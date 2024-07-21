@@ -125,7 +125,7 @@ class ConverterGUI:
     def convert(self, gm_path, godot_path):
         # Convert sprites
         sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
-        sprite_converter.convert_sprites()
+        sprite_converter.convert_all()
 
         # Reset progress for sound conversion
         self.threadsafe_update_progress(0)

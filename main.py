@@ -60,7 +60,7 @@ class ConverterGUI:
         self.info_frame = tk.Frame(master)
         self.info_frame.grid(row=5, column=0, columnspan=3, pady=10)
 
-        self.version_label = tk.Label(self.info_frame, text="Version 0.0.7", font=("Arial", 8))
+        self.version_label = tk.Label(self.info_frame, text="Version 0.0.8", font=("Arial", 8))
         self.version_label.pack(side=tk.LEFT, padx=10)
 
         self.infiland_label = tk.Label(self.info_frame, text="Made by Infiland", font=("Arial", 8), cursor="hand2")

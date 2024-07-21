@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk, messagebox
 from sprites import SpriteConverter
 from sounds import SoundConverter
+from project_settings import ProjectSettingsConverter
 import threading
 import webbrowser
 import os
@@ -122,10 +123,15 @@ class ConverterGUI:
         thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
         thread.start()
 
+    # MAIN CONVERSION IS HERE!!!
     def convert(self, gm_path, godot_path):
+        # Convert project settings
+        project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.threadsafe_log)
+        project_settings_converter.convert_all()
+
         # Convert sprites
         sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
-        sprite_converter.convert_sprites()
+        sprite_converter.convert_all()
 
         # Reset progress for sound conversion
         self.threadsafe_update_progress(0)

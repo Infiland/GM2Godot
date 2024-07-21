@@ -66,3 +66,6 @@ class SpriteConverter:
                     self.progress_callback(int(processed_images / total_images * 100))
 
         self.log_callback("Sprite conversion completed.")
+
+    def convert_all(self):
+        self.convert_sprites()

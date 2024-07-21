@@ -8,14 +8,15 @@ Feel free to help!
 
 When presenting this tool, I've gotten a couple of questions what the tool really is and what it is supposed to be, so I'll break it down.
 
-GM2Godot is:
+**GM2Godot is:**
 - A tool that ports assets from GameMaker to Godot
 - Is for people who don't want to port the GameMaker project to Godot from scratch
 - Not perfect. It will make mistakes.
 
-GM2Godot isn't:
+**GM2Godot isn't:**
 - For people who expect everything will work perfectly.
 - A compiler that can seemingly translate GML to GDScript
+- This isn't a tool which converts exported GML projects to Godot, [use UndertaleToolMod instead](https://github.com/UnderminersTeam/UndertaleModTool)
 
 # Contribution
 I will make contributing.md later! But pretty much do pull requests and I'll try to code review them.

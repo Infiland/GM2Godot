@@ -1,8 +1,10 @@
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, ttk
+from tkinter import filedialog, scrolledtext, ttk, messagebox
 from sprites import SpriteConverter
+from sounds import SoundConverter
 import threading
 import webbrowser
+import os
 
 class ConverterGUI:
     def __init__(self, master):
@@ -52,13 +54,32 @@ class ConverterGUI:
 
     def browse_gm(self):
         folder = filedialog.askdirectory()
-        self.gm_entry.delete(0, tk.END)
-        self.gm_entry.insert(0, folder)
+        if folder:
+            self.gm_entry.delete(0, tk.END)
+            self.gm_entry.insert(0, folder)
+            self.check_gm_project(folder)
 
     def browse_godot(self):
         folder = filedialog.askdirectory()
-        self.godot_entry.delete(0, tk.END)
-        self.godot_entry.insert(0, folder)
+        if folder:
+            self.godot_entry.delete(0, tk.END)
+            self.godot_entry.insert(0, folder)
+            self.check_godot_project(folder)
+
+    def check_gm_project(self, folder):
+        yyp_files = [f for f in os.listdir(folder) if f.endswith('.yyp')]
+        if not yyp_files:
+            messagebox.showwarning("Invalid GameMaker Project", "No .yyp file found in the selected GameMaker project folder.")
+        elif len(yyp_files) > 1:
+            messagebox.showwarning("Multiple .yyp Files", f"Multiple .yyp files found: {', '.join(yyp_files)}. Please ensure only one .yyp file is present.")
+        else:
+            self.log(f"GameMaker project file found: {yyp_files[0]}")
+
+    def check_godot_project(self, folder):
+        if not os.path.exists(os.path.join(folder, 'project.godot')):
+            messagebox.showwarning("Invalid Godot Project", "No project.godot file found in the selected Godot project folder.")
+        else:
+            self.log("Godot project file found: project.godot")
 
     def log(self, message):
         self.console.insert(tk.END, message + "\n")
@@ -76,19 +97,43 @@ class ConverterGUI:
             self.log("Please select both GameMaker and Godot project paths.")
             return
 
+        # Check for project files
+        yyp_files = [f for f in os.listdir(gm_path) if f.endswith('.yyp')]
+        godot_project_file = os.path.join(godot_path, 'project.godot')
+
+        if not yyp_files:
+            self.log("Error: No .yyp file found in the GameMaker project folder.")
+            return
+        if len(yyp_files) > 1:
+            self.log(f"Warning: Multiple .yyp files found: {', '.join(yyp_files)}. Using the first one.")
+        if not os.path.exists(godot_project_file):
+            self.log("Error: No project.godot file found in the Godot project folder.")
+            return
+
         self.convert_button.config(state=tk.DISABLED)
         self.console.delete('1.0', tk.END)
         self.progress['value'] = 0
         self.progress_label.config(text="0%")
-        self.log("Starting conversion...")
+        self.log(f"Starting conversion...")
+        self.log(f"GameMaker project file: {yyp_files[0]}")
+        self.log(f"Godot project file: project.godot")
 
         # Start conversion in a separate thread
         thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
         thread.start()
 
     def convert(self, gm_path, godot_path):
-        converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
-        converter.convert_sprites()
+        # Convert sprites
+        sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
+        sprite_converter.convert_sprites()
+
+        # Reset progress for sound conversion
+        self.threadsafe_update_progress(0)
+
+        # Convert sounds
+        sound_converter = SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
+        sound_converter.convert_sounds()
+
         self.master.after(0, self.conversion_complete)
 
     def threadsafe_log(self, message):
@@ -100,7 +145,7 @@ class ConverterGUI:
     def conversion_complete(self):
         self.progress['value'] = 100
         self.progress_label.config(text="100%")
-        self.log("Conversion process finished.")
+        self.log("You have ported your project from GameMaker to Godot! Have fun!")
         self.convert_button.config(state=tk.NORMAL)
 
     def open_github(self, event):

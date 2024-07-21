@@ -3,12 +3,13 @@ from PIL import Image
 from collections import defaultdict
 
 class SpriteConverter:
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None):
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
         self.log_callback = log_callback
         self.progress_callback = progress_callback
+        self.conversion_running = conversion_running or (lambda: True)
 
     def find_sprite_images(self):
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
@@ -45,6 +46,9 @@ class SpriteConverter:
 
         # Process each sprite
         for sprite_name, images in sprite_images.items():
+            if not self.conversion_running():
+                self.log_callback("Sprite conversion stopped.")
+                return
             # Create a folder for the sprite in the Godot project
             godot_sprite_folder = os.path.join(self.godot_sprites_path, sprite_name)
             os.makedirs(godot_sprite_folder, exist_ok=True)

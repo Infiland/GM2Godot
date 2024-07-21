@@ -2,12 +2,13 @@ import os
 import shutil
 
 class SoundConverter:
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None):
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
         self.log_callback = log_callback
         self.progress_callback = progress_callback
+        self.conversion_running = conversion_running or (lambda: True)
 
     def find_sound_files(self):
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
@@ -34,6 +35,9 @@ class SoundConverter:
 
         # Process each sound file
         for gm_sound_path in sound_files:
+            if not self.conversion_running():
+                self.log_callback("Sound conversion stopped.")
+                return
             # Get the relative path from the GameMaker sounds folder
             rel_path = os.path.relpath(gm_sound_path, os.path.join(self.gm_project_path, 'sounds'))
             

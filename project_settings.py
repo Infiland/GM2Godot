@@ -68,7 +68,37 @@ class ProjectSettingsConverter:
             self.log_callback(f"Error reading project name from .yyp file: {str(e)}")
             return None
 
-    def update_project_godot(self):
+    def update_project_name(self):
+        project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
+        
+        if not os.path.exists(project_godot_path):
+            self.log_callback("project.godot file not found in the Godot project directory.")
+            return
+
+        try:
+            with open(project_godot_path, 'r') as file:
+                content = file.read()
+
+            # Update project name
+            gm_project_name = self.get_gm_project_name()
+            if gm_project_name:
+                content = re.sub(
+                    r'config/name=".*"',
+                    f'config/name="{gm_project_name}"',
+                    content
+                )
+                self.log_callback(f"Updated project name to: {gm_project_name}")
+            else:
+                self.log_callback("Could not update project name: GameMaker project name not found.")
+
+            with open(project_godot_path, 'w') as file:
+                file.write(content)
+
+        except Exception as e:
+            self.log_callback(f"Error updating project name: {str(e)}")
+
+    
+    def update_project_settings(self):
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
@@ -86,25 +116,13 @@ class ProjectSettingsConverter:
                 content
             )
 
-            # Update project name
-            gm_project_name = self.get_gm_project_name()
-            if gm_project_name:
-                content = re.sub(
-                    r'config/name=".*"',
-                    f'config/name="{gm_project_name}"',
-                    content
-                )
-                self.log_callback(f"Updated project name to: {gm_project_name}")
-            else:
-                self.log_callback("Could not update project name: GameMaker project name not found.")
-
             with open(project_godot_path, 'w') as file:
                 file.write(content)
 
-            self.log_callback("Updated project.godot: Set icon path to res://icon.png and updated project name")
+            self.log_callback("Updated project.godot: Set icon path to res://icon.png")
         except Exception as e:
-            self.log_callback(f"Error updating project.godot: {str(e)}")
-    
+            self.log_callback(f"Error updating project settings: {str(e)}")
+
     def read_audio_groups(self):
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
         if not yyp_files:
@@ -171,11 +189,3 @@ class ProjectSettingsConverter:
         except Exception as e:
             self.log_callback(f"Error generating default_bus_layout.tres: {str(e)}")
 
-    def convert_all(self):
-        try:
-            if self.convert_icon():
-                self.update_project_godot()
-        except Exception as e:
-            self.log_callback(f"No icon found: {str(e)}")
-        
-        self.generate_audio_bus_layout()

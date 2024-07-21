@@ -8,3 +8,7 @@ The program requires the Pillow library to use
 ```
 pip install Pillow
 ```
+Once installed, you can run the program:
+```
+python main.py
+```

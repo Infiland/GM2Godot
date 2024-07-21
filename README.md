@@ -33,6 +33,11 @@ py --version
 ```
 You can download [python here.](https://www.python.org/downloads/)
 
+If you are Linux, **you are required to have Tkinter module**, do the following: (tested this on Ubuntu, so it probably works on debian based systems)
+```
+sudo apt-get install python3-tk
+```
+
 The program requires the Pillow library to use
 ```
 pip install Pillow

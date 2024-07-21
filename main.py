@@ -17,7 +17,7 @@ class ConverterGUI:
         self.gm_label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.gm_entry = tk.Entry(master, width=50)
         self.gm_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.gm_button = tk.Button(master, text="Browse", command=self.browse_gm)
+        self.gm_button = tk.Button(master, text="Browse GameMaker Path", command=self.browse_gm)
         self.gm_button.grid(row=0, column=2, padx=5, pady=5)
 
         # Godot project path
@@ -25,12 +25,26 @@ class ConverterGUI:
         self.godot_label.grid(row=1, column=0, sticky="w", padx=5, pady=5)
         self.godot_entry = tk.Entry(master, width=50)
         self.godot_entry.grid(row=1, column=1, padx=5, pady=5)
-        self.godot_button = tk.Button(master, text="Browse", command=self.browse_godot)
+        self.godot_button = tk.Button(master, text="Browse Godot Path", command=self.browse_godot)
         self.godot_button.grid(row=1, column=2, padx=5, pady=5)
 
         # Convert button
         self.convert_button = tk.Button(master, text="Convert", command=self.start_conversion)
         self.convert_button.grid(row=2, column=1, pady=10)
+
+        # Add Settings button
+        self.settings_button = tk.Button(master, text="Settings", command=self.open_settings)
+        self.settings_button.grid(row=2, column=2, pady=10)
+
+        # Initialize conversion settings
+        self.conversion_settings = {
+            "sprites": tk.BooleanVar(value=True),
+            "sounds": tk.BooleanVar(value=True),
+            "game_icon": tk.BooleanVar(value=True),
+            "project_settings": tk.BooleanVar(value=True),
+            "project_name": tk.BooleanVar(value=True),
+            "audio_buses": tk.BooleanVar(value=True)
+        }
 
         # Console output
         self.console = scrolledtext.ScrolledText(master, height=15)
@@ -52,6 +66,18 @@ class ConverterGUI:
         # Configure grid
         master.grid_columnconfigure(1, weight=1)
         master.grid_rowconfigure(3, weight=1)
+
+    def open_settings(self):
+        settings_window = tk.Toplevel(self.master)
+        settings_window.title("Conversion Settings")
+        settings_window.geometry("300x250")
+
+        tk.Label(settings_window, text="Select files to convert:").pack(pady=10)
+
+        for setting, var in self.conversion_settings.items():
+            tk.Checkbutton(settings_window, text=setting.replace("_", " ").title(), variable=var).pack(anchor="w", padx=20)
+
+        tk.Button(settings_window, text="Save", command=settings_window.destroy).pack(pady=20)
 
     def browse_gm(self):
         folder = filedialog.askdirectory()
@@ -125,20 +151,39 @@ class ConverterGUI:
 
     # MAIN CONVERSION IS HERE!!!
     def convert(self, gm_path, godot_path):
-        # Convert project settings
         project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.threadsafe_log)
-        project_settings_converter.convert_all()
+
+        # Handle project settings individually
+        if self.conversion_settings["game_icon"].get():
+            self.threadsafe_log("Converting game icon...")
+            project_settings_converter.convert_icon()
+
+        if self.conversion_settings["project_name"].get():
+            self.threadsafe_log("Updating project name...")
+            project_settings_converter.update_project_name()
+
+        if self.conversion_settings["project_settings"].get():
+            self.threadsafe_log("Updating project settings...")
+            project_settings_converter.update_project_settings()
+
+        if self.conversion_settings["audio_buses"].get():
+            self.threadsafe_log("Generating audio bus layout...")
+            project_settings_converter.generate_audio_bus_layout()
 
         # Convert sprites
-        sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
-        sprite_converter.convert_all()
+        if self.conversion_settings["sprites"].get():
+            self.threadsafe_log("Converting sprites...")
+            sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
+            sprite_converter.convert_all()
 
         # Reset progress for sound conversion
         self.threadsafe_update_progress(0)
 
         # Convert sounds
-        sound_converter = SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
-        sound_converter.convert_sounds()
+        if self.conversion_settings["sounds"].get():
+            self.threadsafe_log("Converting sounds...")
+            sound_converter = SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress)
+            sound_converter.convert_sounds()
 
         self.master.after(0, self.conversion_complete)
 

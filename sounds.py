@@ -1,5 +1,6 @@
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class SoundConverter:
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
@@ -13,17 +14,30 @@ class SoundConverter:
     def find_sound_files(self):
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
         sound_files = []
-        for root, dirs, files in os.walk(sound_folder):
-            for file in files:
-                if file.lower().endswith(('.wav', '.mp3', '.ogg')):
-                    sound_files.append(os.path.join(root, file))
+        for root, _, files in os.walk(sound_folder):
+            sound_files.extend(
+                os.path.join(root, file)
+                for file in files
+                if file.lower().endswith(('.wav', '.mp3', '.ogg'))
+            )
         return sound_files
 
-    def convert_sounds(self):
-        # Ensure the Godot sounds directory exists
-        os.makedirs(self.godot_sounds_path, exist_ok=True)
+    def process_sound_file(self, gm_sound_path):
+        if not self.conversion_running():
+            return False
 
-        # Find all sound files
+        rel_path = os.path.relpath(gm_sound_path, os.path.join(self.gm_project_path, 'sounds'))
+        godot_sound_folder = os.path.join(self.godot_sounds_path, os.path.dirname(rel_path))
+        os.makedirs(godot_sound_folder, exist_ok=True)
+
+        godot_sound_path = os.path.join(self.godot_sounds_path, rel_path)
+        shutil.copy2(gm_sound_path, godot_sound_path)
+
+        self.log_callback(f"Converted: {rel_path} -> sounds/{rel_path}")
+        return True
+
+    def convert_sounds(self):
+        os.makedirs(self.godot_sounds_path, exist_ok=True)
         sound_files = self.find_sound_files()
 
         if not sound_files:
@@ -33,26 +47,15 @@ class SoundConverter:
         total_sounds = len(sound_files)
         processed_sounds = 0
 
-        # Process each sound file
-        for gm_sound_path in sound_files:
-            if not self.conversion_running():
-                self.log_callback("Sound conversion stopped.")
-                return
-            # Get the relative path from the GameMaker sounds folder
-            rel_path = os.path.relpath(gm_sound_path, os.path.join(self.gm_project_path, 'sounds'))
-            
-            # Create the corresponding folder structure in Godot
-            godot_sound_folder = os.path.join(self.godot_sounds_path, os.path.dirname(rel_path))
-            os.makedirs(godot_sound_folder, exist_ok=True)
-
-            # Copy the sound file to the Godot project
-            godot_sound_path = os.path.join(self.godot_sounds_path, rel_path)
-            shutil.copy2(gm_sound_path, godot_sound_path)
-
-            self.log_callback(f"Converted: {rel_path} -> sounds/{rel_path}")
-
-            processed_sounds += 1
-            if self.progress_callback:
-                self.progress_callback(int(processed_sounds / total_sounds * 100))
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(self.process_sound_file, sound_file) for sound_file in sound_files]
+            for future in as_completed(futures):
+                if future.result():
+                    processed_sounds += 1
+                    if self.progress_callback:
+                        self.progress_callback(int(processed_sounds / total_sounds * 100))
+                else:
+                    self.log_callback("Sound conversion stopped.")
+                    return
 
         self.log_callback("Sound conversion completed.")

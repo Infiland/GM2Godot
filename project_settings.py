@@ -139,7 +139,11 @@ class ProjectSettingsConverter:
             content += f"\n[{section}]\n"
         
         setting_pattern = f"{setting}\\s*=.*"
-        new_setting = f'{setting}="{value}"'
+        
+        if value.lower() in ['true', 'false']:
+            new_setting = f'{setting}={value.lower()}'
+        else:
+            new_setting = f'{setting}="{value}"'
         
         if re.search(setting_pattern, content):
             content = re.sub(setting_pattern, new_setting, content)

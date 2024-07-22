@@ -10,6 +10,7 @@ import threading
 import webbrowser
 import os
 from PIL import Image, ImageTk
+import time
 
 class ModernButton(ttk.Button):
     def __init__(self, master=None, **kw):
@@ -33,6 +34,8 @@ class ConverterGUI:
         self.setup_conversion_settings()
         self.conversion_running = threading.Event()
         self.conversion_thread = None
+        self.timer_running = False
+        self.start_time = 0
 
     def load_icon(self, path):
         try:
@@ -131,9 +134,12 @@ class ConverterGUI:
         self.progress_label = ttk.Label(progress_frame, text="0%", style="TLabel")
         self.progress_label.pack(side=tk.RIGHT, padx=5)
 
+        self.timer_label = ttk.Label(parent, text="Time: 00:00:00", style="TLabel")
+        self.timer_label.grid(row=5, column=0, columnspan=3, pady=(0, 10))
+
     def create_info_labels(self, parent):
         info_frame = ttk.Frame(parent, style="TFrame")
-        info_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
 
         ttk.Label(info_frame, text="Version 0.0.8", style="TLabel").pack(side=tk.LEFT, padx=10)
 
@@ -174,18 +180,18 @@ class ConverterGUI:
         self.console.see(tk.END)
         self.console.configure(state='disabled')
 
-    def browse_project(self, entry, file_check):
-        folder = filedialog.askdirectory()
+    def browse_project(self, entry, file_check, dialog_title):
+        folder = filedialog.askdirectory(title=dialog_title)
         if folder:
             entry.delete(0, tk.END)
             entry.insert(0, folder)
             file_check(folder)
 
     def browse_gm(self):
-        self.browse_project(self.gamemaker_entry, self.check_gm_project)
+        self.browse_project(self.gamemaker_entry, self.check_gm_project, "Select your GameMaker Project")
 
     def browse_godot(self):
-        self.browse_project(self.godot_entry, self.check_godot_project)
+        self.browse_project(self.godot_entry, self.check_godot_project, "Select your new Godot project")
 
     def check_project_file(self, folder, file_extension, file_name):
         files = [f for f in os.listdir(folder) if f.endswith(file_extension)]
@@ -218,6 +224,7 @@ class ConverterGUI:
         self.prepare_for_conversion()
         self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
         self.conversion_thread.start()
+        self.start_timer()
 
     def validate_projects(self, gm_path, godot_path):
         yyp_files = [f for f in os.listdir(gm_path) if f.endswith('.yyp')]
@@ -251,6 +258,23 @@ class ConverterGUI:
             self.log("Stopping conversion process...")
             self.stop_button.config(state=tk.DISABLED)
             self.master.after(100, self.check_conversion_stopped)
+
+    def start_timer(self):
+        self.timer_running = True
+        self.start_time = time.time()
+        self.update_timer()
+
+    def stop_timer(self):
+        self.timer_running = False
+
+    def update_timer(self):
+        if self.timer_running:
+            elapsed_time = int(time.time() - self.start_time)
+            hours, remainder = divmod(elapsed_time, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            time_str = f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}"
+            self.timer_label.config(text=time_str)
+            self.master.after(1000, self.update_timer)
 
     def convert(self, gm_path, godot_path):
         project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.threadsafe_log)
@@ -293,6 +317,7 @@ class ConverterGUI:
         self.conversion_running.clear()
         self.convert_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
+        self.stop_timer()
 
     def open_github(self, event):
         webbrowser.open_new("https://github.com/Infiland/GM2Godot")

@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk, messagebox
 from sprites import SpriteConverter
 from sounds import SoundConverter
+from fonts import FontConverter
+from tilesets import TileSetConverter
 from project_settings import ProjectSettingsConverter
 import threading
 import webbrowser
@@ -81,6 +83,11 @@ class ConverterGUI:
         self.conversion_settings = {
             "sprites": tk.BooleanVar(value=True),
             "sounds": tk.BooleanVar(value=True),
+            "fonts": tk.BooleanVar(value=True),
+            "tilesets": tk.BooleanVar(value=True),
+            "objects": tk.BooleanVar(value=True),
+            "notes": tk.BooleanVar(value=True),
+            "shaders": tk.BooleanVar(value=True),
             "game_icon": tk.BooleanVar(value=True),
             "project_settings": tk.BooleanVar(value=True),
             "project_name": tk.BooleanVar(value=True),
@@ -93,7 +100,7 @@ class ConverterGUI:
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
         settings_window.title("Conversion Settings")
-        settings_window.geometry("300x250")
+        settings_window.geometry("280x400")
 
         tk.Label(settings_window, text="Select files to convert:").pack(pady=10)
 
@@ -207,6 +214,18 @@ class ConverterGUI:
             self.threadsafe_log("Converting sprites...")
             sprite_converter = SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set)
             sprite_converter.convert_all()
+
+        # Convert fonts
+        if self.conversion_settings["fonts"].get() and self.conversion_running.is_set():
+            self.threadsafe_log("Converting fonts...")
+            font_converter = FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set)
+            font_converter.convert_all()
+
+        # Convert tilesets
+        if self.conversion_settings["tilesets"].get() and self.conversion_running.is_set():
+            self.threadsafe_log("Converting tilesets...")
+            tileset_converter = TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set)
+            tileset_converter.convert_all()
 
         # Reset progress for sound conversion
         self.threadsafe_update_progress(0)

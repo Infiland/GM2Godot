@@ -35,9 +35,13 @@ class ConverterGUI:
         self.conversion_thread = None
 
     def load_icon(self, path):
-        img = Image.open(path)
-        img = img.resize((20, 20), Image.Resampling.LANCZOS)
-        return ImageTk.PhotoImage(img)
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(path)
+            img = img.resize((20, 20), Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except ImportError:
+            return None
 
     def setup_styles(self):
         self.style.configure("TFrame", background="#222222")
@@ -75,7 +79,10 @@ class ConverterGUI:
             frame = ttk.Frame(parent, style="TFrame")
             frame.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=5)
             
-            icon_label = ttk.Label(frame, image=icon, style="TLabel")
+            if icon:
+                icon_label = ttk.Label(frame, image=icon, style="TLabel")
+            else:
+                icon_label = ttk.Label(frame, text=label[:2], style="TLabel")
             icon_label.pack(side=tk.LEFT, padx=(0, 5))
             
             text_label = ttk.Label(frame, text=f"{label} Project Path:", style="TLabel")

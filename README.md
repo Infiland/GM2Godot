@@ -38,9 +38,9 @@ If you are Linux, **you are required to have Tkinter module**, do the following:
 sudo apt-get install python3-tk python3-pil python3-pil.imagetk
 ```
 
-The program requires the Pillow library to use
+The program requires the following libraries to use
 ```
-pip install Pillow
+pip install Pillow markdown tkhtmlview
 ```
 Once installed, you can run the program:
 ```

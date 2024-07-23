@@ -11,6 +11,9 @@ import webbrowser
 import os
 from PIL import Image, ImageTk
 import time
+import requests
+import markdown
+from tkhtmlview import HTMLLabel
 
 class ModernButton(ttk.Button):
     def __init__(self, master=None, **kw):
@@ -141,7 +144,9 @@ class ConverterGUI:
         info_frame = ttk.Frame(parent, style="TFrame")
         info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
 
-        ttk.Label(info_frame, text="Version 0.0.8", style="TLabel").pack(side=tk.LEFT, padx=10)
+        version_label = ttk.Label(info_frame, text="Version 0.0.8", style="TLabel", cursor="hand2")
+        version_label.pack(side=tk.LEFT, padx=10)
+        version_label.bind("<Button-1>", self.show_release_notes)
 
         contribute_link = ttk.Label(info_frame, text="Contribute", foreground="#abc9ff", cursor="hand2", style="TLabel")
         contribute_link.pack(side=tk.LEFT, padx=10)
@@ -150,6 +155,36 @@ class ConverterGUI:
         infiland_label = ttk.Label(info_frame, text="Made by Infiland", foreground="#abc9ff", cursor="hand2", style="TLabel")
         infiland_label.pack(side=tk.RIGHT, padx=10)
         infiland_label.bind("<Button-1>", self.open_infiland_website)
+
+    def show_release_notes(self, event):
+        release_notes = self.fetch_release_notes()
+        if release_notes:
+            self.display_release_notes(release_notes)
+        else:
+            messagebox.showerror("Error", "Unable to fetch release notes. Please check your internet connection and try again.")
+
+    def fetch_release_notes(self):
+        try:
+            response = requests.get("https://api.github.com/repos/Infiland/GM2Godot/releases/latest")
+            if response.status_code == 200:
+                return response.json()['body']
+            else:
+                return None
+        except Exception as e:
+            print(f"Error fetching release notes: {e}")
+            return None
+
+    def display_release_notes(self, notes):
+        html_notes = markdown.markdown(notes)
+        html_notes = f'<html><body style="font-size: 6px;">{html_notes}</body></html>'
+
+        notes_window = tk.Toplevel(self.master)
+        notes_window.title("Release Notes")
+        notes_window.geometry("750x600")
+        notes_window.configure(bg="#222222")
+
+        notes_label = HTMLLabel(notes_window, html=html_notes, bg="#3d3d3d", fg="#ffffff", font=('Consolas', 6))
+        notes_label.pack(padx=20, pady=20, fill=tk.BOTH, expand=True)
 
     def setup_conversion_settings(self):
         settings = [

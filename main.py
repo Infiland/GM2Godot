@@ -42,6 +42,8 @@ class ConverterGUI:
         self.timer_running = False
         self.start_time = 0
 
+        self.stop_button.config(state=tk.DISABLED, style="TButton")
+
     def load_icon(self, path):
         try:
             from PIL import Image, ImageTk
@@ -66,6 +68,8 @@ class ConverterGUI:
         self.style.map("TEntry", fieldbackground=[('readonly', '#3d3d3d')])
         self.style.map("Modern.TButton", background=[('active', '#9ab8ee'), ('disabled', '#666666')], foreground=[('disabled', '#aaaaaa')])
         self.style.map("TCheckbutton", background=[('active', '#222222')])
+        self.style.configure("Red.TButton", background="red", foreground="white")
+        self.style.map("Red.TButton", background=[('active', '#ff6666')])
 
     def setup_ui(self):
         main_frame = ttk.Frame(self.master, padding="20 20 20 20", style="TFrame")
@@ -108,6 +112,8 @@ class ConverterGUI:
             button = ModernButton(button_frame, text=text, command=command, state=state)
             button.grid(row=0, column=idx, padx=5)
             setattr(self, f"{text.lower()}_button", button)
+
+        self.stop_button.configure(style="Red.TButton")
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")
@@ -228,18 +234,46 @@ class ConverterGUI:
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
         settings_window.title("Conversion Settings")
-        settings_window.geometry("300x450")
+        settings_window.geometry("400x500")
         settings_window.configure(bg="#222222")
 
         main_frame = ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(main_frame, text="Select files to convert:", style="TLabel").pack(pady=10)
+        ttk.Label(main_frame, text="Select files to convert:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
 
-        for setting, var in self.conversion_settings.items():
-            ttk.Checkbutton(main_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").pack(anchor="w", padx=20, pady=2)
+        checkbox_frame = ttk.Frame(main_frame, style="TFrame")
+        checkbox_frame.pack(fill=tk.BOTH, expand=True)
 
-        ModernButton(main_frame, text="Save", command=settings_window.destroy).pack(pady=20)
+        categories = {
+            "Assets": ["sprites", "sounds", "fonts"],
+            "Project": ["game_icon", "project_settings", "project_name", "audio_buses", "notes"],
+            "Not Working": ["objects", "shaders", "tilesets"]
+        }
+
+        row = 0
+        for category, settings in categories.items():
+            ttk.Label(checkbox_frame, text=category, style="TLabel", font=("Helvetica", 12, "bold")).grid(row=row, column=0, sticky="w", pady=(10, 5))
+            row += 1
+            for setting in settings:
+                var = self.conversion_settings[setting]
+                ttk.Checkbutton(checkbox_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").grid(row=row, column=0, sticky="w", padx=20)
+                row += 1
+
+        button_frame = ttk.Frame(main_frame, style="TFrame")
+        button_frame.pack(pady=10)
+
+        def select_all():
+            for var in self.conversion_settings.values():
+                var.set(True)
+
+        def deselect_all():
+            for var in self.conversion_settings.values():
+                var.set(False)
+
+        ModernButton(button_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
+        ModernButton(button_frame, text="Deselect All", command=deselect_all).pack(side=tk.LEFT, padx=5)
+        ModernButton(button_frame, text="Save", command=settings_window.destroy).pack(side=tk.LEFT, padx=5)
 
     def log(self, message):
         self.console.configure(state='normal')
@@ -292,6 +326,7 @@ class ConverterGUI:
         self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
         self.conversion_thread.start()
         self.start_timer()
+        self.stop_button.config(state=tk.NORMAL, style="Red.TButton")
 
     def validate_projects(self, gm_path, godot_path):
         yyp_files = [f for f in os.listdir(gm_path) if f.endswith('.yyp')]
@@ -323,7 +358,7 @@ class ConverterGUI:
         if self.conversion_running.is_set():
             self.conversion_running.clear()
             self.log("Stopping conversion process...")
-            self.stop_button.config(state=tk.DISABLED)
+            self.stop_button.config(state=tk.DISABLED, style="TButton")
             self.master.after(100, self.check_conversion_stopped)
 
     def start_timer(self):

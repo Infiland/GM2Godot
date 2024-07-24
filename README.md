@@ -1,5 +1,7 @@
 # GM2Godot
 
+![gm2godot](https://github.com/user-attachments/assets/dc8874da-704c-485b-8fc6-b3a9886b1480)
+
 GM2Godot is a tool which converts GameMaker (2024.6.2) projects to Godot (4.2) projects.
 This repository is work in progress and I'll slowly add Contributing.MD, issues, branches and milestones.
 Feel free to help!

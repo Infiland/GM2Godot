@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-import tkinter.font as tkfont
 from sprites import SpriteConverter
 from sounds import SoundConverter
 from fonts import FontConverter
@@ -9,7 +8,6 @@ from project_settings import ProjectSettingsConverter
 import threading
 import webbrowser
 import os
-from PIL import Image, ImageTk
 import time
 import requests
 import markdown
@@ -144,7 +142,7 @@ class ConverterGUI:
         info_frame = ttk.Frame(parent, style="TFrame")
         info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
 
-        version_label = ttk.Label(info_frame, text="Version 0.0.8", style="TLabel", cursor="hand2")
+        version_label = ttk.Label(info_frame, text="Version 0.0.9", style="TLabel", cursor="hand2")
         version_label.pack(side=tk.LEFT, padx=10)
         version_label.bind("<Button-1>", self.show_release_notes)
 

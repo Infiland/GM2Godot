@@ -19,7 +19,7 @@ from project_settings import ProjectSettingsConverter
 
 class ModernButton(ttk.Button):
     def __init__(self, master=None, **kw):
-        ttk.Button.__init__(self, master, style="Modern.TButton", **kw)
+        super().__init__(master, style="Modern.TButton", **kw)
 
 class ConverterGUI:
     def __init__(self, master):
@@ -53,18 +53,19 @@ class ConverterGUI:
             return None
 
     def setup_styles(self):
+        self.style = ttk.Style()
         styles = {
             "TFrame": {"background": "#222222"},
             "TLabel": {"background": "#222222", "foreground": "#ffffff", "font": ('Helvetica', 10)},
             "TEntry": {"fieldbackground": "#3d3d3d", "foreground": "#ffffff", "insertcolor": "#ffffff", "font": ('Helvetica', 10)},
-            "Modern.TButton": {"background": "#abc9ff", "foreground": "#222222", "font": ('Helvetica', 10, 'bold'), "padding": 10},
+            "Modern.TButton": {"background": "#abc9ff", "foreground": "#222222", "font": ('Helvetica', 10, 'bold'), "padding": (10, 5)},
             "TProgressbar": {"background": "#42ffc2", "troughcolor": "#3d3d3d"},
             "TCheckbutton": {"background": "#222222", "foreground": "#ffffff"},
             "Console.Vertical.TScrollbar": {"background": "#3d3d3d", "troughcolor": "#222222", "arrowcolor": "#ffffff"}
         }
         for style, options in styles.items():
             self.style.configure(style, **options)
-        
+
         self.style.map("TEntry", fieldbackground=[('readonly', '#3d3d3d')])
         self.style.map("Modern.TButton", background=[('active', '#9ab8ee'), ('disabled', '#666666')], foreground=[('disabled', '#aaaaaa')])
         self.style.map("TCheckbutton", background=[('active', '#222222')])
@@ -110,10 +111,11 @@ class ConverterGUI:
 
         for idx, (text, command, state) in enumerate(buttons):
             button = ModernButton(button_frame, text=text, command=command, state=state)
-            button.grid(row=0, column=idx, padx=5)
+            button.grid(row=0, column=idx, padx=5, pady=10)
             setattr(self, f"{text.lower()}_button", button)
 
         self.stop_button.configure(style="Red.TButton")
+        self.stop_button.config(padding=(10, 5))
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")

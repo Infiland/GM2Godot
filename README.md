@@ -40,7 +40,7 @@ sudo apt-get install python3-tk python3-pil python3-pil.imagetk
 
 The program requires the following libraries to use
 ```
-pip install Pillow markdown tkhtmlview
+pip install Pillow markdown2 tkhtmlview
 ```
 *(If you have Pillow installed, version 8.0.0 or newer is required)*
 

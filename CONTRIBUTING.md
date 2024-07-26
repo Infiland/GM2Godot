@@ -13,6 +13,7 @@ First off, thank you for considering contributing to GM2Godot! It's people like 
 6. [Testing](#testing)
 7. [Documentation](#documentation)
 8. [Community](#community)
+9. [Other](#other)
 
 ## Code of Conduct
 
@@ -68,7 +69,7 @@ git clone https://github.com/Infiland/GM2Godot
 2. [Install Python 3.9.0 or later](https://www.python.org/downloads/)
 3. Install required libraries:
    ```
-   pip install Pillow markdown tkhtmlview
+   pip install Pillow markdown2 tkhtmlview
    ```
 4. If you're on Linux, install Tkinter:
    ```
@@ -88,6 +89,7 @@ The main components of the GM2Godot project are:
 - `sprites.py`: Handles sprite conversion
 - `sounds.py`: Handles sound conversion
 - `fonts.py`: Handles font conversion
+- `notes.py`: Handles note conversion
 - `tilesets.py`: Handles tileset conversion (Should wait until Godot 4.3 for TileMap major changes)
 - `shaders.py`: Converts GameMaker shaders to GDScript shaders
 - `project_settings.py`: Copies GameMaker settings to Godot
@@ -132,3 +134,8 @@ This includes the README.md and CONTRIBUTING.md files
 Discussions about GM2Godot take place on this repository's [Issues](https://github.com/Infiland/GM2Godot/issues) and [Pull Requests](https://github.com/Infiland/GM2Godot/pulls) sections. Anybody is welcome to join these conversations.
 
 Wherever possible, do not take these conversations to private channels, including contacting the maintainers directly. Keeping communication public means everybody can benefit and learn from the conversation.
+
+## Other
+
+GameMaker is developing a new runtime called [GMRT](https://github.com/YoYoGames/GMRT-Beta/blob/main/docs/introduction/GMRT-beta-intro-and-setup-instructions.md) which changes the way how the runtime works for it, and terms like VC and YYC compiler will be depracated.
+When it comes out, more advanced features will be added, but it's a plan to keep simple and only include packages from the default runtime configuration

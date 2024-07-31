@@ -2,13 +2,13 @@ import os
 import threading
 import time
 import webbrowser
+from functools import partial
 import requests
 import markdown2
-
-from html.parser import HTMLParser
-from tkhtmlview import HTMLLabel
+import platform
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
+from tkhtmlview import HTMLLabel
 
 from sprites import SpriteConverter
 from sounds import SoundConverter
@@ -28,6 +28,8 @@ class ConverterGUI:
         master.geometry("800x600")
         master.configure(bg="#222222")
 
+        self.program_icon()
+
         self.style = ttk.Style()
         self.style.theme_use('clam')
         self.setup_styles()
@@ -43,6 +45,39 @@ class ConverterGUI:
         self.start_time = 0
 
         self.stop_button.config(state=tk.DISABLED, style="TButton")
+
+    def program_icon(self):
+        icon_path = os.path.join(os.path.dirname(__file__), "img", "Logo.png")    
+        if platform.system() == "Windows":
+            self.set_windows_icon(icon_path)
+        elif platform.system() == "Linux":
+            self.set_linux_icon(icon_path)
+        else:
+            self.set_default_icon(icon_path)
+
+    def set_windows_icon(self, icon_path):
+        try:
+            icon = tk.PhotoImage(file=icon_path)
+            self.master.iconphoto(False, icon)
+            print(f"Icon set successfully using PhotoImage: {icon_path}")
+        except Exception as e:
+            print(f"Failed to set icon using PhotoImage: {e}")
+            self.set_default_icon(icon_path)
+
+    def set_linux_icon(self, icon_path):
+        try:
+            img = tk.Image("photo", file=icon_path)
+            self.master.tk.call('wm', 'iconphoto', self.master._w, img)
+        except Exception as e:
+            print(f"Failed to set icon on Linux: {e}")
+            self.set_default_icon(icon_path)
+
+    def set_default_icon(self, icon_path):
+        try:
+            icon = tk.PhotoImage(file=icon_path)
+            self.master.iconphoto(True, icon)
+        except tk.TclError:
+            print(f"Failed to load icon from {icon_path}. The icon will not be displayed.")
 
     def load_icon(self, path):
         try:
@@ -250,7 +285,7 @@ class ConverterGUI:
         categories = {
             "Assets": ["sprites", "sounds", "fonts"],
             "Project": ["game_icon", "project_settings", "project_name", "audio_buses", "notes"],
-            "Not Working": ["objects", "shaders", "tilesets"]
+            "WIP": ["objects", "shaders", "tilesets"]
         }
 
         row = 0

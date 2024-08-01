@@ -21,14 +21,32 @@ class ModernButton(ttk.Button):
     def __init__(self, master=None, **kw):
         super().__init__(master, style="Modern.TButton", **kw)
 
+class CoolProgressBar(tk.Canvas):
+    def __init__(self, master, width, height, bg_color, fill_color, text_color):
+        super().__init__(master, width=width, height=height, bg=bg_color, highlightthickness=0)
+        self.fill_color = fill_color
+        self.text_color = text_color
+        self.width = width
+        self.height = height
+        self.progress = 0
+        self.rect_id = self.create_rectangle(0, width, 0, height, fill=fill_color)
+        self.text_id = self.create_text(width // 2, height // 2, text="0%", fill=text_color, font=("Helvetica", 12, "bold"))
+
+    def update_progress(self, value):
+        self.progress = value
+        fill_width = int(self.width * (value / 100))
+        self.coords(self.rect_id, 0, 0, fill_width, self.height)
+        self.itemconfig(self.text_id, text=f"{value}%")
+        self.lift(self.text_id)
+        self.update_idletasks()
+
 class ConverterGUI:
     def __init__(self, master):
         self.master = master
-        master.title("GM2Godot")
-        master.geometry("800x600")
-        master.configure(bg="#222222")
-
-        self.program_icon()
+        self.master.title("GM2Godot")
+        self.master.geometry("800x600")
+        self.master.configure(bg="#222222")
+        self.set_program_icon()
 
         self.style = ttk.Style()
         self.style.theme_use('clam')
@@ -43,17 +61,15 @@ class ConverterGUI:
         self.conversion_thread = None
         self.timer_running = False
         self.start_time = 0
-
-        self.stop_button.config(state=tk.DISABLED, style="TButton")
-
-    def program_icon(self):
-        icon_path = os.path.join(os.path.dirname(__file__), "img", "Logo.png")    
-        if platform.system() == "Windows":
-            self.set_windows_icon(icon_path)
-        elif platform.system() == "Linux":
-            self.set_linux_icon(icon_path)
-        else:
-            self.set_default_icon(icon_path)
+    
+    def set_program_icon(self):
+        icon_path = os.path.join(os.path.dirname(__file__), "img", "Logo.png")
+        icon_setters = {
+            "Windows": self.set_windows_icon,
+            "Linux": self.set_linux_icon
+        }
+        icon_setter = icon_setters.get(platform.system(), self.set_default_icon)
+        icon_setter(icon_path)
 
     def set_windows_icon(self, icon_path):
         try:
@@ -84,19 +100,18 @@ class ConverterGUI:
             from PIL import Image, ImageTk
             img = Image.open(path)
             return ImageTk.PhotoImage(img.resize((20, 20), Image.Resampling.LANCZOS))
-        except ImportError:
+        except Exception:
             return None
 
     def setup_styles(self):
-        self.style = ttk.Style()
         styles = {
             "TFrame": {"background": "#222222"},
             "TLabel": {"background": "#222222", "foreground": "#ffffff", "font": ('Helvetica', 10)},
             "TEntry": {"fieldbackground": "#3d3d3d", "foreground": "#ffffff", "insertcolor": "#ffffff", "font": ('Helvetica', 10)},
             "Modern.TButton": {"background": "#abc9ff", "foreground": "#222222", "font": ('Helvetica', 10, 'bold'), "padding": (10, 5)},
-            "TProgressbar": {"background": "#42ffc2", "troughcolor": "#3d3d3d"},
             "TCheckbutton": {"background": "#222222", "foreground": "#ffffff"},
-            "Console.Vertical.TScrollbar": {"background": "#3d3d3d", "troughcolor": "#222222", "arrowcolor": "#ffffff"}
+            "Console.Vertical.TScrollbar": {"background": "#3d3d3d", "troughcolor": "#222222", "arrowcolor": "#ffffff"},
+            "Red.TButton": {"background": "red", "foreground": "white"}
         }
         for style, options in styles.items():
             self.style.configure(style, **options)
@@ -104,8 +119,8 @@ class ConverterGUI:
         self.style.map("TEntry", fieldbackground=[('readonly', '#3d3d3d')])
         self.style.map("Modern.TButton", background=[('active', '#9ab8ee'), ('disabled', '#666666')], foreground=[('disabled', '#aaaaaa')])
         self.style.map("TCheckbutton", background=[('active', '#222222')])
-        self.style.configure("Red.TButton", background="red", foreground="white")
         self.style.map("Red.TButton", background=[('active', '#ff6666')])
+        self.style.configure("Red.TButton", background="white", foreground="white")
 
     def setup_ui(self):
         main_frame = ttk.Frame(self.master, padding="20 20 20 20", style="TFrame")
@@ -150,7 +165,6 @@ class ConverterGUI:
             setattr(self, f"{text.lower()}_button", button)
 
         self.stop_button.configure(style="Red.TButton")
-        self.stop_button.config(padding=(10, 5))
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")
@@ -168,14 +182,14 @@ class ConverterGUI:
         progress_frame = ttk.Frame(parent, style="TFrame")
         progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
 
-        self.progress = ttk.Progressbar(progress_frame, orient="horizontal", length=300, mode="determinate", style="TProgressbar")
-        self.progress.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-        self.progress_label = ttk.Label(progress_frame, text="0%", style="TLabel")
-        self.progress_label.pack(side=tk.RIGHT, padx=5)
+        self.progress = CoolProgressBar(progress_frame, width=500, height=30, bg_color="#3d3d3d", fill_color="#42ffc2", text_color="#ffffff")
+        self.progress.pack(side=tk.LEFT, expand=True)
 
         self.timer_label = ttk.Label(parent, text="Time: 00:00:00", style="TLabel")
         self.timer_label.grid(row=5, column=0, columnspan=3, pady=(0, 10))
+
+        self.status_label = ttk.Label(parent, text="", foreground="#ffffff", style="TLabel")
+        self.status_label.grid(row=5, column=0, columnspan=3, pady=(0, 10),padx=(0,400))
 
     def create_info_labels(self, parent):
         info_frame = ttk.Frame(parent, style="TFrame")
@@ -265,8 +279,8 @@ class ConverterGUI:
             "game_icon", "project_settings", "project_name", "audio_buses"
         ]
         self.conversion_settings = {setting: tk.BooleanVar(value=True) for setting in settings}
-        self.conversion_settings["notes"] = tk.BooleanVar(value=False)
-        self.conversion_settings["objects"] = tk.BooleanVar(value=False)
+        self.conversion_settings["notes"].set(False)
+        self.conversion_settings["objects"].set(False)
         
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
@@ -363,6 +377,7 @@ class ConverterGUI:
         self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
         self.conversion_thread.start()
         self.start_timer()
+        self.style.configure("Red.TButton", background="red", foreground="white")
         self.stop_button.config(state=tk.NORMAL, style="Red.TButton")
 
     def validate_projects(self, gm_path, godot_path):
@@ -387,14 +402,14 @@ class ConverterGUI:
         self.stop_button.config(state=tk.NORMAL)
         self.conversion_running.set()
         self.console.delete('1.0', tk.END)
-        self.progress['value'] = 0
-        self.progress_label.config(text="0%")
+        self.progress.update_progress(0)
         self.log("Starting conversion...")
 
     def stop_conversion(self):
         if self.conversion_running.is_set():
             self.conversion_running.clear()
             self.log("Stopping conversion process...")
+            self.style.configure("Red.TButton", background="white", foreground="white")
             self.stop_button.config(state=tk.DISABLED, style="TButton")
             self.master.after(100, self.check_conversion_stopped)
 
@@ -433,6 +448,7 @@ class ConverterGUI:
         for setting, converter, log_message in converters:
             if self.conversion_settings[setting].get() and self.conversion_running.is_set():
                 self.threadsafe_log(log_message)
+                self.threadsafe_update_status(log_message)
                 converter()
                 self.threadsafe_update_progress(0)
 
@@ -447,12 +463,15 @@ class ConverterGUI:
     def threadsafe_log(self, message):
         self.master.after(0, self.log, message)
 
+    def threadsafe_update_status(self, message):
+        self.master.after(0, self.status_label.config, {"text": message})
+
     def threadsafe_update_progress(self, value):
-        self.master.after(0, self.update_progress, value)
+        self.master.after(0, self.progress.update_progress, value)
 
     def conversion_complete(self):
-        self.progress['value'] = 100
-        self.progress_label.config(text="100%")
+        self.progress.update_progress(100)
+        self.status_label.config(text="Conversion complete!")
         self.log("You have ported your project from GameMaker to Godot! Have fun!" if self.conversion_running.is_set() else "Conversion process stopped.")
         self.conversion_running.clear()
         self.convert_button.config(state=tk.NORMAL)

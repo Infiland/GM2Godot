@@ -5,103 +5,54 @@ import webbrowser
 from functools import partial
 import requests
 import markdown2
-import platform
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
 from tkhtmlview import HTMLLabel
 
-from sprites import SpriteConverter
-from sounds import SoundConverter
-from fonts import FontConverter
-from notes import NoteConverter
-from tilesets import TileSetConverter
-from project_settings import ProjectSettingsConverter
+#TODO: REPLACE THIS WITH from src.conversion.converter import Converter
+from src.conversion.sprites import SpriteConverter
+from src.conversion.sounds import SoundConverter
+from src.conversion.fonts import FontConverter
+from src.conversion.notes import NoteConverter
+from src.conversion.tilesets import TileSetConverter
+from src.conversion.project_settings import ProjectSettingsConverter
 
-class ModernButton(ttk.Button):
-    def __init__(self, master=None, **kw):
-        super().__init__(master, style="Modern.TButton", **kw)
+# Import Version
+from src.version import get_version
 
-class CoolProgressBar(tk.Canvas):
-    def __init__(self, master, width, height, bg_color, fill_color, text_color):
-        super().__init__(master, width=width, height=height, bg=bg_color, highlightthickness=0)
-        self.fill_color = fill_color
-        self.text_color = text_color
-        self.width = width
-        self.height = height
-        self.progress = 0
-        self.rect_id = self.create_rectangle(0, width, 0, height, fill=fill_color)
-        self.text_id = self.create_text(width // 2, height // 2, text="0%", fill=text_color, font=("Helvetica", 12, "bold"))
-
-    def update_progress(self, value):
-        self.progress = value
-        fill_width = int(self.width * (value / 100))
-        self.coords(self.rect_id, 0, 0, fill_width, self.height)
-        self.itemconfig(self.text_id, text=f"{value}%")
-        self.lift(self.text_id)
-        self.update_idletasks()
+# Import GUI
+from src.gui.modern_button import ModernButton
+from src.gui.icon import Icon
+from src.gui.setupui import SetupUI
 
 class ConverterGUI:
     def __init__(self, master):
         self.master = master
-        self.master.title("GM2Godot")
+        self.master.title(f"GM2Godot v{get_version()}")
         self.master.geometry("800x600")
         self.master.configure(bg="#222222")
-        self.set_program_icon()
+        self.icon = Icon(self.master)
 
         self.style = ttk.Style()
         self.style.theme_use('clam')
         self.setup_styles()
 
-        self.gm_icon = self.load_icon("img/Gamemaker.png")
-        self.godot_icon = self.load_icon("img/Godot.png")
+        self.setup_ui = SetupUI(self.master, self)
+        self.setup_ui.setup_ui()
 
-        self.setup_ui()
+        self.console = self.setup_ui.console
+        self.progress = self.setup_ui.progress
+        self.timer_label = self.setup_ui.timer_label
+        self.status_label = self.setup_ui.status_label
+
+        self.convert_button = self.setup_ui.get_button("convert")
+        self.stop_button = self.setup_ui.get_button("stop")
+
         self.setup_conversion_settings()
         self.conversion_running = threading.Event()
         self.conversion_thread = None
         self.timer_running = False
         self.start_time = 0
-    
-    def set_program_icon(self):
-        icon_path = os.path.join(os.path.dirname(__file__), "img", "Logo.png")
-        icon_setters = {
-            "Windows": self.set_windows_icon,
-            "Linux": self.set_linux_icon
-        }
-        icon_setter = icon_setters.get(platform.system(), self.set_default_icon)
-        icon_setter(icon_path)
-
-    def set_windows_icon(self, icon_path):
-        try:
-            icon = tk.PhotoImage(file=icon_path)
-            self.master.iconphoto(False, icon)
-            print(f"Icon set successfully using PhotoImage: {icon_path}")
-        except Exception as e:
-            print(f"Failed to set icon using PhotoImage: {e}")
-            self.set_default_icon(icon_path)
-
-    def set_linux_icon(self, icon_path):
-        try:
-            img = tk.Image("photo", file=icon_path)
-            self.master.tk.call('wm', 'iconphoto', self.master._w, img)
-        except Exception as e:
-            print(f"Failed to set icon on Linux: {e}")
-            self.set_default_icon(icon_path)
-
-    def set_default_icon(self, icon_path):
-        try:
-            icon = tk.PhotoImage(file=icon_path)
-            self.master.iconphoto(True, icon)
-        except tk.TclError:
-            print(f"Failed to load icon from {icon_path}. The icon will not be displayed.")
-
-    def load_icon(self, path):
-        try:
-            from PIL import Image, ImageTk
-            img = Image.open(path)
-            return ImageTk.PhotoImage(img.resize((20, 20), Image.Resampling.LANCZOS))
-        except Exception:
-            return None
 
     def setup_styles(self):
         styles = {
@@ -121,90 +72,6 @@ class ConverterGUI:
         self.style.map("TCheckbutton", background=[('active', '#222222')])
         self.style.map("Red.TButton", background=[('active', '#ff6666')])
         self.style.configure("Red.TButton", background="white", foreground="white")
-
-    def setup_ui(self):
-        main_frame = ttk.Frame(self.master, padding="20 20 20 20", style="TFrame")
-        main_frame.grid(column=0, row=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.master.columnconfigure(0, weight=1)
-        self.master.rowconfigure(0, weight=1)
-
-        self.create_project_path_inputs(main_frame)
-        self.create_buttons(main_frame)
-        self.create_console(main_frame)
-        self.create_progress_bar(main_frame)
-        self.create_info_labels(main_frame)
-
-    def create_project_path_inputs(self, parent):
-        paths = [("GameMaker", self.browse_gm, self.gm_icon), ("Godot", self.browse_godot, self.godot_icon)]
-        for idx, (label, command, icon) in enumerate(paths):
-            frame = ttk.Frame(parent, style="TFrame")
-            frame.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=5)
-            
-            ttk.Label(frame, text=label[:2] if icon is None else "", image=icon, style="TLabel").pack(side=tk.LEFT, padx=(0, 5))
-            ttk.Label(frame, text=f"{label} Project Path:", style="TLabel").pack(side=tk.LEFT)
-            
-            entry = ttk.Entry(parent, width=50, style="TEntry")
-            entry.grid(row=idx, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
-            ModernButton(parent, text=f"Browse {label} Path", command=command).grid(row=idx, column=2, padx=5, pady=5)
-            setattr(self, f"{label.lower()}_entry", entry)
-        parent.columnconfigure(1, weight=1)
-
-    def create_buttons(self, parent):
-        button_frame = ttk.Frame(parent, style="TFrame")
-        button_frame.grid(row=2, column=0, columnspan=3, pady=10)
-
-        buttons = [
-            ("Convert", self.start_conversion, tk.NORMAL),
-            ("Stop", self.stop_conversion, tk.DISABLED),
-            ("Settings", self.open_settings, tk.NORMAL)
-        ]
-
-        for idx, (text, command, state) in enumerate(buttons):
-            button = ModernButton(button_frame, text=text, command=command, state=state)
-            button.grid(row=0, column=idx, padx=5, pady=10)
-            setattr(self, f"{text.lower()}_button", button)
-
-        self.stop_button.configure(style="Red.TButton")
-
-    def create_console(self, parent):
-        console_frame = ttk.Frame(parent, style="TFrame")
-        console_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
-        parent.rowconfigure(3, weight=1)
-
-        self.console = tk.Text(console_frame, wrap=tk.WORD, height=15, bg="#3d3d3d", fg="#ffffff", insertbackground="#ffffff", font=('Consolas', 10), state='disabled')
-        self.console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scrollbar = ttk.Scrollbar(console_frame, orient="vertical", command=self.console.yview, style="Console.Vertical.TScrollbar")
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.console.configure(yscrollcommand=scrollbar.set)
-
-    def create_progress_bar(self, parent):
-        progress_frame = ttk.Frame(parent, style="TFrame")
-        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
-
-        self.progress = CoolProgressBar(progress_frame, width=500, height=30, bg_color="#3d3d3d", fill_color="#42ffc2", text_color="#ffffff")
-        self.progress.pack(side=tk.LEFT, expand=True)
-
-        self.timer_label = ttk.Label(parent, text="Time: 00:00:00", style="TLabel")
-        self.timer_label.grid(row=5, column=0, columnspan=3, pady=(0, 10))
-
-        self.status_label = ttk.Label(parent, text="", foreground="#ffffff", style="TLabel")
-        self.status_label.grid(row=5, column=0, columnspan=3, pady=(0, 10),padx=(0,400))
-
-    def create_info_labels(self, parent):
-        info_frame = ttk.Frame(parent, style="TFrame")
-        info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
-
-        labels = [
-            ("Version 0.0.9", self.show_release_notes, tk.LEFT),
-            ("Contribute", self.open_github, tk.LEFT),
-            ("Made by Infiland", self.open_infiland_website, tk.RIGHT)
-        ]
-
-        for text, command, side in labels:
-            label = ttk.Label(info_frame, text=text, style="TLabel", cursor="hand2")
-            label.pack(side=side, padx=10)
-            label.bind("<Button-1>", command)
 
     def show_release_notes(self, event):
         release_notes = self.fetch_release_notes()
@@ -327,10 +194,13 @@ class ConverterGUI:
         ModernButton(button_frame, text="Save", command=settings_window.destroy).pack(side=tk.LEFT, padx=5)
 
     def log(self, message):
-        self.console.configure(state='normal')
-        self.console.insert(tk.END, message + "\n")
-        self.console.see(tk.END)
-        self.console.configure(state='disabled')
+        if self.console:
+            self.console.configure(state='normal')
+            self.console.insert(tk.END, message + "\n")
+            self.console.see(tk.END)
+            self.console.configure(state='disabled')
+        else:
+            print(f"Console not initialized. Message: {message}")
 
     def browse_project(self, entry, file_check, dialog_title):
         folder = filedialog.askdirectory(title=dialog_title)
@@ -340,10 +210,10 @@ class ConverterGUI:
             file_check(folder)
 
     def browse_gm(self):
-        self.browse_project(self.gamemaker_entry, self.check_gm_project, "Select your GameMaker Project")
+        self.browse_project(self.setup_ui.entries['gamemaker'], self.check_gm_project, "Select your GameMaker Project")
 
     def browse_godot(self):
-        self.browse_project(self.godot_entry, self.check_godot_project, "Select your new Godot project")
+        self.browse_project(self.setup_ui.entries['godot'], self.check_godot_project, "Select your new Godot project")
 
     def check_project_file(self, folder, file_extension, file_name):
         files = [f for f in os.listdir(folder) if f.endswith(file_extension)]
@@ -365,7 +235,7 @@ class ConverterGUI:
         self.progress_label.config(text=f"{value}%")
 
     def start_conversion(self):
-        gm_path, godot_path = self.gamemaker_entry.get(), self.godot_entry.get()
+        gm_path, godot_path = self.setup_ui.entries['gamemaker'].get(), self.setup_ui.entries['godot'].get()
         if not gm_path or not godot_path:
             self.log("Please select both GameMaker and Godot project paths.")
             return

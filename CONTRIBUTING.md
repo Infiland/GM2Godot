@@ -85,7 +85,10 @@ git clone https://github.com/Infiland/GM2Godot
 The project structure will keep changing as more features are added
 The main components of the GM2Godot project are:
 
-- `main.py`: Contains the GUI application and main logic for the converter
+- `main.py`: Main application
+- `gui.py`: Handles GUI main elements
+
+- `converter.py`: Handles and runs all of the conversion
 - `sprites.py`: Handles sprite conversion
 - `sounds.py`: Handles sound conversion
 - `fonts.py`: Handles font conversion
@@ -93,9 +96,12 @@ The main components of the GM2Godot project are:
 - `tilesets.py`: Handles tileset conversion (Should wait until Godot 4.3 for TileMap major changes)
 - `shaders.py`: Converts GameMaker shaders to GDScript shaders
 - `project_settings.py`: Copies GameMaker settings to Godot
+- `included_files.py`: Copies GameMaker included files to Godot
 
 ### Folders
 - `img`: Contains image files
+- `src`: Contains main functionality
+- `gui`: Has GUI related code
 
 ## Coding Standards
 
@@ -122,7 +128,7 @@ You can snag my GameMaker project from this repo:
 ```
 git clone https://github.com/Infiland/TheColorfulCreature
 ```
-You do not have to have GameMaker or run this project in GameMaker, but if you want to perform testing in Godot, run GM2Godot and use Godot 4.2.2 to create an empty project.
+You do not have to have GameMaker or run this project in GameMaker, but if you want to perform testing in Godot, run GM2Godot and use Godot 4.3 to create an empty project.
 
 ## Documentation
 

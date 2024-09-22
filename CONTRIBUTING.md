@@ -128,7 +128,7 @@ You can snag my GameMaker project from this repo:
 ```
 git clone https://github.com/Infiland/TheColorfulCreature
 ```
-You do not have to have GameMaker or run this project in GameMaker, but if you want to perform testing in Godot, run GM2Godot and use Godot 4.2.2 to create an empty project.
+You do not have to have GameMaker or run this project in GameMaker, but if you want to perform testing in Godot, run GM2Godot and use Godot 4.3 to create an empty project.
 
 ## Documentation
 

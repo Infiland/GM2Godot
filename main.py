@@ -148,16 +148,21 @@ class ConverterGUI:
         self.conversion_settings = {setting: tk.BooleanVar(value=True) for setting in settings}
         self.conversion_settings["notes"].set(False)
         self.conversion_settings["objects"].set(False)
+
+        self.gm_platform_settings = "windows"
+
+    def update_platform_settings(self, event):
+        self.gm_platform_settings = self.platform_combobox.get()
         
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
         settings_window.title("Conversion Settings")
-        settings_window.geometry("400x500")
+        settings_window.geometry("460x640")
         settings_window.configure(bg="#222222")
 
-        main_frame = ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
+        main_frame= ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
+        main_frame.pack(fill=tk.BOTH, expand=True, anchor="w")
+        
         ttk.Label(main_frame, text="Select files to convert:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
 
         checkbox_frame = ttk.Frame(main_frame, style="TFrame")
@@ -178,9 +183,24 @@ class ConverterGUI:
                 ttk.Checkbutton(checkbox_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").grid(row=row, column=0, sticky="w", padx=20)
                 row += 1
 
-        button_frame = ttk.Frame(main_frame, style="TFrame")
-        button_frame.pack(pady=10)
+        ttk.Label(main_frame, text="Gamemaker platform:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
+        ttk.Label(main_frame, text="Choose which Gamemaker platform settings to convert to Godot", style="TLabel", font=("Helvetica", 10, "bold")).pack(pady=10)
+        
+        platform_categories = ("linux",
+                               "macos",
+                               "windows")
+        
+        combobox_frame = ttk.Frame(main_frame, style="TFrame")
+        combobox_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.platform_combobox = ttk.Combobox(combobox_frame, values=platform_categories, textvariable=self.gm_platform_settings, state="readonly")
+        self.platform_combobox.pack(pady=10)
+        self.platform_combobox.bind('<<ComboboxSelected>>', self.update_platform_settings)
+        self.platform_combobox.current(platform_categories.index(self.gm_platform_settings))
 
+        button_frame = ttk.Frame(main_frame, style="TFrame")
+        button_frame.pack()
+        
         def select_all():
             for var in self.conversion_settings.values():
                 var.set(True)
@@ -191,7 +211,7 @@ class ConverterGUI:
 
         ModernButton(button_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
         ModernButton(button_frame, text="Deselect All", command=deselect_all).pack(side=tk.LEFT, padx=5)
-        ModernButton(button_frame, text="Save", command=settings_window.destroy).pack(side=tk.LEFT, padx=5)
+        ModernButton(button_frame, text="Save", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
 
     def log(self, message):
         if self.console:
@@ -235,7 +255,7 @@ class ConverterGUI:
         self.progress_label.config(text=f"{value}%")
 
     def start_conversion(self):
-        gm_path, godot_path = self.setup_ui.entries['gamemaker'].get(), self.setup_ui.entries['godot'].get()
+        gm_path, gm_platform, godot_path = self.setup_ui.entries['gamemaker'].get(), self.gm_platform_settings, self.setup_ui.entries['godot'].get()
         if not gm_path or not godot_path:
             self.log("Please select both GameMaker and Godot project paths.")
             return
@@ -244,7 +264,7 @@ class ConverterGUI:
             return
 
         self.prepare_for_conversion()
-        self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, godot_path))
+        self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, gm_platform, godot_path))
         self.conversion_thread.start()
         self.start_timer()
         self.style.configure("Red.TButton", background="red", foreground="white")
@@ -300,8 +320,8 @@ class ConverterGUI:
             self.timer_label.config(text=time_str)
             self.master.after(1000, self.update_timer)
 
-    def convert(self, gm_path, godot_path):
-        project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.threadsafe_log)
+    def convert(self, gm_path, gm_platform_settings_path, godot_path):
+        project_settings_converter = ProjectSettingsConverter(gm_path, gm_platform_settings_path, godot_path, self.threadsafe_log)
 
         converters = [
             ("game_icon", project_settings_converter.convert_icon, "Converting game icon..."),

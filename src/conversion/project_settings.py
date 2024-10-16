@@ -6,15 +6,18 @@ from PIL import Image
 from typing import Optional, List, Callable
 
 class ProjectSettingsConverter:
-    def __init__(self, gm_project_path: str, godot_project_path: str, log_callback: Callable[[str], None] = print):
+    def __init__(self, gm_project_path: str, gm_platform: str, godot_project_path: str, log_callback: Callable[[str], None] = print):
         self.gm_project_path = gm_project_path
+        self.gm_platform = gm_platform
         self.godot_project_path = godot_project_path
         self.log_callback = log_callback
-        self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', 'options_windows.yy')
+
+        self.options_platform_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, f'options_{self.gm_platform}.yy')
+        self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
 
     def convert_icon(self) -> bool:
-        gm_icon_path = os.path.join(self.gm_project_path, 'options', 'windows', 'icons')
+        gm_icon_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, 'icons')
         godot_ico_path = os.path.join(self.godot_project_path, 'icon.ico')
         godot_png_path = os.path.join(self.godot_project_path, 'icon.png')
 
@@ -22,22 +25,22 @@ class ProjectSettingsConverter:
             self.log_callback(f"Icon directory not found: {gm_icon_path}")
             return False
 
-        ico_files = [f for f in os.listdir(gm_icon_path) if f.endswith('.ico')]
+        icon_files = [f for f in os.listdir(gm_icon_path) if f.endswith('.ico') or f.endswith('.png')]
 
-        if not ico_files:
-            self.log_callback("No .ico file found in the GameMaker project's icon directory.")
+        if not (icon_files):
+            self.log_callback("No icon file found in the GameMaker project's icon directory.")
             return False
 
-        source_ico = os.path.join(gm_icon_path, ico_files[0])
-
+        source_icon = os.path.join(gm_icon_path, icon_files[0])
+            
         try:
-            shutil.copy2(source_ico, godot_ico_path)
-            self.log_callback(f"Copied icon: {ico_files[0]} -> icon.ico")
+            shutil.copy2(source_icon, godot_ico_path)
+            self.log_callback(f"Copied icon: {icon_files[0]} -> icon.ico")
 
-            with Image.open(source_ico) as img:
+            with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
-            self.log_callback(f"Converted icon: {ico_files[0]} -> icon.png")
-
+            self.log_callback(f"Converted icon: {icon_files[0]} -> icon.png")
+        
             return True
         except Exception as e:
             self.log_callback(f"Error processing icon: {str(e)}")
@@ -111,19 +114,20 @@ class ProjectSettingsConverter:
             content = re.sub(r'config/icon="res://.*"', 'config/icon="res://icon.png"', content)
 
             settings_to_update = [
-                ("option_windows_description_info", "config/description"),
-                ("option_windows_version", "config/version"),
-                ("option_windows_use_splash", "boot_splash/show_image"),
-                ("option_game_speed", "run/max_fps"),
-                ("option_windows_vsync", "window/vsync/vsync_mode"),
-                ("option_windows_resize_window", "window/size/resizable"),
-                ("option_windows_borderless", "window/size/borderless"),
-                ("option_windows_interpolate_pixels", "textures/canvas_textures/default_texture_filter"),
-                ("option_windows_start_fullscreen", "window/size/mode")
+                (f"option_windows_description_info", "config/description"),
+                (f"option_{self.gm_platform}_version", "config/version"),
+                (f"option_windows_use_splash", "boot_splash/show_image"),
+                (f"option_game_speed", "run/max_fps"),
+                (f"option_{self.gm_platform}_vsync", "window/vsync/vsync_mode"),
+                (f"option_{self.gm_platform}_sync", "window/vsync/vsync_mode"),
+                (f"option_{self.gm_platform}_resize_window", "window/size/resizable"),
+                (f"option_windows_borderless", "window/size/borderless"),
+                (f"option_{self.gm_platform}_interpolate_pixels", "textures/canvas_textures/default_texture_filter"),
+                (f"option_{self.gm_platform}_start_fullscreen", "window/size/mode")
             ]
 
             for gm_option, godot_setting in settings_to_update:
-                value = self.get_gm_option(gm_option, self.options_windows_path if "windows" in gm_option else self.options_main_path)
+                value = self.get_gm_option(gm_option, self.options_windows_path if 'windows' in gm_option else self.options_platform_path if self.gm_platform in gm_option else self.options_main_path)
                 if value:
                     content = self.update_godot_setting(content, godot_setting, value)
 

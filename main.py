@@ -5,6 +5,7 @@ import webbrowser
 from functools import partial
 import requests
 import markdown2
+import platform
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
 from tkhtmlview import HTMLLabel
@@ -149,7 +150,13 @@ class ConverterGUI:
         self.conversion_settings["notes"].set(False)
         self.conversion_settings["objects"].set(False)
 
-        self.gm_platform_settings = "windows"
+        match(platform.system()):  
+            case "Linux":
+                self.gm_platform_settings = "linux"
+            case "Darwin":
+                self.gm_platform_settings = "macos"
+            case _:
+                self.gm_platform_settings = "windows"
 
     def update_platform_settings(self, event):
         self.gm_platform_settings = self.platform_combobox.get()

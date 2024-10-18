@@ -17,7 +17,7 @@ When presenting this tool, I've gotten a couple of questions what the tool reall
 **GM2Godot isn't:**
 - For people who expect everything will work perfectly.
 - A compiler that can seamlessly transpile GML to GDScript *(yet)*
-- This isn't a tool which converts exported GML projects to Godot, [use UndertaleToolMod instead](https://github.com/UnderminersTeam/UndertaleModTool)
+- This isn't a tool which turns COMPILED GM projects to Godot, [use UndertaleToolMod instead](https://github.com/UnderminersTeam/UndertaleModTool)
 
 # Contribution
 Contribution is found in [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md). But pretty much fork the repo, do pull requests and I'll try to code review them.
@@ -36,8 +36,9 @@ py --version
 
 If you are Linux, **you are required to have Tkinter module**, do the following: (tested this on Ubuntu, so it probably works on debian based systems)
 ```
-sudo apt-get install python3-tk python3-pil python3-pil.imagetk
+sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
 ```
+(if tkhtmlview is a problem, please use pip install tkhtmlview --break-system-packages)
 
 The program requires the following libraries to use
 ```

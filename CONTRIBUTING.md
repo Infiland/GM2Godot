@@ -73,8 +73,9 @@ git clone https://github.com/Infiland/GM2Godot
    ```
 4. If you're on Linux, install Tkinter:
    ```
-   sudo apt-get install python3-tk python3-pil python3-pil.imagetk
+   sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
    ```
+   (if tkhtmlview is a problem, please use pip install tkhtmlview --break-system-packages)
 5. Run the program with:
    ```
    python main.py
@@ -83,7 +84,7 @@ git clone https://github.com/Infiland/GM2Godot
 ## Project Structure
 
 The project structure will keep changing as more features are added
-The main components of the GM2Godot project are:
+The main components/important parts of GM2Godot are:
 
 - `main.py`: Main application
 - `gui.py`: Handles GUI main elements
@@ -93,7 +94,7 @@ The main components of the GM2Godot project are:
 - `sounds.py`: Handles sound conversion
 - `fonts.py`: Handles font conversion
 - `notes.py`: Handles note conversion
-- `tilesets.py`: Handles tileset conversion (Should wait until Godot 4.3 for TileMap major changes)
+- `tilesets.py`: Handles tileset conversion
 - `shaders.py`: Converts GameMaker shaders to GDScript shaders
 - `project_settings.py`: Copies GameMaker settings to Godot
 - `included_files.py`: Copies GameMaker included files to Godot
@@ -124,7 +125,7 @@ While not strict, it's good to follow these: (Even I mess up!)
 
 Testing would require having both a GameMaker project and a Godot project.
 
-You can snag my GameMaker project from this repo:
+You can snag my GameMaker project from this repo for testing:
 ```
 git clone https://github.com/Infiland/TheColorfulCreature
 ```

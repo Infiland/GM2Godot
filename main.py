@@ -19,11 +19,15 @@ from src.conversion.tilesets import TileSetConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
 from src.conversion.converter import Converter
-from src.version import get_version
-from src.gui.modern_button import ModernButton
-from src.gui.icon import Icon
-from src.gui.setupui import SetupUI
-from src.gui.about import AboutDialog
+from src.conversion.converter import Converter
+from src.gui import (
+    SetupUI,
+    AboutDialog,
+    ModernButton,
+    ModernProgressBar,
+    Icon,
+    get_version
+)
 
 class ConverterGUI:
     def __init__(self, master):
@@ -31,7 +35,6 @@ class ConverterGUI:
         self.master.title(f"GM2Godot v{get_version()}")
         self.master.geometry("800x600")
         self.master.configure(bg="#222222")
-        self.icon = Icon(self.master)
 
         self.style = ttk.Style()
         self.style.theme_use('clam')
@@ -44,7 +47,6 @@ class ConverterGUI:
         self.progress = self.setup_ui.progress
         self.timer_label = self.setup_ui.timer_label
         self.status_label = self.setup_ui.status_label
-
         self.convert_button = self.setup_ui.get_button("convert")
         self.stop_button = self.setup_ui.get_button("stop")
 

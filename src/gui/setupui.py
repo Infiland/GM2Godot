@@ -97,6 +97,7 @@ class SetupUI:
 
         labels = [
             (f"Version {get_version()}", self.app.show_release_notes, tk.LEFT),
+            ("About", self.app.show_about, tk.LEFT),
             ("Contribute", self.app.open_github, tk.LEFT),
             ("Made by Infiland", self.app.open_infiland_website, tk.RIGHT)
         ]

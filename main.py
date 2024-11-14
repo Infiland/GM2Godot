@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
 from tkhtmlview import HTMLLabel
 
-#TODO: REPLACE THIS WITH from src.conversion.converter import Converter
+# TODO: HANDLE CONVERTER IN THE CONVERTER CLASS
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -18,13 +18,12 @@ from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
-# Import Version
+from src.conversion.converter import Converter
 from src.version import get_version
-
-# Import GUI
 from src.gui.modern_button import ModernButton
 from src.gui.icon import Icon
 from src.gui.setupui import SetupUI
+from src.gui.about import AboutDialog
 
 class ConverterGUI:
     def __init__(self, master):
@@ -54,6 +53,7 @@ class ConverterGUI:
         self.conversion_thread = None
         self.timer_running = False
         self.start_time = 0
+        self.converter = None
 
     def setup_styles(self):
         styles = {
@@ -80,6 +80,9 @@ class ConverterGUI:
             self.display_release_notes(release_notes)
         else:
             messagebox.showerror("Error", "Unable to fetch release notes. Please check your internet connection and try again.")
+
+    def show_about(self, event):
+        AboutDialog(self.master)
 
     def fetch_release_notes(self):
         try:
@@ -143,13 +146,12 @@ class ConverterGUI:
 
     def setup_conversion_settings(self):
         settings = [
-            "sprites", "sounds", "fonts", "tilesets", "objects", "notes", "shaders",
+            "sprites", "sounds", "fonts", "tilesets", "notes",
             "game_icon", "project_settings", "project_name", "audio_buses"
         ]
         self.conversion_settings = {setting: tk.BooleanVar(value=True) for setting in settings}
         self.conversion_settings["notes"].set(False)
-        self.conversion_settings["objects"].set(False)
-
+        
         match(platform.system()):  
             case "Linux":
                 self.gm_platform_settings = "linux"
@@ -167,7 +169,7 @@ class ConverterGUI:
         settings_window.geometry("460x640")
         settings_window.configure(bg="#222222")
 
-        main_frame= ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
+        main_frame = ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
         main_frame.pack(fill=tk.BOTH, expand=True, anchor="w")
         
         ttk.Label(main_frame, text="Select files to convert:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
@@ -176,9 +178,9 @@ class ConverterGUI:
         checkbox_frame.pack(fill=tk.BOTH, expand=True)
 
         categories = {
-            "Assets": ["sprites", "sounds", "fonts"],
-            "Project": ["game_icon", "project_settings", "project_name", "audio_buses", "notes"],
-            "WIP": ["objects", "shaders", "tilesets"]
+            "Project": ["game_icon", "project_settings", "project_name", "audio_buses"],
+            "Assets": ["sprites", "sounds", "fonts", "notes", "tilesets"],
+            "WIP": ["objects","shaders","tilesets"]
         }
 
         row = 0
@@ -190,23 +192,20 @@ class ConverterGUI:
                 ttk.Checkbutton(checkbox_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").grid(row=row, column=0, sticky="w", padx=20)
                 row += 1
 
-        ttk.Label(main_frame, text="Gamemaker platform:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
-        ttk.Label(main_frame, text="Choose which Gamemaker platform settings to convert to Godot", style="TLabel", font=("Helvetica", 10, "bold")).pack(pady=10)
-        
-        platform_categories = ("linux",
-                               "macos",
-                               "windows")
-        
-        combobox_frame = ttk.Frame(main_frame, style="TFrame")
-        combobox_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.platform_combobox = ttk.Combobox(combobox_frame, values=platform_categories, textvariable=self.gm_platform_settings, state="readonly")
-        self.platform_combobox.pack(pady=10)
+        platform_frame = ttk.Frame(main_frame, style="TFrame")
+        platform_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+
+        ttk.Label(platform_frame, text="GameMaker platform:", style="TLabel", font=("Helvetica", 14, "bold")).pack()
+        ttk.Label(platform_frame, text="Choose which GameMaker platform settings to convert to Godot", style="TLabel").pack(pady=5)
+
+        platform_categories = ("linux", "macos", "windows")
+        self.platform_combobox = ttk.Combobox(platform_frame, values=platform_categories, state="readonly")
+        self.platform_combobox.set(self.gm_platform_settings)
+        self.platform_combobox.pack(pady=5)
         self.platform_combobox.bind('<<ComboboxSelected>>', self.update_platform_settings)
-        self.platform_combobox.current(platform_categories.index(self.gm_platform_settings))
 
         button_frame = ttk.Frame(main_frame, style="TFrame")
-        button_frame.pack()
+        button_frame.pack(pady=10)
         
         def select_all():
             for var in self.conversion_settings.values():
@@ -262,7 +261,7 @@ class ConverterGUI:
         self.progress_label.config(text=f"{value}%")
 
     def start_conversion(self):
-        gm_path, gm_platform, godot_path = self.setup_ui.entries['gamemaker'].get(), self.gm_platform_settings, self.setup_ui.entries['godot'].get()
+        gm_path, godot_path = self.setup_ui.entries['gamemaker'].get(), self.setup_ui.entries['godot'].get()
         if not gm_path or not godot_path:
             self.log("Please select both GameMaker and Godot project paths.")
             return
@@ -271,11 +270,28 @@ class ConverterGUI:
             return
 
         self.prepare_for_conversion()
-        self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, gm_platform, godot_path))
+        
+        self.converter = Converter(self.threadsafe_log, self.threadsafe_update_progress)
+        settings = {name: var.get() for name, var in self.conversion_settings.items()}
+        
+        self.conversion_thread = threading.Thread(
+            target=self.run_conversion,
+            args=(gm_path, godot_path, settings)
+        )
+        
         self.conversion_thread.start()
         self.start_timer()
         self.style.configure("Red.TButton", background="red", foreground="white")
         self.stop_button.config(state=tk.NORMAL, style="Red.TButton")
+
+    def run_conversion(self, gm_path, godot_path, settings):
+        """Run the conversion process in a separate thread."""
+        try:
+            self.converter.convert(gm_path, godot_path, settings)
+        except Exception as e:
+            self.threadsafe_log(f"Error during conversion: {str(e)}")
+        finally:
+            self.master.after(0, self.conversion_complete)
 
     def validate_projects(self, gm_path, godot_path):
         yyp_files = [f for f in os.listdir(gm_path) if f.endswith('.yyp')]
@@ -303,8 +319,9 @@ class ConverterGUI:
         self.log("Starting conversion...")
 
     def stop_conversion(self):
-        if self.conversion_running.is_set():
-            self.conversion_running.clear()
+        """Stop the ongoing conversion process."""
+        if self.converter:
+            self.converter.stop_conversion()
             self.log("Stopping conversion process...")
             self.style.configure("Red.TButton", background="white", foreground="white")
             self.stop_button.config(state=tk.DISABLED, style="TButton")
@@ -367,13 +384,17 @@ class ConverterGUI:
         self.master.after(0, self.progress.update_progress, value)
 
     def conversion_complete(self):
+        """Handle completion of conversion process."""
         self.progress.update_progress(100)
         self.status_label.config(text="Conversion complete!")
-        self.log("You have ported your project from GameMaker to Godot! Have fun!" if self.conversion_running.is_set() else "Conversion process stopped.")
-        self.conversion_running.clear()
+        conversion_status = ("You have ported your project from GameMaker to Godot! Have fun!" 
+                           if self.converter and self.converter.is_running() 
+                           else "Conversion process stopped.")
+        self.log(conversion_status)
         self.convert_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         self.stop_timer()
+        self.converter = None
 
     def open_github(self, event):
         webbrowser.open_new("https://github.com/Infiland/GM2Godot")

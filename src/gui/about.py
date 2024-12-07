@@ -109,7 +109,7 @@ class AboutDialog:
         links = [
             ("GitHub Repository", "https://github.com/Infiland/GM2Godot"),
             ("Report an Issue", "https://github.com/Infiland/GM2Godot/issues"),
-            ("Infiland Website", "https://infiland.github.io")
+            ("Infiland Website", "https://infi.land")
         ]
         
         for text, url in links:

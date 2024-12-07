@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk, font as tkfont
 from tkhtmlview import HTMLLabel
 
 #TODO: REPLACE THIS WITH from src.conversion.converter import Converter
+from src.gui.about import AboutDialog
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -37,6 +38,8 @@ class ConverterGUI:
         self.style.theme_use('clam')
         self.setup_styles()
 
+        self.create_menu()
+
         self.setup_ui = SetupUI(self.master, self)
         self.setup_ui.setup_ui()
 
@@ -54,6 +57,22 @@ class ConverterGUI:
         self.conversion_thread = None
         self.timer_running = False
         self.start_time = 0
+
+    def create_menu(self):
+        """Create the menu bar with Help menu."""
+        menubar = tk.Menu(self.master)
+        self.master.config(menu=menubar)
+
+        help_menu = tk.Menu(menubar, tearoff=0, bg="#222222", fg="white", activebackground="#3d3d3d", activeforeground="white")
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About GM2Godot", command=self.show_about)
+        help_menu.add_separator()
+        help_menu.add_command(label="Documentation", command=lambda: webbrowser.open("https://github.com/Infiland/GM2Godot/wiki"))
+        help_menu.add_command(label="Report Issue", command=lambda: webbrowser.open("https://github.com/Infiland/GM2Godot/issues"))
+
+    def show_about(self):
+        """Show the About dialog."""
+        AboutDialog(self.master)
 
     def setup_styles(self):
         styles = {
@@ -379,7 +398,7 @@ class ConverterGUI:
         webbrowser.open_new("https://github.com/Infiland/GM2Godot")
 
     def open_infiland_website(self, event):
-        webbrowser.open_new("https://infiland.github.io")
+        webbrowser.open_new("https://infi.land")
 
 def main():
     root = tk.Tk()

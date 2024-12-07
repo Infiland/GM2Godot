@@ -18,10 +18,8 @@ from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
-# Import Version
 from src.version import get_version
 
-# Import GUI
 from src.gui.modern_button import ModernButton
 from src.gui.icon import Icon
 from src.gui.setupui import SetupUI
@@ -32,6 +30,7 @@ class ConverterGUI:
         self.master.title(f"GM2Godot v{get_version()}")
         self.master.geometry("800x600")
         self.master.configure(bg="#222222")
+        self.icon = Icon(self.master)
         self.icon = Icon(self.master)
 
         self.style = ttk.Style()
@@ -45,6 +44,7 @@ class ConverterGUI:
         self.progress = self.setup_ui.progress
         self.timer_label = self.setup_ui.timer_label
         self.status_label = self.setup_ui.status_label
+
 
         self.convert_button = self.setup_ui.get_button("convert")
         self.stop_button = self.setup_ui.get_button("stop")

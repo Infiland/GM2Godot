@@ -3,8 +3,13 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
+# Import localization manager
+from src.localization import get_localized
+
 class Icon:
     def __init__(self, master):
+        self.language = "EN"
+        
         self.master = master
         self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.set_program_icon()
@@ -25,7 +30,7 @@ class Icon:
             icon = tk.PhotoImage(file=icon_path)
             self.master.iconphoto(False, icon)
         except Exception as e:
-            print(f"Failed to set icon using PhotoImage: {e}")
+            print(get_localized(self.language, 'Icon_Error_Photoimage').format(error=e))
             self.set_default_icon(icon_path)
 
     def set_linux_icon(self, icon_path):
@@ -33,7 +38,7 @@ class Icon:
             img = tk.Image("photo", file=icon_path)
             self.master.tk.call('wm', 'iconphoto', self.master._w, img)
         except Exception as e:
-            print(f"Failed to set icon on Linux: {e}")
+            print(get_localized(self.language, 'Icon_Error_Linux').format(error=e))
             self.set_default_icon(icon_path)
 
     def set_default_icon(self, icon_path):
@@ -41,7 +46,7 @@ class Icon:
             icon = tk.PhotoImage(file=icon_path)
             self.master.iconphoto(True, icon)
         except tk.TclError:
-            print(f"Failed to load icon from {icon_path}. The icon will not be displayed.")
+            print(get_localized(self.language, 'Icon_Error_Path').format(icon_path=icon_path))
 
     def load_icon(self, path):
         try:
@@ -50,7 +55,7 @@ class Icon:
             img = Image.open(full_path)
             return ImageTk.PhotoImage(img.resize((20, 20), Image.Resampling.LANCZOS))
         except Exception as e:
-            print(f"Failed to load icon from {full_path}: {e}")
+            print(get_localized(self.language, 'Icon_Error').format(full_path=full_path, error=e))
             return None
         
     def get_gamemaker_icon(self):

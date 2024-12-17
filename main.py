@@ -11,7 +11,6 @@ from tkinter import filedialog, messagebox, ttk, font as tkfont
 from tkhtmlview import HTMLLabel
 
 #TODO: REPLACE THIS WITH from src.conversion.converter import Converter
-from src.gui.about import AboutDialog
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -19,26 +18,30 @@ from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
+# Import Version
 from src.version import get_version
 
+# Import GUI
 from src.gui.modern_button import ModernButton
 from src.gui.icon import Icon
 from src.gui.setupui import SetupUI
 
+# Import localization manager
+from src.localization import get_localized
+
 class ConverterGUI:
     def __init__(self, master):
+        self.language = "EN"
+        
         self.master = master
-        self.master.title(f"GM2Godot v{get_version()}")
+        self.master.title(get_localized(self.language, 'Menu_Title').format(version=get_version()))
         self.master.geometry("800x600")
         self.master.configure(bg="#222222")
-        self.icon = Icon(self.master)
         self.icon = Icon(self.master)
 
         self.style = ttk.Style()
         self.style.theme_use('clam')
         self.setup_styles()
-
-        self.create_menu()
 
         self.setup_ui = SetupUI(self.master, self)
         self.setup_ui.setup_ui()
@@ -48,32 +51,15 @@ class ConverterGUI:
         self.timer_label = self.setup_ui.timer_label
         self.status_label = self.setup_ui.status_label
 
-
-        self.convert_button = self.setup_ui.get_button("convert")
-        self.stop_button = self.setup_ui.get_button("stop")
+        self.convert_button = self.setup_ui.get_button(get_localized(self.language, 'Menu_UI_Button_Convert'))
+        self.stop_button = self.setup_ui.get_button(get_localized(self.language, 'Menu_UI_Button_Stop'))
 
         self.setup_conversion_settings()
         self.conversion_running = threading.Event()
         self.conversion_thread = None
         self.timer_running = False
         self.start_time = 0
-
-    def create_menu(self):
-        """Create the menu bar with Help menu."""
-        menubar = tk.Menu(self.master)
-        self.master.config(menu=menubar)
-
-        help_menu = tk.Menu(menubar, tearoff=0, bg="#222222", fg="white", activebackground="#3d3d3d", activeforeground="white")
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About GM2Godot", command=self.show_about)
-        help_menu.add_separator()
-        help_menu.add_command(label="Documentation", command=lambda: webbrowser.open("https://github.com/Infiland/GM2Godot/wiki"))
-        help_menu.add_command(label="Report Issue", command=lambda: webbrowser.open("https://github.com/Infiland/GM2Godot/issues"))
-
-    def show_about(self):
-        """Show the About dialog."""
-        AboutDialog(self.master)
-
+        
     def setup_styles(self):
         styles = {
             "TFrame": {"background": "#222222"},
@@ -98,7 +84,7 @@ class ConverterGUI:
         if release_notes:
             self.display_release_notes(release_notes)
         else:
-            messagebox.showerror("Error", "Unable to fetch release notes. Please check your internet connection and try again.")
+            messagebox.showerror(get_localized(self.language, 'ReleaseNotes_Error_NoInternet')[0], get_localized(self.language, 'ReleaseNotes_Error_NoInternet')[1])
 
     def fetch_release_notes(self):
         try:
@@ -108,12 +94,12 @@ class ConverterGUI:
             else:
                 return None
         except Exception as e:
-            print(f"Error fetching release notes: {e}")
+            print(get_localized(self.language, 'ReleaseNotes_Error_Generic').format(error=e))
             return None
 
     def display_release_notes(self, notes):
         notes_window = tk.Toplevel(self.master)
-        notes_window.title("Release Notes")
+        notes_window.title(get_localized(self.language, 'ReleaseNotes_Title'))
         notes_window.geometry("750x600")
         notes_window.configure(bg="#222222")
 
@@ -161,10 +147,8 @@ class ConverterGUI:
         text_widget.configure(state="disabled")
 
     def setup_conversion_settings(self):
-        settings = [
-            "sprites", "sounds", "fonts", "tilesets", "objects", "notes", "shaders",
-            "game_icon", "project_settings", "project_name", "audio_buses"
-        ]
+        settings = get_localized(self.language, 'Settings_Files_Categories')
+        
         self.conversion_settings = {setting: tk.BooleanVar(value=True) for setting in settings}
         self.conversion_settings["notes"].set(False)
         self.conversion_settings["objects"].set(False)
@@ -182,7 +166,7 @@ class ConverterGUI:
         
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
-        settings_window.title("Conversion Settings")
+        settings_window.title(get_localized(self.language, 'Settings_Title'))
         settings_window.geometry("460x640")
         settings_window.configure(bg="#222222")
 
@@ -209,8 +193,8 @@ class ConverterGUI:
                 ttk.Checkbutton(checkbox_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").grid(row=row, column=0, sticky="w", padx=20)
                 row += 1
 
-        ttk.Label(main_frame, text="Gamemaker platform:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
-        ttk.Label(main_frame, text="Choose which Gamemaker platform settings to convert to Godot", style="TLabel", font=("Helvetica", 10, "bold")).pack(pady=10)
+        ttk.Label(main_frame, text=get_localized(self.language, 'Settings_Platform_Heading'), style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
+        ttk.Label(main_frame, text=get_localized(self.language, 'Settings_Platform_Subheading'), style="TLabel", font=("Helvetica", 10, "bold")).pack(pady=10)
         
         platform_categories = ("linux",
                                "macos",
@@ -235,9 +219,9 @@ class ConverterGUI:
             for var in self.conversion_settings.values():
                 var.set(False)
 
-        ModernButton(button_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
-        ModernButton(button_frame, text="Deselect All", command=deselect_all).pack(side=tk.LEFT, padx=5)
-        ModernButton(button_frame, text="Save", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
+        ModernButton(button_frame, text=get_localized(self.language, 'Settings_Button_SelectAll'), command=select_all).pack(side=tk.LEFT, padx=5)
+        ModernButton(button_frame, text=get_localized(self.language, 'Settings_Button_DeselectAll'), command=deselect_all).pack(side=tk.LEFT, padx=5)
+        ModernButton(button_frame, text=get_localized(self.language, 'Settings_Button_Save'), command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
 
     def log(self, message):
         if self.console:
@@ -246,7 +230,7 @@ class ConverterGUI:
             self.console.see(tk.END)
             self.console.configure(state='disabled')
         else:
-            print(f"Console not initialized. Message: {message}")
+            print(get_localized(self.language, 'Console_Error_NotInitialized').format(message=message))#f"Console not initialized. Message: {message}")
 
     def browse_project(self, entry, file_check, dialog_title):
         folder = filedialog.askdirectory(title=dialog_title)
@@ -264,11 +248,11 @@ class ConverterGUI:
     def check_project_file(self, folder, file_extension, file_name):
         files = [f for f in os.listdir(folder) if f.endswith(file_extension)]
         if not files:
-            messagebox.showwarning(f"Invalid {file_name} Project", f"No {file_extension} file found in the selected {file_name} project folder.")
+            messagebox.showwarning(get_localized(self.language, 'Console_Error_InvalidProject')[0].format(file_name=file_name), get_localized(self.language, 'Console_Error_InvalidProject')[1].format(file_name=file_name, file_extension=file_extension))
         elif len(files) > 1:
-            messagebox.showwarning(f"Multiple {file_extension} Files", f"Multiple {file_extension} files found: {', '.join(files)}. Please ensure only one {file_extension} file is present.")
+            messagebox.showwarning(get_localized(self.language, 'Console_Error_MultipleGenericFiles')[0].format(file_extension=file_extension), get_localized(self.language, 'Console_Error_MultipleGenericFiles')[1].format(file_extension=file_extension, files=', '.join(files)))
         else:
-            self.log(f"{file_name} project file found: {files[0]}")
+            self.log(get_localized(self.language, 'Console_ProjectFound').format(file_name=file_name, files=files[0]))
 
     def check_gm_project(self, folder):
         self.check_project_file(folder, '.yyp', 'GameMaker')
@@ -283,7 +267,7 @@ class ConverterGUI:
     def start_conversion(self):
         gm_path, gm_platform, godot_path = self.setup_ui.entries['gamemaker'].get(), self.gm_platform_settings, self.setup_ui.entries['godot'].get()
         if not gm_path or not godot_path:
-            self.log("Please select both GameMaker and Godot project paths.")
+            self.log(get_localized(self.language, 'Console_Error_MissingDirectories'))
             return
 
         if not self.validate_projects(gm_path, godot_path):
@@ -307,11 +291,11 @@ class ConverterGUI:
 
     def log_project_errors(self, yyp_files, godot_project_file):
         if not yyp_files:
-            self.log("Error: No .yyp file found in the GameMaker project folder.")
+            self.log(get_localized(self.language, 'Console_Error_MissingGamemakerFile'))
         elif len(yyp_files) > 1:
-            self.log(f"Warning: Multiple .yyp files found: {', '.join(yyp_files)}. Using the first one.")
+            self.log(get_localized(self.language, 'Console_Error_MultipleGamemakerFiles').format(yyp_files=', '.join(yyp_files)))
         if not os.path.exists(godot_project_file):
-            self.log("Error: No project.godot file found in the Godot project folder.")
+            self.log(get_localized(self.language, 'Console_Error_MissingGodotFile'))
 
     def prepare_for_conversion(self):
         self.convert_button.config(state=tk.DISABLED)
@@ -319,12 +303,12 @@ class ConverterGUI:
         self.conversion_running.set()
         self.console.delete('1.0', tk.END)
         self.progress.update_progress(0)
-        self.log("Starting conversion...")
+        self.log(get_localized(self.language, 'Console_ConversionStart'))
 
     def stop_conversion(self):
         if self.conversion_running.is_set():
             self.conversion_running.clear()
-            self.log("Stopping conversion process...")
+            self.log(get_localized(self.language, 'Console_ConversionStopping'))
             self.style.configure("Red.TButton", background="white", foreground="white")
             self.stop_button.config(state=tk.DISABLED, style="TButton")
             self.master.after(100, self.check_conversion_stopped)
@@ -350,15 +334,15 @@ class ConverterGUI:
         project_settings_converter = ProjectSettingsConverter(gm_path, gm_platform_settings_path, godot_path, self.threadsafe_log)
 
         converters = [
-            ("game_icon", project_settings_converter.convert_icon, "Converting game icon..."),
-            ("project_name", project_settings_converter.update_project_name, "Updating project name..."),
-            ("project_settings", project_settings_converter.update_project_settings, "Updating project settings..."),
-            ("audio_buses", project_settings_converter.generate_audio_bus_layout, "Generating audio bus layout..."),
-            ("sprites", lambda: SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), "Converting sprites..."),
-            ("fonts", lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), "Converting fonts..."),
-            ("tilesets", lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), "Converting tilesets..."),
-            ("sounds", lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_sounds(), "Converting sounds..."),
-            ("notes", lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), "Converting notes...")
+            ("game_icon", project_settings_converter.convert_icon, get_localized(self.language, 'Console_Convertor_Icon')),
+            ("project_name", project_settings_converter.update_project_name, get_localized(self.language, 'Console_Convertor_Name')),
+            ("project_settings", project_settings_converter.update_project_settings, get_localized(self.language, 'Console_Convertor_Settings')),
+            ("audio_buses", project_settings_converter.generate_audio_bus_layout, get_localized(self.language, 'Console_Convertor_AudioBus')),
+            ("sprites", lambda: SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized(self.language, 'Console_Convertor_Sprites')),
+            ("fonts", lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized(self.language, 'Console_Convertor_Fonts')),
+            ("tilesets", lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized(self.language, 'Console_Convertor_Tilesets')),
+            ("sounds", lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_sounds(), get_localized(self.language, 'Console_Convertor_Sounds')),
+            ("notes", lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized(self.language, 'Console_Convertor_Notes'))
         ]
 
         for setting, converter, log_message in converters:
@@ -387,8 +371,8 @@ class ConverterGUI:
 
     def conversion_complete(self):
         self.progress.update_progress(100)
-        self.status_label.config(text="Conversion complete!")
-        self.log("You have ported your project from GameMaker to Godot! Have fun!" if self.conversion_running.is_set() else "Conversion process stopped.")
+        self.status_label.config(text=get_localized(self.language, 'Console_ConversionComplete'))
+        self.log(get_localized(self.language, 'Console_ConversionComplete_B') if self.conversion_running.is_set() else get_localized(self.language, 'Console_ConversionStopped'))
         self.conversion_running.clear()
         self.convert_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
@@ -398,7 +382,7 @@ class ConverterGUI:
         webbrowser.open_new("https://github.com/Infiland/GM2Godot")
 
     def open_infiland_website(self, event):
-        webbrowser.open_new("https://infi.land")
+        webbrowser.open_new("https://infiland.github.io")
 
 def main():
     root = tk.Tk()

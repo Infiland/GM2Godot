@@ -21,7 +21,7 @@ from src.conversion.project_settings import ProjectSettingsConverter
 
 from src.version import get_version
 
-from src.gui.modern_button import ModernButton
+from src.gui.modern_widgets import ModernButton, ModernCheckbox, ModernCombobox
 from src.gui.icon import Icon
 from src.gui.setupui import SetupUI
 
@@ -280,16 +280,24 @@ class ConverterGUI:
     def open_settings(self):
         settings_window = tk.Toplevel(self.master)
         settings_window.title("Conversion Settings")
-        settings_window.geometry("460x640")
-        settings_window.configure(bg="#222222")
+        settings_window.geometry("800x500")  # Wider window for horizontal layout
+        settings_window.configure(bg="#1e1e1e")
+        settings_window.transient(self.master)  # Make it float on top of main window
+        settings_window.grab_set()  # Make it modal
 
-        main_frame= ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
-        main_frame.pack(fill=tk.BOTH, expand=True, anchor="w")
+        main_frame = ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(main_frame, text="Select files to convert:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
+        ttk.Label(main_frame, text="Select files to convert:", style="TLabel", font=("Segoe UI", 14, "bold")).pack(pady=(0, 20))
 
-        checkbox_frame = ttk.Frame(main_frame, style="TFrame")
-        checkbox_frame.pack(fill=tk.BOTH, expand=True)
+        # Create a frame for the categories
+        categories_frame = ttk.Frame(main_frame, style="TFrame")
+        categories_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Configure grid weights for equal spacing
+        categories_frame.grid_columnconfigure(0, weight=1)
+        categories_frame.grid_columnconfigure(1, weight=1)
+        categories_frame.grid_columnconfigure(2, weight=1)
 
         categories = {
             "Assets": ["sprites", "sounds", "fonts"],
@@ -297,32 +305,43 @@ class ConverterGUI:
             "WIP": ["objects", "shaders", "tilesets"]
         }
 
-        row = 0
-        for category, settings in categories.items():
-            ttk.Label(checkbox_frame, text=category, style="TLabel", font=("Helvetica", 12, "bold")).grid(row=row, column=0, sticky="w", pady=(10, 5))
-            row += 1
+        # Create frames for each category
+        for idx, (category, settings) in enumerate(categories.items()):
+            category_frame = ttk.Frame(categories_frame, style="TFrame", padding="10 0")
+            category_frame.grid(row=0, column=idx, sticky="n", padx=10)
+            
+            ttk.Label(category_frame, text=category, style="TLabel", font=("Segoe UI", 12, "bold")).pack(pady=(0, 10))
+            
             for setting in settings:
                 var = self.conversion_settings[setting]
-                ttk.Checkbutton(checkbox_frame, text=setting.replace("_", " ").title(), variable=var, style="TCheckbutton").grid(row=row, column=0, sticky="w", padx=20)
-                row += 1
+                ModernCheckbox(category_frame, text=setting.replace("_", " ").title(), variable=var).pack(pady=5, anchor="w")
 
-        ttk.Label(main_frame, text="Gamemaker platform:", style="TLabel", font=("Helvetica", 14, "bold")).pack(pady=10)
-        ttk.Label(main_frame, text="Choose which Gamemaker platform settings to convert to Godot", style="TLabel", font=("Helvetica", 10, "bold")).pack(pady=10)
+        # Platform selection section
+        platform_frame = ttk.Frame(main_frame, style="TFrame", padding="0 20")
+        platform_frame.pack(fill=tk.X)
         
-        platform_categories = ("linux",
-                               "macos",
-                               "windows")
+        platform_label_frame = ttk.Frame(platform_frame, style="TFrame")
+        platform_label_frame.pack(fill=tk.X)
         
-        combobox_frame = ttk.Frame(main_frame, style="TFrame")
-        combobox_frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(platform_label_frame, text="GameMaker Platform:", style="TLabel", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT)
+        ttk.Label(platform_label_frame, text="Choose which GameMaker platform settings to convert to Godot", 
+                 style="TLabel", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(10, 0))
         
-        self.platform_combobox = ttk.Combobox(combobox_frame, values=platform_categories, textvariable=self.gm_platform_settings, state="readonly")
-        self.platform_combobox.pack(pady=10)
+        combobox_frame = ttk.Frame(platform_frame, style="TFrame")
+        combobox_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        platform_categories = ("linux", "macos", "windows")
+        
+        self.platform_combobox = ModernCombobox(combobox_frame, 
+                                               values=platform_categories,
+                                               state="readonly")
+        self.platform_combobox.pack(fill=tk.X)
         self.platform_combobox.bind('<<ComboboxSelected>>', self.update_platform_settings)
-        self.platform_combobox.current(platform_categories.index(self.gm_platform_settings))
+        self.platform_combobox.set(self.gm_platform_settings)
 
+        # Buttons frame
         button_frame = ttk.Frame(main_frame, style="TFrame")
-        button_frame.pack()
+        button_frame.pack(pady=(20, 0))
         
         def select_all():
             for var in self.conversion_settings.values():

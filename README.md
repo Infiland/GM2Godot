@@ -2,62 +2,106 @@
 
 ![SCREENSHOT1](https://github.com/user-attachments/assets/831a2cee-22b0-4a0d-9d08-810ab725da52)
 
-GM2Godot is a tool which converts GameMaker (2024.8.1) projects to Godot (4.3) projects.
-This repository is work in progress but [feel free to help!](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md)
+GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.11) projects to Godot (4.3) projects. It features a sleek dark-themed interface and intuitive controls for a seamless conversion experience.
 
-# What it is and what it isn't
+## Features
 
-When presenting this tool, I've gotten a couple of questions what the tool really is and what it is supposed to be, so I'll break it down.
+- **Modern Dark Theme UI**: Clean, intuitive interface with modern design elements
+- **Asset Conversion**: Converts various GameMaker assets to Godot format:
+  - Sprites and Images
+  - Sound Effects and Music
+  - Fonts
+  - Project Settings
+  - Game Icons
+  - Audio Bus Layout
+  - Notes and Documentation
+- **Platform Support**: Converts settings for multiple platforms:
+  - Windows
+  - macOS
+  - Linux
+- **Real-time Progress**: Visual feedback with progress bar and time tracking
+- **Customizable Conversion**: Choose exactly which assets to convert
+
+## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
-- A tool that ports assets from GameMaker to Godot
-- Is for people who don't want to port the GameMaker project to Godot from scratch
-- Not perfect. It will make mistakes.
+- A modern asset conversion tool from GameMaker to Godot
+- A time-saver for starting Godot projects from GameMaker
+- A tool for developers who want to migrate their projects
 
 **GM2Godot isn't:**
-- For people who expect everything will work perfectly.
-- A compiler that can seamlessly transpile GML to GDScript *(yet)*
-- This isn't a tool which turns COMPILED GM projects to Godot, [use UndertaleToolMod instead](https://github.com/UnderminersTeam/UndertaleModTool)
+- A perfect 1:1 conversion tool
+- A GML to GDScript transpiler *(yet)*
+- A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
-# Contribution
-Contribution is found in [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md). But pretty much fork the repo, do pull requests and I'll try to code review them.
+## Installation
 
-# Installation
-
-Clone this repository
-```
+1. **Clone the Repository**
+```bash
 git clone https://github.com/Infiland/GM2Godot
+cd GM2Godot
 ```
-Open VSC and install Python 3.9.0 or later (I haven't tested older python versions)
-```
-py --version
-```
-[You can download python here.](https://www.python.org/downloads/)
 
-If you are Linux, **you are required to have Tkinter module**, do the following: (tested this on Ubuntu, so it probably works on debian based systems)
-```
-sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
-```
-(if tkhtmlview is a problem, please use pip install tkhtmlview --break-system-packages)
-
-The program requires the following libraries to use
-```
+2. **Install Python Requirements**
+- Requires Python 3.9.0 or later
+- Install required packages:
+```bash
 pip install Pillow markdown2 tkhtmlview
 ```
-*(If you have Pillow installed, version 8.0.0 or newer is required)*
 
-Once installed, you can run the program:
+3. **Additional Requirements**
+- For Linux users (Ubuntu/Debian):
+```bash
+sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
 ```
+Note: If tkhtmlview installation fails, try:
+```bash
+pip install tkhtmlview --break-system-packages
+```
+
+## Usage
+
+1. **Launch the Application**
+```bash
 python main.py
 ```
 
-# How to use
-The tool will open a GUI menu upon running main.py.
+2. **Configure Project Paths**
+- Set your GameMaker project directory
+- Set an empty Godot project directory
+  - **Important**: Godot directory must be empty to prevent data loss
 
-At the top, place the GameMaker directory and the Godot directory in each textbox.
-NOTE: Godot directory needs to be completely empty to avoid data loss, GameMaker should stay as is.
+3. **Configure Settings**
+- Click the "Settings" button to open the configuration window
+- Select which assets to convert:
+  - Assets (sprites, sounds, fonts)
+  - Project (icons, settings, audio)
+  - Work in Progress features
+- Choose your target GameMaker platform
 
-Once you put both directories in the tool, you can choose in settings what you want to port and press the "Convert" button.
+4. **Start Conversion**
+- Click "Convert" to begin the process
+- Monitor progress through the progress bar
+- View detailed logs in the console
+- Use the stop button if needed
 
-It will then start taking assets from GameMaker and port them into your empty Godot project.
-The tool will be done when it says so in the console and when the progress bar is at 100%.
+## Contributing
+
+We welcome contributions! Check out [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) for guidelines.
+
+To contribute:
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to your branch
+5. Create a Pull Request
+
+## License
+
+[Add your license information here]
+
+## Support
+
+- Report issues on our [GitHub Issues](https://github.com/Infiland/GM2Godot/issues) page
+- Check our [Documentation](https://github.com/Infiland/GM2Godot/wiki) for detailed guides
+- Join our community (Add community links if available)

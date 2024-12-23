@@ -162,6 +162,16 @@ class ModernCombobox(ttk.Combobox):
                  foreground=[('readonly', '#e0e0e0'), ('disabled', '#666666')],
                  arrowcolor=[('disabled', '#666666')])
         
+        # Define the layout for the combobox
+        style.layout(style_name, [
+            ('Combobox.padding', {'children': [
+                ('Combobox.background', {'children': [
+                    ('Combobox.textfield', {'side': 'left', 'sticky': 'nswe'}),
+                    ('Combobox.arrow', {'side': 'right', 'sticky': 'nswe'})
+                ], 'sticky': 'nswe'})
+            ], 'sticky': 'nswe'})
+        ])
+        
         kw['style'] = style_name
         if 'font' not in kw:
             kw['font'] = ('Segoe UI', 10)

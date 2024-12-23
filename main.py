@@ -30,9 +30,14 @@ class ConverterGUI:
         self.master = master
         self.master.title(f"GM2Godot v{get_version()}")
         self.master.geometry("800x600")
-        self.master.configure(bg="#222222")
+        self.master.configure(bg="#1e1e1e")
         self.icon = Icon(self.master)
-        self.icon = Icon(self.master)
+        
+        # Add window padding
+        self.master.grid_columnconfigure(0, weight=1, minsize=20)
+        self.master.grid_columnconfigure(2, weight=1, minsize=20)
+        self.master.grid_rowconfigure(0, weight=1, minsize=20)
+        self.master.grid_rowconfigure(2, weight=1, minsize=20)
 
         self.style = ttk.Style()
         self.style.theme_use('clam')
@@ -48,7 +53,6 @@ class ConverterGUI:
         self.timer_label = self.setup_ui.timer_label
         self.status_label = self.setup_ui.status_label
 
-
         self.convert_button = self.setup_ui.get_button("convert")
         self.stop_button = self.setup_ui.get_button("stop")
 
@@ -60,10 +64,10 @@ class ConverterGUI:
 
     def create_menu(self):
         """Create the menu bar with Help menu."""
-        menubar = tk.Menu(self.master)
+        menubar = tk.Menu(self.master, bg="#1e1e1e", fg="#e0e0e0", activebackground="#2d2d2d", activeforeground="#ffffff")
         self.master.config(menu=menubar)
 
-        help_menu = tk.Menu(menubar, tearoff=0, bg="#222222", fg="white", activebackground="#3d3d3d", activeforeground="white")
+        help_menu = tk.Menu(menubar, tearoff=0, bg="#1e1e1e", fg="#e0e0e0", activebackground="#2d2d2d", activeforeground="#ffffff")
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About GM2Godot", command=self.show_about)
         help_menu.add_separator()
@@ -76,22 +80,115 @@ class ConverterGUI:
 
     def setup_styles(self):
         styles = {
-            "TFrame": {"background": "#222222"},
-            "TLabel": {"background": "#222222", "foreground": "#ffffff", "font": ('Helvetica', 10)},
-            "TEntry": {"fieldbackground": "#3d3d3d", "foreground": "#ffffff", "insertcolor": "#ffffff", "font": ('Helvetica', 10)},
-            "Modern.TButton": {"background": "#abc9ff", "foreground": "#222222", "font": ('Helvetica', 10, 'bold'), "padding": (10, 5)},
-            "TCheckbutton": {"background": "#222222", "foreground": "#ffffff"},
-            "Console.Vertical.TScrollbar": {"background": "#3d3d3d", "troughcolor": "#222222", "arrowcolor": "#ffffff"},
-            "Red.TButton": {"background": "red", "foreground": "white"}
+            "TFrame": {
+                "background": "#1e1e1e"  # Darker background for better contrast
+            },
+            "TLabel": {
+                "background": "#1e1e1e",
+                "foreground": "#e0e0e0",  # Softer white for better readability
+                "font": ('Segoe UI', 10)  # Modern system font
+            },
+            "TEntry": {
+                "fieldbackground": "#2d2d2d",
+                "foreground": "#e0e0e0",
+                "insertcolor": "#e0e0e0",
+                "font": ('Segoe UI', 10),
+                "borderwidth": 0,
+                "relief": "flat"
+            },
+            "Modern.TButton": {
+                "background": "#0078d4",  # Modern blue
+                "foreground": "#ffffff",
+                "font": ('Segoe UI', 10, 'bold'),
+                "padding": (15, 8),
+                "borderwidth": 0,
+                "relief": "flat"
+            },
+            "Icon.TButton": {
+                "background": "#d83b01",  # Modern red for stop button
+                "foreground": "#ffffff",
+                "padding": 4,
+                "borderwidth": 0,
+                "relief": "flat",
+                "width": 3,  # Make it square
+                "anchor": "center"
+            },
+            "TCheckbutton": {
+                "background": "#1e1e1e",
+                "foreground": "#e0e0e0"
+            },
+            "Console.Vertical.TScrollbar": {
+                "background": "#2d2d2d",
+                "troughcolor": "#1e1e1e",
+                "arrowcolor": "#e0e0e0",
+                "borderwidth": 0,
+                "relief": "flat"
+            },
+            "Red.TButton": {
+                "background": "#d83b01",  # Modern red
+                "foreground": "#ffffff",
+                "borderwidth": 0,
+                "relief": "flat"
+            },
+            "TCombobox": {
+                "background": "#2d2d2d",
+                "foreground": "#e0e0e0",
+                "fieldbackground": "#2d2d2d",
+                "arrowcolor": "#e0e0e0",
+                "font": ('Segoe UI', 10),
+                "relief": "flat",
+                "borderwidth": 0
+            }
         }
+        
         for style, options in styles.items():
             self.style.configure(style, **options)
 
-        self.style.map("TEntry", fieldbackground=[('readonly', '#3d3d3d')])
-        self.style.map("Modern.TButton", background=[('active', '#9ab8ee'), ('disabled', '#666666')], foreground=[('disabled', '#aaaaaa')])
-        self.style.map("TCheckbutton", background=[('active', '#222222')])
-        self.style.map("Red.TButton", background=[('active', '#ff6666')])
-        self.style.configure("Red.TButton", background="white", foreground="white")
+        # Enhanced button states
+        self.style.map("Modern.TButton",
+            background=[('active', '#106ebe'), ('disabled', '#333333')],
+            foreground=[('disabled', '#666666')]
+        )
+        
+        # Icon button states
+        self.style.map("Icon.TButton",
+            background=[('active', '#a62d00'), ('disabled', '#333333')],
+            foreground=[('disabled', '#666666')]
+        )
+        
+        self.style.map("TEntry",
+            fieldbackground=[('readonly', '#2d2d2d')],
+            relief=[('focus', 'flat')]
+        )
+        
+        self.style.map("TCheckbutton",
+            background=[('active', '#1e1e1e')]
+        )
+        
+        self.style.map("Red.TButton",
+            background=[('active', '#a62d00')],
+            foreground=[('disabled', '#666666')]
+        )
+        
+        # Enhanced Combobox states
+        self.style.map("TCombobox",
+            fieldbackground=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
+            selectbackground=[('readonly', '#0078d4')],
+            selectforeground=[('readonly', '#ffffff')],
+            background=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
+            foreground=[('readonly', '#e0e0e0'), ('disabled', '#666666')],
+            arrowcolor=[('disabled', '#666666')]
+        )
+
+        # Configure master window
+        self.master.configure(bg="#1e1e1e")
+        self.master.option_add('*TCombobox*Listbox.background', '#2d2d2d')
+        self.master.option_add('*TCombobox*Listbox.foreground', '#e0e0e0')
+        self.master.option_add('*TCombobox*Listbox.selectBackground', '#0078d4')
+        self.master.option_add('*TCombobox*Listbox.selectForeground', '#ffffff')
+        self.master.option_add('*TCombobox*Listbox.font', ('Segoe UI', 10))
+        self.master.option_add('*TCombobox*Listbox.relief', 'flat')
+        self.master.option_add('*TCombobox*Listbox.borderwidth', '0')
 
     def show_release_notes(self, event):
         release_notes = self.fetch_release_notes()

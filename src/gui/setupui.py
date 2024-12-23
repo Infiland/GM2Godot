@@ -20,7 +20,7 @@ class SetupUI:
         self.status_label = None
 
     def setup_ui(self):
-        main_frame = ttk.Frame(self.master, padding="20 20 20 20", style="TFrame")
+        main_frame = ttk.Frame(self.master, padding="40 40 40 40", style="TFrame")
         main_frame.grid(column=0, row=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.master.columnconfigure(0, weight=1)
         self.master.rowconfigure(0, weight=1)
@@ -32,68 +32,109 @@ class SetupUI:
         self.create_info_labels(main_frame)
 
     def create_project_path_inputs(self, parent):
-        paths = [("GameMaker", self.app.browse_gm, self.icon.get_gamemaker_icon()), ("Godot", self.app.browse_godot, self.icon.get_godot_icon())]
+        paths = [("GameMaker", self.app.browse_gm, self.icon.get_gamemaker_icon()), 
+                ("Godot", self.app.browse_godot, self.icon.get_godot_icon())]
+                
         for idx, (label, command, icon) in enumerate(paths):
             frame = ttk.Frame(parent, style="TFrame")
-            frame.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=5)
+            frame.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=(0, 20))
             
-            ttk.Label(frame, text=label[:2] if icon is None else "", image=icon, style="TLabel").pack(side=tk.LEFT, padx=(0, 5))
-            ttk.Label(frame, text=f"{label} Project Path:", style="TLabel").pack(side=tk.LEFT)
+            icon_label = ttk.Label(frame, text=label[:2] if icon is None else "", image=icon, style="TLabel")
+            icon_label.pack(side=tk.LEFT, padx=(0, 10))
+            
+            path_label = ttk.Label(frame, text=f"{label} Project Path:", style="TLabel")
+            path_label.pack(side=tk.LEFT)
             
             entry = ttk.Entry(parent, width=50, style="TEntry")
-            entry.grid(row=idx, column=1, padx=5, pady=5, sticky=(tk.W, tk.E))
-            ModernButton(parent, text=f"Browse {label} Path", command=command).grid(row=idx, column=2, padx=5, pady=5)
+            entry.grid(row=idx, column=1, padx=10, pady=(0, 20), sticky=(tk.W, tk.E))
+            
+            browse_button = ModernButton(parent, text=f"Browse {label}", command=command)
+            browse_button.grid(row=idx, column=2, padx=5, pady=(0, 20))
+            
             self.entries[label.lower()] = entry
+            
         parent.columnconfigure(1, weight=1)
 
     def create_buttons(self, parent):
         button_frame = ttk.Frame(parent, style="TFrame")
-        button_frame.grid(row=2, column=0, columnspan=3, pady=10)
+        button_frame.grid(row=2, column=0, columnspan=3, pady=(0, 30))
 
-        buttons = [
-            ("Convert", self.app.start_conversion, tk.NORMAL),
-            ("Stop", self.app.stop_conversion, tk.DISABLED),
-            ("Settings", self.app.open_settings, tk.NORMAL)
-        ]
+        # Create convert and settings buttons
+        convert_button = ModernButton(button_frame, text="Convert", command=self.app.start_conversion)
+        convert_button.grid(row=0, column=0, padx=10)
+        self.buttons["convert"] = convert_button
 
-        for idx, (text, command, state) in enumerate(buttons):
-            button = ModernButton(button_frame, text=text, command=command, state=state)
-            button.grid(row=0, column=idx, padx=5, pady=10)
-            self.buttons[text.lower()] = button
+        # Create stop button with icon
+        stop_button = ModernButton(button_frame, command=self.app.stop_conversion, state=tk.DISABLED, icon_only=True)
+        stop_icon = ModernButton.create_stop_icon(button_frame, size=24)
+        stop_button.configure(image=stop_icon)
+        stop_button._icon = stop_icon  # Keep a reference to prevent garbage collection
+        stop_button.grid(row=0, column=1, padx=10)
+        self.buttons["stop"] = stop_button
 
-        self.buttons["stop"].configure(style="Red.TButton")
+        settings_button = ModernButton(button_frame, text="Settings", command=self.app.open_settings)
+        settings_button.grid(row=0, column=2, padx=10)
+        self.buttons["settings"] = settings_button
 
     def get_button(self, button_name):
         return self.buttons.get(button_name.lower())
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")
-        console_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        console_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 20))
         parent.rowconfigure(3, weight=1)
 
-        self.console = tk.Text(console_frame, wrap=tk.WORD, height=15, bg="#3d3d3d", fg="#ffffff", insertbackground="#ffffff", font=('Consolas', 10), state='disabled')
+        self.console = tk.Text(console_frame, 
+                             wrap=tk.WORD, 
+                             height=15, 
+                             bg="#2d2d2d", 
+                             fg="#e0e0e0", 
+                             insertbackground="#e0e0e0", 
+                             font=('Cascadia Code', 10), 
+                             state='disabled',
+                             padx=10,
+                             pady=10,
+                             relief="flat",
+                             borderwidth=0)
         self.console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(console_frame, orient="vertical", command=self.console.yview, style="Console.Vertical.TScrollbar")
+        scrollbar = ttk.Scrollbar(console_frame, 
+                                orient="vertical", 
+                                command=self.console.yview, 
+                                style="Console.Vertical.TScrollbar")
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.console.configure(yscrollcommand=scrollbar.set)
 
     def create_progress_bar(self, parent):
         progress_frame = ttk.Frame(parent, style="TFrame")
-        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        progress_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
 
-        self.progress = ModernProgressBar(progress_frame, width=500, height=30, bg_color="#3d3d3d", fill_color="#42ffc2", text_color="#ffffff")
-        self.progress.pack(side=tk.LEFT, expand=True)
+        self.progress = ModernProgressBar(progress_frame, 
+                                        width=500, 
+                                        height=30, 
+                                        bg_color="#2d2d2d", 
+                                        fill_color="#0078d4", 
+                                        text_color="#ffffff")
+        self.progress.pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-        self.timer_label = ttk.Label(parent, text="Time: 00:00:00", style="TLabel")
-        self.timer_label.grid(row=5, column=0, columnspan=3, pady=(0, 10))
+        status_frame = ttk.Frame(parent, style="TFrame")
+        status_frame.grid(row=5, column=0, columnspan=3, pady=(0, 20))
+        
+        self.timer_label = ttk.Label(status_frame, 
+                                   text="Time: 00:00:00", 
+                                   style="TLabel",
+                                   font=('Segoe UI', 10))
+        self.timer_label.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.status_label = ttk.Label(parent, text="", foreground="#ffffff", style="TLabel")
-        self.status_label.grid(row=5, column=0, columnspan=3, pady=(0, 10), padx=(0, 400))
+        self.status_label = ttk.Label(status_frame, 
+                                    text="", 
+                                    style="TLabel",
+                                    font=('Segoe UI', 10))
+        self.status_label.pack(side=tk.LEFT)
 
     def create_info_labels(self, parent):
         info_frame = ttk.Frame(parent, style="TFrame")
-        info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        info_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 0))
 
         labels = [
             (f"Version {get_version()}", self.app.show_release_notes, tk.LEFT),
@@ -102,6 +143,12 @@ class SetupUI:
         ]
 
         for text, command, side in labels:
-            label = ttk.Label(info_frame, text=text, style="TLabel", cursor="hand2")
+            label = ttk.Label(info_frame, 
+                            text=text, 
+                            style="TLabel", 
+                            cursor="hand2",
+                            font=('Segoe UI', 9))
             label.pack(side=side, padx=10)
             label.bind("<Button-1>", command)
+            label.bind('<Enter>', lambda e, label=label: label.configure(foreground="#0078d4"))
+            label.bind('<Leave>', lambda e, label=label: label.configure(foreground="#e0e0e0"))

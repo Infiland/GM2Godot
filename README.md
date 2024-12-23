@@ -34,6 +34,9 @@ GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.11)
 - A GML to GDScript transpiler *(yet)*
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
+## Releases
+Downloadable releases can be found on the side of this page, for now executables are only available on windows but we will work on other platforms too
+
 ## Installation
 
 1. **Clone the Repository**
@@ -95,10 +98,6 @@ To contribute:
 3. Commit your changes
 4. Push to your branch
 5. Create a Pull Request
-
-## License
-
-[Add your license information here]
 
 ## Support
 

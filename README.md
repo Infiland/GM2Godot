@@ -1,6 +1,6 @@
 # GM2Godot
 
-![SCREENSHOT1](https://github.com/user-attachments/assets/831a2cee-22b0-4a0d-9d08-810ab725da52)
+![GM2Godot 0 0 12](https://github.com/user-attachments/assets/b19edd23-f91e-48b7-a2c3-7e5654a8e9b8)
 
 GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.11) projects to Godot (4.3) projects. It features a sleek dark-themed interface and intuitive controls for a seamless conversion experience.
 
@@ -35,7 +35,7 @@ GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.11)
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Releases
-Downloadable releases can be found on the side of this page, for now executables are only available on windows but we will work on other platforms too
+Downloadable releases can be found on the side of this page, for now executables are only available on Windows but we will work on other platforms too
 
 ## Installation
 

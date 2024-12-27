@@ -39,27 +39,41 @@ Downloadable releases can be found on the side of this page, for now executables
 
 ## Installation
 
+### Prerequisites
+- Python 3.10 or later (required for match statement support)
+- Tkinter support for your Python installation (see platform-specific instructions below)
+
+### Step-by-step Installation
+
 1. **Clone the Repository**
 ```bash
 git clone https://github.com/Infiland/GM2Godot
 cd GM2Godot
 ```
 
-2. **Install Python Requirements**
-- Requires Python 3.9.0 or later
-- Install required packages:
+2. **Set Up Python Environment**
 ```bash
-pip install Pillow markdown2 tkhtmlview
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# On Unix/macOS:
+source venv/bin/activate
+# On Windows:
+venv\Scripts\activate
+
+# Install all required dependencies
+pip install -r requirements.txt
 ```
 
-3. **Additional Requirements**
-- For Linux users (Ubuntu/Debian):
+3. **Platform-Specific Setup**
+- Linux (Ubuntu/Debian):
 ```bash
-sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
+sudo apt-get install python3-tk
 ```
-Note: If tkhtmlview installation fails, try:
+- macOS (using Homebrew):
 ```bash
-pip install tkhtmlview --break-system-packages
+brew install python-tk@3.11  # Replace 3.11 with your Python version
 ```
 
 ## Usage

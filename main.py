@@ -12,6 +12,7 @@ from tkhtmlview import HTMLLabel
 
 #TODO: REPLACE THIS WITH from src.conversion.converter import Converter
 from src.gui.about import AboutDialog
+from src.gui.mac_file_dialog import MacFileDialog
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -25,7 +26,7 @@ from src.gui.modern_widgets import ModernButton, ModernCheckbox, ModernCombobox
 from src.gui.icon import Icon
 from src.gui.setupui import SetupUI
 
-class ConverterGUI:
+class ConverterGUI(MacFileDialog):
     def __init__(self, master):
         self.master = master
         self.master.title(f"GM2Godot v{get_version()}")
@@ -363,19 +364,6 @@ class ConverterGUI:
             self.console.configure(state='disabled')
         else:
             print(f"Console not initialized. Message: {message}")
-
-    def browse_project(self, entry, file_check, dialog_title):
-        folder = filedialog.askdirectory(title=dialog_title)
-        if folder:
-            entry.delete(0, tk.END)
-            entry.insert(0, folder)
-            file_check(folder)
-
-    def browse_gm(self):
-        self.browse_project(self.setup_ui.entries['gamemaker'], self.check_gm_project, "Select your GameMaker Project")
-
-    def browse_godot(self):
-        self.browse_project(self.setup_ui.entries['godot'], self.check_godot_project, "Select your new Godot project")
 
     def check_project_file(self, folder, file_extension, file_name):
         files = [f for f in os.listdir(folder) if f.endswith(file_extension)]

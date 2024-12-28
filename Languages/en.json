@@ -1,0 +1,131 @@
+{
+"README" : [
+">> This file contains all scripting and dialogue for GM2Godot, including the main executable in internal modules.",
+">> When translating into other languages, DO NOT change the name of any of the keys, only the string they're associated with.",
+">> Additionally, DO NOT modify any strings surrounded by {brackets}. These are used to the program to format non-string objects (such as varaiables) into a string.",
+">> Changing either of these will cause a crash.",
+
+"Language and Language_Code are read by GM2Godot to list the file as a language option.",
+"README, Language, Author, Version, are not used by GM2Godot, they are simply a means of documentation and attribution."
+],
+
+"Language" : "English",
+"Language_Code" : "en",
+"Author" : "written by Infiland, structured by HalfofBilly",
+"Version" : "1.0.0",
+
+"About_Title" : "About GM2Godot",
+"About_Description" : "GM2Godot is a tool designed to help developers migrate their GameMaker projects to the Godot Engine.\nIt automates the conversion of various project assets and settings, making the transition smoother.",
+"About_Repository" : "GitHub Repository",
+"About_Issues" : "Report an Issue",
+"About_Website" : "Infiland Website",
+"About_Contributors_Heading" : "Contributors",
+"About_Error_Contributors_NotFound" : "Failed to load contributors: {error}",
+"About_Copyright" : "© {current_year} Infiland. All rights reserved.",
+
+"Console_ProjectFound" : "{file_name} project file found: {files}",
+"Console_Error_NotInitialized" : "Console not initialized. Message: {message}",
+"Console_Error_InvalidProject" : ["Invalid {file_name} Project", "No {file_extension} file found in the selected {file_name} project folder."],
+"Console_Error_MultipleGenericFiles" : ["Multiple {file_extension} Files", "Multiple {file_extension} files found: {files}. Please ensure only one {file_extension} file is present."],
+"Console_Error_MissingDirectories" : "Please select both GameMaker and Godot project paths.",
+"Console_Error_MissingGamemakerFile" : "Error: No .yyp file found in the GameMaker project folder.",
+"Console_Error_MultipleGamemakerFiles" : "Warning: Multiple .yyp files found: {yyp_files}. Using the first one.",
+"Console_Error_MissingGodotFile" : "Error: No project.godot file found in the Godot project folder.",
+"Console_ConversionStart" : "Starting conversion...",
+"Console_ConversionStopping" : "Stopping conversion process...",
+"Console_ConversionStopped" : "Conversion process stopped.",
+"Console_ConversionComplete" : "Conversion complete!",
+"Console_ConversionComplete_B" : "You have ported your project from GameMaker to Godot! Have fun!",
+"Console_Convertor_Icon" : "Converting game icon...",
+"Console_Convertor_Name" : "Updating project name...",
+
+"Console_Convertor_Icon_Error_DirectoryNotFound" : "Icon directory not found: {gm_icon_path}",
+"Console_Convertor_Icon_Error_FileNotFound" : "No icon file found in the GameMaker project's icon directory.",
+"Console_Convertor_Icon_Copied" : "Copied icon: {icon_files} -> icon.ico",
+"Console_Convertor_Icon_Converted" : "Converted icon: {icon_files} -> icon.png",
+"Console_Convertor_Error_IconGeneric" : "Error processing icon: {error}",
+
+"Console_Convertor_Settings" : "Updating project settings...",
+"Console_Convertor_Settings_Error_yypNotFound" : "No .yyp file found in the GameMaker project folder.",
+"Console_Convertor_Settings_Error_GM_FileNotFound" : "{file_path} file not found.",
+"Console_Convertor_Settings_Error_yypNameNotRead" : "Error reading project name from .yyp file: {error}",
+"Console_Convertor_Settings_Error_yypGeneric" : "Error reading {option_name} from {os.path.basename(file_path)}: {error}",
+"Console_Convertor_Settings_Error_GD_NotFound" : "project.godot file not found in the Godot project directory.",
+"Console_Convertor_Settings_UpdatedName" : "Updated project name to: {gm_project_name}",
+"Console_Convertor_Settings_Error_Name_GM" : "Could not update project name: GameMaker project name not found.",
+"Console_Convertor_Settings_Error_NameGeneric" : "Error updating project name: {error)}.",
+"Console_Convertor_Settings_Updated" : "Updated project.godot with GameMaker settings",
+"Console_Convertor_Settings_Error_NotUpdated" : "Error updating project settings: {error}",
+
+"Console_Convertor_AudioBus" : "Generating audio bus layout...",
+"Console_Convertor_AudioBus_Error_SectionNotFound_GM" : "AudioGroups section not found in the .yyp file.",
+"Console_Convertor_AudioBus_Error_NameNotFound_GM" : "No AudioGroup names found in the .yyp file.",
+"Console_Convertor_AudioBus_Error_Group_Generic" : "Error reading AudioGroups from .yyp file: {error}",
+"Console_Convertor_AudioBus_Group_Found" : "Found AudioGroups: {audio_group_names}",
+"Console_Convertor_AudioBus_Group_Generated" : "Generated default_bus_layout.tres with {audio_groups_num} audio buses.",
+"Console_Convertor_AudioBus_Error_GroupNotGenerated" : "Error generating default_bus_layout.tres: {error}",
+
+"Console_Convertor_Sprites" : "Converting sprites...",
+"Console_Convertor_Sprites_Complete" : "Sprite conversion completed.",
+"Console_Convertor_Sprites_Stopped" : "Sprite conversion stopped.",
+"Console_Convertor_Sprites_Converted" : "Converted: {relative_path} -> sprites/{sprite_name}/{new_filename}",
+"Console_Convertor_Sprites_Error_NotFound" : "No sprite images found in the GameMaker project.",
+
+"Console_Convertor_Fonts" : "Converting fonts...",
+"Console_Convertor_Fonts_Complete" : "Font conversion completed.",
+"Console_Convertor_Fonts_Error_NotFound" : "Font folder not found in {gm_project_path}",
+
+"Console_Convertor_Tilesets" : "Converting tilesets...",
+"Console_Convertor_Tilesets_Complete" : "Tileset conversion completed.",
+"Console_Convertor_Tilesets_Error_NotFound" : "Tileset folder not found in {self.gm_project_path}",
+
+"Console_Convertor_Sounds" : "Converting sounds...",
+"Console_Convertor_Sounds_Converted" : "Converted: {path} -> sounds/{path}",
+"Console_Convertor_Sounds_Error_NotFound" : "No sound files found in the GameMaker project.",
+"Console_Convertor_Sounds_Complete" : "Sound conversion completed.",
+"Console_Convertor_Sounds_Stopped" : "Sound conversion stopped.",
+
+"Console_Convertor_Shaders_Converted" : "Converted {filename} to {output_path}",
+
+"Console_Convertor_Notes" : "Converting notes...",
+"Console_Convertor_Notes_Copied" : "Copied note: {note_name}",
+"Console_Convertor_Notes_Stopped" : "Note conversion stopped.",
+"Console_Convertor_Notes_Error_NotFound" : "No notes folder found in GameMaker project.",
+
+"Icon_Error_Photoimage" : "Failed to set icon using PhotoImage: {error}",
+"Icon_Error_Linux" : "Failed to set icon on Linux: {error}",
+"Icon_Error_Path" : "Failed to load icon from {icon_path}. The icon will not be displayed.",
+"Icon_Error" : "Failed to load icon from {full_path}: {error}",
+
+"Menu_Title" : "GM2Godot v{version}",
+"Menu_UI_Button_Convert" : "Convert",
+"Menu_UI_Button_Stop" : "stop",
+"Menu_UI_Button_Settings" : "Settings",
+"Menu_GameMaker" : "GameMaker",
+"Menu_Godot" : "Godot",
+"Menu_UI_Directory_Heading" : "{Game_Engine} Project Path:",
+"Menu_UI_Directory_Button" : "Browse {Game_Engine} Path:",
+"Menu_UI_Time_Heading" : "Time:",
+
+"Prompt_Path_GameMaker" : "Select your GameMaker Project",
+"Prompt_Path_Godot" : "Select your GameMaker Project",
+
+"ReleaseNotes_Title" : "Release Notes",
+"ReleaseNotes_Error_NoInternet" : ["Error", "Unable to fetch release notes. Please check your internet connection and try again."],
+"ReleaseNotes_Error_Generic" : "Error fetching release notes: {error}",
+
+"Settings_Title" : "Conversion Settings",
+"Settings_Files_Heading" : "Select files to convert:",
+"Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
+
+"Settings_Button_SelectAll" : "Select All",
+"Settings_Button_DeselectAll" : "Deselect All",
+"Settings_Button_Save" : "Save",
+"Settings_Platform_Heading" : "Gamemaker platform:",
+"Settings_Platform_Subheading" : "Choose which Gamemaker platform settings to convert to Godot",
+
+"UI_Label_Version" : "Version {version}",
+"UI_Label_Contribute" : "Contribute",
+"UI_Label_MadeBy" : "Made by Infiland"
+}

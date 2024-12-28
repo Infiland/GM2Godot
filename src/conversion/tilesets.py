@@ -1,9 +1,14 @@
 import os
 
+# Import localization manager
+from src.localization import get_localized, get_current_language
+
 # WORK IN PROGRESS
 
-class TileSetConverter:
+class TileSetConverter:    
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
+        self.language = get_current_language()
+        
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'tilesets')
@@ -20,10 +25,10 @@ class TileSetConverter:
         gm_sprites_path = os.path.join(self.gm_project_path, 'tilesets')
 
         if not os.path.exists(gm_sprites_path):
-            self.log_callback(f"Tileset folder not found in {self.gm_project_path}")
+            self.log_callback(get_localized(self.language, 'Console_Convertor_Tilesets_Error_NotFound').format(project_path=self.gm_project_path))
             return
 
-        self.log_callback("Tileset conversion completed.")
+        self.log_callback(get_localized(self.language, 'Console_Convertor_Tilesets_Complete'))
 
     def convert_all(self):
         self.convert_tilesets()

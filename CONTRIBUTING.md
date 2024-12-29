@@ -96,6 +96,11 @@ We particularly welcome contributions in these areas:
 - Bug fixes
 - Performance optimizations
 
+## Localization
+
+To localize GM2Godot into other languages, create a copy of the Template.json file found in the Languages folder in GM2Godot's root directory. Rename the file to the chosen language's ISO-639 (Set 1) code (for example, en for English). Refer to https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes for a list of languages and their corresponding ISO-639 codes.
+More information regarding localization can be found in the README section of the Template.json file.
+
 ## Questions or Issues?
 
 - Check existing [issues](https://github.com/Infiland/GM2Godot/issues)

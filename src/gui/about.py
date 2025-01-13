@@ -8,14 +8,12 @@ from datetime import datetime
 from src.version import get_version
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class AboutDialog:
     def __init__(self, parent):
-        self.language = get_current_language()
-        
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title(get_localized(self.language, "About_Title"))
+        self.dialog.title(get_localized("About_Title"))
         self.dialog.geometry("600x700")
         self.dialog.configure(bg="#222222")
         self.dialog.transient(parent)
@@ -54,11 +52,11 @@ class AboutDialog:
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         ttk.Label(main_frame, 
-                 text=get_localized(self.language, "Menu_Title").format(version=get_version()),
+                 text=get_localized("Menu_Title").format(version=get_version()),
                  style="AboutTitle.TLabel").pack(pady=(0, 10))
         
         description = (
-            get_localized(self.language, 'About_Description')
+            get_localized("About_Description")
         )
         ttk.Label(main_frame, 
                  text=description, 
@@ -66,7 +64,7 @@ class AboutDialog:
                  wraplength=500).pack(pady=(0, 20))
         
         ttk.Label(main_frame, 
-                 text=get_localized(self.language, "About_Contributors_Heading"), 
+                 text=get_localized("About_Contributors_Heading"), 
                  style="AboutSection.TLabel").pack(pady=(0, 10))
         
         self.create_contributors_list(main_frame)
@@ -110,9 +108,9 @@ class AboutDialog:
         links_frame.pack(pady=20)
         
         links = [
-            (get_localized(self.language, 'About_Repository'), "https://github.com/Infiland/GM2Godot"),
-            (get_localized(self.language, 'About_Issues'), "https://github.com/Infiland/GM2Godot/issues"),
-            (get_localized(self.language, 'About_Website'), "https://infi.land")
+            (get_localized("About_Repository"), "https://github.com/Infiland/GM2Godot"),
+            (get_localized("About_Issues"), "https://github.com/Infiland/GM2Godot/issues"),
+            (get_localized("About_Website"), "https://infi.land")
         ]
         
         for text, url in links:
@@ -126,7 +124,7 @@ class AboutDialog:
     def create_copyright_label(self, parent):
         """Create copyright label with current year."""
         current_year = datetime.now().year
-        copyright_text = get_localized(self.language, 'About_Copyright').format(current_year=current_year)
+        copyright_text = get_localized('About_Copyright').format(current_year=current_year)
         ttk.Label(parent, 
                  text=copyright_text,
                  style="About.TLabel").pack(pady=(20, 0))
@@ -146,7 +144,7 @@ class AboutDialog:
                 
         except Exception as e:
             ttk.Label(parent_frame,
-                     text=get_localized(self.language, 'About_Error_Contributors_NotFound').format(error=str(e)),
+                     text=get_localized("About_Error_Contributors_NotFound").format(error=str(e)),
                      style="About.TLabel").pack(pady=5)
                      
     def create_contributor_widget(self, parent_frame, contributor):

@@ -3,12 +3,10 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class SoundConverter:   
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        self.language = get_current_language()
-        
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
@@ -38,7 +36,7 @@ class SoundConverter:
         godot_sound_path = os.path.join(self.godot_sounds_path, rel_path)
         shutil.copy2(gm_sound_path, godot_sound_path)
 
-        self.log_callback(get_localized(self.language, 'Console_Convertor_Sounds_Converted').format(path=rel_path))
+        self.log_callback(get_localized("Console_Convertor_Sounds_Converted").format(path=rel_path))
         return True
 
     def convert_sounds(self):
@@ -46,7 +44,7 @@ class SoundConverter:
         sound_files = self.find_sound_files()
 
         if not sound_files:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Sounds_Error_NotFound'))
+            self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
             return
 
         total_sounds = len(sound_files)
@@ -60,6 +58,6 @@ class SoundConverter:
                     if self.progress_callback:
                         self.progress_callback(int(processed_sounds / total_sounds * 100))
                 else:
-                    self.log_callback(get_localized(self.language, 'Console_Convertor_Sounds_Stopped'))
+                    self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
                     return
-        self.log_callback(get_localized(self.language, 'Console_Convertor_Sounds_Complete'))
+        self.log_callback(get_localized("Console_Convertor_Sounds_Complete"))

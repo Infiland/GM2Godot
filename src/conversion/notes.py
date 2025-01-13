@@ -2,12 +2,10 @@ import os
 import shutil
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class NoteConverter:    
     def __init__(self, gm_path, godot_path, log_function, update_progress, check_running):
-        self.language = get_current_language()
-        
         self.gm_path = gm_path
         self.godot_path = godot_path
         self.log = log_function
@@ -19,7 +17,7 @@ class NoteConverter:
         godot_notes_path = os.path.join(self.godot_path, "notes")
 
         if not os.path.exists(gm_notes_path):
-            self.log(get_localized(self.language, 'Console_Convertor_Notes_Error_NotFound'))
+            self.log(get_localized("Console_Convertor_Notes_Error_NotFound"))
             return
 
         if not os.path.exists(godot_notes_path):
@@ -30,7 +28,7 @@ class NoteConverter:
 
         for root, dirs, files in os.walk(gm_notes_path):
             if not self.check_running():
-                self.log(self.log(get_localized(self.language, 'Console_Convertor_Notes_Stopped')))
+                self.log(self.log(get_localized("Console_Convertor_Notes_Stopped")))
                 return
 
             for file in files:
@@ -47,7 +45,7 @@ class NoteConverter:
                     
                     shutil.copy2(src_file, dst_file)
                     
-                    self.log(get_localized(self.language, 'Console_Convertor_Notes_Copied').format(note_name=note_name))
+                    self.log(get_localized("Console_Convertor_Notes_Copied").format(note_name=note_name))
                     
                     processed_notes += 1
                     progress = int((processed_notes / total_notes) * 100)

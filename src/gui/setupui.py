@@ -8,12 +8,10 @@ from src.gui.icon import Icon
 from src.version import get_version
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class SetupUI:
     def __init__(self, master, app):
-        self.language = get_current_language()
-        
         self.master = master
         self.app = app
         self.icon = Icon(self.master)
@@ -47,23 +45,24 @@ class SetupUI:
         self.master.minsize(600, 400)
 
     def create_project_path_inputs(self, parent):
-        paths = [(get_localized(self.language, "Menu_GameMaker"), self.app.browse_gm, self.icon.get_gamemaker_icon()),
-                (get_localized(self.language, "Menu_Godot"), self.app.browse_godot, self.icon.get_godot_icon())]
+        paths = [("GameMaker", self.app.browse_gm, self.icon.get_gamemaker_icon()),
+                ("Godot", self.app.browse_godot, self.icon.get_godot_icon())]
        
         for idx, (label, command, icon) in enumerate(paths):
+            Game_Engine = get_localized(f"Menu_{label}")
             frame = ttk.Frame(parent, style="TFrame")
             frame.grid(row=idx, column=0, columnspan=3, sticky="ew", pady=(0, 20))
             
             icon_label = ttk.Label(frame, text=label[:2] if icon is None else "", image=icon, style="TLabel")
             icon_label.pack(side=tk.LEFT, padx=(0, 10))
 
-            path_label = ttk.Label(frame, text=get_localized(self.language, "Menu_UI_Directory_Heading").format(Game_Engine = label), style="TLabel")
+            path_label = ttk.Label(frame, text=get_localized("Menu_UI_Directory_Heading").format(Game_Engine = Game_Engine), style="TLabel")
             path_label.pack(side=tk.LEFT)
             
             entry = ttk.Entry(frame, style="TEntry")
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
             
-            browse_button = ModernButton(frame, text=get_localized(self.language, "Menu_UI_Directory_Button").format(Game_Engine = label), command=command)
+            browse_button = ModernButton(frame, text=get_localized("Menu_UI_Directory_Button").format(Game_Engine = Game_Engine), command=command)
             browse_button.pack(side=tk.LEFT)
             
             self.entries[label.lower()] = entry
@@ -79,9 +78,9 @@ class SetupUI:
         inner_button_frame.grid(row=0, column=1)
 
         # Create convert and settings buttons
-        convert_button = ModernButton(inner_button_frame, text=get_localized(self.language, 'Menu_UI_Button_Convert'), command=self.app.start_conversion)
+        convert_button = ModernButton(inner_button_frame, text=get_localized("Menu_UI_Button_Convert"), command=self.app.start_conversion)
         convert_button.grid(row=0, column=0, padx=10)
-        self.buttons[get_localized(self.language, 'Menu_UI_Button_Convert')] = convert_button
+        self.buttons[get_localized("Menu_UI_Button_Convert")] = convert_button
 
         # Create stop button with icon
         stop_button = ModernButton(inner_button_frame, command=self.app.stop_conversion, state=tk.DISABLED, icon_only=True)
@@ -89,14 +88,14 @@ class SetupUI:
         stop_button.configure(image=stop_icon)
         stop_button._icon = stop_icon  # Keep a reference to prevent garbage collection
         stop_button.grid(row=0, column=1, padx=10)
-        self.buttons[get_localized(self.language, 'Menu_UI_Button_Stop')] = stop_button
+        self.buttons[get_localized("Menu_UI_Button_Stop")] = stop_button
 
-        settings_button = ModernButton(inner_button_frame, text=get_localized(self.language, 'Menu_UI_Button_Settings'), command=self.app.open_settings)
+        settings_button = ModernButton(inner_button_frame, text=get_localized("Menu_UI_Button_Settings"), command=self.app.open_settings)
         settings_button.grid(row=0, column=2, padx=10)
-        self.buttons[get_localized(self.language, 'Menu_UI_Button_Settings')] = settings_button
+        self.buttons[get_localized("Menu_UI_Button_Settings")] = settings_button
 
     def get_button(self, button_name):
-        return self.buttons.get(button_name.lower())
+        return self.buttons.get(button_name)#.lower())
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")
@@ -142,7 +141,7 @@ class SetupUI:
         status_frame.grid_columnconfigure(1, weight=1)
         
         self.timer_label = ttk.Label(status_frame, 
-                                   text=f"{get_localized(self.language, 'Menu_UI_Time_Heading')} 00:00:00", 
+                                   text=f"{get_localized('Menu_UI_Time_Heading')} 00:00:00", 
                                    style="TLabel",
                                    font=('Segoe UI', 10))
         self.timer_label.grid(row=0, column=0, padx=(0, 20))
@@ -159,7 +158,7 @@ class SetupUI:
         info_frame.grid_columnconfigure(1, weight=1)
 
         version_label = ttk.Label(info_frame, 
-                                text=get_localized(self.language, "UI_Label_Version").format(version=get_version()), 
+                                text=get_localized("UI_Label_Version").format(version=get_version()), 
                                 style="TLabel", 
                                 cursor="hand2",
                                 font=('Segoe UI', 9))
@@ -169,7 +168,7 @@ class SetupUI:
         version_label.bind('<Leave>', lambda e: version_label.configure(foreground="#e0e0e0"))
 
         contribute_label = ttk.Label(info_frame, 
-                                   text=get_localized(self.language, "UI_Label_Contribute"), 
+                                   text=get_localized("UI_Label_Contribute"), 
                                    style="TLabel", 
                                    cursor="hand2",
                                    font=('Segoe UI', 9))
@@ -179,7 +178,7 @@ class SetupUI:
         contribute_label.bind('<Leave>', lambda e: contribute_label.configure(foreground="#e0e0e0"))
 
         made_by_label = ttk.Label(info_frame, 
-                                text=get_localized(self.language, "UI_Label_MadeBy"), 
+                                text=get_localized("UI_Label_MadeBy"), 
                                 style="TLabel", 
                                 cursor="hand2",
                                 font=('Segoe UI', 9))

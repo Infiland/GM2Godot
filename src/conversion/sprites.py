@@ -3,12 +3,10 @@ from PIL import Image
 from collections import defaultdict
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class SpriteConverter:    
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        self.language = get_current_language()
-        
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
@@ -34,7 +32,7 @@ class SpriteConverter:
 
         sprite_images = self.find_sprite_images()
         if not sprite_images:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Sprites_Error_NotFound'))
+            self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
             return
 
         total_images = sum(len(images) for images in sprite_images.values())
@@ -42,7 +40,7 @@ class SpriteConverter:
 
         for sprite_name, images in sprite_images.items():
             if not self.conversion_running():
-                self.log_callback(get_localized(self.language, 'Console_Convertor_Sprites_Stopped'))
+                self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
                 return
 
             godot_sprite_folder = os.path.join(self.godot_sprites_path, sprite_name)
@@ -55,13 +53,13 @@ class SpriteConverter:
                 with Image.open(gm_sprite_path) as img:
                     img.save(godot_sprite_path, 'PNG')
 
-                self.log_callback(get_localized(self.language, 'Console_Convertor_Sprites_Converted').format(relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path), sprite_name=sprite_name, new_filename=new_filename))
+                self.log_callback(get_localized("Console_Convertor_Sprites_Converted").format(relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path), sprite_name=sprite_name, new_filename=new_filename))
 
                 processed_images += 1
                 if self.progress_callback:
                     self.progress_callback(int(processed_images / total_images * 100))
 
-        self.log_callback(get_localized(self.language, 'Console_Convertor_Sprites_Complete'))
+        self.log_callback(get_localized("Console_Convertor_Sprites_Complete"))
 
     def convert_all(self):
         self.convert_sprites()

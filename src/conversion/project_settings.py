@@ -6,12 +6,10 @@ from PIL import Image
 from typing import Optional, List, Callable
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 class ProjectSettingsConverter:    
     def __init__(self, gm_project_path: str, gm_platform: str, godot_project_path: str, log_callback: Callable[[str], None] = print):
-        self.language = get_current_language()
-        
         self.gm_project_path = gm_project_path
         self.gm_platform = gm_platform
         self.godot_project_path = godot_project_path
@@ -27,34 +25,34 @@ class ProjectSettingsConverter:
         godot_png_path = os.path.join(self.godot_project_path, 'icon.png')
 
         if not os.path.exists(gm_icon_path):
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Icon_Error_DirectoryNotFound').format(gm_icon_path=gm_icon_path))
+            self.log_callback(get_localized("Console_Convertor_Icon_Error_DirectoryNotFound").format(gm_icon_path=gm_icon_path))
             return False
 
         icon_files = [f for f in os.listdir(gm_icon_path) if f.endswith('.ico') or f.endswith('.png')]
 
         if not (icon_files):
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Icon_Error_FileNotFound'))
+            self.log_callback(get_localized("Console_Convertor_Icon_Error_FileNotFound"))
             return False
 
         source_icon = os.path.join(gm_icon_path, icon_files[0])
             
         try:
             shutil.copy2(source_icon, godot_ico_path)
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Icon_Copied').format(icon_files=icon_files[0]))
+            self.log_callback(get_localized("Console_Convertor_Icon_Copied").format(icon_files=icon_files[0]))
 
             with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
-            self.log_callback(self.log_callback(get_localized(self.language, 'Console_Convertor_Icon_Converted').format(icon_files=icon_files[0])))
+            self.log_callback(self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0])))
         
             return True
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Error_IconGeneric').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_Error_IconGeneric").format(error=str(e)))
             return False
 
     def get_gm_project_name(self) -> Optional[str]:
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
         if not yyp_files:
-            self.log_callback(self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_yypNotFound')))
+            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
             return None
 
         yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
@@ -64,12 +62,12 @@ class ProjectSettingsConverter:
                 match = re.search(r'"%Name":\s*"([^"]*)"', content)
                 return match.group(1) if match else None
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_yypNameNotRead').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNameNotRead").format(error=str(e)))
             return None
 
     def get_gm_option(self, option_name: str, file_path: str) -> Optional[str]:
         if not os.path.exists(file_path):
-            self.log_callback(self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_yypNotFound')))
+            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
             return None
 
         try:
@@ -78,14 +76,14 @@ class ProjectSettingsConverter:
                 match = re.search(f'"{option_name}":\\s*([^,\n]+)', content)
                 return match.group(1).strip('"') if match else None
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_yypGeneric').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypGeneric").format(option_name=option_name, file_path=os.path.basename(file_path), error=str(e)))
             return None
 
     def update_project_name(self) -> None:
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_GD_NotFound'))
+            self.log_callback(get_localized("Console_Error_MissingGodotFile"))
             return
 
         try:
@@ -95,21 +93,22 @@ class ProjectSettingsConverter:
             gm_project_name = self.get_gm_project_name()
             if gm_project_name:
                 content = re.sub(r'config/name=".*"', f'config/name="{gm_project_name}"', content)
-                self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_UpdatedName').format(gm_project_name=gm_project_name))
+                self.log_callback(get_localized("Console_Convertor_Settings_UpdatedName").format(gm_project_name=gm_project_name))
             else:
-                self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_Name_GM'))
+                self.log_callback(get_localized("Console_Convertor_Settings_Error_Name_GM"))
 
             with open(project_godot_path, 'w') as file:
                 file.write(content)
 
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_NameGeneric').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_NameGeneric").format(error=str(e)))
 
     def update_project_settings(self) -> None:
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_GD_NotFound'))
+            self.log_callback(get_localized("Console_Error_MissingGodotFile"))
+            self.log_callback(get_localized(""))
             return
 
         try:
@@ -139,10 +138,10 @@ class ProjectSettingsConverter:
             with open(project_godot_path, 'w') as file:
                 file.write(content)
 
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Updated'))
+            self.log_callback(get_localized("Console_Convertor_Settings_Updated"))
             
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_NotUpdated').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_NotUpdated").format(error=str(e)))
 
     def update_godot_setting(self, content: str, setting: str, value: str, section: str = "application") -> str:
         if section not in content:
@@ -170,7 +169,7 @@ class ProjectSettingsConverter:
     def read_audio_groups(self) -> List[str]:
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
         if not yyp_files:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_Settings_Error_yypNotFound'))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return []
 
         yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
@@ -180,22 +179,22 @@ class ProjectSettingsConverter:
                 
                 audio_groups_match = re.search(r'"AudioGroups":\s*\[(.*?)\]', yyp_content, re.DOTALL)
                 if not audio_groups_match:
-                    self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Error_SectionNotFound_GM'))
+                    self.log_callback(get_localized("Console_Convertor_AudioBus_Error_SectionNotFound_GM"))
                     return []
 
                 audio_groups_content = audio_groups_match.group(1)
                 audio_group_names = re.findall(r'"%Name":\s*"([^"]*)"', audio_groups_content)
                 
                 if not audio_group_names:
-                    self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Error_NameNotFound_GM'))
+                    self.log_callback(get_localized("Console_Convertor_AudioBus_Error_NameNotFound_GM"))
 
                     return []
 
-                self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Group_Found').format(audio_group_names=', '.join(audio_group_names)))
+                self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Found").format(audio_group_names=', '.join(audio_group_names)))
                 return audio_group_names
 
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Error_Group_Generic').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_AudioBus_Error_Group_Generic").format(error=str(e)))
             return []
 
     def generate_audio_bus_layout(self) -> None:
@@ -227,7 +226,7 @@ class ProjectSettingsConverter:
                     file.write(f'bus/{i}/volume_db = 0.0\n')
                     file.write(f'bus/{i}/send = "Master"\n')
 
-            self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Group_Generated').format(audio_groups_num=len(audio_groups)))
+            self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Generated").format(audio_groups_num=len(audio_groups)))
             self.log_callback(f"Generated default_bus_layout.tres with {len(audio_groups)} audio buses.")
         except Exception as e:
-            self.log_callback(get_localized(self.language, 'Console_Convertor_AudioBus_Error_GroupNotGenerated').format(error=str(e)))
+            self.log_callback(get_localized("Console_Convertor_AudioBus_Error_GroupNotGenerated").format(error=str(e)))

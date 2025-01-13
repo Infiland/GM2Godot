@@ -1,12 +1,12 @@
 import json, string
 
-def get_localized(language, key):
+def get_localized(key):
+    # Find active language
+    with open('Current Language', 'r') as file:
+        language = file.readline().strip('\n')
+    # Find matching key in lanugage json
     with open(f'Languages/{language}.json', 'r') as file:
         return json.load(file)[key]
-
-def get_current_language():
-    with open('Current Language', 'r') as file:
-        return file.readline().strip('\n')
 
 
 

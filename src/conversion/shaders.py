@@ -2,11 +2,9 @@ import re
 import os
 
 # Import localization manager
-from src.localization import get_localized, get_current_language
+from src.localization import get_localized
 
 # WORK IN PROGRESS
-
-self.language = get_current_language()
 
 def convert_gm_to_godot_shader(input_file, output_file):    
     with open(input_file, 'r') as f:
@@ -56,7 +54,7 @@ def process_directory(input_dir, output_dir):
             input_path = os.path.join(input_dir, filename)
             output_path = os.path.join(output_dir, filename.rsplit('.', 1)[0] + '.gdshader')
             convert_gm_to_godot_shader(input_path, output_path)
-            print(get_localized(self.language, 'Console_Convertor_Shaders_Converted').format(filename=filename, output_path=os.path.basename(output_path)))
+            print(get_localized("Console_Convertor_Shaders_Converted").format(filename=filename, output_path=os.path.basename(output_path)))
 
 input_directory = 'path/to/input/directory'
 output_directory = 'path/to/output/directory'

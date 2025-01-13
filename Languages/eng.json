@@ -10,9 +10,9 @@
 ],
 
 "Language" : "English",
-"Language_Code" : "en",
+"Language_Code" : "eng",
 "Author" : "written by Infiland, structured by HalfofBilly",
-"Version" : "1.0.0",
+"Version" : "0.0.14",
 
 "About_Title" : "About GM2Godot",
 "About_Description" : "GM2Godot is a tool designed to help developers migrate their GameMaker projects to the Godot Engine.\nIt automates the conversion of various project assets and settings, making the transition smoother.",
@@ -47,10 +47,8 @@
 
 "Console_Convertor_Settings" : "Updating project settings...",
 "Console_Convertor_Settings_Error_yypNotFound" : "No .yyp file found in the GameMaker project folder.",
-"Console_Convertor_Settings_Error_GM_FileNotFound" : "{file_path} file not found.",
 "Console_Convertor_Settings_Error_yypNameNotRead" : "Error reading project name from .yyp file: {error}",
-"Console_Convertor_Settings_Error_yypGeneric" : "Error reading {option_name} from {os.path.basename(file_path)}: {error}",
-"Console_Convertor_Settings_Error_GD_NotFound" : "project.godot file not found in the Godot project directory.",
+"Console_Convertor_Settings_Error_yypGeneric" : "Error reading {option_name} from {file_path}: {error}",
 "Console_Convertor_Settings_UpdatedName" : "Updated project name to: {gm_project_name}",
 "Console_Convertor_Settings_Error_Name_GM" : "Could not update project name: GameMaker project name not found.",
 "Console_Convertor_Settings_Error_NameGeneric" : "Error updating project name: {error)}.",
@@ -77,7 +75,7 @@
 
 "Console_Convertor_Tilesets" : "Converting tilesets...",
 "Console_Convertor_Tilesets_Complete" : "Tileset conversion completed.",
-"Console_Convertor_Tilesets_Error_NotFound" : "Tileset folder not found in {self.gm_project_path}",
+"Console_Convertor_Tilesets_Error_NotFound" : "Tileset folder not found in {gm_project_path}",
 
 "Console_Convertor_Sounds" : "Converting sounds...",
 "Console_Convertor_Sounds_Converted" : "Converted: {path} -> sounds/{path}",
@@ -85,14 +83,14 @@
 "Console_Convertor_Sounds_Complete" : "Sound conversion completed.",
 "Console_Convertor_Sounds_Stopped" : "Sound conversion stopped.",
 
-"Console_Convertor_Shaders_Converted" : "Converted {filename} to {output_path}",
+"Console_Convertor_Shaders_Converted" : "Converted {filename} -> {output_path}",
 
 "Console_Convertor_Notes" : "Converting notes...",
 "Console_Convertor_Notes_Copied" : "Copied note: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Note conversion stopped.",
 "Console_Convertor_Notes_Error_NotFound" : "No notes folder found in GameMaker project.",
 
-"Icon_Error_Photoimage" : "Failed to set icon using PhotoImage: {error}",
+"Icon_Error_PhotoImage" : "Failed to set icon using PhotoImage: {error}",
 "Icon_Error_Linux" : "Failed to set icon on Linux: {error}",
 "Icon_Error_Path" : "Failed to load icon from {icon_path}. The icon will not be displayed.",
 "Icon_Error" : "Failed to load icon from {full_path}: {error}",

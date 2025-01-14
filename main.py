@@ -262,7 +262,6 @@ class ConverterGUI:
         text_widget.configure(state="disabled")
 
     def setup_conversion_settings(self):
-        #settings = (set(item for sublist in get_localized("Settings_Categories_Contents") for item in sublist)) # merges all setting categories into a single array
         class settings_contents:
             values = ["sprites", "fonts", "sounds", "game_icon", "project_name", "project_settings", "audio_buses", "notes", "objects", "shaders", "tilesets"]
             

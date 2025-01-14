@@ -95,7 +95,7 @@ class SetupUI:
         self.buttons[get_localized("Menu_UI_Button_Settings")] = settings_button
 
     def get_button(self, button_name):
-        return self.buttons.get(button_name)#.lower())
+        return self.buttons.get(button_name)
 
     def create_console(self, parent):
         console_frame = ttk.Frame(parent, style="TFrame")

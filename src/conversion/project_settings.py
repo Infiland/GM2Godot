@@ -108,7 +108,6 @@ class ProjectSettingsConverter:
         
         if not os.path.exists(project_godot_path):
             self.log_callback(get_localized("Console_Error_MissingGodotFile"))
-            self.log_callback(get_localized(""))
             return
 
         try:

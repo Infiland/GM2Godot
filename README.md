@@ -1,6 +1,6 @@
 # GM2Godot
 
-![GM2Godot 0 0 12](https://github.com/user-attachments/assets/b19edd23-f91e-48b7-a2c3-7e5654a8e9b8)
+![gm2godot](https://github.com/user-attachments/assets/bd60918e-a933-45bf-bb5f-49ced19f5c14)
 
 GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.11) projects to Godot (4.3) projects. It features a sleek dark-themed interface and intuitive controls for a seamless conversion experience.
 

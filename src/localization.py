@@ -1,20 +1,18 @@
 import json, string
+import os
+import sys
 
-def get_language(): # Find active language
-    global local_script
-    try:
-        with open('Current Language', 'r') as file:
-            language = file.readline().strip('\n')
-            with open(f"Languages/{language}.json", 'r') as file:
-                pass           
-    except:
-        language = "eng"
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    with open(f'Languages/{language}.json', 'r') as file:
-        local_script = json.load(file)
-    
-def get_localized(key): # Find matching key in lanugage json
-    return local_script[key]
+def get_localized(key):
+    base_path = get_base_path()
+    lang_file = os.path.join(base_path, 'Current Language')
+    with open(lang_file, 'r') as file:
+        language = file.readline().strip()
 
-
-get_language()
+    json_path = os.path.join(base_path, 'Languages', f'{language}.json')
+    with open(json_path, 'r') as file:
+        return json.load(file)[key]

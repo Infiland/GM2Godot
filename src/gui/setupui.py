@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox, ttk, font as tkfont
 from src.gui.modern_progress_bar import ModernProgressBar
 from src.gui.modern_widgets import ModernButton
 from src.gui.icon import Icon
-
+from src.gui.language_settings import language_options_window
 from src.version import get_version
 
 # Import localization manager
@@ -15,6 +15,7 @@ class SetupUI:
         self.master = master
         self.app = app
         self.icon = Icon(self.master)
+        self.language_window = language_options_window(self.master)
         self.entries = {}
         self.buttons = {}
         self.progress = None
@@ -186,3 +187,10 @@ class SetupUI:
         made_by_label.bind("<Button-1>", self.app.open_infiland_website)
         made_by_label.bind('<Enter>', lambda e: made_by_label.configure(foreground="#0078d4"))
         made_by_label.bind('<Leave>', lambda e: made_by_label.configure(foreground="#e0e0e0"))
+
+        language_options_label = ttk.Label(info_frame,
+                                image=self.icon.get_language_icon(),
+                                style="TLabel",
+                                cursor="hand2")
+        language_options_label.grid(row=0, column=3, padx=10)
+        language_options_label.bind("<Button-1>", self.language_window.open_window)

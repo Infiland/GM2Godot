@@ -6,6 +6,7 @@
 ">> Changing either of these will cause a crash.",
 
 "Language and Language_Code are read by GM2Godot to list the file as a language option.",
+"Language_Code must be same as file name (i.e., eng for eng.json)",
 "README, Language, Author, Version, are not used by GM2Godot, they are simply a means of documentation and attribution."
 ],
 
@@ -111,6 +112,10 @@
 "ReleaseNotes_Title" : "Release Notes",
 "ReleaseNotes_Error_NoInternet" : ["Error", "Unable to fetch release notes. Please check your internet connection and try again."],
 "ReleaseNotes_Error_Generic" : "Error fetching release notes: {error}",
+
+"Language_Select_Title" : "Select language",
+"Language_Select_Button_Save" : "Apply",
+"Language_Select_Button_Cancel" : "Cancel",
 
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",

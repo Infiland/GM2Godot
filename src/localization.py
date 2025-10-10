@@ -8,18 +8,18 @@ def get_base_path():
 def get_localized(key):
     base_path = get_base_path()
     lang_file = os.path.join(base_path, 'Current Language')
-    with open(lang_file, 'r') as file:
+    with open(lang_file, 'r', encoding='utf-8') as file:
         language = file.readline().strip()
 
     json_path = os.path.join(base_path, 'Languages', f'{language}.json')
-    with open(json_path, 'r') as file:
+    with open(json_path, 'r', encoding='utf-8') as file:
         try :
             return json.load(file)[key]
         except :
             pass
 
     # If an exception is thrown, the script will attempt to load the key from eng.json
-    with open(os.path.join(base_path, 'Languages', 'eng.json'), 'r') as file:
+    with open(os.path.join(base_path, 'Languages', 'eng.json'), 'r', encoding='utf-8') as file:
         try :
             return json.load(file)[key]
         except :

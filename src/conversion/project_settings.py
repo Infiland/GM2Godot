@@ -87,7 +87,7 @@ class ProjectSettingsConverter:
             return
 
         try:
-            with open(project_godot_path, 'r') as file:
+            with open(project_godot_path, 'r', encoding='utf-8') as file:
                 content = file.read()
 
             gm_project_name = self.get_gm_project_name()
@@ -97,7 +97,7 @@ class ProjectSettingsConverter:
             else:
                 self.log_callback(get_localized("Console_Convertor_Settings_Error_Name_GM"))
 
-            with open(project_godot_path, 'w') as file:
+            with open(project_godot_path, 'w', encoding='utf-8') as file:
                 file.write(content)
 
         except Exception as e:
@@ -111,7 +111,7 @@ class ProjectSettingsConverter:
             return
 
         try:
-            with open(project_godot_path, 'r') as file:
+            with open(project_godot_path, 'r', encoding='utf-8') as file:
                 content = file.read()
 
             content = re.sub(r'config/icon="res://.*"', 'config/icon="res://icon.png"', content)
@@ -134,7 +134,7 @@ class ProjectSettingsConverter:
                 if value:
                     content = self.update_godot_setting(content, godot_setting, value)
 
-            with open(project_godot_path, 'w') as file:
+            with open(project_godot_path, 'w', encoding='utf-8') as file:
                 file.write(content)
 
             self.log_callback(get_localized("Console_Convertor_Settings_Updated"))
@@ -201,7 +201,7 @@ class ProjectSettingsConverter:
         bus_layout_path = os.path.join(self.godot_project_path, 'default_bus_layout.tres')
 
         try:
-            with open(bus_layout_path, 'w') as file:
+            with open(bus_layout_path, 'w', encoding='utf-8') as file:
                 file.write('[gd_resource type="AudioBusLayout" format=3 uid="uid://cvoahc3k1xyrn"]\n\n')
                 file.write('[resource]\n')
                 

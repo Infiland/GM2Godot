@@ -13,7 +13,7 @@
 "Language" : "English",
 "Language_Code" : "eng",
 "Author" : "written by Infiland, structured by HalfofBilly",
-"Version" : "0.0.14",
+"Version" : "0.0.16",
 
 "About_Title" : "About GM2Godot",
 "About_Description" : "GM2Godot is a tool designed to help developers migrate their GameMaker projects to the Godot Engine.\nIt automates the conversion of various project assets and settings, making the transition smoother.",

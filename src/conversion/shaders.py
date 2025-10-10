@@ -6,8 +6,8 @@ from src.localization import get_localized
 
 # WORK IN PROGRESS
 
-def convert_gm_to_godot_shader(input_file, output_file):    
-    with open(input_file, 'r') as f:
+def convert_gm_to_godot_shader(input_file, output_file):
+    with open(input_file, 'r', encoding='utf-8') as f:
         content = f.read()
 
     content = re.sub(r'precision highp float;', 'shader_type canvas_item;', content)
@@ -42,7 +42,7 @@ def convert_gm_to_godot_shader(input_file, output_file):
         else:
             content = content.replace(f'uniform {uniform_type} {uniform_name};', f'uniform {uniform_name};')
 
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         f.write(content)
 
 def process_directory(input_dir, output_dir):

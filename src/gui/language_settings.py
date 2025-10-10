@@ -20,12 +20,12 @@ class language_options_window :
 
     def apply_new_language(self):
         try :
-            with open(f"{get_base_path()}/Languages/{self.available_languages_keys[self.combobox_language.current()]}.json", 'r') as file:
+            with open(f"{get_base_path()}/Languages/{self.available_languages_keys[self.combobox_language.current()]}.json", 'r', encoding='utf-8') as file:
                 new_language = json.load(file)["Language_Code"]
         except:
             new_language = "eng" # Fallback to English
 
-        with open(f"{get_base_path()}/Current Language", 'w') as file:
+        with open(f"{get_base_path()}/Current Language", 'w', encoding='utf-8') as file:
             try :
                 file.write(new_language)
             except :
@@ -52,13 +52,13 @@ class language_options_window :
         self.current_language_key = ""
 
         try :
-            with open(f"{get_base_path()}/Current Language", 'r') as file:
+            with open(f"{get_base_path()}/Current Language", 'r', encoding='utf-8') as file:
                 self.current_language_key = file.read()
         except :
             pass
 
         for i in range(len(available_languages_directory)):
-                with open(available_languages_directory[i], 'r') as file:
+                with open(available_languages_directory[i], 'r', encoding='utf-8') as file:
                     try :
                         language_json_file = json.load(file)
                         self.available_languages_keys.append(language_json_file["Language_Code"])

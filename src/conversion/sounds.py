@@ -4,15 +4,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import localization manager
 from src.localization import get_localized
+from src.conversion.base_converter import BaseConverter
 
-class SoundConverter:   
+class SoundConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        self.gm_project_path = gm_project_path
-        self.godot_project_path = godot_project_path
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
-        self.log_callback = log_callback
-        self.progress_callback = progress_callback
-        self.conversion_running = conversion_running or (lambda: True)
 
     def find_sound_files(self):
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
@@ -61,3 +58,6 @@ class SoundConverter:
                     self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
                     return
         self.log_callback(get_localized("Console_Convertor_Sounds_Complete"))
+
+    def convert_all(self):
+        self.convert_sounds()

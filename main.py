@@ -482,7 +482,11 @@ class ConverterGUI:
             self.master.after(1000, self.update_timer)
 
     def convert(self, gm_path, gm_platform_settings_path, godot_path):
-        project_settings_converter = ProjectSettingsConverter(gm_path, gm_platform_settings_path, godot_path, self.threadsafe_log)
+        project_settings_converter = ProjectSettingsConverter(
+            gm_path, godot_path, self.threadsafe_log,
+            self.threadsafe_update_progress, self.conversion_running.is_set,
+            gm_platform=gm_platform_settings_path
+        )
 
         converters = [
             (get_localized("Settings_Categories_Contents")[1][0], project_settings_converter.convert_icon, get_localized("Console_Convertor_Icon")),
@@ -492,7 +496,7 @@ class ConverterGUI:
             (get_localized("Settings_Categories_Contents")[0][0], lambda: SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sprites")),
             (get_localized("Settings_Categories_Contents")[0][1], lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Fonts")),
             (get_localized("Settings_Categories_Contents")[2][2], lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Tilesets")),
-            (get_localized("Settings_Categories_Contents")[0][2], lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_sounds(), get_localized("Console_Convertor_Sounds")),
+            (get_localized("Settings_Categories_Contents")[0][2], lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sounds")),
             (get_localized("Settings_Categories_Contents")[1][4], lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Notes"))
         ]
 

@@ -15,7 +15,7 @@ class Converter:
         self.update_progress = progress_callback
 
     def convert(self, gm_path, godot_path, settings):
-        project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.log)
+        project_settings_converter = ProjectSettingsConverter(gm_path, godot_path, self.log, gm_platform='windows')
 
         converters = [
             ("game_icon", project_settings_converter.convert_icon, get_localized("Console_Convertor_Icon")),
@@ -25,7 +25,7 @@ class Converter:
             ("sprites", lambda: SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sprites")),
             ("fonts", lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Fonts")),
             ("tilesets", lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Tilesets")),
-            ("sounds", lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_sounds(), get_localized("Console_Convertor_Sounds")),
+            ("sounds", lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sounds")),
             ("notes", lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Notes"))
         ]
 

@@ -33,7 +33,7 @@ class SoundConverter(BaseConverter):
         godot_sound_path = os.path.join(self.godot_sounds_path, rel_path)
         shutil.copy2(gm_sound_path, godot_sound_path)
 
-        self.log_callback(get_localized("Console_Convertor_Sounds_Converted").format(path=rel_path))
+        self._safe_log(get_localized("Console_Convertor_Sounds_Converted").format(path=rel_path))
         return True
 
     def convert_sounds(self):
@@ -52,8 +52,7 @@ class SoundConverter(BaseConverter):
             for future in as_completed(futures):
                 if future.result():
                     processed_sounds += 1
-                    if self.progress_callback:
-                        self.progress_callback(int(processed_sounds / total_sounds * 100))
+                    self._safe_progress(int(processed_sounds / total_sounds * 100))
                 else:
                     self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
                     return

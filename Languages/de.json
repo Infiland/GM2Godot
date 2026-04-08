@@ -97,6 +97,12 @@
 "Console_Convertor_Notes_Stopped" : "Notiz-Konvertierung gestoppt.",
 "Console_Convertor_Notes_Error_NotFound" : "Kein Notizen-Ordner im GameMaker-Projekt gefunden.",
 
+"Console_Convertor_IncludedFiles" : "Eingeschlossene Dateien werden konvertiert...",
+"Console_Convertor_IncludedFiles_Complete" : "Konvertierung eingeschlossener Dateien abgeschlossen.",
+"Console_Convertor_IncludedFiles_Stopped" : "Konvertierung eingeschlossener Dateien gestoppt.",
+"Console_Convertor_IncludedFiles_Copied" : "Kopiert: {path}",
+"Console_Convertor_IncludedFiles_Error_NotFound" : "Kein Ordner mit eingeschlossenen Dateien (datafiles) im GameMaker-Projekt gefunden.",
+
 "Icon_Error_PhotoImage" : "Fehler beim Setzen des Icons mit PhotoImage: {error}",
 "Icon_Error_Linux" : "Fehler beim Setzen des Icons unter Linux: {error}",
 "Icon_Error_Path" : "Fehler beim Laden des Icons von {icon_path}. Das Icon wird nicht angezeigt.",
@@ -126,7 +132,7 @@
 "Settings_Title" : "Konvertierungseinstellungen",
 "Settings_Files_Heading" : "Wählen Sie zu konvertierende Dateien aus:",
 "Settings_Categories_Headings" : ["Assets", "Projekt", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "included_files"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Schriftarten",
@@ -138,7 +144,8 @@
     "notes": "Notizen",
     "objects": "Objekte",
     "shaders": "Shader",
-    "tilesets": "Tilesets"
+    "tilesets": "Tilesets",
+    "included_files": "Eingeschlossene Dateien"
 },
 
 "Settings_Button_SelectAll" : "Alle auswählen",

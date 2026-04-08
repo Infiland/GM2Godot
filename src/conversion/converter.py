@@ -4,13 +4,14 @@ from src.conversion.fonts import FontConverter
 from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.shaders import ShaderConverter
+from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
 from src.localization import get_localized
 
 
 CONVERSION_CATEGORIES = {
-    "assets": ["sprites", "fonts", "sounds"],
+    "assets": ["sprites", "fonts", "sounds", "included_files"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
     "wip": ["objects", "shaders", "tilesets"],
 }
@@ -59,6 +60,10 @@ class Converter:
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set
             ).convert_all(), "Console_Convertor_Shaders"),
+            ("included_files", lambda: IncludedFilesConverter(
+                gm_path, godot_path, self.log_callback,
+                self.progress_callback, self.conversion_running.is_set
+            ).convert_all(), "Console_Convertor_IncludedFiles"),
             ("objects", lambda: self.log_callback(
                 get_localized("Console_Convertor_Objects_NotImplemented")
             ), "Console_Convertor_Objects"),

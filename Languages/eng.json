@@ -97,6 +97,12 @@
 "Console_Convertor_Notes_Stopped" : "Note conversion stopped.",
 "Console_Convertor_Notes_Error_NotFound" : "No notes folder found in GameMaker project.",
 
+"Console_Convertor_IncludedFiles" : "Converting included files...",
+"Console_Convertor_IncludedFiles_Complete" : "Included files conversion completed.",
+"Console_Convertor_IncludedFiles_Stopped" : "Included files conversion stopped.",
+"Console_Convertor_IncludedFiles_Copied" : "Copied: {path}",
+"Console_Convertor_IncludedFiles_Error_NotFound" : "No included files (datafiles) folder found in GameMaker project.",
+
 "Icon_Error_PhotoImage" : "Failed to set icon using PhotoImage: {error}",
 "Icon_Error_Linux" : "Failed to set icon on Linux: {error}",
 "Icon_Error_Path" : "Failed to load icon from {icon_path}. The icon will not be displayed.",
@@ -126,7 +132,7 @@
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",
 "Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "included_files"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Fonts",
@@ -138,7 +144,8 @@
     "notes": "Notes",
     "objects": "Objects",
     "shaders": "Shaders",
-    "tilesets": "Tilesets"
+    "tilesets": "Tilesets",
+    "included_files": "Included Files"
 },
 
 "Settings_Button_SelectAll" : "Select All",

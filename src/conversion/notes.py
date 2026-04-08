@@ -28,7 +28,7 @@ class NoteConverter:
 
         for root, dirs, files in os.walk(gm_notes_path):
             if not self.check_running():
-                self.log(self.log(get_localized("Console_Convertor_Notes_Stopped")))
+                self.log(get_localized("Console_Convertor_Notes_Stopped"))
                 return
 
             for file in files:

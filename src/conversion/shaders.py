@@ -55,7 +55,3 @@ def process_directory(input_dir, output_dir):
             output_path = os.path.join(output_dir, filename.rsplit('.', 1)[0] + '.gdshader')
             convert_gm_to_godot_shader(input_path, output_path)
             print(get_localized("Console_Convertor_Shaders_Converted").format(filename=filename, output_path=os.path.basename(output_path)))
-
-input_directory = 'path/to/input/directory'
-output_directory = 'path/to/output/directory'
-process_directory(input_directory, output_directory)

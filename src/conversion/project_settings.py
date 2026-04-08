@@ -42,7 +42,7 @@ class ProjectSettingsConverter:
 
             with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0])))
+            self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0]))
         
             return True
         except Exception as e:
@@ -52,7 +52,7 @@ class ProjectSettingsConverter:
     def get_gm_project_name(self) -> Optional[str]:
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
         if not yyp_files:
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
 
         yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
@@ -67,7 +67,7 @@ class ProjectSettingsConverter:
 
     def get_gm_option(self, option_name: str, file_path: str) -> Optional[str]:
         if not os.path.exists(file_path):
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
 
         try:

@@ -1,2 +1,0 @@
-class ReleaseNotes:
-    print("WIP!")

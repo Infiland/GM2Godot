@@ -23,7 +23,7 @@ class FontConverter:
         gm_sprites_path = os.path.join(self.gm_project_path, 'fonts')
 
         if not os.path.exists(gm_sprites_path):
-            self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path={self.gm_project_path}))
+            self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
 
         self.log_callback(get_localized("Console_Convertor_Fonts_Complete"))

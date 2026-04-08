@@ -5,7 +5,7 @@ if exist "build" rmdir /s /q "build"
 if exist "*.spec" del /f /q *.spec
 
 echo Installing required packages...
-pip install markdown2 tkhtmlview Pillow pyinstaller
+pip install -r requirements.txt pyinstaller
 
 echo.
 echo Creating Windows build...

@@ -5,6 +5,7 @@ import webbrowser
 from PIL import Image, ImageTk
 from io import BytesIO
 from datetime import datetime
+from src.gui.theme import THEME
 from src.version import get_version
 
 # Import localization manager
@@ -15,7 +16,7 @@ class AboutDialog:
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(get_localized("About_Title"))
         self.dialog.geometry("600x700")
-        self.dialog.configure(bg="#222222")
+        self.dialog.configure(bg=THEME["bg_dialog"])
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -26,21 +27,21 @@ class AboutDialog:
     def setup_styles(self):
         """Configure styles for the About dialog."""
         styles = {
-            "About.TFrame": {"background": "#222222"},
+            "About.TFrame": {"background": THEME["bg_dialog"]},
             "About.TLabel": {
-                "background": "#222222",
-                "foreground": "#ffffff",
-                "font": ('Helvetica', 10)
+                "background": THEME["bg_dialog"],
+                "foreground": THEME["fg_white"],
+                "font": ('Helvetica', THEME["font_size"])
             },
             "AboutTitle.TLabel": {
-                "background": "#222222",
-                "foreground": "#ffffff",
-                "font": ('Helvetica', 16, 'bold')
+                "background": THEME["bg_dialog"],
+                "foreground": THEME["fg_white"],
+                "font": ('Helvetica', THEME["font_size_heading"], 'bold')
             },
             "AboutSection.TLabel": {
-                "background": "#222222",
-                "foreground": "#ffffff",
-                "font": ('Helvetica', 12, 'bold')
+                "background": THEME["bg_dialog"],
+                "foreground": THEME["fg_white"],
+                "font": ('Helvetica', THEME["font_size_large"], 'bold')
             }
         }
         for style, options in styles.items():
@@ -78,8 +79,8 @@ class AboutDialog:
         contributors_frame = ttk.Frame(parent, style="About.TFrame")
         contributors_frame.pack(fill=tk.BOTH, expand=True)
         
-        canvas = tk.Canvas(contributors_frame, 
-                         bg="#222222", 
+        canvas = tk.Canvas(contributors_frame,
+                         bg=THEME["bg_dialog"],
                          highlightthickness=0)
         scrollbar = ttk.Scrollbar(contributors_frame, 
                                 orient="vertical", 

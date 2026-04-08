@@ -3,15 +3,13 @@ import threading
 import time
 import webbrowser
 from functools import partial
-import requests
-import markdown2
 import platform
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
-from tkhtmlview import HTMLLabel
-
 #TODO: REPLACE THIS WITH from src.conversion.converter import Converter
 from src.gui.about import AboutDialog
+from src.gui.release_notes import ReleaseNotesDialog
+from src.gui.theme import THEME
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -35,7 +33,7 @@ class ConverterGUI:
         self.master = master
         self.master.title(get_localized("Menu_Title").format(version=get_version()))
         self.master.geometry("800x600")
-        self.master.configure(bg="#1e1e1e")
+        self.master.configure(bg=THEME["bg_primary"])
         self.icon = Icon(self.master)
         
         # Add window padding
@@ -49,6 +47,8 @@ class ConverterGUI:
         self.setup_styles()
 
         self.create_menu()
+
+        self.release_notes = ReleaseNotesDialog(self.master)
 
         self.setup_ui = SetupUI(self.master, self)
         self.setup_ui.setup_ui()
@@ -69,10 +69,10 @@ class ConverterGUI:
 
     def create_menu(self):
         """Create the menu bar with Help menu."""
-        menubar = tk.Menu(self.master, bg="#1e1e1e", fg="#e0e0e0", activebackground="#2d2d2d", activeforeground="#ffffff")
+        menubar = tk.Menu(self.master, bg=THEME["bg_primary"], fg=THEME["fg_primary"], activebackground=THEME["bg_secondary"], activeforeground=THEME["fg_white"])
         self.master.config(menu=menubar)
 
-        help_menu = tk.Menu(menubar, tearoff=0, bg="#1e1e1e", fg="#e0e0e0", activebackground="#2d2d2d", activeforeground="#ffffff")
+        help_menu = tk.Menu(menubar, tearoff=0, bg=THEME["bg_primary"], fg=THEME["fg_primary"], activebackground=THEME["bg_secondary"], activeforeground=THEME["fg_white"])
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About GM2Godot", command=self.show_about)
         help_menu.add_separator()
@@ -86,61 +86,61 @@ class ConverterGUI:
     def setup_styles(self):
         styles = {
             "TFrame": {
-                "background": "#1e1e1e"  # Darker background for better contrast
+                "background": THEME["bg_primary"]
             },
             "TLabel": {
-                "background": "#1e1e1e",
-                "foreground": "#e0e0e0",  # Softer white for better readability
-                "font": ('Segoe UI', 10)  # Modern system font
+                "background": THEME["bg_primary"],
+                "foreground": THEME["fg_primary"],
+                "font": (THEME["font_family"], THEME["font_size"])
             },
             "TEntry": {
-                "fieldbackground": "#2d2d2d",
-                "foreground": "#e0e0e0",
-                "insertcolor": "#e0e0e0",
-                "font": ('Segoe UI', 10),
+                "fieldbackground": THEME["bg_secondary"],
+                "foreground": THEME["fg_primary"],
+                "insertcolor": THEME["fg_primary"],
+                "font": (THEME["font_family"], THEME["font_size"]),
                 "borderwidth": 0,
                 "relief": "flat"
             },
             "Modern.TButton": {
-                "background": "#0078d4",  # Modern blue
-                "foreground": "#ffffff",
-                "font": ('Segoe UI', 10, 'bold'),
+                "background": THEME["accent_blue"],
+                "foreground": THEME["fg_white"],
+                "font": (THEME["font_family"], THEME["font_size"], 'bold'),
                 "padding": (15, 8),
                 "borderwidth": 0,
                 "relief": "flat"
             },
             "Icon.TButton": {
-                "background": "#d83b01",  # Modern red for stop button
-                "foreground": "#ffffff",
+                "background": THEME["accent_red"],
+                "foreground": THEME["fg_white"],
                 "padding": 4,
                 "borderwidth": 0,
                 "relief": "flat",
-                "width": 3,  # Make it square
+                "width": 3,
                 "anchor": "center"
             },
             "TCheckbutton": {
-                "background": "#1e1e1e",
-                "foreground": "#e0e0e0"
+                "background": THEME["bg_primary"],
+                "foreground": THEME["fg_primary"]
             },
             "Console.Vertical.TScrollbar": {
-                "background": "#2d2d2d",
-                "troughcolor": "#1e1e1e",
-                "arrowcolor": "#e0e0e0",
+                "background": THEME["bg_secondary"],
+                "troughcolor": THEME["bg_primary"],
+                "arrowcolor": THEME["fg_primary"],
                 "borderwidth": 0,
                 "relief": "flat"
             },
             "Red.TButton": {
-                "background": "#d83b01",  # Modern red
-                "foreground": "#ffffff",
+                "background": THEME["accent_red"],
+                "foreground": THEME["fg_white"],
                 "borderwidth": 0,
                 "relief": "flat"
             },
             "TCombobox": {
-                "background": "#2d2d2d",
-                "foreground": "#e0e0e0",
-                "fieldbackground": "#2d2d2d",
-                "arrowcolor": "#e0e0e0",
-                "font": ('Segoe UI', 10),
+                "background": THEME["bg_secondary"],
+                "foreground": THEME["fg_primary"],
+                "fieldbackground": THEME["bg_secondary"],
+                "arrowcolor": THEME["fg_primary"],
+                "font": (THEME["font_family"], THEME["font_size"]),
                 "relief": "flat",
                 "borderwidth": 0
             }
@@ -151,116 +151,49 @@ class ConverterGUI:
 
         # Enhanced button states
         self.style.map("Modern.TButton",
-            background=[('active', '#106ebe'), ('disabled', '#333333')],
-            foreground=[('disabled', '#666666')]
+            background=[('active', THEME["accent_blue_hover"]), ('disabled', THEME["disabled_bg"])],
+            foreground=[('disabled', THEME["fg_disabled"])]
         )
-        
+
         # Icon button states
         self.style.map("Icon.TButton",
-            background=[('active', '#a62d00'), ('disabled', '#333333')],
-            foreground=[('disabled', '#666666')]
+            background=[('active', THEME["accent_red_hover"]), ('disabled', THEME["disabled_bg"])],
+            foreground=[('disabled', THEME["fg_disabled"])]
         )
-        
+
         self.style.map("TEntry",
-            fieldbackground=[('readonly', '#2d2d2d')],
+            fieldbackground=[('readonly', THEME["bg_secondary"])],
             relief=[('focus', 'flat')]
         )
-        
+
         self.style.map("TCheckbutton",
-            background=[('active', '#1e1e1e')]
+            background=[('active', THEME["bg_primary"])]
         )
-        
+
         self.style.map("Red.TButton",
-            background=[('active', '#a62d00')],
-            foreground=[('disabled', '#666666')]
+            background=[('active', THEME["accent_red_hover"])],
+            foreground=[('disabled', THEME["fg_disabled"])]
         )
-        
+
         # Enhanced Combobox states
         self.style.map("TCombobox",
-            fieldbackground=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
-            selectbackground=[('readonly', '#0078d4')],
-            selectforeground=[('readonly', '#ffffff')],
-            background=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
-            foreground=[('readonly', '#e0e0e0'), ('disabled', '#666666')],
-            arrowcolor=[('disabled', '#666666')]
+            fieldbackground=[('readonly', THEME["bg_secondary"]), ('disabled', THEME["bg_primary"])],
+            selectbackground=[('readonly', THEME["accent_blue"])],
+            selectforeground=[('readonly', THEME["fg_white"])],
+            background=[('readonly', THEME["bg_secondary"]), ('disabled', THEME["bg_primary"])],
+            foreground=[('readonly', THEME["fg_primary"]), ('disabled', THEME["fg_disabled"])],
+            arrowcolor=[('disabled', THEME["fg_disabled"])]
         )
 
         # Configure master window
-        self.master.configure(bg="#1e1e1e")
-        self.master.option_add('*TCombobox*Listbox.background', '#2d2d2d')
-        self.master.option_add('*TCombobox*Listbox.foreground', '#e0e0e0')
-        self.master.option_add('*TCombobox*Listbox.selectBackground', '#0078d4')
-        self.master.option_add('*TCombobox*Listbox.selectForeground', '#ffffff')
-        self.master.option_add('*TCombobox*Listbox.font', ('Segoe UI', 10))
+        self.master.configure(bg=THEME["bg_primary"])
+        self.master.option_add('*TCombobox*Listbox.background', THEME["bg_secondary"])
+        self.master.option_add('*TCombobox*Listbox.foreground', THEME["fg_primary"])
+        self.master.option_add('*TCombobox*Listbox.selectBackground', THEME["accent_blue"])
+        self.master.option_add('*TCombobox*Listbox.selectForeground', THEME["fg_white"])
+        self.master.option_add('*TCombobox*Listbox.font', (THEME["font_family"], THEME["font_size"]))
         self.master.option_add('*TCombobox*Listbox.relief', 'flat')
         self.master.option_add('*TCombobox*Listbox.borderwidth', '0')
-
-    def show_release_notes(self, event):
-        release_notes = self.fetch_release_notes()
-        if release_notes:
-            self.display_release_notes(release_notes)
-        else:
-             messagebox.showerror(get_localized("ReleaseNotes_Error_NoInternet")[0], get_localized("ReleaseNotes_Error_NoInternet")[1])
-
-    def fetch_release_notes(self):
-        try:
-            response = requests.get("https://api.github.com/repos/Infiland/GM2Godot/releases/latest")
-            if response.status_code == 200:
-                return response.json()['body']
-            else:
-                return None
-        except Exception as e:
-            print(get_localized("ReleaseNotes_Error_Generic").format(error=e))
-            return None
-
-    def display_release_notes(self, notes):
-        notes_window = tk.Toplevel(self.master)
-        notes_window.title(get_localized("ReleaseNotes_Title"))
-        notes_window.geometry("750x600")
-        notes_window.configure(bg="#222222")
-
-        html_content = markdown2.markdown(notes)
-
-        text_widget = tk.Text(notes_window, wrap=tk.WORD, bg="#3d3d3d", fg="#ffffff", font=("Arial", 11), padx=10, pady=10)
-        text_widget.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
-
-        scrollbar = ttk.Scrollbar(text_widget, orient="vertical", command=text_widget.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        text_widget.configure(yscrollcommand=scrollbar.set)
-
-        text_widget.tag_configure("h1", font=("Arial", 16, "bold"), spacing3=5)
-        text_widget.tag_configure("h2", font=("Arial", 14, "bold"), spacing3=5)
-        text_widget.tag_configure("bullet", lmargin1=20, lmargin2=30)
-        text_widget.tag_configure("link", foreground="#4da6ff", underline=True)
-
-        def insert_formatted(content):
-            for line in content.split('\n'):
-                if line.startswith('<h1>'):
-                    text_widget.insert(tk.END, line[4:-5] + '\n', "h1")
-                elif line.startswith('<h2>'):
-                    text_widget.insert(tk.END, line[4:-5] + '\n', "h2")
-                elif line.startswith('<ul>'):
-                    text_widget.insert(tk.END, line[4:-5] + '\n', "ul")
-                elif line.startswith('<strong>'):
-                    text_widget.insert(tk.END, line[4:-5] + '\n', "strong")
-                elif line.startswith('<li>'):
-                    text_widget.insert(tk.END, "• " + line[4:-5] + '\n', "bullet")
-                elif line.startswith('<p>'):
-                    text_widget.insert(tk.END, line[3:-4] + '\n\n')
-                elif line.startswith('<a href='): # This doesn't work :(
-                    start = line.find('"') + 1
-                    end = line.find('"', start)
-                    url = line[start:end]
-                    text = line[line.find('>')+1:line.find('</a>')]
-                    text_widget.insert(tk.END, text, "link")
-                    text_widget.tag_bind("link", "<Button-1>", lambda e, url=url: webbrowser.open_new(url))
-                else:
-                    text_widget.insert(tk.END, line + '\n')
-
-        insert_formatted(html_content)
-
-        text_widget.configure(state="disabled")
 
     def setup_conversion_settings(self):
         class settings_contents:
@@ -301,14 +234,14 @@ class ConverterGUI:
         settings_window = tk.Toplevel(self.master)
         settings_window.title(get_localized("Settings_Title"))
         settings_window.geometry("800x500")  # Wider window for horizontal layout
-        settings_window.configure(bg="#1e1e1e")
+        settings_window.configure(bg=THEME["bg_primary"])
         settings_window.transient(self.master)  # Make it float on top of main window
         settings_window.grab_set()  # Make it modal
 
         main_frame = ttk.Frame(settings_window, padding="20 20 20 20", style="TFrame")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(main_frame, text=get_localized("Settings_Files_Heading"), style="TLabel", font=("Segoe UI", 14, "bold")).pack(pady=(0, 20))
+        ttk.Label(main_frame, text=get_localized("Settings_Files_Heading"), style="TLabel", font=(THEME["font_family"], THEME["font_size_title"], "bold")).pack(pady=(0, 20))
 
         # Create a frame for the categories
         categories_frame = ttk.Frame(main_frame, style="TFrame")
@@ -330,7 +263,7 @@ class ConverterGUI:
             category_frame = ttk.Frame(categories_frame, style="TFrame", padding="10 0")
             category_frame.grid(row=0, column=idx, sticky="n", padx=10)
             
-            ttk.Label(category_frame, text=category, style="TLabel", font=("Segoe UI", 12, "bold")).pack(pady=(0, 10))
+            ttk.Label(category_frame, text=category, style="TLabel", font=(THEME["font_family"], THEME["font_size_large"], "bold")).pack(pady=(0, 10))
             
             for setting in settings:
                 var = self.conversion_settings[setting]
@@ -343,9 +276,9 @@ class ConverterGUI:
         platform_label_frame = ttk.Frame(platform_frame, style="TFrame")
         platform_label_frame.pack(fill=tk.X)
         
-        ttk.Label(platform_label_frame, text=get_localized("Settings_Platform_Heading"), style="TLabel", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT)
-        ttk.Label(platform_label_frame, text=get_localized("Settings_Platform_Subheading"), 
-                 style="TLabel", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(platform_label_frame, text=get_localized("Settings_Platform_Heading"), style="TLabel", font=(THEME["font_family"], THEME["font_size_title"], "bold")).pack(side=tk.LEFT)
+        ttk.Label(platform_label_frame, text=get_localized("Settings_Platform_Subheading"),
+                 style="TLabel", font=(THEME["font_family"], THEME["font_size"])).pack(side=tk.LEFT, padx=(10, 0))
         
         combobox_frame = ttk.Frame(platform_frame, style="TFrame")
         combobox_frame.pack(fill=tk.X, pady=(10, 0))
@@ -429,7 +362,7 @@ class ConverterGUI:
         self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, gm_platform, godot_path))
         self.conversion_thread.start()
         self.start_timer()
-        self.style.configure("Red.TButton", background="red", foreground="white")
+        self.style.configure("Red.TButton", background=THEME["accent_red"], foreground=THEME["fg_white"])
         self.stop_button.config(state=tk.NORMAL, style="Red.TButton")
 
     def validate_projects(self, gm_path, godot_path):
@@ -461,7 +394,7 @@ class ConverterGUI:
         if self.conversion_running.is_set():
             self.conversion_running.clear()
             self.log(get_localized("Console_ConversionStopping"))
-            self.style.configure("Red.TButton", background="white", foreground="white")
+            self.style.configure("Red.TButton", background=THEME["fg_white"], foreground=THEME["fg_white"])
             self.stop_button.config(state=tk.DISABLED, style="TButton")
             self.master.after(100, self.check_conversion_stopped)
 

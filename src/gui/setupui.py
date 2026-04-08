@@ -5,6 +5,7 @@ from src.gui.modern_progress_bar import ModernProgressBar
 from src.gui.modern_widgets import ModernButton
 from src.gui.icon import Icon
 from src.gui.language_settings import language_options_window
+from src.gui.theme import THEME
 from src.version import get_version
 
 # Import localization manager
@@ -104,12 +105,12 @@ class SetupUI:
         console_frame.grid_columnconfigure(0, weight=1)
         console_frame.grid_rowconfigure(0, weight=1)
 
-        self.console = tk.Text(console_frame, 
-                             wrap=tk.WORD, 
-                             bg="#2d2d2d", 
-                             fg="#e0e0e0", 
-                             insertbackground="#e0e0e0", 
-                             font=('Cascadia Code', 10), 
+        self.console = tk.Text(console_frame,
+                             wrap=tk.WORD,
+                             bg=THEME["bg_secondary"],
+                             fg=THEME["fg_primary"],
+                             insertbackground=THEME["fg_primary"],
+                             font=('Cascadia Code', THEME["font_size"]),
                              state='disabled',
                              padx=10,
                              pady=10,
@@ -129,28 +130,28 @@ class SetupUI:
         progress_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(0, 10))
         progress_frame.grid_columnconfigure(0, weight=1)
 
-        self.progress = ModernProgressBar(progress_frame, 
+        self.progress = ModernProgressBar(progress_frame,
                                         width=0,  # Let it expand
-                                        height=30, 
-                                        bg_color="#2d2d2d", 
-                                        fill_color="#0078d4", 
-                                        text_color="#ffffff")
+                                        height=30,
+                                        bg_color=THEME["bg_secondary"],
+                                        fill_color=THEME["accent_blue"],
+                                        text_color=THEME["fg_white"])
         self.progress.grid(row=0, column=0, sticky="ew")
 
         status_frame = ttk.Frame(parent, style="TFrame")
         status_frame.grid(row=5, column=0, columnspan=3, pady=(0, 20), sticky="ew")
         status_frame.grid_columnconfigure(1, weight=1)
         
-        self.timer_label = ttk.Label(status_frame, 
-                                   text=f"{get_localized('Menu_UI_Time_Heading')} 00:00:00", 
+        self.timer_label = ttk.Label(status_frame,
+                                   text=f"{get_localized('Menu_UI_Time_Heading')} 00:00:00",
                                    style="TLabel",
-                                   font=('Segoe UI', 10))
+                                   font=(THEME["font_family"], THEME["font_size"]))
         self.timer_label.grid(row=0, column=0, padx=(0, 20))
 
-        self.status_label = ttk.Label(status_frame, 
-                                    text="", 
+        self.status_label = ttk.Label(status_frame,
+                                    text="",
                                     style="TLabel",
-                                    font=('Segoe UI', 10))
+                                    font=(THEME["font_family"], THEME["font_size"]))
         self.status_label.grid(row=0, column=1, sticky="w")
 
     def create_info_labels(self, parent):
@@ -158,35 +159,35 @@ class SetupUI:
         info_frame.grid(row=6, column=0, columnspan=3, sticky="ew")
         info_frame.grid_columnconfigure(1, weight=1)
 
-        version_label = ttk.Label(info_frame, 
-                                text=get_localized("UI_Label_Version").format(version=get_version()), 
-                                style="TLabel", 
+        version_label = ttk.Label(info_frame,
+                                text=get_localized("UI_Label_Version").format(version=get_version()),
+                                style="TLabel",
                                 cursor="hand2",
-                                font=('Segoe UI', 9))
+                                font=(THEME["font_family"], 9))
         version_label.grid(row=0, column=0, padx=10)
-        version_label.bind("<Button-1>", self.app.show_release_notes)
-        version_label.bind('<Enter>', lambda e: version_label.configure(foreground="#0078d4"))
-        version_label.bind('<Leave>', lambda e: version_label.configure(foreground="#e0e0e0"))
+        version_label.bind("<Button-1>", self.app.release_notes.show)
+        version_label.bind('<Enter>', lambda e: version_label.configure(foreground=THEME["accent_blue"]))
+        version_label.bind('<Leave>', lambda e: version_label.configure(foreground=THEME["fg_primary"]))
 
-        contribute_label = ttk.Label(info_frame, 
-                                   text=get_localized("UI_Label_Contribute"), 
-                                   style="TLabel", 
+        contribute_label = ttk.Label(info_frame,
+                                   text=get_localized("UI_Label_Contribute"),
+                                   style="TLabel",
                                    cursor="hand2",
-                                   font=('Segoe UI', 9))
+                                   font=(THEME["font_family"], 9))
         contribute_label.grid(row=0, column=1, padx=10)
         contribute_label.bind("<Button-1>", self.app.open_github)
-        contribute_label.bind('<Enter>', lambda e: contribute_label.configure(foreground="#0078d4"))
-        contribute_label.bind('<Leave>', lambda e: contribute_label.configure(foreground="#e0e0e0"))
+        contribute_label.bind('<Enter>', lambda e: contribute_label.configure(foreground=THEME["accent_blue"]))
+        contribute_label.bind('<Leave>', lambda e: contribute_label.configure(foreground=THEME["fg_primary"]))
 
-        made_by_label = ttk.Label(info_frame, 
-                                text=get_localized("UI_Label_MadeBy"), 
-                                style="TLabel", 
+        made_by_label = ttk.Label(info_frame,
+                                text=get_localized("UI_Label_MadeBy"),
+                                style="TLabel",
                                 cursor="hand2",
-                                font=('Segoe UI', 9))
+                                font=(THEME["font_family"], 9))
         made_by_label.grid(row=0, column=2, padx=10)
         made_by_label.bind("<Button-1>", self.app.open_infiland_website)
-        made_by_label.bind('<Enter>', lambda e: made_by_label.configure(foreground="#0078d4"))
-        made_by_label.bind('<Leave>', lambda e: made_by_label.configure(foreground="#e0e0e0"))
+        made_by_label.bind('<Enter>', lambda e: made_by_label.configure(foreground=THEME["accent_blue"]))
+        made_by_label.bind('<Leave>', lambda e: made_by_label.configure(foreground=THEME["fg_primary"]))
 
         language_options_label = ttk.Label(info_frame,
                                 image=self.icon.get_language_icon(),

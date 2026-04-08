@@ -6,8 +6,10 @@ from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 
 class NoteConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
+                 update_log_callback=None, compact_logging=False):
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
+                         update_log_callback, compact_logging)
 
     def convert_notes(self):
         gm_notes_path = os.path.join(self.gm_project_path, "notes")
@@ -41,9 +43,11 @@ class NoteConverter(BaseConverter):
 
                     shutil.copy2(src_file, dst_file)
 
-                    self.log_callback(get_localized("Console_Convertor_Notes_Copied").format(note_name=note_name))
-
                     processed_notes += 1
+                    if self.compact_logging:
+                        self._log_progress(note_name, processed_notes, total_notes)
+                    else:
+                        self.log_callback(get_localized("Console_Convertor_Notes_Copied").format(note_name=note_name))
                     progress = int((processed_notes / total_notes) * 100)
                     if self.progress_callback:
                         self.progress_callback(progress)

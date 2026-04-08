@@ -7,8 +7,10 @@ from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 
 class SoundConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
+                 update_log_callback=None, compact_logging=False):
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
+                         update_log_callback, compact_logging)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
 
     def find_sound_files(self):
@@ -33,7 +35,8 @@ class SoundConverter(BaseConverter):
         godot_sound_path = os.path.join(self.godot_sounds_path, rel_path)
         shutil.copy2(gm_sound_path, godot_sound_path)
 
-        self._safe_log(get_localized("Console_Convertor_Sounds_Converted").format(path=rel_path))
+        if not self.compact_logging:
+            self._safe_log(get_localized("Console_Convertor_Sounds_Converted").format(path=rel_path))
         return True
 
     def convert_sounds(self):
@@ -48,10 +51,13 @@ class SoundConverter(BaseConverter):
         processed_sounds = 0
 
         with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(self.process_sound_file, sound_file) for sound_file in sound_files]
-            for future in as_completed(futures):
+            futures_map = {executor.submit(self.process_sound_file, sf): sf for sf in sound_files}
+            for future in as_completed(futures_map):
                 if future.result():
                     processed_sounds += 1
+                    if self.compact_logging:
+                        sound_name = os.path.basename(futures_map[future])
+                        self._safe_log_progress(sound_name, processed_sounds, total_sounds)
                     self._safe_progress(int(processed_sounds / total_sounds * 100))
                 else:
                     self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))

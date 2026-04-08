@@ -1,10 +1,10 @@
 import glob, os, json, sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
-from tkhtmlview import HTMLLabel
 
 from src.gui.modern_widgets import ModernButton, ModernCheckbox, ModernCombobox
 from src.gui.icon import Icon
+from src.gui.theme import THEME
 
 from src.localization import get_localized
 
@@ -39,7 +39,7 @@ class language_options_window :
         self.language_window = tk.Toplevel(self.master)
         self.language_window.title(get_localized("Language_Select_Title"))
         self.language_window.geometry("300x150")  # Wider window for horizontal layout
-        self.language_window.configure(bg="#1e1e1e")
+        self.language_window.configure(bg=THEME["bg_primary"])
         self.language_window.transient(self.master)  # Make it float on top of main window
 
         main_frame = ttk.Frame(self.language_window, padding="20 20 20 20", style="TFrame")

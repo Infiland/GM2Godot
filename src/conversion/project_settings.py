@@ -7,14 +7,15 @@ from typing import Optional, List, Callable
 
 # Import localization manager
 from src.localization import get_localized
+from src.conversion.base_converter import BaseConverter
 
-class ProjectSettingsConverter:    
-    def __init__(self, gm_project_path: str, gm_platform: str, godot_project_path: str, log_callback: Callable[[str], None] = print):
-        self.gm_project_path = gm_project_path
+class ProjectSettingsConverter(BaseConverter):
+    def __init__(self, gm_project_path, godot_project_path,
+                 log_callback=print, progress_callback=None,
+                 conversion_running=None, gm_platform='windows'):
+        super().__init__(gm_project_path, godot_project_path,
+                         log_callback, progress_callback, conversion_running)
         self.gm_platform = gm_platform
-        self.godot_project_path = godot_project_path
-        self.log_callback = log_callback
-
         self.options_platform_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, f'options_{self.gm_platform}.yy')
         self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
@@ -42,7 +43,7 @@ class ProjectSettingsConverter:
 
             with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0])))
+            self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0]))
         
             return True
         except Exception as e:
@@ -52,7 +53,7 @@ class ProjectSettingsConverter:
     def get_gm_project_name(self) -> Optional[str]:
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
         if not yyp_files:
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
 
         yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
@@ -67,7 +68,7 @@ class ProjectSettingsConverter:
 
     def get_gm_option(self, option_name: str, file_path: str) -> Optional[str]:
         if not os.path.exists(file_path):
-            self.log_callback(self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound")))
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
 
         try:
@@ -229,3 +230,9 @@ class ProjectSettingsConverter:
             self.log_callback(f"Generated default_bus_layout.tres with {len(audio_groups)} audio buses.")
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_AudioBus_Error_GroupNotGenerated").format(error=str(e)))
+
+    def convert_all(self):
+        self.convert_icon()
+        self.update_project_name()
+        self.update_project_settings()
+        self.generate_audio_bus_layout()

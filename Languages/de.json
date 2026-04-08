@@ -72,10 +72,12 @@
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",
+"Console_Convertor_Fonts_NotImplemented" : "Schriftarten-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Fonts_Error_NotFound" : "Schriftarten-Ordner nicht in {gm_project_path} gefunden",
 
 "Console_Convertor_Tilesets" : "Tilesets werden konvertiert...",
 "Console_Convertor_Tilesets_Complete" : "Tileset-Konvertierung abgeschlossen.",
+"Console_Convertor_Tilesets_NotImplemented" : "Tileset-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Tilesets_Error_NotFound" : "Tileset-Ordner nicht in {gm_project_path} gefunden",
 
 "Console_Convertor_Sounds" : "Sounds werden konvertiert...",
@@ -84,7 +86,11 @@
 "Console_Convertor_Sounds_Complete" : "Sound-Konvertierung abgeschlossen.",
 "Console_Convertor_Sounds_Stopped" : "Sound-Konvertierung gestoppt.",
 
+"Console_Convertor_Shaders" : "Shader werden konvertiert...",
 "Console_Convertor_Shaders_Converted" : "{filename} konvertiert -> {output_path}",
+
+"Console_Convertor_Objects" : "Objekte werden konvertiert...",
+"Console_Convertor_Objects_NotImplemented" : "Objekt-Konvertierung ist noch nicht implementiert.",
 
 "Console_Convertor_Notes" : "Notizen werden konvertiert...",
 "Console_Convertor_Notes_Copied" : "Notiz kopiert: {note_name}",
@@ -121,6 +127,19 @@
 "Settings_Files_Heading" : "Wählen Sie zu konvertierende Dateien aus:",
 "Settings_Categories_Headings" : ["Assets", "Projekt", "WIP"],
 "Settings_Categories_Contents" : [["sprites", "fonts", "sounds"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
+"Settings_Labels": {
+    "sprites": "Sprites",
+    "fonts": "Schriftarten",
+    "sounds": "Sounds",
+    "game_icon": "Spiel-Symbol",
+    "project_name": "Projektname",
+    "project_settings": "Projekteinstellungen",
+    "audio_buses": "Audio-Busse",
+    "notes": "Notizen",
+    "objects": "Objekte",
+    "shaders": "Shader",
+    "tilesets": "Tilesets"
+},
 
 "Settings_Button_SelectAll" : "Alle auswählen",
 "Settings_Button_DeselectAll" : "Alle abwählen",

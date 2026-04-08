@@ -1,6 +1,8 @@
 import tkinter as tk
 import colorsys
 
+from src.gui.theme import THEME
+
 class ModernProgressBar(tk.Canvas):
     def __init__(self, master, width, height, bg_color, fill_color, text_color):
         super().__init__(master, width=width, height=height, bg=bg_color, highlightthickness=0)
@@ -21,7 +23,7 @@ class ModernProgressBar(tk.Canvas):
         self.text_id = self.create_text(width // 2, height // 2,
                                       text="0%",
                                       fill=text_color,
-                                      font=("Segoe UI", 12, "bold"))
+                                      font=(THEME["font_family"], THEME["font_size_large"], "bold"))
         
         # Bind resize event
         self.bind('<Configure>', self.on_resize)
@@ -67,7 +69,7 @@ class ModernProgressBar(tk.Canvas):
         self.text_id = self.create_text(self.width // 2, self.height // 2,
                                       text=f"{self.progress}%",
                                       fill=self.text_color,
-                                      font=("Segoe UI", 12, "bold"))
+                                      font=(THEME["font_family"], THEME["font_size_large"], "bold"))
 
     def update_progress(self, value):
         self.progress = value

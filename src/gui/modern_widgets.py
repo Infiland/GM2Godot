@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageDraw, ImageTk
 
+from src.gui.theme import THEME
+
 class ModernButton(ttk.Button):
     def __init__(self, master=None, icon_only=False, **kw):
         if icon_only:
@@ -23,7 +25,9 @@ class ModernButton(ttk.Button):
         self.state(['!active'])
 
     @staticmethod
-    def create_stop_icon(master, color="#ffffff", size=20):
+    def create_stop_icon(master, color=None, size=20):
+        if color is None:
+            color = THEME["fg_white"]
         # Create a new image with RGBA
         image = Image.new('RGBA', (size, size), (216, 59, 1, 255))  # #d83b01 in RGBA
         draw = ImageDraw.Draw(image)
@@ -46,10 +50,10 @@ class ModernCheckbox(ttk.Checkbutton):
         style = ttk.Style()
         
         # Configure the custom style
-        style.configure(style_name, 
-                      background="#1e1e1e",
-                      foreground="#e0e0e0",
-                      font=('Segoe UI', 10))
+        style.configure(style_name,
+                      background=THEME["bg_primary"],
+                      foreground=THEME["fg_primary"],
+                      font=(THEME["font_family"], THEME["font_size"]))
         
         # Create images for different states
         self.images = self._create_checkbox_images()
@@ -91,14 +95,14 @@ class ModernCheckbox(ttk.Checkbutton):
         
         # Colors
         colors = {
-            'bg': "#2d2d2d",
-            'bg_hover': "#3d3d3d",
-            'bg_disabled': "#1e1e1e",
-            'check': "#0078d4",
-            'check_hover': "#1e8ad4",
-            'check_disabled': "#404040",
-            'border': "#404040",
-            'border_hover': "#505050"
+            'bg': THEME["bg_secondary"],
+            'bg_hover': THEME["bg_tertiary"],
+            'bg_disabled': THEME["bg_primary"],
+            'check': THEME["accent_blue"],
+            'check_hover': THEME["accent_blue_light"],
+            'check_disabled': THEME["border"],
+            'border': THEME["border"],
+            'border_hover': THEME["border_hover"]
         }
         
         states = {
@@ -145,22 +149,22 @@ class ModernCombobox(ttk.Combobox):
         
         # Configure the custom style
         style.configure(style_name,
-                      background="#2d2d2d",
-                      foreground="#e0e0e0",
-                      fieldbackground="#2d2d2d",
-                      arrowcolor="#e0e0e0",
+                      background=THEME["bg_secondary"],
+                      foreground=THEME["fg_primary"],
+                      fieldbackground=THEME["bg_secondary"],
+                      arrowcolor=THEME["fg_primary"],
                       borderwidth=0,
                       relief="flat",
                       padding=5)
-        
+
         # Configure the dropdown list style
         style.map(style_name,
-                 fieldbackground=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
-                 selectbackground=[('readonly', '#0078d4')],
-                 selectforeground=[('readonly', '#ffffff')],
-                 background=[('readonly', '#2d2d2d'), ('disabled', '#1e1e1e')],
-                 foreground=[('readonly', '#e0e0e0'), ('disabled', '#666666')],
-                 arrowcolor=[('disabled', '#666666')])
+                 fieldbackground=[('readonly', THEME["bg_secondary"]), ('disabled', THEME["bg_primary"])],
+                 selectbackground=[('readonly', THEME["accent_blue"])],
+                 selectforeground=[('readonly', THEME["fg_white"])],
+                 background=[('readonly', THEME["bg_secondary"]), ('disabled', THEME["bg_primary"])],
+                 foreground=[('readonly', THEME["fg_primary"]), ('disabled', THEME["fg_disabled"])],
+                 arrowcolor=[('disabled', THEME["fg_disabled"])])
         
         # Define the layout for the combobox
         style.layout(style_name, [
@@ -174,16 +178,16 @@ class ModernCombobox(ttk.Combobox):
         
         kw['style'] = style_name
         if 'font' not in kw:
-            kw['font'] = ('Segoe UI', 10)
-            
+            kw['font'] = (THEME["font_family"], THEME["font_size"])
+
         super().__init__(master, **kw)
-        
+
         # Configure dropdown list appearance
-        self.option_add('*TCombobox*Listbox.background', '#2d2d2d')
-        self.option_add('*TCombobox*Listbox.foreground', '#e0e0e0')
-        self.option_add('*TCombobox*Listbox.selectBackground', '#0078d4')
-        self.option_add('*TCombobox*Listbox.selectForeground', '#ffffff')
-        self.option_add('*TCombobox*Listbox.font', ('Segoe UI', 10))
+        self.option_add('*TCombobox*Listbox.background', THEME["bg_secondary"])
+        self.option_add('*TCombobox*Listbox.foreground', THEME["fg_primary"])
+        self.option_add('*TCombobox*Listbox.selectBackground', THEME["accent_blue"])
+        self.option_add('*TCombobox*Listbox.selectForeground', THEME["fg_white"])
+        self.option_add('*TCombobox*Listbox.font', (THEME["font_family"], THEME["font_size"]))
         self.option_add('*TCombobox*Listbox.relief', 'flat')
         self.option_add('*TCombobox*Listbox.borderwidth', '0')
         

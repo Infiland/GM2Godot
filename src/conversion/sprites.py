@@ -4,15 +4,12 @@ from collections import defaultdict
 
 # Import localization manager
 from src.localization import get_localized
+from src.conversion.base_converter import BaseConverter
 
-class SpriteConverter:    
+class SpriteConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        self.gm_project_path = gm_project_path
-        self.godot_project_path = godot_project_path
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
-        self.log_callback = log_callback
-        self.progress_callback = progress_callback
-        self.conversion_running = conversion_running or (lambda: True)
 
     def find_sprite_images(self):
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')

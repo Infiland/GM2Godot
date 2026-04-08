@@ -5,7 +5,7 @@ if exist "build" rmdir /s /q "build"
 if exist "*.spec" del /f /q *.spec
 
 echo Installing required packages...
-pip install markdown2 tkhtmlview Pillow pyinstaller
+pip install -r requirements.txt pyinstaller
 
 echo.
 echo Creating Windows build...
@@ -15,7 +15,6 @@ pyinstaller --onefile ^
             --name GM2Godot ^
             --icon img/Logo.png ^
             --hidden-import markdown2 ^
-            --hidden-import tkhtmlview ^
             --hidden-import PIL ^
             --add-data "img;img" ^
             --add-data "src;src" ^

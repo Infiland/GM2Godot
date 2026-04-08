@@ -16,6 +16,7 @@ from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
 from src.conversion.notes import NoteConverter
+from src.conversion.shaders import ShaderConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.project_settings import ProjectSettingsConverter
 
@@ -497,7 +498,8 @@ class ConverterGUI:
             (get_localized("Settings_Categories_Contents")[0][1], lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Fonts")),
             (get_localized("Settings_Categories_Contents")[2][2], lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Tilesets")),
             (get_localized("Settings_Categories_Contents")[0][2], lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sounds")),
-            (get_localized("Settings_Categories_Contents")[1][4], lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Notes"))
+            (get_localized("Settings_Categories_Contents")[1][4], lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Notes")),
+            ("shaders", lambda: ShaderConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Shaders"))
         ]
 
         for setting, converter, log_message in converters:

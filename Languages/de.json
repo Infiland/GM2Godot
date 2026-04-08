@@ -72,10 +72,12 @@
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",
+"Console_Convertor_Fonts_NotImplemented" : "Schriftarten-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Fonts_Error_NotFound" : "Schriftarten-Ordner nicht in {gm_project_path} gefunden",
 
 "Console_Convertor_Tilesets" : "Tilesets werden konvertiert...",
 "Console_Convertor_Tilesets_Complete" : "Tileset-Konvertierung abgeschlossen.",
+"Console_Convertor_Tilesets_NotImplemented" : "Tileset-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Tilesets_Error_NotFound" : "Tileset-Ordner nicht in {gm_project_path} gefunden",
 
 "Console_Convertor_Sounds" : "Sounds werden konvertiert...",

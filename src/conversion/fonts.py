@@ -23,7 +23,7 @@ class FontConverter(BaseConverter):
             self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
 
-        self.log_callback(get_localized("Console_Convertor_Fonts_Complete"))
+        self.log_callback(get_localized("Console_Convertor_Fonts_NotImplemented"))
 
     def convert_all(self):
         self.convert_fonts()

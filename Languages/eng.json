@@ -72,10 +72,12 @@
 
 "Console_Convertor_Fonts" : "Converting fonts...",
 "Console_Convertor_Fonts_Complete" : "Font conversion completed.",
+"Console_Convertor_Fonts_NotImplemented" : "Font conversion is not yet implemented.",
 "Console_Convertor_Fonts_Error_NotFound" : "Font folder not found in {gm_project_path}",
 
 "Console_Convertor_Tilesets" : "Converting tilesets...",
 "Console_Convertor_Tilesets_Complete" : "Tileset conversion completed.",
+"Console_Convertor_Tilesets_NotImplemented" : "Tileset conversion is not yet implemented.",
 "Console_Convertor_Tilesets_Error_NotFound" : "Tileset folder not found in {gm_project_path}",
 
 "Console_Convertor_Sounds" : "Converting sounds...",

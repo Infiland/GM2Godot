@@ -7,8 +7,10 @@ from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 
 class SpriteConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
+                 update_log_callback=None, compact_logging=False):
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
+                         update_log_callback, compact_logging)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
 
     def find_sprite_images(self):
@@ -50,7 +52,10 @@ class SpriteConverter(BaseConverter):
                 with Image.open(gm_sprite_path) as img:
                     img.save(godot_sprite_path, 'PNG')
 
-                self.log_callback(get_localized("Console_Convertor_Sprites_Converted").format(relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path), sprite_name=sprite_name, new_filename=new_filename))
+                if self.compact_logging:
+                    self._log_progress(sprite_name, index, len(images))
+                else:
+                    self.log_callback(get_localized("Console_Convertor_Sprites_Converted").format(relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path), sprite_name=sprite_name, new_filename=new_filename))
 
                 processed_images += 1
                 if self.progress_callback:

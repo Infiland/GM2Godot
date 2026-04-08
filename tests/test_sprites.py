@@ -74,6 +74,67 @@ class TestSpriteConverterBasic(unittest.TestCase):
         self.assertEqual(len(png_files), 2)
 
 
+class TestSpriteConverterCompactLogging(unittest.TestCase):
+    """Test SpriteConverter with compact logging enabled."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.log_messages = []
+        self.update_messages = []
+
+        # Build two sprites with 2 frames each
+        for sprite_name in ["sprite_a", "sprite_b"]:
+            for i in range(2):
+                layer_dir = os.path.join(
+                    self.gm_dir, "sprites", sprite_name, "layers",
+                    f"aaaaaaaa-bbbb-cccc-dddd-{sprite_name}{i:08d}",
+                )
+                os.makedirs(layer_dir)
+                img = Image.new("RGBA", (2, 2), "red")
+                img.save(os.path.join(layer_dir, f"frame{i}.png"), "PNG")
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_compact_logging_uses_progress_messages(self):
+        converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.log_messages.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            update_log_callback=lambda msg: self.update_messages.append(msg),
+            compact_logging=True,
+        )
+        converter.convert_all()
+
+        # Should NOT have any verbose "Converted:" messages
+        all_messages = self.log_messages + self.update_messages
+        for msg in all_messages:
+            self.assertNotIn("Converted:", msg)
+
+        # Should have compact progress messages with [current/total] format
+        progress_messages = [m for m in all_messages if "[" in m and "/" in m]
+        self.assertTrue(len(progress_messages) > 0,
+                        "Expected compact progress messages")
+
+    def test_verbose_logging_when_compact_disabled(self):
+        logs = []
+        converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            compact_logging=False,
+        )
+        converter.convert_all()
+
+        # Should have verbose per-file messages
+        converted_messages = [m for m in logs if "Converted:" in m]
+        self.assertEqual(len(converted_messages), 4)  # 2 sprites x 2 frames
+
+
 class TestSpriteConverterEmpty(unittest.TestCase):
     """When the sprites folder is empty the converter should log an error, not crash."""
 

@@ -153,6 +153,9 @@
 "Settings_Button_Save" : "Save",
 "Settings_Platform_Heading" : "Gamemaker platform:",
 "Settings_Platform_Subheading" : "Choose which Gamemaker platform settings to convert to Godot",
+"Settings_Logging_Heading" : "Logging",
+"Settings_Logging_Compact" : "Compact progress logging",
+"Console_Compact_Progress" : "Converting {name} [{current}/{total}]",
 
 "UI_Label_Version" : "Version {version}",
 "UI_Label_Contribute" : "Contribute",

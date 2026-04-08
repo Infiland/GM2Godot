@@ -117,5 +117,63 @@ class TestBaseConverterThreadSafety(unittest.TestCase):
         self.assertEqual(len(self.progress_values), 200)
 
 
+class TestBaseConverterCompactLogging(unittest.TestCase):
+    """Verify _log_progress dispatches to the correct callback."""
+
+    def setUp(self):
+        class StubConverter(BaseConverter):
+            def convert_all(self):
+                pass
+
+        self.log_messages = []
+        self.update_messages = []
+        self.converter = StubConverter(
+            "/gm", "/godot",
+            log_callback=lambda msg: self.log_messages.append(msg),
+            update_log_callback=lambda msg: self.update_messages.append(msg),
+            compact_logging=True,
+        )
+
+    def test_first_item_uses_log_callback(self):
+        self.converter._log_progress("test_sprite", 1, 5)
+        self.assertEqual(len(self.log_messages), 1)
+        self.assertEqual(len(self.update_messages), 0)
+        self.assertIn("[1/5]", self.log_messages[0])
+
+    def test_subsequent_items_use_update_log(self):
+        self.converter._log_progress("test_sprite", 1, 5)
+        self.converter._log_progress("test_sprite", 2, 5)
+        self.converter._log_progress("test_sprite", 3, 5)
+        self.assertEqual(len(self.log_messages), 1)
+        self.assertEqual(len(self.update_messages), 2)
+        self.assertIn("[3/5]", self.update_messages[-1])
+
+    def test_new_item_resets_to_log_callback(self):
+        """When current resets to 1 (new asset group), a new line is appended."""
+        self.converter._log_progress("sprite_a", 1, 3)
+        self.converter._log_progress("sprite_a", 2, 3)
+        self.converter._log_progress("sprite_a", 3, 3)
+        self.converter._log_progress("sprite_b", 1, 2)
+        self.converter._log_progress("sprite_b", 2, 2)
+        self.assertEqual(len(self.log_messages), 2)  # Two "first items"
+        self.assertEqual(len(self.update_messages), 3)  # Three updates
+
+    def test_update_log_defaults_to_log_callback(self):
+        """When update_log_callback is not provided, it falls back to log_callback."""
+        class StubConverter(BaseConverter):
+            def convert_all(self):
+                pass
+
+        messages = []
+        converter = StubConverter(
+            "/gm", "/godot",
+            log_callback=lambda msg: messages.append(msg),
+        )
+        converter._log_progress("item", 1, 3)
+        converter._log_progress("item", 2, 3)
+        # Both should go to log_callback since update_log_callback defaults to it
+        self.assertEqual(len(messages), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

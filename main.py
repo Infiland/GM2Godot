@@ -194,6 +194,7 @@ class ConverterGUI:
         self.conversion_settings = {key: tk.BooleanVar(value=True) for key in all_keys}
         self.conversion_settings["notes"].set(False)
         self.conversion_settings["objects"].set(False)
+        self.compact_logging = tk.BooleanVar(value=True)
 
         match(platform.system()):
             case "Linux":
@@ -269,6 +270,16 @@ class ConverterGUI:
         self.platform_combobox.bind('<<ComboboxSelected>>', self.update_platform_settings)
         self.platform_combobox.set(self.gm_platform_settings)
 
+        # Logging section
+        logging_frame = ttk.Frame(main_frame, style="TFrame", padding="0 20")
+        logging_frame.pack(fill=tk.X)
+
+        ttk.Label(logging_frame, text=get_localized("Settings_Logging_Heading"),
+                  style="TLabel", font=(THEME["font_family"], THEME["font_size_title"], "bold")).pack(anchor="w")
+
+        ModernCheckbox(logging_frame, text=get_localized("Settings_Logging_Compact"),
+                       variable=self.compact_logging).pack(pady=5, anchor="w")
+
         # Buttons frame
         button_frame = ttk.Frame(main_frame, style="TFrame")
         button_frame.pack(pady=(20, 0))
@@ -293,6 +304,20 @@ class ConverterGUI:
             self.console.configure(state='disabled')
         else:
             print(get_localized("Console_Error_NotInitialized").format(message=message))
+
+    def update_log(self, message):
+        """Replace the last content line in the console with message."""
+        if self.console:
+            self.console.configure(state='normal')
+            # "end-1c" is at the implicit trailing newline in tk.Text.
+            # After log(), content ends with an explicit \n, so the last
+            # content line is one line above the empty trailing line.
+            end_pos = self.console.index("end-1c")
+            target_line = max(1, int(end_pos.split('.')[0]) - 1)
+            self.console.delete(f"{target_line}.0", f"{target_line}.0 lineend")
+            self.console.insert(f"{target_line}.0", message)
+            self.console.see(tk.END)
+            self.console.configure(state='disabled')
 
     def browse_project(self, entry, file_check, dialog_title):
         folder = filedialog.askdirectory(title=dialog_title)
@@ -335,8 +360,9 @@ class ConverterGUI:
         if not self.validate_projects(gm_path, godot_path):
             return
 
+        compact_logging = self.compact_logging.get()
         self.prepare_for_conversion()
-        self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, gm_platform, godot_path))
+        self.conversion_thread = threading.Thread(target=self.convert, args=(gm_path, gm_platform, godot_path, compact_logging))
         self.conversion_thread.start()
         self.start_timer()
         self.style.configure("Red.TButton", background=THEME["accent_red"], foreground=THEME["fg_white"])
@@ -392,12 +418,14 @@ class ConverterGUI:
             self.timer_label.config(text=time_str)
             self.master.after(1000, self.update_timer)
 
-    def convert(self, gm_path, gm_platform, godot_path):
+    def convert(self, gm_path, gm_platform, godot_path, compact_logging):
         converter = Converter(
             self.threadsafe_log,
             self.threadsafe_update_progress,
             self.threadsafe_update_status,
-            self.conversion_running
+            self.conversion_running,
+            update_log_callback=self.threadsafe_update_log,
+            compact_logging=compact_logging,
         )
         converter.convert(gm_path, gm_platform, godot_path, self.conversion_settings)
         self.master.after(0, self.conversion_complete)
@@ -410,6 +438,9 @@ class ConverterGUI:
 
     def threadsafe_log(self, message):
         self.master.after(0, self.log, message)
+
+    def threadsafe_update_log(self, message):
+        self.master.after(0, self.update_log, message)
 
     def threadsafe_update_status(self, message):
         self.master.after(0, self.status_label.config, {"text": message})

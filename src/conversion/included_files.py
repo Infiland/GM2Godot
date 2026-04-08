@@ -6,8 +6,10 @@ from src.conversion.base_converter import BaseConverter
 
 
 class IncludedFilesConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
+                 update_log_callback=None, compact_logging=False):
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
+                         update_log_callback, compact_logging)
 
     def convert_included_files(self):
         gm_datafiles_path = os.path.join(self.gm_project_path, "datafiles")
@@ -48,9 +50,11 @@ class IncludedFilesConverter(BaseConverter):
 
             shutil.copy2(gm_file_path, godot_file_path)
 
-            self.log_callback(get_localized("Console_Convertor_IncludedFiles_Copied").format(path=rel_path))
-
             processed_files += 1
+            if self.compact_logging:
+                self._log_progress(os.path.basename(rel_path), processed_files, total_files)
+            else:
+                self.log_callback(get_localized("Console_Convertor_IncludedFiles_Copied").format(path=rel_path))
             progress = int((processed_files / total_files) * 100)
             if self.progress_callback:
                 self.progress_callback(progress)

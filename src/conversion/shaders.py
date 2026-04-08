@@ -8,9 +8,11 @@ from src.localization import get_localized
 class ShaderConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path,
                  log_callback=print, progress_callback=None,
-                 conversion_running=None):
+                 conversion_running=None,
+                 update_log_callback=None, compact_logging=False):
         super().__init__(gm_project_path, godot_project_path,
-                         log_callback, progress_callback, conversion_running)
+                         log_callback, progress_callback, conversion_running,
+                         update_log_callback, compact_logging)
         self.godot_shaders_path = os.path.join(self.godot_project_path, 'shaders')
 
     def convert_shader(self, input_file, output_file):
@@ -84,8 +86,11 @@ class ShaderConverter(BaseConverter):
             output_path = os.path.join(self.godot_shaders_path, output_name)
 
             self.convert_shader(input_path, output_path)
-            self.log_callback(get_localized("Console_Convertor_Shaders_Converted").format(
-                filename=filename, output_path=output_name))
+            if self.compact_logging:
+                self._log_progress(filename, i + 1, total)
+            else:
+                self.log_callback(get_localized("Console_Convertor_Shaders_Converted").format(
+                    filename=filename, output_path=output_name))
 
             if self.progress_callback:
                 self.progress_callback(int((i + 1) / total * 100))

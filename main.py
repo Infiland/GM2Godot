@@ -6,17 +6,10 @@ from functools import partial
 import platform
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, font as tkfont
-#TODO: REPLACE THIS WITH from src.conversion.converter import Converter
 from src.gui.about import AboutDialog
 from src.gui.release_notes import ReleaseNotesDialog
 from src.gui.theme import THEME
-from src.conversion.sprites import SpriteConverter
-from src.conversion.sounds import SoundConverter
-from src.conversion.fonts import FontConverter
-from src.conversion.notes import NoteConverter
-from src.conversion.shaders import ShaderConverter
-from src.conversion.tilesets import TileSetConverter
-from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.converter import Converter
 
 from src.version import get_version
 
@@ -196,30 +189,13 @@ class ConverterGUI:
         self.master.option_add('*TCombobox*Listbox.borderwidth', '0')
 
     def setup_conversion_settings(self):
-        class settings_contents:
-            values = ["sprites", "fonts", "sounds", "game_icon", "project_name", "project_settings", "audio_buses", "notes", "objects", "shaders", "tilesets"]
-            
-            sprites = get_localized("Settings_Categories_Contents")[0][0]
-            fonts = get_localized("Settings_Categories_Contents")[0][1]
-            sounds = get_localized("Settings_Categories_Contents")[0][2]
-            
-            game_icon = get_localized("Settings_Categories_Contents")[1][0]
-            project_name = get_localized("Settings_Categories_Contents")[1][1]
-            project_settings = get_localized("Settings_Categories_Contents")[1][2]
-            audio_buses = get_localized("Settings_Categories_Contents")[1][3]
-            notes = get_localized("Settings_Categories_Contents")[1][4]
-
-            objects = get_localized("Settings_Categories_Contents")[2][0]
-            shaders = get_localized("Settings_Categories_Contents")[2][1]
-            tilesets = get_localized("Settings_Categories_Contents")[2][2]
-
-        settings = settings_contents()
-        
-        self.conversion_settings = {settings.values[i] : tk.BooleanVar(value=True) for i in range(len(settings.values))}
+        from src.conversion.converter import CONVERSION_CATEGORIES
+        all_keys = [key for keys in CONVERSION_CATEGORIES.values() for key in keys]
+        self.conversion_settings = {key: tk.BooleanVar(value=True) for key in all_keys}
         self.conversion_settings["notes"].set(False)
         self.conversion_settings["objects"].set(False)
 
-        match(platform.system()):  
+        match(platform.system()):
             case "Linux":
                 self.gm_platform_settings = "linux"
             case "Darwin":
@@ -252,22 +228,23 @@ class ConverterGUI:
         categories_frame.grid_columnconfigure(1, weight=1)
         categories_frame.grid_columnconfigure(2, weight=1)
 
-        categories = {
-            get_localized("Settings_Categories_Headings")[0] : get_localized("Settings_Categories_Contents")[0],
-            get_localized("Settings_Categories_Headings")[1] : get_localized("Settings_Categories_Contents")[1],
-            get_localized("Settings_Categories_Headings")[2] : get_localized("Settings_Categories_Contents")[2]
-        }
+        labels = get_localized("Settings_Labels")
+        headings = get_localized("Settings_Categories_Headings")
 
-        # Create frames for each category
-        for idx, (category, settings) in enumerate(categories.items()):
+        from src.conversion.converter import CONVERSION_CATEGORIES
+        categories_items = list(CONVERSION_CATEGORIES.items())
+
+        for idx, (cat_key, setting_keys) in enumerate(categories_items):
             category_frame = ttk.Frame(categories_frame, style="TFrame", padding="10 0")
             category_frame.grid(row=0, column=idx, sticky="n", padx=10)
-            
-            ttk.Label(category_frame, text=category, style="TLabel", font=(THEME["font_family"], THEME["font_size_large"], "bold")).pack(pady=(0, 10))
-            
-            for setting in settings:
-                var = self.conversion_settings[setting]
-                ModernCheckbox(category_frame, text=setting.replace("_", " ").title(), variable=var).pack(pady=5, anchor="w")
+
+            ttk.Label(category_frame, text=headings[idx],
+                      style="TLabel", font=(THEME["font_family"], THEME["font_size_large"], "bold")).pack(pady=(0, 10))
+
+            for key in setting_keys:
+                display_name = labels.get(key, key.replace("_", " ").title())
+                var = self.conversion_settings[key]
+                ModernCheckbox(category_frame, text=display_name, variable=var).pack(pady=5, anchor="w")
 
         # Platform selection section
         platform_frame = ttk.Frame(main_frame, style="TFrame", padding="0 20")
@@ -415,33 +392,14 @@ class ConverterGUI:
             self.timer_label.config(text=time_str)
             self.master.after(1000, self.update_timer)
 
-    def convert(self, gm_path, gm_platform_settings_path, godot_path):
-        project_settings_converter = ProjectSettingsConverter(
-            gm_path, godot_path, self.threadsafe_log,
-            self.threadsafe_update_progress, self.conversion_running.is_set,
-            gm_platform=gm_platform_settings_path
+    def convert(self, gm_path, gm_platform, godot_path):
+        converter = Converter(
+            self.threadsafe_log,
+            self.threadsafe_update_progress,
+            self.threadsafe_update_status,
+            self.conversion_running
         )
-
-        converters = [
-            (get_localized("Settings_Categories_Contents")[1][0], project_settings_converter.convert_icon, get_localized("Console_Convertor_Icon")),
-            (get_localized("Settings_Categories_Contents")[1][1], project_settings_converter.update_project_name, get_localized("Console_Convertor_Name")),
-            (get_localized("Settings_Categories_Contents")[1][2], project_settings_converter.update_project_settings, get_localized("Console_Convertor_Settings")),
-            (get_localized("Settings_Categories_Contents")[1][3], project_settings_converter.generate_audio_bus_layout, get_localized("Console_Convertor_AudioBus")),
-            (get_localized("Settings_Categories_Contents")[0][0], lambda: SpriteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sprites")),
-            (get_localized("Settings_Categories_Contents")[0][1], lambda: FontConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Fonts")),
-            (get_localized("Settings_Categories_Contents")[2][2], lambda: TileSetConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Tilesets")),
-            (get_localized("Settings_Categories_Contents")[0][2], lambda: SoundConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Sounds")),
-            (get_localized("Settings_Categories_Contents")[1][4], lambda: NoteConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Notes")),
-            ("shaders", lambda: ShaderConverter(gm_path, godot_path, self.threadsafe_log, self.threadsafe_update_progress, self.conversion_running.is_set).convert_all(), get_localized("Console_Convertor_Shaders"))
-        ]
-
-        for setting, converter, log_message in converters:
-            if self.conversion_settings[setting].get() and self.conversion_running.is_set():
-                self.threadsafe_log(log_message)
-                self.threadsafe_update_status(log_message)
-                converter()
-                self.threadsafe_update_progress(0)
-
+        converter.convert(gm_path, gm_platform, godot_path, self.conversion_settings)
         self.master.after(0, self.conversion_complete)
 
     def check_conversion_stopped(self):

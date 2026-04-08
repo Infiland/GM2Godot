@@ -27,6 +27,7 @@ THEME = {
 
     # Fonts
     "font_family": "Segoe UI",
+    "font_size_small": 9,
     "font_size": 10,
     "font_size_large": 12,
     "font_size_title": 14,

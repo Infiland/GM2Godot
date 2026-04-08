@@ -42,7 +42,7 @@ class ReleaseNotesDialog:
 
         html_content = markdown2.markdown(notes)
 
-        text_widget = tk.Text(notes_window, wrap=tk.WORD, bg=THEME["bg_tertiary"], fg=THEME["fg_white"], font=("Arial", 11), padx=10, pady=10)
+        text_widget = tk.Text(notes_window, wrap=tk.WORD, bg=THEME["bg_tertiary"], fg=THEME["fg_white"], font=(THEME["font_family"], THEME["font_size"]), padx=10, pady=10)
         text_widget.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
 
         scrollbar = ttk.Scrollbar(text_widget, orient="vertical", command=text_widget.yview)
@@ -50,8 +50,8 @@ class ReleaseNotesDialog:
 
         text_widget.configure(yscrollcommand=scrollbar.set)
 
-        text_widget.tag_configure("h1", font=("Arial", 16, "bold"), spacing3=5)
-        text_widget.tag_configure("h2", font=("Arial", 14, "bold"), spacing3=5)
+        text_widget.tag_configure("h1", font=(THEME["font_family"], THEME["font_size_heading"], "bold"), spacing3=5)
+        text_widget.tag_configure("h2", font=(THEME["font_family"], THEME["font_size_title"], "bold"), spacing3=5)
         text_widget.tag_configure("bullet", lmargin1=20, lmargin2=30)
         text_widget.tag_configure("link", foreground=THEME["accent_link"], underline=True)
 

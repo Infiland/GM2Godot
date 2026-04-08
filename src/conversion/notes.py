@@ -30,7 +30,6 @@ class NoteConverter(BaseConverter):
 
             for file in files:
                 if file.endswith('.txt'):
-                    relative_path = os.path.relpath(root, gm_notes_path)
                     note_name = os.path.splitext(file)[0]
 
                     godot_note_folder = os.path.join(godot_notes_path, note_name)

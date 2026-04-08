@@ -15,7 +15,6 @@ pyinstaller --onefile ^
             --name GM2Godot ^
             --icon img/Logo.png ^
             --hidden-import markdown2 ^
-            --hidden-import tkhtmlview ^
             --hidden-import PIL ^
             --add-data "img;img" ^
             --add-data "src;src" ^

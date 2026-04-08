@@ -163,7 +163,7 @@ class SetupUI:
                                 text=get_localized("UI_Label_Version").format(version=get_version()),
                                 style="TLabel",
                                 cursor="hand2",
-                                font=(THEME["font_family"], 9))
+                                font=(THEME["font_family"], THEME["font_size_small"]))
         version_label.grid(row=0, column=0, padx=10)
         version_label.bind("<Button-1>", self.app.release_notes.show)
         version_label.bind('<Enter>', lambda e: version_label.configure(foreground=THEME["accent_blue"]))
@@ -173,7 +173,7 @@ class SetupUI:
                                    text=get_localized("UI_Label_Contribute"),
                                    style="TLabel",
                                    cursor="hand2",
-                                   font=(THEME["font_family"], 9))
+                                   font=(THEME["font_family"], THEME["font_size_small"]))
         contribute_label.grid(row=0, column=1, padx=10)
         contribute_label.bind("<Button-1>", self.app.open_github)
         contribute_label.bind('<Enter>', lambda e: contribute_label.configure(foreground=THEME["accent_blue"]))
@@ -183,7 +183,7 @@ class SetupUI:
                                 text=get_localized("UI_Label_MadeBy"),
                                 style="TLabel",
                                 cursor="hand2",
-                                font=(THEME["font_family"], 9))
+                                font=(THEME["font_family"], THEME["font_size_small"]))
         made_by_label.grid(row=0, column=2, padx=10)
         made_by_label.bind("<Button-1>", self.app.open_infiland_website)
         made_by_label.bind('<Enter>', lambda e: made_by_label.configure(foreground=THEME["accent_blue"]))

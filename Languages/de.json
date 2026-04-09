@@ -70,6 +70,8 @@
 "Console_Convertor_Sprites_Converted" : "Konvertiert: {relative_path} -> sprites/{sprite_name}/{new_filename}",
 "Console_Convertor_Sprites_Error_NotFound" : "Keine Sprite-Bilder im GameMaker-Projekt gefunden.",
 "Console_Convertor_Sprites_YYParseFailed" : "Warnung: {yy_path} konnte nicht gelesen werden, Fallback-Reihenfolge wird fuer {sprite_name} verwendet.",
+"Console_Convertor_Sprites_Skipped" : "Verwaistes Sprite nicht in .yyp übersprungen: {sprite_name}",
+"Console_Convertor_Sprites_YYPFilterWarning" : "Warnung: .yyp-Datei konnte nicht geparst werden. Alle Sprites werden konvertiert.",
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",

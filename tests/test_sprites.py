@@ -395,5 +395,178 @@ class TestParseSpriteYY(unittest.TestCase):
         self.assertEqual(layer_guid, "visible_layer")
 
 
+def _make_yyp_content(sprite_names, extra_resources=None):
+    """Build a minimal .yyp file string with the given sprite names in the resources array."""
+    resources = []
+    for name in sprite_names:
+        resources.append(
+            '{{"id":{{"name":"{name}","path":"sprites/{name}/{name}.yy",}},}}'.format(name=name)
+        )
+    if extra_resources:
+        resources.extend(extra_resources)
+    res_str = ",\n    ".join(resources) if resources else ""
+    return '{{\n  "%Name": "TestProject",\n  "resources": [\n    {res}\n  ],\n}}'.format(res=res_str)
+
+
+def _make_sprite_on_disk(gm_dir, sprite_name, layer_guid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
+    """Create a minimal sprite folder structure with a single-frame PNG."""
+    layer_dir = os.path.join(gm_dir, "sprites", sprite_name, "layers", layer_guid)
+    os.makedirs(layer_dir, exist_ok=True)
+    img = Image.new("RGBA", (2, 2), "red")
+    img.save(os.path.join(layer_dir, "frame0.png"), "PNG")
+
+
+class TestGetValidSpriteNames(unittest.TestCase):
+    """Test _get_valid_sprite_names() parsing of .yyp files."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self):
+        return SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def test_returns_sprite_names_from_yyp(self):
+        sound_resource = '{"id":{"name":"snd_explosion","path":"sounds/snd_explosion/snd_explosion.yy",},}'
+        yyp = _make_yyp_content(["s_player", "s_enemy", "s_bullet"], extra_resources=[sound_resource])
+        with open(os.path.join(self.gm_dir, "Test.yyp"), "w") as f:
+            f.write(yyp)
+
+        converter = self._make_converter()
+        result = converter._get_valid_sprite_names()
+        self.assertEqual(result, {"s_player", "s_enemy", "s_bullet"})
+
+    def test_handles_trailing_commas(self):
+        # Trailing commas are present in the _make_yyp_content output
+        yyp = _make_yyp_content(["s_test"])
+        with open(os.path.join(self.gm_dir, "Game.yyp"), "w") as f:
+            f.write(yyp)
+
+        converter = self._make_converter()
+        result = converter._get_valid_sprite_names()
+        self.assertEqual(result, {"s_test"})
+
+    def test_returns_none_when_no_yyp(self):
+        converter = self._make_converter()
+        result = converter._get_valid_sprite_names()
+        self.assertIsNone(result)
+
+    def test_returns_none_when_yyp_malformed(self):
+        with open(os.path.join(self.gm_dir, "Bad.yyp"), "w") as f:
+            f.write("not valid json {{{")
+
+        converter = self._make_converter()
+        result = converter._get_valid_sprite_names()
+        self.assertIsNone(result)
+
+    def test_returns_empty_set_when_no_sprites(self):
+        sound_resource = '{"id":{"name":"snd_boom","path":"sounds/snd_boom/snd_boom.yy",},}'
+        yyp = _make_yyp_content([], extra_resources=[sound_resource])
+        with open(os.path.join(self.gm_dir, "Game.yyp"), "w") as f:
+            f.write(yyp)
+
+        converter = self._make_converter()
+        result = converter._get_valid_sprite_names()
+        self.assertIsNotNone(result)
+        self.assertEqual(result, set())
+
+
+class TestSpriteConverterFiltering(unittest.TestCase):
+    """Test that orphaned sprites are filtered out based on .yyp."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self):
+        return SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def test_skips_orphaned_sprites(self):
+        _make_sprite_on_disk(self.gm_dir, "s_valid1")
+        _make_sprite_on_disk(self.gm_dir, "s_valid2")
+        _make_sprite_on_disk(self.gm_dir, "s_orphan")
+
+        yyp = _make_yyp_content(["s_valid1", "s_valid2"])
+        with open(os.path.join(self.gm_dir, "Test.yyp"), "w") as f:
+            f.write(yyp)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        godot_sprites = os.path.join(self.godot_dir, "sprites")
+        converted = set(os.listdir(godot_sprites)) if os.path.exists(godot_sprites) else set()
+        self.assertIn("s_valid1", converted)
+        self.assertIn("s_valid2", converted)
+        self.assertNotIn("s_orphan", converted)
+
+        skipped_logs = [l for l in self.logs if "s_orphan" in l]
+        self.assertTrue(len(skipped_logs) > 0, "Expected a log message about skipped orphan sprite")
+
+    def test_converts_all_when_all_in_yyp(self):
+        _make_sprite_on_disk(self.gm_dir, "s_a")
+        _make_sprite_on_disk(self.gm_dir, "s_b")
+
+        yyp = _make_yyp_content(["s_a", "s_b"])
+        with open(os.path.join(self.gm_dir, "Test.yyp"), "w") as f:
+            f.write(yyp)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        godot_sprites = os.path.join(self.godot_dir, "sprites")
+        converted = set(os.listdir(godot_sprites))
+        self.assertIn("s_a", converted)
+        self.assertIn("s_b", converted)
+
+        skipped_logs = [l for l in self.logs if "Skipped" in l and ("s_a" in l or "s_b" in l)]
+        self.assertEqual(len(skipped_logs), 0, "No real sprites should be skipped")
+
+    def test_converts_all_when_yyp_missing(self):
+        _make_sprite_on_disk(self.gm_dir, "s_x")
+        _make_sprite_on_disk(self.gm_dir, "s_y")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        godot_sprites = os.path.join(self.godot_dir, "sprites")
+        converted = set(os.listdir(godot_sprites))
+        self.assertIn("s_x", converted)
+        self.assertIn("s_y", converted)
+
+    def test_converts_all_when_yyp_malformed(self):
+        _make_sprite_on_disk(self.gm_dir, "s_m")
+        _make_sprite_on_disk(self.gm_dir, "s_n")
+
+        with open(os.path.join(self.gm_dir, "Bad.yyp"), "w") as f:
+            f.write("totally broken {{{")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        godot_sprites = os.path.join(self.godot_dir, "sprites")
+        converted = set(os.listdir(godot_sprites))
+        self.assertIn("s_m", converted)
+        self.assertIn("s_n", converted)
+
+
 if __name__ == "__main__":
     unittest.main()

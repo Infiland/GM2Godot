@@ -155,6 +155,8 @@
 "Settings_Platform_Subheading" : "Wählen Sie aus, welche GameMaker-Plattform-Einstellungen nach Godot konvertiert werden sollen",
 "Settings_Logging_Heading" : "Protokollierung",
 "Settings_Logging_Compact" : "Kompakte Fortschrittsprotokollierung",
+"Settings_Performance_Heading" : "Leistung",
+"Settings_Performance_Threads" : "Konvertierungsthreads:",
 "Console_Compact_Progress" : "Konvertiere {name} [{current}/{total}]",
 
 "UI_Label_Version" : "Version {version}",

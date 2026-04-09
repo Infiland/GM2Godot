@@ -7,8 +7,10 @@ from src.conversion.base_converter import BaseConverter
 # WORK IN PROGRESS
 
 class FontConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None):
-        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running)
+    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
+                 max_workers=None):
+        super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
+                         max_workers=max_workers)
         self.godot_fonts_path = os.path.join(self.godot_project_path, 'fonts')
 
     def convert_fonts(self):

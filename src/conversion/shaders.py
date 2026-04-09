@@ -1,5 +1,6 @@
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.conversion.base_converter import BaseConverter
 from src.localization import get_localized
@@ -9,10 +10,11 @@ class ShaderConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path,
                  log_callback=print, progress_callback=None,
                  conversion_running=None,
-                 update_log_callback=None, compact_logging=False):
+                 update_log_callback=None, compact_logging=False,
+                 max_workers=None):
         super().__init__(gm_project_path, godot_project_path,
                          log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging)
+                         update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_shaders_path = os.path.join(self.godot_project_path, 'shaders')
 
     def convert_shader(self, input_file, output_file):
@@ -56,6 +58,15 @@ class ShaderConverter(BaseConverter):
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
+    def _process_shader(self, input_path):
+        if not self.conversion_running():
+            return None
+        filename = os.path.basename(input_path)
+        output_name = os.path.splitext(filename)[0] + '.gdshader'
+        output_path = os.path.join(self.godot_shaders_path, output_name)
+        self.convert_shader(input_path, output_path)
+        return (filename, output_name)
+
     def convert_all(self):
         gm_shaders_path = os.path.join(self.gm_project_path, 'shaders')
 
@@ -76,23 +87,28 @@ class ShaderConverter(BaseConverter):
             return
 
         total = len(shader_files)
-        for i, input_path in enumerate(shader_files):
-            if not self.conversion_running():
-                self.log_callback("Shader conversion stopped.")
-                return
+        processed = 0
 
-            filename = os.path.basename(input_path)
-            output_name = os.path.splitext(filename)[0] + '.gdshader'
-            output_path = os.path.join(self.godot_shaders_path, output_name)
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures_map = {
+                executor.submit(self._process_shader, path): path
+                for path in shader_files
+            }
+            for future in as_completed(futures_map):
+                result = future.result()
+                if result is None:
+                    self.log_callback("Shader conversion stopped.")
+                    return
 
-            self.convert_shader(input_path, output_path)
-            if self.compact_logging:
-                self._log_progress(filename, i + 1, total)
-            else:
-                self.log_callback(get_localized("Console_Convertor_Shaders_Converted").format(
-                    filename=filename, output_path=output_name))
+                filename, output_name = result
+                processed += 1
 
-            if self.progress_callback:
-                self.progress_callback(int((i + 1) / total * 100))
+                if self.compact_logging:
+                    self._safe_log_progress(filename, processed, total)
+                else:
+                    self._safe_log(get_localized("Console_Convertor_Shaders_Converted").format(
+                        filename=filename, output_path=output_name))
+
+                self._safe_progress(int((processed / total) * 100))
 
         self.log_callback("Shader conversion complete.")

@@ -12,9 +12,11 @@ from src.conversion.base_converter import BaseConverter
 class ProjectSettingsConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path,
                  log_callback=print, progress_callback=None,
-                 conversion_running=None, gm_platform='windows'):
+                 conversion_running=None, gm_platform='windows',
+                 max_workers=None):
         super().__init__(gm_project_path, godot_project_path,
-                         log_callback, progress_callback, conversion_running)
+                         log_callback, progress_callback, conversion_running,
+                         max_workers=max_workers)
         self.gm_platform = gm_platform
         self.options_platform_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, f'options_{self.gm_platform}.yy')
         self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')

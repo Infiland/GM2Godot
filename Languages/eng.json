@@ -155,6 +155,8 @@
 "Settings_Platform_Subheading" : "Choose which Gamemaker platform settings to convert to Godot",
 "Settings_Logging_Heading" : "Logging",
 "Settings_Logging_Compact" : "Compact progress logging",
+"Settings_Performance_Heading" : "Performance",
+"Settings_Performance_Threads" : "Conversion threads:",
 "Console_Compact_Progress" : "Converting {name} [{current}/{total}]",
 
 "UI_Label_Version" : "Version {version}",

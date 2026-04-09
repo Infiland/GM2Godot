@@ -51,6 +51,8 @@ class Converter:
             ("fonts", lambda: FontConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,
+                update_log_callback=self.update_log_callback,
+                compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Fonts"),
             ("tilesets", lambda: TileSetConverter(

@@ -76,8 +76,14 @@
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",
-"Console_Convertor_Fonts_NotImplemented" : "Schriftarten-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Fonts_Error_NotFound" : "Schriftarten-Ordner nicht in {gm_project_path} gefunden",
+"Console_Convertor_Fonts_Converted" : "Schriftart konvertiert: {name} -> fonts/{output_file}",
+"Console_Convertor_Fonts_CopiedTTF" : "TTF kopiert: {name} -> fonts/{output_file}",
+"Console_Convertor_Fonts_Stopped" : "Schriftarten-Konvertierung gestoppt.",
+"Console_Convertor_Fonts_SizeNote" : "  Hinweis: {name} Groesse {size}px muss auf der Node-/Theme-Ebene in Godot gesetzt werden.",
+"Console_Convertor_Fonts_ParseError" : "Warnung: {yy_path} konnte nicht gelesen werden, Schriftart wird uebersprungen.",
+"Console_Convertor_Fonts_TTFMissing" : "Warnung: {name} hat includeTTF=true, aber TTF-Datei '{ttf_name}' nicht gefunden. Fallback auf SystemFont.",
+"Console_Convertor_Fonts_SystemFontFallback" : "Warnung: Schriftart '{font_name}' fuer {name} nicht auf dem System gefunden. SystemFont-Referenz erstellt. Installieren Sie die Schriftart und fuehren Sie erneut aus, oder fuegen Sie die Schriftartdatei manuell zu fonts/ hinzu.",
 
 "Console_Convertor_Tilesets" : "Tilesets werden konvertiert...",
 "Console_Convertor_Tilesets_Complete" : "Tileset-Konvertierung abgeschlossen.",

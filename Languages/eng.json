@@ -76,8 +76,14 @@
 
 "Console_Convertor_Fonts" : "Converting fonts...",
 "Console_Convertor_Fonts_Complete" : "Font conversion completed.",
-"Console_Convertor_Fonts_NotImplemented" : "Font conversion is not yet implemented.",
 "Console_Convertor_Fonts_Error_NotFound" : "Font folder not found in {gm_project_path}",
+"Console_Convertor_Fonts_Converted" : "Converted font: {name} -> fonts/{output_file}",
+"Console_Convertor_Fonts_CopiedTTF" : "Copied TTF: {name} -> fonts/{output_file}",
+"Console_Convertor_Fonts_Stopped" : "Font conversion stopped.",
+"Console_Convertor_Fonts_SizeNote" : "  Note: {name} size {size}px must be set at the node/theme level in Godot.",
+"Console_Convertor_Fonts_ParseError" : "Warning: Could not parse {yy_path}, skipping font.",
+"Console_Convertor_Fonts_TTFMissing" : "Warning: {name} has includeTTF=true but TTF file '{ttf_name}' not found. Falling back to SystemFont.",
+"Console_Convertor_Fonts_SystemFontFallback" : "Warning: Font '{font_name}' for {name} not found on system. Created SystemFont reference. Install the font and re-run, or manually add the font file to fonts/.",
 
 "Console_Convertor_Tilesets" : "Converting tilesets...",
 "Console_Convertor_Tilesets_Complete" : "Tileset conversion completed.",

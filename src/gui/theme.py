@@ -23,6 +23,11 @@ THEME = {
     "accent_red": "#d83b01",
     "accent_red_hover": "#a62d00",
 
+    # Log colors
+    "log_success": "#98c379",
+    "log_warning": "#e5c07b",
+    "log_error": "#e06c75",
+
     # Disabled / borders
     "disabled_bg": "#333333",
     "border": "#404040",

@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         self._progress.status_label.setText(get_localized("Console_ConversionComplete"))
 
         if self._conversion_running.is_set():
-            self._console.append_log(get_localized("Console_ConversionComplete_B"))
+            self._console.append_log(get_localized("Console_ConversionComplete_B"), success=True)
         else:
             self._console.append_log(get_localized("Console_ConversionStopped"))
 

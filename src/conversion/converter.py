@@ -19,19 +19,21 @@ CONVERSION_CATEGORIES = {
 
 class Converter:
     def __init__(self, log_callback, progress_callback, status_callback, conversion_running,
-                 update_log_callback=None, compact_logging=False):
+                 update_log_callback=None, compact_logging=False, max_workers=None):
         self.log_callback = log_callback
         self.progress_callback = progress_callback
         self.status_callback = status_callback
         self.conversion_running = conversion_running
         self.update_log_callback = update_log_callback or log_callback
         self.compact_logging = compact_logging
+        self.max_workers = max_workers
 
     def convert(self, gm_path, gm_platform, godot_path, settings):
         project_settings = ProjectSettingsConverter(
             gm_path, godot_path, self.log_callback,
             self.progress_callback, self.conversion_running.is_set,
-            gm_platform=gm_platform
+            gm_platform=gm_platform,
+            max_workers=self.max_workers,
         )
 
         converters = [
@@ -44,38 +46,45 @@ class Converter:
                 self.progress_callback, self.conversion_running.is_set,
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Sprites"),
             ("fonts", lambda: FontConverter(
                 gm_path, godot_path, self.log_callback,
-                self.progress_callback, self.conversion_running.is_set
+                self.progress_callback, self.conversion_running.is_set,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Fonts"),
             ("tilesets", lambda: TileSetConverter(
                 gm_path, godot_path, self.log_callback,
-                self.progress_callback, self.conversion_running.is_set
+                self.progress_callback, self.conversion_running.is_set,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Tilesets"),
             ("sounds", lambda: SoundConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Sounds"),
             ("notes", lambda: NoteConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Notes"),
             ("shaders", lambda: ShaderConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Shaders"),
             ("included_files", lambda: IncludedFilesConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_IncludedFiles"),
             ("objects", lambda: self.log_callback(
                 get_localized("Console_Convertor_Objects_NotImplemented")

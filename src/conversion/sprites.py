@@ -1,16 +1,17 @@
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 from collections import defaultdict
 
-# Import localization manager
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 
+
 class SpriteConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False):
+                 update_log_callback=None, compact_logging=False, max_workers=None):
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging)
+                         update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
 
     def find_sprite_images(self):
@@ -26,6 +27,18 @@ class SpriteConverter(BaseConverter):
                 )
         return image_files
 
+    def _process_sprite(self, sprite_name, index, gm_sprite_path, images_count):
+        if not self.conversion_running():
+            return None
+
+        new_filename = f"{sprite_name}_{index if images_count > 1 else ''}.png"
+        godot_sprite_path = os.path.join(self.godot_sprites_path, sprite_name, new_filename)
+
+        with Image.open(gm_sprite_path) as img:
+            img.save(godot_sprite_path, 'PNG')
+
+        return (sprite_name, index, images_count, gm_sprite_path, new_filename)
+
     def convert_sprites(self):
         os.makedirs(self.godot_sprites_path, exist_ok=True)
 
@@ -34,32 +47,42 @@ class SpriteConverter(BaseConverter):
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
             return
 
-        total_images = sum(len(images) for images in sprite_images.values())
+        # Pre-create all sprite directories
+        for sprite_name in sprite_images:
+            os.makedirs(os.path.join(self.godot_sprites_path, sprite_name), exist_ok=True)
+
+        # Flatten all work items
+        work_items = []
+        for sprite_name, images in sprite_images.items():
+            sorted_images = sorted(images)
+            for index, gm_sprite_path in enumerate(sorted_images, start=1):
+                work_items.append((sprite_name, index, gm_sprite_path, len(sorted_images)))
+
+        total_images = len(work_items)
         processed_images = 0
 
-        for sprite_name, images in sprite_images.items():
-            if not self.conversion_running():
-                self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
-                return
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures_map = {
+                executor.submit(self._process_sprite, name, idx, path, count): (name, idx, path, count)
+                for name, idx, path, count in work_items
+            }
+            for future in as_completed(futures_map):
+                result = future.result()
+                if result is None:
+                    self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
+                    return
 
-            godot_sprite_folder = os.path.join(self.godot_sprites_path, sprite_name)
-            os.makedirs(godot_sprite_folder, exist_ok=True)
-
-            for index, gm_sprite_path in enumerate(sorted(images), start=1):
-                new_filename = f"{sprite_name}_{index if len(images) > 1 else ''}.png"
-                godot_sprite_path = os.path.join(godot_sprite_folder, new_filename)
-
-                with Image.open(gm_sprite_path) as img:
-                    img.save(godot_sprite_path, 'PNG')
+                sprite_name, index, images_count, gm_sprite_path, new_filename = result
+                processed_images += 1
 
                 if self.compact_logging:
-                    self._log_progress(sprite_name, index, len(images))
+                    self._safe_log_progress(sprite_name, processed_images, total_images)
                 else:
-                    self.log_callback(get_localized("Console_Convertor_Sprites_Converted").format(relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path), sprite_name=sprite_name, new_filename=new_filename))
+                    self._safe_log(get_localized("Console_Convertor_Sprites_Converted").format(
+                        relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path),
+                        sprite_name=sprite_name, new_filename=new_filename))
 
-                processed_images += 1
-                if self.progress_callback:
-                    self.progress_callback(int(processed_images / total_images * 100))
+                self._safe_progress(int(processed_images / total_images * 100))
 
         self.log_callback(get_localized("Console_Convertor_Sprites_Complete"))
 

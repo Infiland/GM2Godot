@@ -8,9 +8,9 @@ from src.conversion.base_converter import BaseConverter
 
 class SoundConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False):
+                 update_log_callback=None, compact_logging=False, max_workers=None):
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging)
+                         update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
 
     def find_sound_files(self):
@@ -50,7 +50,7 @@ class SoundConverter(BaseConverter):
         total_sounds = len(sound_files)
         processed_sounds = 0
 
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {executor.submit(self.process_sound_file, sf): sf for sf in sound_files}
             for future in as_completed(futures_map):
                 if future.result():

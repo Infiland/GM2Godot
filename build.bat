@@ -16,6 +16,9 @@ pyinstaller --onefile ^
             --icon img/Logo.png ^
             --hidden-import markdown2 ^
             --hidden-import PIL ^
+            --hidden-import PySide6.QtWidgets ^
+            --hidden-import PySide6.QtCore ^
+            --hidden-import PySide6.QtGui ^
             --add-data "img;img" ^
             --add-data "src;src" ^
             --add-data "Languages;Languages" ^
@@ -44,4 +47,4 @@ echo Build complete! The executable is in:
 echo - Windows: dist\windows\GM2Godot.exe
 echo.
 echo Press any key to exit...
-pause > nul 
+pause > nul

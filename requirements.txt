@@ -1,3 +1,4 @@
 Pillow
 markdown2
 requests
+PySide6

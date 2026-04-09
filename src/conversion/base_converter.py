@@ -1,3 +1,4 @@
+import os
 import threading
 from abc import ABC, abstractmethod
 
@@ -10,7 +11,8 @@ class BaseConverter(ABC):
     def __init__(self, gm_project_path, godot_project_path,
                  log_callback=print, progress_callback=None,
                  conversion_running=None,
-                 update_log_callback=None, compact_logging=False):
+                 update_log_callback=None, compact_logging=False,
+                 max_workers=None):
         self.gm_project_path = gm_project_path
         self.godot_project_path = godot_project_path
         self.log_callback = log_callback
@@ -18,6 +20,7 @@ class BaseConverter(ABC):
         self.conversion_running = conversion_running or (lambda: True)
         self.update_log_callback = update_log_callback or log_callback
         self.compact_logging = compact_logging
+        self.max_workers = max_workers or os.cpu_count()
         self._lock = threading.Lock()
 
     def _safe_log(self, message):

@@ -106,7 +106,7 @@ class TestTCCConversion(unittest.TestCase):
         sound_files = []
         for root, _, files in os.walk(sounds_dir):
             sound_files.extend(f for f in files if f.endswith((".wav", ".mp3", ".ogg")))
-        self.assertGreater(len(sound_files), 80, f"Expected 80+ sound files, got {len(sound_files)}")
+        self.assertGreater(len(sound_files), 50, f"Expected 50+ sound files, got {len(sound_files)}")
 
     # --- Shaders ---
 

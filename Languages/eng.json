@@ -44,6 +44,7 @@
 "Console_Convertor_Icon_Error_FileNotFound" : "No icon file found in the GameMaker project's icon directory.",
 "Console_Convertor_Icon_Copied" : "Copied icon: {icon_files} -> icon.ico",
 "Console_Convertor_Icon_Converted" : "Converted icon: {icon_files} -> icon.png",
+"Console_Convertor_Icon_Fallback" : "Icon not found for selected platform, using icons from '{platform}' instead.",
 "Console_Convertor_Error_IconGeneric" : "Error processing icon: {error}",
 
 "Console_Convertor_Settings" : "Updating project settings...",
@@ -70,6 +71,8 @@
 "Console_Convertor_Sprites_Converted" : "Converted: {relative_path} -> sprites/{sprite_name}/{new_filename}",
 "Console_Convertor_Sprites_Error_NotFound" : "No sprite images found in the GameMaker project.",
 "Console_Convertor_Sprites_YYParseFailed" : "Warning: Could not parse {yy_path}, using fallback frame ordering for {sprite_name}.",
+"Console_Convertor_Sprites_Skipped" : "Skipped orphaned sprite not in .yyp: {sprite_name}",
+"Console_Convertor_Sprites_YYPFilterWarning" : "Warning: Could not parse .yyp file for sprite filtering. All sprites will be converted.",
 
 "Console_Convertor_Fonts" : "Converting fonts...",
 "Console_Convertor_Fonts_Complete" : "Font conversion completed.",
@@ -120,7 +123,7 @@
 "Menu_UI_Time_Heading" : "Time:",
 
 "Prompt_Path_GameMaker" : "Select your GameMaker Project",
-"Prompt_Path_Godot" : "Select your GameMaker Project",
+"Prompt_Path_Godot" : "Select your Godot Project",
 
 "ReleaseNotes_Title" : "Release Notes",
 "ReleaseNotes_Error_NoInternet" : ["Error", "Unable to fetch release notes. Please check your internet connection and try again."],

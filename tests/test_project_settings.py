@@ -151,5 +151,61 @@ class TestReadAudioGroups(unittest.TestCase):
         self.assertEqual(groups, [])
 
 
+class TestConvertIconFallback(unittest.TestCase):
+    """Test that convert_icon falls back to other platforms when the selected platform has no icons."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self, platform='linux'):
+        return ProjectSettingsConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            gm_platform=platform,
+        )
+
+    def _create_icon(self, platform):
+        """Create a minimal .ico file under options/<platform>/icons/."""
+        from PIL import Image
+        icons_dir = os.path.join(self.gm_dir, 'options', platform, 'icons')
+        os.makedirs(icons_dir, exist_ok=True)
+        img = Image.new("RGBA", (16, 16), "blue")
+        img.save(os.path.join(icons_dir, "icon.ico"), "PNG")
+
+    def test_uses_fallback_platform_when_selected_missing(self):
+        self._create_icon('windows')
+        converter = self._make_converter(platform='linux')
+        result = converter.convert_icon()
+
+        self.assertTrue(result)
+        self.assertTrue(os.path.exists(os.path.join(self.godot_dir, 'icon.png')))
+        fallback_logs = [l for l in self.logs if 'windows' in l]
+        self.assertTrue(len(fallback_logs) > 0, "Should log which platform was used as fallback")
+
+    def test_uses_selected_platform_when_available(self):
+        self._create_icon('linux')
+        self._create_icon('windows')
+        converter = self._make_converter(platform='linux')
+        result = converter.convert_icon()
+
+        self.assertTrue(result)
+        fallback_logs = [l for l in self.logs if 'Fallback' in l or 'instead' in l]
+        self.assertEqual(len(fallback_logs), 0, "Should not fall back when selected platform has icons")
+
+    def test_returns_false_when_no_platform_has_icons(self):
+        converter = self._make_converter(platform='linux')
+        result = converter.convert_icon()
+
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

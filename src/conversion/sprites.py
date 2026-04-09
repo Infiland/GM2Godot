@@ -16,6 +16,36 @@ class SpriteConverter(BaseConverter):
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
 
+    def _get_valid_sprite_names(self):
+        """Parse the .yyp project file and return the set of sprite names listed in resources.
+
+        Returns None if the .yyp file cannot be found or parsed, allowing
+        the caller to fall back to converting all sprites on disk.
+        """
+        try:
+            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
+            if not yyp_files:
+                return None
+
+            yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
+            with open(yyp_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
+            data = json.loads(cleaned)
+
+            valid_sprites = set()
+            for resource in data.get('resources', []):
+                res_id = resource.get('id', {})
+                path = res_id.get('path', '')
+                if path.startswith('sprites/'):
+                    valid_sprites.add(res_id.get('name', ''))
+
+            return valid_sprites
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            self._safe_log(get_localized("Console_Convertor_Sprites_YYPFilterWarning"))
+            return None
+
     def _find_all_sprite_images(self):
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
         image_files = defaultdict(list)
@@ -96,6 +126,18 @@ class SpriteConverter(BaseConverter):
         os.makedirs(self.godot_sprites_path, exist_ok=True)
 
         sprite_images = self._find_all_sprite_images()
+
+        valid_names = self._get_valid_sprite_names()
+        if valid_names is not None:
+            filtered = {}
+            for name, images in sprite_images.items():
+                if name in valid_names:
+                    filtered[name] = images
+                else:
+                    self._safe_log(get_localized("Console_Convertor_Sprites_Skipped").format(
+                        sprite_name=name))
+            sprite_images = filtered
+
         if not sprite_images:
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
             return

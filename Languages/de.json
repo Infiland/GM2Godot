@@ -44,6 +44,7 @@
 "Console_Convertor_Icon_Error_FileNotFound" : "Keine Icon-Datei im Icon-Verzeichnis des GameMaker-Projekts gefunden.",
 "Console_Convertor_Icon_Copied" : "Icon kopiert: {icon_files} -> icon.ico",
 "Console_Convertor_Icon_Converted" : "Icon konvertiert: {icon_files} -> icon.png",
+"Console_Convertor_Icon_Fallback" : "Icon fuer die ausgewaehlte Plattform nicht gefunden, verwende Icons von '{platform}' stattdessen.",
 "Console_Convertor_Error_IconGeneric" : "Fehler beim Verarbeiten des Icons: {error}",
 
 "Console_Convertor_Settings" : "Projekteinstellungen werden aktualisiert...",
@@ -70,6 +71,8 @@
 "Console_Convertor_Sprites_Converted" : "Konvertiert: {relative_path} -> sprites/{sprite_name}/{new_filename}",
 "Console_Convertor_Sprites_Error_NotFound" : "Keine Sprite-Bilder im GameMaker-Projekt gefunden.",
 "Console_Convertor_Sprites_YYParseFailed" : "Warnung: {yy_path} konnte nicht gelesen werden, Fallback-Reihenfolge wird fuer {sprite_name} verwendet.",
+"Console_Convertor_Sprites_Skipped" : "Verwaistes Sprite nicht in .yyp übersprungen: {sprite_name}",
+"Console_Convertor_Sprites_YYPFilterWarning" : "Warnung: .yyp-Datei konnte nicht geparst werden. Alle Sprites werden konvertiert.",
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",

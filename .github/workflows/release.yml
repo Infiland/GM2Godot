@@ -58,7 +58,13 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Build executable
+        shell: bash
         run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SEP=";"
+          else
+            SEP=":"
+          fi
           pyinstaller --onefile \
             --windowed \
             --clean \
@@ -69,10 +75,10 @@ jobs:
             --hidden-import PySide6.QtWidgets \
             --hidden-import PySide6.QtCore \
             --hidden-import PySide6.QtGui \
-            --add-data "img${{ runner.os == 'Windows' && ';' || ':' }}img" \
-            --add-data "src${{ runner.os == 'Windows' && ';' || ':' }}src" \
-            --add-data "Languages${{ runner.os == 'Windows' && ';' || ':' }}Languages" \
-            --add-data "Current Language${{ runner.os == 'Windows' && ';' || ':' }}." \
+            --add-data "img${SEP}img" \
+            --add-data "src${SEP}src" \
+            --add-data "Languages${SEP}Languages" \
+            --add-data "Current Language${SEP}." \
             main.py
 
       - name: Package build

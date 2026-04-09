@@ -28,8 +28,11 @@ class ProjectSettingsConverter(BaseConverter):
         godot_png_path = os.path.join(self.godot_project_path, 'icon.png')
 
         if not os.path.exists(gm_icon_path):
-            self.log_callback(get_localized("Console_Convertor_Icon_Error_DirectoryNotFound").format(gm_icon_path=gm_icon_path))
-            return False
+            gm_icon_path = self._find_fallback_icon_path()
+            if gm_icon_path is None:
+                self.log_callback(get_localized("Console_Convertor_Icon_Error_DirectoryNotFound").format(
+                    gm_icon_path=os.path.join(self.gm_project_path, 'options', self.gm_platform, 'icons')))
+                return False
 
         icon_files = [f for f in os.listdir(gm_icon_path) if f.endswith('.ico') or f.endswith('.png')]
 
@@ -51,6 +54,24 @@ class ProjectSettingsConverter(BaseConverter):
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Error_IconGeneric").format(error=str(e)))
             return False
+
+    def _find_fallback_icon_path(self) -> Optional[str]:
+        """Search other platforms for an icon directory when the selected platform has none."""
+        options_dir = os.path.join(self.gm_project_path, 'options')
+        if not os.path.isdir(options_dir):
+            return None
+
+        for platform in os.listdir(options_dir):
+            if platform == self.gm_platform:
+                continue
+            candidate = os.path.join(options_dir, platform, 'icons')
+            if os.path.isdir(candidate):
+                icon_files = [f for f in os.listdir(candidate) if f.endswith('.ico') or f.endswith('.png')]
+                if icon_files:
+                    self.log_callback(get_localized("Console_Convertor_Icon_Fallback").format(platform=platform))
+                    return candidate
+
+        return None
 
     def get_gm_project_name(self) -> Optional[str]:
         yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]

@@ -44,6 +44,7 @@
 "Console_Convertor_Icon_Error_FileNotFound" : "No icon file found in the GameMaker project's icon directory.",
 "Console_Convertor_Icon_Copied" : "Copied icon: {icon_files} -> icon.ico",
 "Console_Convertor_Icon_Converted" : "Converted icon: {icon_files} -> icon.png",
+"Console_Convertor_Icon_Fallback" : "Icon not found for selected platform, using icons from '{platform}' instead.",
 "Console_Convertor_Error_IconGeneric" : "Error processing icon: {error}",
 
 "Console_Convertor_Settings" : "Updating project settings...",

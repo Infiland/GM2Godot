@@ -69,6 +69,7 @@
 "Console_Convertor_Sprites_Stopped" : "Sprite conversion stopped.",
 "Console_Convertor_Sprites_Converted" : "Converted: {relative_path} -> sprites/{sprite_name}/{new_filename}",
 "Console_Convertor_Sprites_Error_NotFound" : "No sprite images found in the GameMaker project.",
+"Console_Convertor_Sprites_YYParseFailed" : "Warning: Could not parse {yy_path}, using fallback frame ordering for {sprite_name}.",
 
 "Console_Convertor_Fonts" : "Converting fonts...",
 "Console_Convertor_Fonts_Complete" : "Font conversion completed.",

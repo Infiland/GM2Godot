@@ -22,7 +22,7 @@ class TileSetConverter(BaseConverter):
         gm_tilesets_path = os.path.join(self.gm_project_path, 'tilesets')
 
         if not os.path.exists(gm_tilesets_path):
-            self.log_callback(get_localized("Console_Convertor_Tilesets_Error_NotFound").format(project_path=self.gm_project_path))
+            self.log_callback(get_localized("Console_Convertor_Tilesets_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
 
         self.log_callback(get_localized("Console_Convertor_Tilesets_NotImplemented"))

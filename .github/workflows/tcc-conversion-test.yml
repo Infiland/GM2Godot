@@ -1,0 +1,31 @@
+name: TCC Conversion Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  tcc-conversion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install Pillow
+
+      - name: Clone The Colorful Creature (shallow)
+        run: git clone --depth 1 --no-recurse-submodules https://github.com/Infiland/TheColorfulCreature.git "${{ runner.temp }}/TheColorfulCreature"
+
+      - name: Run TCC conversion test
+        env:
+          TCC_PROJECT_PATH: ${{ runner.temp }}/TheColorfulCreature
+        run: python -m unittest tests.test_tcc_conversion -v

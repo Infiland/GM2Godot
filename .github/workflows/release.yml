@@ -2,6 +2,10 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/version.py'
   push:
     branches: [main]
     paths:
@@ -103,6 +107,7 @@ jobs:
 
   release:
     needs: [get-version, build]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write

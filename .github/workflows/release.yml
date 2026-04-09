@@ -46,6 +46,9 @@ jobs:
             name: linux
             ext: ""
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +61,6 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Build executable
-        shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             SEP=";"
@@ -86,13 +88,11 @@ jobs:
           mkdir -p release
           cp dist/GM2Godot${{ matrix.ext }} release/
           cp README.md release/
-        shell: bash
 
       - name: Zip release
         run: |
           cd release
           7z a ../GM2Godot-${{ matrix.name }}.zip .
-        shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

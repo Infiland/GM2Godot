@@ -864,9 +864,9 @@ class TestGenerateSpriteScene(unittest.TestCase):
         with open(tscn_path, "r") as f:
             content = f.read()
 
-        # bbox_center = (15.5, 15.5), origin = (16, 16)
-        # offset = (-0.5, -0.5)
-        self.assertIn("position = Vector2(-0.5, -0.5)", content)
+        # Full bbox on 32x32: bbox_center = (0+31+1)/2 = 16, sprite_center = 16
+        # offset = (0, 0) → no position line needed (but code still writes it)
+        self.assertIn("position = Vector2(0.0, 0.0)", content)
 
     def test_multiframe_references_first_frame(self):
         data = self._make_collision_data(collision_kind=1)

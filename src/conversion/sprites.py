@@ -177,8 +177,9 @@ class SpriteConverter(BaseConverter):
 
         bbox_w = bbox_right - bbox_left + 1
         bbox_h = bbox_bottom - bbox_top + 1
-        bbox_center_x = (bbox_left + bbox_right) / 2
-        bbox_center_y = (bbox_top + bbox_bottom) / 2
+        # GM bbox values are inclusive pixel indices; add 1 for continuous center
+        bbox_center_x = (bbox_left + bbox_right + 1) / 2
+        bbox_center_y = (bbox_top + bbox_bottom + 1) / 2
 
         # Godot Sprite2D defaults to centered=true, so visual center (w/2, h/2)
         # is at position (0,0). Collision offset must be relative to that center.

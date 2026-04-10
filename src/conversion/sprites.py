@@ -59,6 +59,281 @@ class SpriteConverter(BaseConverter):
                 )
         return image_files
 
+    def _parse_collision_data(self, sprite_name):
+        """Parse collision mask properties from a sprite .yy file.
+
+        Returns a dict with collision fields or None if parsing fails.
+        """
+        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
+        try:
+            with open(yy_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
+            data = json.loads(cleaned)
+
+            return {
+                "collisionKind": int(data.get("collisionKind", 1)),
+                "bboxMode": int(data.get("bboxMode", 0)),
+                "bbox_left": int(data.get("bbox_left", 0)),
+                "bbox_right": int(data.get("bbox_right", 0)),
+                "bbox_top": int(data.get("bbox_top", 0)),
+                "bbox_bottom": int(data.get("bbox_bottom", 0)),
+                "width": int(data.get("width", 0)),
+                "height": int(data.get("height", 0)),
+                "origin": int(data.get("origin", 0)),
+                "xorigin": int(data.get("xorigin", 0)),
+                "yorigin": int(data.get("yorigin", 0)),
+            }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return None
+
+    def _parse_animation_data(self, sprite_name):
+        """Parse animation metadata from a sprite .yy file's sequence object.
+
+        Returns a dict with animation fields or None if parsing fails.
+        """
+        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
+        try:
+            with open(yy_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
+            data = json.loads(cleaned)
+
+            sequence = data.get("sequence")
+            if sequence is None:
+                return None
+
+            playback_speed = float(sequence.get("playbackSpeed", 30.0))
+            playback_speed_type = int(sequence.get("playbackSpeedType", 0))
+            loop = int(sequence.get("playback", 1)) == 1
+
+            frame_durations = []
+            tracks = sequence.get("tracks", [])
+            if tracks:
+                keyframes_store = tracks[0].get("keyframes", {})
+                keyframes = keyframes_store.get("Keyframes", [])
+                sorted_kf = sorted(keyframes, key=lambda kf: float(kf.get("Key", 0)))
+                frame_durations = [float(kf.get("Length", 1.0)) for kf in sorted_kf]
+
+            return {
+                "playbackSpeed": playback_speed,
+                "playbackSpeedType": playback_speed_type,
+                "loop": loop,
+                "frame_durations": frame_durations,
+            }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def _compute_godot_fps(animation_data):
+        """Convert GameMaker playback speed to Godot FPS.
+
+        Type 0 (FPS): use value directly.
+        Type 1 (frames per game frame): multiply by 60 (standard GM step rate).
+        """
+        speed = animation_data["playbackSpeed"]
+        if animation_data["playbackSpeedType"] == 1:
+            return speed * 60.0
+        return speed
+
+    def _compute_origin_offset(self, collision_data):
+        """Compute the sprite origin position in pixels.
+
+        Returns (origin_x, origin_y) based on the origin preset or custom values.
+        """
+        w = collision_data["width"]
+        h = collision_data["height"]
+        origin = collision_data["origin"]
+
+        origin_map = {
+            0: (0, 0),
+            1: (w / 2, 0),
+            2: (w, 0),
+            3: (0, h / 2),
+            4: (w / 2, h / 2),
+            5: (w, h / 2),
+            6: (0, h),
+            7: (w / 2, h),
+            8: (w, h),
+        }
+
+        if origin == 9:
+            return (collision_data["xorigin"], collision_data["yorigin"])
+        return origin_map.get(origin, (0, 0))
+
+    def _build_collision_block(self, collision_data):
+        """Build collision sub_resource text, shape id, and node text from collision data.
+
+        Returns (sub_resource_text, shape_id, node_text) or (None, None, None)
+        if collision_data is None.
+        """
+        if collision_data is None:
+            return (None, None, None)
+
+        bbox_left = collision_data["bbox_left"]
+        bbox_right = collision_data["bbox_right"]
+        bbox_top = collision_data["bbox_top"]
+        bbox_bottom = collision_data["bbox_bottom"]
+
+        bbox_w = bbox_right - bbox_left + 1
+        bbox_h = bbox_bottom - bbox_top + 1
+        bbox_center_x = (bbox_left + bbox_right) / 2
+        bbox_center_y = (bbox_top + bbox_bottom) / 2
+
+        # Godot Sprite2D defaults to centered=true, so visual center (w/2, h/2)
+        # is at position (0,0). Collision offset must be relative to that center.
+        sprite_center_x = collision_data["width"] / 2
+        sprite_center_y = collision_data["height"] / 2
+        offset_x = bbox_center_x - sprite_center_x
+        offset_y = bbox_center_y - sprite_center_y
+
+        collision_kind = collision_data["collisionKind"]
+
+        # Build shape resource and node based on collision kind
+        if collision_kind == 2:
+            # Ellipse
+            if abs(bbox_w - bbox_h) < 2:
+                shape_type = "CircleShape2D"
+                shape_id = "CircleShape2D_1"
+                shape_props = f"radius = {bbox_w / 2}"
+            else:
+                shape_type = "CapsuleShape2D"
+                shape_id = "CapsuleShape2D_1"
+                radius = min(bbox_w, bbox_h) / 2
+                height = max(bbox_w, bbox_h)
+                shape_props = f"radius = {radius}\nheight = {height}"
+        elif collision_kind == 3:
+            # Diamond - ConvexPolygonShape2D
+            mid_x = (bbox_left + bbox_right) / 2 - sprite_center_x
+            mid_y = (bbox_top + bbox_bottom) / 2 - sprite_center_y
+            top = bbox_top - sprite_center_y
+            bottom = bbox_bottom - sprite_center_y
+            left = bbox_left - sprite_center_x
+            right = bbox_right - sprite_center_x
+
+            shape_type = "ConvexPolygonShape2D"
+            shape_id = "ConvexPolygonShape2D_1"
+            shape_props = f"points = PackedVector2Array({mid_x}, {top}, {right}, {mid_y}, {mid_x}, {bottom}, {left}, {mid_y})"
+        else:
+            # Rectangle (collisionKind 1) or Precise fallback (0, 4)
+            shape_type = "RectangleShape2D"
+            shape_id = "RectangleShape2D_1"
+            shape_props = f"size = Vector2({bbox_w}, {bbox_h})"
+
+        # Diamond uses position on the node differently: offset already baked into points
+        if collision_kind == 3:
+            position_line = ""
+        else:
+            position_line = f'\nposition = Vector2({offset_x}, {offset_y})'
+
+        sub_resource_text = (
+            f'[sub_resource type="{shape_type}" id="{shape_id}"]\n'
+            f'{shape_props}\n'
+        )
+
+        node_text = (
+            f'[node name="CollisionShape2D" type="CollisionShape2D" parent="."]\n'
+            f'shape = SubResource("{shape_id}"){position_line}\n'
+        )
+
+        return (sub_resource_text, shape_id, node_text)
+
+    def _write_static_scene(self, sprite_name, collision_sub, collision_node):
+        """Generate a Sprite2D .tscn scene file.
+
+        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        """
+        has_collision = collision_sub is not None
+        load_steps = 2 if has_collision else 1
+
+        parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
+        parts.append(f'\n[ext_resource type="Texture2D" path="res://sprites/{sprite_name}/{sprite_name}.png" id="1"]\n')
+
+        if has_collision:
+            parts.append(f'\n{collision_sub}')
+
+        parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
+        parts.append(f'\n[node name="Sprite2D" type="Sprite2D" parent="."]\n')
+        parts.append(f'texture = ExtResource("1")\n')
+
+        if has_collision:
+            parts.append(f'\n{collision_node}')
+
+        tscn_content = ''.join(parts)
+
+        tscn_dir = os.path.join(self.godot_sprites_path, sprite_name)
+        os.makedirs(tscn_dir, exist_ok=True)
+        tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
+        with open(tscn_path, 'w', encoding='utf-8') as f:
+            f.write(tscn_content)
+
+    def _write_animated_scene(self, sprite_name, frame_count, animation_data, collision_sub, collision_node):
+        """Generate an AnimatedSprite2D .tscn scene file with embedded SpriteFrames.
+
+        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        """
+        has_collision = collision_sub is not None
+        # ext_resources (one per frame) + SpriteFrames sub_resource + optional collision sub_resource
+        load_steps = frame_count + 1 + (1 if has_collision else 0)
+
+        parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
+
+        # One ext_resource per frame
+        for i in range(1, frame_count + 1):
+            parts.append(f'\n[ext_resource type="Texture2D" path="res://sprites/{sprite_name}/{sprite_name}_{i}.png" id="{i}"]\n')
+
+        # Build frame entries for the SpriteFrames animation array
+        durations = animation_data.get("frame_durations", [])
+        frame_entries = []
+        for i in range(1, frame_count + 1):
+            duration = durations[i - 1] if i - 1 < len(durations) else 1.0
+            frame_entries.append(
+                f'{{\n"duration": {duration},\n"texture": ExtResource("{i}")\n}}'
+            )
+        frames_str = ', '.join(frame_entries)
+
+        godot_fps = self._compute_godot_fps(animation_data)
+        loop_str = "true" if animation_data["loop"] else "false"
+
+        parts.append(f'\n[sub_resource type="SpriteFrames" id="SpriteFrames_1"]\n')
+        parts.append(f'animations = [{{\n"frames": [{frames_str}],\n"loop": {loop_str},\n"name": &"default",\n"speed": {godot_fps}\n}}]\n')
+
+        if has_collision:
+            parts.append(f'\n{collision_sub}')
+
+        parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
+
+        parts.append(f'\n[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]\n')
+        parts.append(f'sprite_frames = SubResource("SpriteFrames_1")\n')
+        parts.append(f'animation = &"default"\n')
+        parts.append(f'autoplay = "default"\n')
+
+        if has_collision:
+            parts.append(f'\n{collision_node}')
+
+        tscn_content = ''.join(parts)
+
+        tscn_dir = os.path.join(self.godot_sprites_path, sprite_name)
+        os.makedirs(tscn_dir, exist_ok=True)
+        tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
+        with open(tscn_path, 'w', encoding='utf-8') as f:
+            f.write(tscn_content)
+
+    def _generate_sprite_scene(self, sprite_name, collision_data, frame_count, animation_data=None):
+        """Generate a .tscn scene file for a sprite.
+
+        Creates either an AnimatedSprite2D scene (multi-frame with animation data)
+        or a Sprite2D scene (single-frame or no animation data).
+
+        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        """
+        collision_sub, shape_id, collision_node = self._build_collision_block(collision_data)
+
+        if frame_count > 1 and animation_data is not None:
+            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_sub, collision_node)
+        else:
+            self._write_static_scene(sprite_name, collision_sub, collision_node)
+
     def _parse_sprite_yy(self, sprite_name):
         yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
         try:
@@ -114,7 +389,7 @@ class SpriteConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        new_filename = f"{sprite_name}_{index if images_count > 1 else ''}.png"
+        new_filename = f"{sprite_name}_{index}.png" if images_count > 1 else f"{sprite_name}.png"
         godot_sprite_path = os.path.join(self.godot_sprites_path, sprite_name, new_filename)
 
         with Image.open(gm_sprite_path) as img:
@@ -178,6 +453,26 @@ class SpriteConverter(BaseConverter):
                         sprite_name=sprite_name, new_filename=new_filename))
 
                 self._safe_progress(int(processed_images / total_images * 100))
+
+        # Second pass: generate scenes for all sprites
+        for sprite_name, images in sprite_images.items():
+            if not self.conversion_running():
+                return
+            frame_count = len(self._build_ordered_frame_list(sprite_name, images))
+            collision_data = self._parse_collision_data(sprite_name)
+            animation_data = self._parse_animation_data(sprite_name)
+
+            self._generate_sprite_scene(sprite_name, collision_data, frame_count, animation_data)
+
+            self._safe_log(get_localized("Console_Convertor_Sprites_SceneGenerated").format(name=sprite_name))
+            if frame_count > 1 and animation_data is not None:
+                godot_fps = self._compute_godot_fps(animation_data)
+                self._safe_log(get_localized("Console_Convertor_Sprites_SceneAnimated").format(
+                    frame_count=frame_count, fps=godot_fps, loop=animation_data["loop"]))
+                if animation_data["playbackSpeedType"] == 1:
+                    self._safe_log(get_localized("Console_Convertor_Sprites_SpeedTypeWarning").format(name=sprite_name))
+            if collision_data is not None and collision_data["collisionKind"] in (0, 4):
+                self._safe_log(get_localized("Console_Convertor_Sprites_CollisionPreciseWarning").format(name=sprite_name))
 
         self.log_callback(get_localized("Console_Convertor_Sprites_Complete"))
 

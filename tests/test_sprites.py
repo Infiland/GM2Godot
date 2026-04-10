@@ -537,7 +537,7 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         self.assertIn("s_a", converted)
         self.assertIn("s_b", converted)
 
-        skipped_logs = [l for l in self.logs if "Skipped" in l and ("s_a" in l or "s_b" in l)]
+        skipped_logs = [l for l in self.logs if "orphaned" in l.lower() and ("s_a" in l or "s_b" in l)]
         self.assertEqual(len(skipped_logs), 0, "No real sprites should be skipped")
 
     def test_converts_all_when_yyp_missing(self):
@@ -566,6 +566,591 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         converted = set(os.listdir(godot_sprites))
         self.assertIn("s_m", converted)
         self.assertIn("s_n", converted)
+
+
+def _make_yy_content_with_collision(sprite_name, frame_guids, layer_guids,
+                                    collision_kind=1, bbox_mode=0,
+                                    bbox_left=0, bbox_right=31,
+                                    bbox_top=0, bbox_bottom=31,
+                                    width=32, height=32,
+                                    origin=0, xorigin=0, yorigin=0,
+                                    layer_visible=None):
+    """Build a .yy file string with collision mask fields."""
+    if layer_visible is None:
+        layer_visible = [True] * len(layer_guids)
+    frames_json = ",\n    ".join(
+        '{{"$GMSpriteFrame":"v1","%Name":"{g}","name":"{g}","resourceType":"GMSpriteFrame","resourceVersion":"2.0",}}'.format(g=g)
+        for g in frame_guids
+    )
+    layers_json = ",\n    ".join(
+        '{{"$GMImageLayer":"","name":"{g}","displayName":"Layer {i}","opacity":100.0,"visible":{v},"resourceType":"GMImageLayer","resourceVersion":"2.0",}}'.format(
+            g=g, i=i, v="true" if v else "false")
+        for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
+    )
+    return (
+        '{{\n'
+        '  "collisionKind": {ck},\n'
+        '  "bboxMode": {bm},\n'
+        '  "bbox_left": {bl},\n'
+        '  "bbox_right": {br},\n'
+        '  "bbox_top": {bt},\n'
+        '  "bbox_bottom": {bb},\n'
+        '  "width": {w},\n'
+        '  "height": {h},\n'
+        '  "origin": {orig},\n'
+        '  "xorigin": {xo},\n'
+        '  "yorigin": {yo},\n'
+        '  "frames":[\n    {frames}\n  ],\n'
+        '  "layers":[\n    {layers}\n  ],\n'
+        '  "name":"{name}",\n'
+        '  "resourceType":"GMSprite",\n'
+        '  "resourceVersion":"2.0",\n'
+        '}}'
+    ).format(
+        ck=collision_kind, bm=bbox_mode,
+        bl=bbox_left, br=bbox_right, bt=bbox_top, bb=bbox_bottom,
+        w=width, h=height, orig=origin, xo=xorigin, yo=yorigin,
+        frames=frames_json, layers=layers_json, name=sprite_name,
+    )
+
+
+def _make_yy_content_with_sequence(sprite_name, frame_guids, layer_guids,
+                                    collision_kind=1, bbox_mode=0,
+                                    bbox_left=0, bbox_right=31,
+                                    bbox_top=0, bbox_bottom=31,
+                                    width=32, height=32,
+                                    origin=0, xorigin=0, yorigin=0,
+                                    layer_visible=None,
+                                    playback_speed=30.0, playback_speed_type=0,
+                                    playback=1, frame_lengths=None):
+    """Build a .yy file string with collision fields AND sequence animation data."""
+    if layer_visible is None:
+        layer_visible = [True] * len(layer_guids)
+    if frame_lengths is None:
+        frame_lengths = [1.0] * len(frame_guids)
+    frames_json = ",\n    ".join(
+        '{{"$GMSpriteFrame":"v1","%Name":"{g}","name":"{g}","resourceType":"GMSpriteFrame","resourceVersion":"2.0",}}'.format(g=g)
+        for g in frame_guids
+    )
+    layers_json = ",\n    ".join(
+        '{{"$GMImageLayer":"","name":"{g}","displayName":"Layer {i}","opacity":100.0,"visible":{v},"resourceType":"GMImageLayer","resourceVersion":"2.0",}}'.format(
+            g=g, i=i, v="true" if v else "false")
+        for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
+    )
+    # Build sequence keyframes
+    keyframes = []
+    for idx, (guid, length) in enumerate(zip(frame_guids, frame_lengths)):
+        keyframes.append(
+            '{{"Key": {key}, "Length": {length}, "Channels": {{"0": {{"Id": {{"name": "{guid}"}}}}}}}}'.format(
+                key=idx, length=length, guid=guid)
+        )
+    keyframes_json = ",\n        ".join(keyframes)
+    return (
+        '{{\n'
+        '  "collisionKind": {ck},\n'
+        '  "bboxMode": {bm},\n'
+        '  "bbox_left": {bl},\n'
+        '  "bbox_right": {br},\n'
+        '  "bbox_top": {bt},\n'
+        '  "bbox_bottom": {bb},\n'
+        '  "width": {w},\n'
+        '  "height": {h},\n'
+        '  "origin": {orig},\n'
+        '  "xorigin": {xo},\n'
+        '  "yorigin": {yo},\n'
+        '  "frames":[\n    {frames}\n  ],\n'
+        '  "layers":[\n    {layers}\n  ],\n'
+        '  "sequence": {{\n'
+        '    "playbackSpeed": {pbs},\n'
+        '    "playbackSpeedType": {pbst},\n'
+        '    "playback": {pb},\n'
+        '    "tracks": [{{\n'
+        '      "keyframes": {{\n'
+        '        "Keyframes": [\n'
+        '        {kf}\n'
+        '        ]\n'
+        '      }}\n'
+        '    }}]\n'
+        '  }},\n'
+        '  "name":"{name}",\n'
+        '  "resourceType":"GMSprite",\n'
+        '  "resourceVersion":"2.0",\n'
+        '}}'
+    ).format(
+        ck=collision_kind, bm=bbox_mode,
+        bl=bbox_left, br=bbox_right, bt=bbox_top, bb=bbox_bottom,
+        w=width, h=height, orig=origin, xo=xorigin, yo=yorigin,
+        frames=frames_json, layers=layers_json, name=sprite_name,
+        pbs=playback_speed, pbst=playback_speed_type, pb=playback,
+        kf=keyframes_json,
+    )
+
+
+class TestParseCollisionData(unittest.TestCase):
+    """Test _parse_collision_data() directly."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_yy(self, sprite_name, content):
+        sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
+        os.makedirs(sprite_dir, exist_ok=True)
+        with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w") as f:
+            f.write(content)
+
+    def test_parses_valid_collision_fields(self):
+        content = _make_yy_content_with_collision(
+            "spr_test", ["frame1"], ["layer1"],
+            collision_kind=1, bbox_mode=2,
+            bbox_left=5, bbox_right=27,
+            bbox_top=3, bbox_bottom=29,
+            width=32, height=32, origin=4,
+        )
+        self._write_yy("spr_test", content)
+
+        result = self.converter._parse_collision_data("spr_test")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["collisionKind"], 1)
+        self.assertEqual(result["bboxMode"], 2)
+        self.assertEqual(result["bbox_left"], 5)
+        self.assertEqual(result["bbox_right"], 27)
+        self.assertEqual(result["bbox_top"], 3)
+        self.assertEqual(result["bbox_bottom"], 29)
+        self.assertEqual(result["width"], 32)
+        self.assertEqual(result["height"], 32)
+        self.assertEqual(result["origin"], 4)
+
+    def test_parses_custom_origin(self):
+        content = _make_yy_content_with_collision(
+            "spr_custom", ["frame1"], ["layer1"],
+            origin=9, xorigin=10, yorigin=20,
+            width=64, height=64,
+        )
+        self._write_yy("spr_custom", content)
+
+        result = self.converter._parse_collision_data("spr_custom")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["origin"], 9)
+        self.assertEqual(result["xorigin"], 10)
+        self.assertEqual(result["yorigin"], 20)
+
+    def test_returns_none_for_missing_file(self):
+        result = self.converter._parse_collision_data("nonexistent_sprite")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_invalid_json(self):
+        self._write_yy("bad_spr", "not json at all {{{")
+        result = self.converter._parse_collision_data("bad_spr")
+        self.assertIsNone(result)
+
+
+class TestComputeOriginOffset(unittest.TestCase):
+    """Test _compute_origin_offset() for all origin presets."""
+
+    def setUp(self):
+        self.converter = SpriteConverter(
+            "/fake/gm", "/fake/godot",
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def _make_data(self, origin, w=64, h=32, xorigin=0, yorigin=0):
+        return {
+            "width": w, "height": h,
+            "origin": origin,
+            "xorigin": xorigin, "yorigin": yorigin,
+        }
+
+    def test_top_left(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(0)), (0, 0))
+
+    def test_top_center(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(1)), (32, 0))
+
+    def test_top_right(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(2)), (64, 0))
+
+    def test_middle_left(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(3)), (0, 16))
+
+    def test_middle_center(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(4)), (32, 16))
+
+    def test_middle_right(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(5)), (64, 16))
+
+    def test_bottom_left(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(6)), (0, 32))
+
+    def test_bottom_center(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(7)), (32, 32))
+
+    def test_bottom_right(self):
+        self.assertEqual(self.converter._compute_origin_offset(self._make_data(8)), (64, 32))
+
+    def test_custom_origin(self):
+        self.assertEqual(
+            self.converter._compute_origin_offset(self._make_data(9, xorigin=10, yorigin=25)),
+            (10, 25),
+        )
+
+
+class TestGenerateSpriteScene(unittest.TestCase):
+    """Test _generate_sprite_scene() .tscn file creation."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_collision_data(self, collision_kind=1, bbox_left=0, bbox_right=31,
+                              bbox_top=0, bbox_bottom=31, width=32, height=32,
+                              origin=0, xorigin=0, yorigin=0):
+        return {
+            "collisionKind": collision_kind,
+            "bboxMode": 0,
+            "bbox_left": bbox_left, "bbox_right": bbox_right,
+            "bbox_top": bbox_top, "bbox_bottom": bbox_bottom,
+            "width": width, "height": height,
+            "origin": origin, "xorigin": xorigin, "yorigin": yorigin,
+        }
+
+    def test_rectangle_scene_created(self):
+        data = self._make_collision_data(collision_kind=1)
+        self.converter._generate_sprite_scene("spr_rect", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_rect", "spr_rect.tscn")
+        self.assertTrue(os.path.exists(tscn_path))
+
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn("[gd_scene format=3 load_steps=2]", content)
+        self.assertIn('type="RectangleShape2D"', content)
+        self.assertIn("size = Vector2(32, 32)", content)
+        self.assertIn('type="Area2D"', content)
+        self.assertIn('type="Sprite2D"', content)
+        self.assertIn('type="CollisionShape2D"', content)
+        self.assertIn('res://sprites/spr_rect/spr_rect.png', content)
+
+    def test_rectangle_with_origin_offset(self):
+        # Middle center origin on 32x32 sprite, full bbox
+        data = self._make_collision_data(collision_kind=1, origin=4, width=32, height=32,
+                                          bbox_left=0, bbox_right=31, bbox_top=0, bbox_bottom=31)
+        self.converter._generate_sprite_scene("spr_centered", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_centered", "spr_centered.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        # bbox_center = (15.5, 15.5), origin = (16, 16)
+        # offset = (-0.5, -0.5)
+        self.assertIn("position = Vector2(-0.5, -0.5)", content)
+
+    def test_multiframe_references_first_frame(self):
+        data = self._make_collision_data(collision_kind=1)
+        anim_data = {"playbackSpeed": 30.0, "playbackSpeedType": 0,
+                     "loop": True, "frame_durations": [1.0, 1.0, 1.0]}
+        self.converter._generate_sprite_scene("spr_anim", data, 3, anim_data)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_anim", "spr_anim.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn("spr_anim_1.png", content)
+
+    def test_ellipse_circle_shape(self):
+        # Square bbox -> CircleShape2D
+        data = self._make_collision_data(collision_kind=2, bbox_left=0, bbox_right=31,
+                                          bbox_top=0, bbox_bottom=31)
+        self.converter._generate_sprite_scene("spr_circle", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_circle", "spr_circle.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('type="CircleShape2D"', content)
+        self.assertIn("radius = 16.0", content)
+
+    def test_ellipse_capsule_shape(self):
+        # Non-square bbox -> CapsuleShape2D
+        data = self._make_collision_data(collision_kind=2, bbox_left=0, bbox_right=15,
+                                          bbox_top=0, bbox_bottom=63, width=16, height=64)
+        self.converter._generate_sprite_scene("spr_capsule", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_capsule", "spr_capsule.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('type="CapsuleShape2D"', content)
+        self.assertIn("radius = 8.0", content)
+        self.assertIn("height = 64", content)
+
+    def test_diamond_shape(self):
+        data = self._make_collision_data(collision_kind=3, bbox_left=0, bbox_right=31,
+                                          bbox_top=0, bbox_bottom=31)
+        self.converter._generate_sprite_scene("spr_diamond", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_diamond", "spr_diamond.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('type="ConvexPolygonShape2D"', content)
+        self.assertIn("PackedVector2Array(", content)
+
+    def test_precise_falls_back_to_rectangle(self):
+        data = self._make_collision_data(collision_kind=0)
+        self.converter._generate_sprite_scene("spr_precise", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_precise", "spr_precise.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('type="RectangleShape2D"', content)
+
+
+class TestParseAnimationData(unittest.TestCase):
+    """Test _parse_animation_data() directly."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_yy(self, sprite_name, content):
+        sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
+        os.makedirs(sprite_dir, exist_ok=True)
+        with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w") as f:
+            f.write(content)
+
+    def test_parses_fps_speed(self):
+        content = _make_yy_content_with_sequence(
+            "spr_fps", ["f1"], ["l1"],
+            playback_speed=30.0, playback_speed_type=0, playback=1,
+        )
+        self._write_yy("spr_fps", content)
+        result = self.converter._parse_animation_data("spr_fps")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["playbackSpeed"], 30.0)
+        self.assertEqual(result["playbackSpeedType"], 0)
+        self.assertTrue(result["loop"])
+
+    def test_parses_per_game_frame_speed(self):
+        content = _make_yy_content_with_sequence(
+            "spr_pgf", ["f1"], ["l1"],
+            playback_speed=1.0, playback_speed_type=1,
+        )
+        self._write_yy("spr_pgf", content)
+        result = self.converter._parse_animation_data("spr_pgf")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["playbackSpeed"], 1.0)
+        self.assertEqual(result["playbackSpeedType"], 1)
+
+    def test_parses_non_looping(self):
+        content = _make_yy_content_with_sequence(
+            "spr_noloop", ["f1"], ["l1"],
+            playback=0,
+        )
+        self._write_yy("spr_noloop", content)
+        result = self.converter._parse_animation_data("spr_noloop")
+        self.assertIsNotNone(result)
+        self.assertFalse(result["loop"])
+
+    def test_parses_custom_frame_durations(self):
+        content = _make_yy_content_with_sequence(
+            "spr_dur", ["f1", "f2", "f3"], ["l1"],
+            frame_lengths=[1.0, 2.0, 0.5],
+        )
+        self._write_yy("spr_dur", content)
+        result = self.converter._parse_animation_data("spr_dur")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["frame_durations"], [1.0, 2.0, 0.5])
+
+    def test_returns_none_for_missing_file(self):
+        result = self.converter._parse_animation_data("nonexistent_sprite")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_no_sequence(self):
+        # Use the old helper that doesn't include a sequence object
+        content = _make_yy_content_with_collision(
+            "spr_old", ["f1"], ["l1"],
+        )
+        self._write_yy("spr_old", content)
+        result = self.converter._parse_animation_data("spr_old")
+        self.assertIsNone(result)
+
+
+class TestComputeGodotFps(unittest.TestCase):
+    """Test _compute_godot_fps() static method."""
+
+    def test_fps_type_passthrough(self):
+        data = {"playbackSpeed": 30.0, "playbackSpeedType": 0}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 30.0)
+
+    def test_fps_type_sixty(self):
+        data = {"playbackSpeed": 60.0, "playbackSpeedType": 0}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 60.0)
+
+    def test_per_game_frame_one(self):
+        data = {"playbackSpeed": 1.0, "playbackSpeedType": 1}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 60.0)
+
+    def test_per_game_frame_half(self):
+        data = {"playbackSpeed": 0.5, "playbackSpeedType": 1}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 30.0)
+
+    def test_per_game_frame_zero(self):
+        data = {"playbackSpeed": 0.0, "playbackSpeedType": 1}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 0.0)
+
+    def test_zero_fps(self):
+        data = {"playbackSpeed": 0.0, "playbackSpeedType": 0}
+        self.assertEqual(SpriteConverter._compute_godot_fps(data), 0.0)
+
+
+class TestGenerateAnimatedScene(unittest.TestCase):
+    """Test animated and static scene generation."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.converter = SpriteConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_collision_data(self, collision_kind=1, bbox_left=0, bbox_right=31,
+                              bbox_top=0, bbox_bottom=31, width=32, height=32,
+                              origin=0, xorigin=0, yorigin=0):
+        return {
+            "collisionKind": collision_kind,
+            "bboxMode": 0,
+            "bbox_left": bbox_left, "bbox_right": bbox_right,
+            "bbox_top": bbox_top, "bbox_bottom": bbox_bottom,
+            "width": width, "height": height,
+            "origin": origin, "xorigin": xorigin, "yorigin": yorigin,
+        }
+
+    def _make_anim_data(self, speed=30.0, speed_type=0, loop=True, durations=None):
+        if durations is None:
+            durations = [1.0]
+        return {
+            "playbackSpeed": speed,
+            "playbackSpeedType": speed_type,
+            "loop": loop,
+            "frame_durations": durations,
+        }
+
+    def _read_tscn(self, sprite_name):
+        tscn_path = os.path.join(self.godot_dir, "sprites", sprite_name, sprite_name + ".tscn")
+        with open(tscn_path, "r") as f:
+            return f.read()
+
+    def test_animated_scene_has_animated_sprite2d(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(durations=[1.0, 1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_anim", collision, 3, anim)
+        content = self._read_tscn("spr_anim")
+        self.assertIn('type="AnimatedSprite2D"', content)
+        self.assertIn('type="SpriteFrames"', content)
+        self.assertNotIn('type="Sprite2D"', content)
+
+    def test_animated_scene_has_correct_frame_count(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(durations=[1.0, 1.0, 1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_4f", collision, 4, anim)
+        content = self._read_tscn("spr_4f")
+        # Should have 4 ext_resources
+        for i in range(1, 5):
+            self.assertIn(f'spr_4f_{i}.png', content)
+
+    def test_animated_scene_has_correct_speed(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(speed=60.0, durations=[1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_fast", collision, 2, anim)
+        content = self._read_tscn("spr_fast")
+        self.assertIn('"speed": 60.0', content)
+
+    def test_animated_scene_loop_flag(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(loop=False, durations=[1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_noloop", collision, 2, anim)
+        content = self._read_tscn("spr_noloop")
+        self.assertIn('"loop": false', content)
+
+    def test_animated_scene_custom_durations(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(durations=[1.0, 2.0, 0.5])
+        self.converter._generate_sprite_scene("spr_dur", collision, 3, anim)
+        content = self._read_tscn("spr_dur")
+        self.assertIn('"duration": 1.0', content)
+        self.assertIn('"duration": 2.0', content)
+        self.assertIn('"duration": 0.5', content)
+
+    def test_animated_scene_has_collision(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(durations=[1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_col", collision, 2, anim)
+        content = self._read_tscn("spr_col")
+        self.assertIn('type="CollisionShape2D"', content)
+
+    def test_animated_scene_autoplay(self):
+        collision = self._make_collision_data()
+        anim = self._make_anim_data(durations=[1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_auto", collision, 2, anim)
+        content = self._read_tscn("spr_auto")
+        self.assertIn('autoplay = "default"', content)
+        self.assertIn('animation = &"default"', content)
+
+    def test_scene_without_collision(self):
+        anim = self._make_anim_data(durations=[1.0, 1.0])
+        self.converter._generate_sprite_scene("spr_nocol", None, 2, anim)
+        content = self._read_tscn("spr_nocol")
+        self.assertIn('type="AnimatedSprite2D"', content)
+        self.assertNotIn('CollisionShape2D', content)
+
+    def test_static_scene_without_collision(self):
+        self.converter._generate_sprite_scene("spr_static", None, 1)
+        content = self._read_tscn("spr_static")
+        self.assertIn('type="Sprite2D"', content)
+        self.assertNotIn('CollisionShape2D', content)
+        self.assertNotIn('AnimatedSprite2D', content)
 
 
 if __name__ == "__main__":

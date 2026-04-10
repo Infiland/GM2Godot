@@ -73,6 +73,10 @@
 "Console_Convertor_Sprites_YYParseFailed" : "Warnung: {yy_path} konnte nicht gelesen werden, Fallback-Reihenfolge wird fuer {sprite_name} verwendet.",
 "Console_Convertor_Sprites_Skipped" : "Verwaistes Sprite nicht in .yyp übersprungen: {sprite_name}",
 "Console_Convertor_Sprites_YYPFilterWarning" : "Warnung: .yyp-Datei konnte nicht geparst werden. Alle Sprites werden konvertiert.",
+"Console_Convertor_Sprites_CollisionPreciseWarning" : "Warnung: {name} verwendet praezise Kollision (nicht unterstuetzt). Begrenzungsrahmen-Rechteck wird als Fallback verwendet.",
+"Console_Convertor_Sprites_SceneGenerated" : "Szene generiert: sprites/{name}/{name}.tscn",
+"Console_Convertor_Sprites_SceneAnimated" : "  Animation: {frame_count} Frames bei {fps} FPS (Schleife: {loop})",
+"Console_Convertor_Sprites_SpeedTypeWarning" : "  Hinweis: {name} verwendet Geschwindigkeit pro Spielframe. Konvertierung nimmt 60fps Spielrate an.",
 
 "Console_Convertor_Fonts" : "Schriftarten werden konvertiert...",
 "Console_Convertor_Fonts_Complete" : "Schriftarten-Konvertierung abgeschlossen.",
@@ -89,6 +93,9 @@
 "Console_Convertor_Tilesets_Complete" : "Tileset-Konvertierung abgeschlossen.",
 "Console_Convertor_Tilesets_NotImplemented" : "Tileset-Konvertierung ist noch nicht implementiert.",
 "Console_Convertor_Tilesets_Error_NotFound" : "Tileset-Ordner nicht in {gm_project_path} gefunden",
+"Console_Convertor_Tilesets_Converted" : "Tileset konvertiert: {name} ({tile_count} Kacheln, {tileWidth}x{tileHeight}px)",
+"Console_Convertor_Tilesets_SpriteNotFound" : "Warnung: Tileset {name} verweist auf Sprite {sprite_name}, das nicht gefunden wurde.",
+"Console_Convertor_Tilesets_Stopped" : "Tileset-Konvertierung gestoppt.",
 
 "Console_Convertor_Sounds" : "Sounds werden konvertiert...",
 "Console_Convertor_Sounds_Converted" : "Konvertiert: {path} -> sounds/{path}",
@@ -171,5 +178,20 @@
 
 "UI_Label_Version" : "Version {version}",
 "UI_Label_Contribute" : "Mitwirken",
-"UI_Label_MadeBy" : "Erstellt von Infiland"
+"UI_Label_MadeBy" : "Erstellt von Infiland",
+
+"Update_Available_Title" : "Update verfuegbar",
+"Update_Available_Message" : "Eine neue Version von GM2Godot ist verfuegbar!",
+"Update_CurrentVersion" : "Aktuelle Version: {current}",
+"Update_LatestVersion" : "Neueste Version: {latest}",
+"Update_Button_Download" : "Update herunterladen",
+"Update_Button_OpenPage" : "Release-Seite oeffnen",
+"Update_Button_Skip" : "Diese Version ueberspringen",
+"Update_Button_Later" : "Spaeter erinnern",
+"Update_Download_Progress" : "Herunterladen... {percent}%",
+"Update_Download_Complete" : "Download abgeschlossen! Ersetzen Sie die aktuelle ausfuehrbare Datei durch die heruntergeladene Datei und starten Sie neu.",
+"Update_Error_Check" : "Updates konnten nicht ueberprueft werden: {error}",
+"Update_Error_Download" : "Download fehlgeschlagen: {error}",
+"Update_UpToDate" : "Sie verwenden die neueste Version.",
+"Menu_CheckUpdates" : "Nach Updates suchen"
 }

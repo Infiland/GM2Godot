@@ -5,7 +5,7 @@ import time
 import webbrowser
 import multiprocessing
 
-from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, QObject
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QApplication
 
@@ -24,6 +24,18 @@ from src.gui.dialogs.language_dialog import LanguageDialog
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.version import get_version
 from src.localization import get_localized
+from src.update_checker import UpdateChecker
+from src.gui.dialogs.update_dialog import UpdateDialog
+
+
+class UpdateCheckWorker(QObject):
+    update_available = Signal(object)  # emits UpdateInfo
+
+    def run(self):
+        checker = UpdateChecker()
+        info = checker.check_for_update()
+        if info and info.available:
+            self.update_available.emit(info)
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +58,7 @@ class MainWindow(QMainWindow):
         self._release_notes = ReleaseNotesDialog(self)
         self._init_ui()
         self._create_menu()
+        self._check_for_updates_on_startup()
 
         # Timer
         self._timer = QTimer(self)
@@ -116,11 +129,48 @@ class MainWindow(QMainWindow):
             "Report Issue",
             lambda: webbrowser.open("https://github.com/Infiland/GM2Godot/issues"),
         )
+        help_menu.addSeparator()
+        help_menu.addAction(
+            get_localized("Menu_CheckUpdates"),
+            self._check_for_updates,
+        )
 
     # --- Actions ---
 
     def _show_about(self):
         AboutDialog(self).exec()
+
+    def _check_for_updates_on_startup(self):
+        self._update_worker = UpdateCheckWorker()
+        self._update_thread = QThread()
+        self._update_worker.moveToThread(self._update_thread)
+        self._update_worker.update_available.connect(self._on_update_available)
+        self._update_thread.started.connect(self._update_worker.run)
+        self._update_thread.start()
+
+    def _on_update_available(self, info):
+        if self._update_thread:
+            self._update_thread.quit()
+            self._update_thread.wait()
+            self._update_thread = None
+            self._update_worker = None
+
+        skipped = UpdateChecker.get_skipped_version()
+        if skipped == info.latest_version:
+            return
+
+        UpdateDialog(info, self).exec()
+
+    def _check_for_updates(self):
+        checker = UpdateChecker()
+        info = checker.check_for_update()
+        if info is None:
+            QMessageBox.warning(self, "Error", get_localized("Update_Error_Check").format(error="Network error"))
+            return
+        if info.available:
+            UpdateDialog(info, self).exec()
+        else:
+            QMessageBox.information(self, "GM2Godot", get_localized("Update_UpToDate"))
 
     def _open_settings(self):
         dialog = SettingsDialog(
@@ -294,4 +344,7 @@ class MainWindow(QMainWindow):
             self._conversion_running.clear()
             self._conversion_thread.quit()
             self._conversion_thread.wait(5000)
+        if hasattr(self, '_update_thread') and self._update_thread and self._update_thread.isRunning():
+            self._update_thread.quit()
+            self._update_thread.wait(3000)
         event.accept()

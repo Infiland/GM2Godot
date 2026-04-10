@@ -5,7 +5,7 @@ import requests
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QCursor
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QWidget, QFrame,
 )
 
 from src.gui.theme import THEME
@@ -102,7 +102,19 @@ class AboutDialog(QDialog):
             self._contrib_layout.addWidget(error_label)
 
     def _add_contributor(self, contributor):
-        row = QHBoxLayout()
+        url = contributor["html_url"]
+
+        # Clickable frame wrapping the entire row
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background-color: transparent; border-radius: 6px; }}"
+            f"QFrame:hover {{ background-color: {THEME['bg_tertiary']}; }}"
+        )
+        frame.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        frame.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
+
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(6, 6, 6, 6)
 
         # Avatar
         try:
@@ -112,6 +124,8 @@ class AboutDialog(QDialog):
             avatar = QLabel()
             avatar.setPixmap(pixmap.scaled(40, 40))
             avatar.setFixedSize(40, 40)
+            avatar.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            avatar.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
             row.addWidget(avatar)
         except Exception:
             pass
@@ -119,9 +133,9 @@ class AboutDialog(QDialog):
         # Info
         info_layout = QVBoxLayout()
         name = QLabel(contributor["login"])
-        name.setStyleSheet(f"color: {THEME['fg_white']};")
+        name.setStyleSheet(f"color: {THEME['accent_link']};")
         name.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        name.mousePressEvent = lambda e, u=contributor["html_url"]: webbrowser.open_new(u)
+        name.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
         info_layout.addWidget(name)
 
         contribs = QLabel(f"{contributor['contributions']} contributions")
@@ -129,4 +143,4 @@ class AboutDialog(QDialog):
         info_layout.addWidget(contribs)
 
         row.addLayout(info_layout, stretch=1)
-        self._contrib_layout.addLayout(row)
+        self._contrib_layout.addWidget(frame)

@@ -140,5 +140,39 @@ class TestShaderConverterEmpty(unittest.TestCase):
                         "Expected log message when shaders directory missing")
 
 
+class TestShaderConverterSubfolders(unittest.TestCase):
+    """Test that shaders respect GameMaker's folder hierarchy."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+        # Create a shader in a named directory with a .yy specifying subfolder
+        shader_dir = os.path.join(self.gm_dir, "shaders", "sh_blur")
+        os.makedirs(shader_dir)
+        with open(os.path.join(shader_dir, "sh_blur.fsh"), "w") as f:
+            f.write(SAMPLE_FSH)
+        with open(os.path.join(shader_dir, "sh_blur.yy"), "w") as f:
+            f.write('{"name": "sh_blur", "parent": {"name": "Effects", "path": "folders/Shaders/Effects.yy",},}')
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_shader_in_subfolder(self):
+        converter = ShaderConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        expected = os.path.join(self.godot_dir, "shaders", "Effects", "sh_blur.gdshader")
+        self.assertTrue(os.path.isfile(expected),
+                        f"Expected shader at {expected}")
+
+
 if __name__ == "__main__":
     unittest.main()

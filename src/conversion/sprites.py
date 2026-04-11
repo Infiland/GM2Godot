@@ -17,7 +17,7 @@ class SpriteConverter(BaseConverter):
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
 
     def _get_valid_sprite_names(self):
-        """Parse the .yyp project file and return the set of sprite names listed in resources.
+        """Parse the .yyp project file and return a dict of sprite name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all sprites on disk.
@@ -34,17 +34,26 @@ class SpriteConverter(BaseConverter):
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
             data = json.loads(cleaned)
 
-            valid_sprites = set()
+            valid_sprites = {}
             for resource in data.get('resources', []):
                 res_id = resource.get('id', {})
                 path = res_id.get('path', '')
                 if path.startswith('sprites/'):
-                    valid_sprites.add(res_id.get('name', ''))
+                    name = res_id.get('name', '')
+                    yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
+                    valid_sprites[name] = self._get_subfolder_from_yy(yy_path)
 
             return valid_sprites
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Sprites_YYPFilterWarning"))
             return None
+
+    @staticmethod
+    def _sprite_res_path(subfolder, sprite_name):
+        """Build a res://sprites/... path, avoiding double slashes."""
+        if subfolder:
+            return f"res://sprites/{subfolder}/{sprite_name}"
+        return f"res://sprites/{sprite_name}"
 
     def _find_all_sprite_images(self):
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
@@ -239,16 +248,17 @@ class SpriteConverter(BaseConverter):
 
         return (sub_resource_text, shape_id, node_text)
 
-    def _write_static_scene(self, sprite_name, collision_sub, collision_node):
+    def _write_static_scene(self, sprite_name, collision_sub, collision_node, subfolder=""):
         """Generate a Sprite2D .tscn scene file.
 
-        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
         has_collision = collision_sub is not None
         load_steps = 2 if has_collision else 1
+        res_prefix = self._sprite_res_path(subfolder, sprite_name)
 
         parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
-        parts.append(f'\n[ext_resource type="Texture2D" path="res://sprites/{sprite_name}/{sprite_name}.png" id="1"]\n')
+        parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_name}.png" id="1"]\n')
 
         if has_collision:
             parts.append(f'\n{collision_sub}')
@@ -262,26 +272,27 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = os.path.join(self.godot_sprites_path, sprite_name)
+        tscn_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
-    def _write_animated_scene(self, sprite_name, frame_count, animation_data, collision_sub, collision_node):
+    def _write_animated_scene(self, sprite_name, frame_count, animation_data, collision_sub, collision_node, subfolder=""):
         """Generate an AnimatedSprite2D .tscn scene file with embedded SpriteFrames.
 
-        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
         has_collision = collision_sub is not None
         # ext_resources (one per frame) + SpriteFrames sub_resource + optional collision sub_resource
         load_steps = frame_count + 1 + (1 if has_collision else 0)
+        res_prefix = self._sprite_res_path(subfolder, sprite_name)
 
         parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
 
         # One ext_resource per frame
         for i in range(1, frame_count + 1):
-            parts.append(f'\n[ext_resource type="Texture2D" path="res://sprites/{sprite_name}/{sprite_name}_{i}.png" id="{i}"]\n')
+            parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_name}_{i}.png" id="{i}"]\n')
 
         # Build frame entries for the SpriteFrames animation array
         durations = animation_data.get("frame_durations", [])
@@ -314,26 +325,26 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = os.path.join(self.godot_sprites_path, sprite_name)
+        tscn_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
-    def _generate_sprite_scene(self, sprite_name, collision_data, frame_count, animation_data=None):
+    def _generate_sprite_scene(self, sprite_name, collision_data, frame_count, animation_data=None, subfolder=""):
         """Generate a .tscn scene file for a sprite.
 
         Creates either an AnimatedSprite2D scene (multi-frame with animation data)
         or a Sprite2D scene (single-frame or no animation data).
 
-        Creates the file at godot_sprites_path/{sprite_name}/{sprite_name}.tscn.
+        Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
         collision_sub, shape_id, collision_node = self._build_collision_block(collision_data)
 
         if frame_count > 1 and animation_data is not None:
-            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_sub, collision_node)
+            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_sub, collision_node, subfolder)
         else:
-            self._write_static_scene(sprite_name, collision_sub, collision_node)
+            self._write_static_scene(sprite_name, collision_sub, collision_node, subfolder)
 
     def _parse_sprite_yy(self, sprite_name):
         yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
@@ -386,12 +397,13 @@ class SpriteConverter(BaseConverter):
 
         return ordered if ordered else sorted(all_image_paths)
 
-    def _process_sprite(self, sprite_name, index, gm_sprite_path, images_count):
+    def _process_sprite(self, sprite_name, index, gm_sprite_path, images_count, subfolder=""):
         if not self.conversion_running():
             return None
 
         new_filename = f"{sprite_name}_{index}.png" if images_count > 1 else f"{sprite_name}.png"
-        godot_sprite_path = os.path.join(self.godot_sprites_path, sprite_name, new_filename)
+        sprite_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+        godot_sprite_path = os.path.join(sprite_dir, new_filename)
 
         with Image.open(gm_sprite_path) as img:
             img.save(godot_sprite_path, 'PNG')
@@ -404,15 +416,21 @@ class SpriteConverter(BaseConverter):
         sprite_images = self._find_all_sprite_images()
 
         valid_names = self._get_valid_sprite_names()
+        sprite_subfolders = {}
         if valid_names is not None:
             filtered = {}
             for name, images in sprite_images.items():
                 if name in valid_names:
                     filtered[name] = images
+                    sprite_subfolders[name] = valid_names[name]
                 else:
                     self._safe_log(get_localized("Console_Convertor_Sprites_Skipped").format(
                         sprite_name=name))
             sprite_images = filtered
+        else:
+            for name in sprite_images:
+                yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
+                sprite_subfolders[name] = self._get_subfolder_from_yy(yy_path)
 
         if not sprite_images:
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
@@ -420,22 +438,25 @@ class SpriteConverter(BaseConverter):
 
         # Pre-create all sprite directories
         for sprite_name in sprite_images:
-            os.makedirs(os.path.join(self.godot_sprites_path, sprite_name), exist_ok=True)
+            subfolder = sprite_subfolders.get(sprite_name, "")
+            sprite_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+            os.makedirs(sprite_dir, exist_ok=True)
 
         # Flatten all work items
         work_items = []
         for sprite_name, images in sprite_images.items():
             ordered_images = self._build_ordered_frame_list(sprite_name, images)
+            subfolder = sprite_subfolders.get(sprite_name, "")
             for index, gm_sprite_path in enumerate(ordered_images, start=1):
-                work_items.append((sprite_name, index, gm_sprite_path, len(ordered_images)))
+                work_items.append((sprite_name, index, gm_sprite_path, len(ordered_images), subfolder))
 
         total_images = len(work_items)
         processed_images = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_sprite, name, idx, path, count): (name, idx, path, count)
-                for name, idx, path, count in work_items
+                executor.submit(self._process_sprite, name, idx, path, count, sub): (name, idx, path, count, sub)
+                for name, idx, path, count, sub in work_items
             }
             for future in as_completed(futures_map):
                 result = future.result()
@@ -462,8 +483,9 @@ class SpriteConverter(BaseConverter):
             frame_count = len(self._build_ordered_frame_list(sprite_name, images))
             collision_data = self._parse_collision_data(sprite_name)
             animation_data = self._parse_animation_data(sprite_name)
+            subfolder = sprite_subfolders.get(sprite_name, "")
 
-            self._generate_sprite_scene(sprite_name, collision_data, frame_count, animation_data)
+            self._generate_sprite_scene(sprite_name, collision_data, frame_count, animation_data, subfolder)
 
             self._safe_log(get_localized("Console_Convertor_Sprites_SceneGenerated").format(name=sprite_name))
             if frame_count > 1 and animation_data is not None:

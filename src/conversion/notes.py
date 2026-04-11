@@ -28,12 +28,18 @@ class NoteConverter(BaseConverter):
 
         os.makedirs(godot_notes_path, exist_ok=True)
 
-        # Collect all note files
+        # Collect all note files and their subfolders
         note_files = []
+        note_subfolders = {}
         for root, dirs, files in os.walk(gm_notes_path):
             for file in files:
                 if file.endswith('.txt'):
-                    note_files.append(os.path.join(root, file))
+                    src_path = os.path.join(root, file)
+                    note_name = os.path.splitext(file)[0]
+                    note_files.append(src_path)
+                    # Look for corresponding .yy file in the same directory
+                    yy_path = os.path.join(root, note_name + '.yy')
+                    note_subfolders[src_path] = self._get_subfolder_from_yy(yy_path)
 
         if not note_files:
             return
@@ -41,7 +47,12 @@ class NoteConverter(BaseConverter):
         # Pre-create all directories
         for src_file in note_files:
             note_name = os.path.splitext(os.path.basename(src_file))[0]
-            os.makedirs(os.path.join(godot_notes_path, note_name), exist_ok=True)
+            subfolder = note_subfolders.get(src_file, "")
+            if subfolder:
+                note_dir = os.path.join(godot_notes_path, subfolder, note_name)
+            else:
+                note_dir = os.path.join(godot_notes_path, note_name)
+            os.makedirs(note_dir, exist_ok=True)
 
         total_notes = len(note_files)
         processed_notes = 0
@@ -50,7 +61,11 @@ class NoteConverter(BaseConverter):
             futures_map = {}
             for src_file in note_files:
                 note_name = os.path.splitext(os.path.basename(src_file))[0]
-                dst_file = os.path.join(godot_notes_path, note_name, os.path.basename(src_file))
+                subfolder = note_subfolders.get(src_file, "")
+                if subfolder:
+                    dst_file = os.path.join(godot_notes_path, subfolder, note_name, os.path.basename(src_file))
+                else:
+                    dst_file = os.path.join(godot_notes_path, note_name, os.path.basename(src_file))
                 future = executor.submit(self._process_note, src_file, dst_file, note_name)
                 futures_map[future] = note_name
 

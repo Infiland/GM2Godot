@@ -18,7 +18,7 @@ class TileSetConverter(BaseConverter):
         self.godot_tilesets_path = os.path.join(self.godot_project_path, 'tilesets')
 
     def _get_valid_tileset_names(self):
-        """Parse the .yyp project file and return the set of tileset names listed in resources.
+        """Parse the .yyp project file and return a dict of tileset name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all tilesets on disk.
@@ -35,12 +35,14 @@ class TileSetConverter(BaseConverter):
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
             data = json.loads(cleaned)
 
-            valid_tilesets = set()
+            valid_tilesets = {}
             for resource in data.get('resources', []):
                 res_id = resource.get('id', {})
                 path = res_id.get('path', '')
                 if path.startswith('tilesets/'):
-                    valid_tilesets.add(res_id.get('name', ''))
+                    name = res_id.get('name', '')
+                    yy_path = os.path.join(self.gm_project_path, 'tilesets', name, name + '.yy')
+                    valid_tilesets[name] = self._get_subfolder_from_yy(yy_path)
 
             return valid_tilesets
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -125,7 +127,7 @@ class TileSetConverter(BaseConverter):
 
         return None
 
-    def _generate_tileset_tres(self, tileset_name, tileset_data):
+    def _generate_tileset_tres(self, tileset_name, tileset_data, subfolder=""):
         """Generate a Godot TileSet .tres resource string."""
         tile_w = tileset_data["tileWidth"]
         tile_h = tileset_data["tileHeight"]
@@ -134,10 +136,15 @@ class TileSetConverter(BaseConverter):
         tilexoff = tileset_data["tilexoff"]
         tileyoff = tileset_data["tileyoff"]
 
+        if subfolder:
+            res_path = f"res://tilesets/{subfolder}/{tileset_name}/{tileset_name}.png"
+        else:
+            res_path = f"res://tilesets/{tileset_name}/{tileset_name}.png"
+
         lines = []
         lines.append('[gd_resource type="TileSet" format=3]')
         lines.append('')
-        lines.append(f'[ext_resource type="Texture2D" path="res://tilesets/{tileset_name}/{tileset_name}.png" id="1"]')
+        lines.append(f'[ext_resource type="Texture2D" path="{res_path}" id="1"]')
         lines.append('')
         lines.append('[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_1"]')
         lines.append('texture = ExtResource("1")')
@@ -156,7 +163,7 @@ class TileSetConverter(BaseConverter):
 
         return '\n'.join(lines)
 
-    def _process_tileset(self, tileset_name):
+    def _process_tileset(self, tileset_name, subfolder=""):
         """Process a single tileset: parse, copy image, generate .tres.
 
         Returns a dict with conversion results, or None if stopped.
@@ -177,7 +184,10 @@ class TileSetConverter(BaseConverter):
                     "sprite_name": sprite_name}
 
         # Create output directory
-        output_dir = os.path.join(self.godot_tilesets_path, tileset_name)
+        if subfolder:
+            output_dir = os.path.join(self.godot_tilesets_path, subfolder, tileset_name)
+        else:
+            output_dir = os.path.join(self.godot_tilesets_path, tileset_name)
         os.makedirs(output_dir, exist_ok=True)
 
         # Copy the sprite image as the tileset texture
@@ -185,7 +195,7 @@ class TileSetConverter(BaseConverter):
         shutil.copy2(image_path, dest_image)
 
         # Generate and write the .tres file
-        tres_content = self._generate_tileset_tres(tileset_name, tileset_data)
+        tres_content = self._generate_tileset_tres(tileset_name, tileset_data, subfolder)
         tres_path = os.path.join(output_dir, tileset_name + '.tres')
         with open(tres_path, 'w', encoding='utf-8') as f:
             f.write(tres_content)
@@ -214,8 +224,14 @@ class TileSetConverter(BaseConverter):
 
         # Filter against .yyp if available
         valid_names = self._get_valid_tileset_names()
+        tileset_subfolders = {}
         if valid_names is not None:
             tileset_names = [n for n in tileset_names if n in valid_names]
+            tileset_subfolders = {n: valid_names[n] for n in tileset_names}
+        else:
+            for name in tileset_names:
+                yy_path = os.path.join(self.gm_project_path, 'tilesets', name, name + '.yy')
+                tileset_subfolders[name] = self._get_subfolder_from_yy(yy_path)
 
         if not tileset_names:
             self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
@@ -226,7 +242,7 @@ class TileSetConverter(BaseConverter):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_tileset, name): name
+                executor.submit(self._process_tileset, name, tileset_subfolders.get(name, "")): name
                 for name in tileset_names
             }
             for future in as_completed(futures_map):

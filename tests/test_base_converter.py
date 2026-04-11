@@ -1,5 +1,7 @@
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import unittest
 
@@ -173,6 +175,101 @@ class TestBaseConverterCompactLogging(unittest.TestCase):
         converter._log_progress("item", 2, 3)
         # Both should go to log_callback since update_log_callback defaults to it
         self.assertEqual(len(messages), 2)
+
+
+class TestReadYYFile(unittest.TestCase):
+    """Test _read_yy_file() JSON parsing with trailing-comma cleanup."""
+
+    def setUp(self):
+        class StubConverter(BaseConverter):
+            def convert_all(self):
+                pass
+
+        self.converter = StubConverter("/gm", "/godot")
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir)
+
+    def test_reads_valid_json(self):
+        yy_path = os.path.join(self.tmp_dir, "test.yy")
+        with open(yy_path, "w") as f:
+            f.write('{"name": "test", "value": 42}')
+        result = self.converter._read_yy_file(yy_path)
+        self.assertEqual(result, {"name": "test", "value": 42})
+
+    def test_cleans_trailing_commas(self):
+        yy_path = os.path.join(self.tmp_dir, "test.yy")
+        with open(yy_path, "w") as f:
+            f.write('{"name": "test", "items": [1, 2, 3,],}')
+        result = self.converter._read_yy_file(yy_path)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["items"], [1, 2, 3])
+
+    def test_returns_none_for_missing_file(self):
+        result = self.converter._read_yy_file("/nonexistent/path.yy")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_invalid_json(self):
+        yy_path = os.path.join(self.tmp_dir, "bad.yy")
+        with open(yy_path, "w") as f:
+            f.write("not valid json {{{")
+        result = self.converter._read_yy_file(yy_path)
+        self.assertIsNone(result)
+
+
+class TestGetSubfolderFromYY(unittest.TestCase):
+    """Test _get_subfolder_from_yy() extraction of IDE folder paths."""
+
+    def setUp(self):
+        class StubConverter(BaseConverter):
+            def convert_all(self):
+                pass
+
+        self.converter = StubConverter("/gm", "/godot")
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir)
+
+    def _write_yy(self, parent_path):
+        yy_path = os.path.join(self.tmp_dir, "test.yy")
+        content = '{{"name": "test", "parent": {{"name": "folder", "path": "{path}",}},}}'.format(
+            path=parent_path)
+        with open(yy_path, "w") as f:
+            f.write(content)
+        return yy_path
+
+    def test_nested_path(self):
+        yy_path = self._write_yy("folders/Sprites/Player/Abilities.yy")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "Player/Abilities")
+
+    def test_deeply_nested_path(self):
+        yy_path = self._write_yy("folders/Objects/Game/Enemies/Bosses.yy")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "Game/Enemies/Bosses")
+
+    def test_root_level_path(self):
+        yy_path = self._write_yy("folders/Sprites.yy")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "")
+
+    def test_single_subfolder(self):
+        yy_path = self._write_yy("folders/Objects/CLASSIC.yy")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "CLASSIC")
+
+    def test_missing_parent_field(self):
+        yy_path = os.path.join(self.tmp_dir, "no_parent.yy")
+        with open(yy_path, "w") as f:
+            f.write('{"name": "test"}')
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "")
+
+    def test_missing_file(self):
+        self.assertEqual(self.converter._get_subfolder_from_yy("/nonexistent.yy"), "")
+
+    def test_malformed_file(self):
+        yy_path = os.path.join(self.tmp_dir, "bad.yy")
+        with open(yy_path, "w") as f:
+            f.write("not json")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "")
 
 
 if __name__ == "__main__":

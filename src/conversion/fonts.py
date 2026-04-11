@@ -126,12 +126,19 @@ class FontConverter(BaseConverter):
         system_font_name = font_data['fontName']
         output_file = None
 
+        subfolder = self._get_subfolder_from_yy(yy_path)
+        if subfolder:
+            output_dir = os.path.join(self.godot_fonts_path, subfolder)
+        else:
+            output_dir = self.godot_fonts_path
+        os.makedirs(output_dir, exist_ok=True)
+
         # 1. Try bundled TTF from GameMaker project
         if font_data['includeTTF'] and font_data['TTFName']:
             ttf_path = os.path.join(os.path.dirname(yy_path), font_data['TTFName'])
             if os.path.isfile(ttf_path):
                 output_file = font_data['TTFName']
-                shutil.copy2(ttf_path, os.path.join(self.godot_fonts_path, output_file))
+                shutil.copy2(ttf_path, os.path.join(output_dir, output_file))
                 if not self.compact_logging:
                     self._safe_log(get_localized("Console_Convertor_Fonts_CopiedTTF").format(
                         name=font_name, output_file=output_file))
@@ -144,7 +151,7 @@ class FontConverter(BaseConverter):
             system_path = _find_system_font(system_font_name)
             if system_path:
                 output_file = font_name + os.path.splitext(system_path)[1]
-                shutil.copy2(system_path, os.path.join(self.godot_fonts_path, output_file))
+                shutil.copy2(system_path, os.path.join(output_dir, output_file))
                 if not self.compact_logging:
                     self._safe_log(get_localized("Console_Convertor_Fonts_Converted").format(
                         name=font_name, output_file=output_file))
@@ -153,7 +160,7 @@ class FontConverter(BaseConverter):
         if output_file is None:
             output_file = font_name + '.tres'
             tres_content = self._generate_system_font_tres(font_data)
-            tres_path = os.path.join(self.godot_fonts_path, output_file)
+            tres_path = os.path.join(output_dir, output_file)
             with open(tres_path, 'w', encoding='utf-8') as f:
                 f.write(tres_content)
             self._safe_log(get_localized("Console_Convertor_Fonts_SystemFontFallback").format(

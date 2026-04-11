@@ -3,6 +3,7 @@ from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
 from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
+from src.conversion.objects import ObjectConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
@@ -11,9 +12,9 @@ from src.localization import get_localized
 
 
 CONVERSION_CATEGORIES = {
-    "assets": ["sprites", "fonts", "sounds", "included_files"],
+    "assets": ["sprites", "fonts", "sounds", "included_files", "objects"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
-    "wip": ["objects", "shaders", "tilesets"],
+    "wip": ["shaders", "tilesets"],
 }
 
 
@@ -90,9 +91,13 @@ class Converter:
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_IncludedFiles"),
-            ("objects", lambda: self.log_callback(
-                get_localized("Console_Convertor_Objects_NotImplemented")
-            ), "Console_Convertor_Objects"),
+            ("objects", lambda: ObjectConverter(
+                gm_path, godot_path, self.log_callback,
+                self.progress_callback, self.conversion_running.is_set,
+                update_log_callback=self.update_log_callback,
+                compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
+            ).convert_all(), "Console_Convertor_Objects"),
         ]
 
         for setting_key, converter_fn, log_key in converters:

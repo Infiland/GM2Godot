@@ -69,7 +69,6 @@ class MainWindow(QMainWindow):
         all_keys = [key for keys in CONVERSION_CATEGORIES.values() for key in keys]
         self._conversion_settings = {key: SettingValue(True) for key in all_keys}
         self._conversion_settings["notes"].set(False)
-        self._conversion_settings["objects"].set(False)
         self._compact_logging = SettingValue(True)
         self._max_workers = multiprocessing.cpu_count()
 

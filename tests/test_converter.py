@@ -25,7 +25,7 @@ class TestConversionCategories(unittest.TestCase):
 
     def test_assets_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["assets"],
-                         ["sprites", "fonts", "sounds", "included_files"])
+                         ["sprites", "fonts", "sounds", "included_files", "objects"])
 
     def test_project_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["project"],
@@ -34,7 +34,7 @@ class TestConversionCategories(unittest.TestCase):
 
     def test_wip_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["wip"],
-                         ["objects", "shaders", "tilesets"])
+                         ["shaders", "tilesets"])
 
 
 class _FakeBooleanVar:

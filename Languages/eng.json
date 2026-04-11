@@ -73,6 +73,10 @@
 "Console_Convertor_Sprites_YYParseFailed" : "Warning: Could not parse {yy_path}, using fallback frame ordering for {sprite_name}.",
 "Console_Convertor_Sprites_Skipped" : "Skipped orphaned sprite not in .yyp: {sprite_name}",
 "Console_Convertor_Sprites_YYPFilterWarning" : "Warning: Could not parse .yyp file for sprite filtering. All sprites will be converted.",
+"Console_Convertor_Sprites_CollisionPreciseWarning" : "Warning: {name} uses precise collision (unsupported). Using bounding box rectangle as fallback.",
+"Console_Convertor_Sprites_SceneGenerated" : "Generated scene: sprites/{name}/{name}.tscn",
+"Console_Convertor_Sprites_SceneAnimated" : "  Animation: {frame_count} frames at {fps} FPS (loop: {loop})",
+"Console_Convertor_Sprites_SpeedTypeWarning" : "  Note: {name} uses per-game-frame speed. Converted assuming 60fps game rate.",
 
 "Console_Convertor_Fonts" : "Converting fonts...",
 "Console_Convertor_Fonts_Complete" : "Font conversion completed.",
@@ -89,6 +93,9 @@
 "Console_Convertor_Tilesets_Complete" : "Tileset conversion completed.",
 "Console_Convertor_Tilesets_NotImplemented" : "Tileset conversion is not yet implemented.",
 "Console_Convertor_Tilesets_Error_NotFound" : "Tileset folder not found in {gm_project_path}",
+"Console_Convertor_Tilesets_Converted" : "Converted tileset: {name} ({tile_count} tiles, {tileWidth}x{tileHeight}px)",
+"Console_Convertor_Tilesets_SpriteNotFound" : "Warning: Tileset {name} references sprite {sprite_name} which was not found.",
+"Console_Convertor_Tilesets_Stopped" : "Tileset conversion stopped.",
 
 "Console_Convertor_Sounds" : "Converting sounds...",
 "Console_Convertor_Sounds_Converted" : "Converted: {path} -> sounds/{path}",
@@ -171,5 +178,20 @@
 
 "UI_Label_Version" : "Version {version}",
 "UI_Label_Contribute" : "Contribute",
-"UI_Label_MadeBy" : "Made by Infiland"
+"UI_Label_MadeBy" : "Made by Infiland",
+
+"Update_Available_Title" : "Update Available",
+"Update_Available_Message" : "A new version of GM2Godot is available!",
+"Update_CurrentVersion" : "Current version: {current}",
+"Update_LatestVersion" : "Latest version: {latest}",
+"Update_Button_Download" : "Download Update",
+"Update_Button_OpenPage" : "Open Releases Page",
+"Update_Button_Skip" : "Skip This Version",
+"Update_Button_Later" : "Remind Me Later",
+"Update_Download_Progress" : "Downloading... {percent}%",
+"Update_Download_Complete" : "Download complete! Replace the current executable with the downloaded file and restart.",
+"Update_Error_Check" : "Could not check for updates: {error}",
+"Update_Error_Download" : "Download failed: {error}",
+"Update_UpToDate" : "You are running the latest version.",
+"Menu_CheckUpdates" : "Check for Updates"
 }

@@ -58,12 +58,17 @@ class ShaderConverter(BaseConverter):
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
-    def _process_shader(self, input_path):
+    def _process_shader(self, input_path, subfolder=""):
         if not self.conversion_running():
             return None
         filename = os.path.basename(input_path)
         output_name = os.path.splitext(filename)[0] + '.gdshader'
-        output_path = os.path.join(self.godot_shaders_path, output_name)
+        if subfolder:
+            output_dir = os.path.join(self.godot_shaders_path, subfolder)
+        else:
+            output_dir = self.godot_shaders_path
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, output_name)
         self.convert_shader(input_path, output_path)
         return (filename, output_name)
 
@@ -76,11 +81,19 @@ class ShaderConverter(BaseConverter):
 
         os.makedirs(self.godot_shaders_path, exist_ok=True)
 
+        # Collect shader files with their subfolder info
         shader_files = []
+        shader_subfolders = {}
         for root, _, files in os.walk(gm_shaders_path):
             for f in files:
                 if f.endswith(('.vsh', '.fsh')):
-                    shader_files.append(os.path.join(root, f))
+                    full_path = os.path.join(root, f)
+                    shader_files.append(full_path)
+                    # Determine subfolder from the shader's .yy file
+                    shader_dir = os.path.dirname(full_path)
+                    shader_name = os.path.basename(shader_dir)
+                    yy_path = os.path.join(shader_dir, shader_name + '.yy')
+                    shader_subfolders[full_path] = self._get_subfolder_from_yy(yy_path)
 
         if not shader_files:
             self.log_callback("No shader files (.vsh/.fsh) found.")
@@ -91,7 +104,7 @@ class ShaderConverter(BaseConverter):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_shader, path): path
+                executor.submit(self._process_shader, path, shader_subfolders.get(path, "")): path
                 for path in shader_files
             }
             for future in as_completed(futures_map):

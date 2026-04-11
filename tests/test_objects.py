@@ -11,7 +11,7 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.objects import ObjectConverter
 
 
-def _make_object_yy_content(name, sprite_name=None):
+def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects.yy"):
     """Build a GameMaker object .yy file string."""
     if sprite_name is not None:
         sprite_id = (
@@ -29,7 +29,7 @@ def _make_object_yy_content(name, sprite_name=None):
         '  "managed": true,\n'
         '  "name": "{name}",\n'
         '  "overriddenProperties": [],\n'
-        '  "parent": {{"name": "Objects", "path": "folders/Objects.yy",}},\n'
+        '  "parent": {{"name": "Objects", "path": "{parent_path}",}},\n'
         '  "parentObjectId": null,\n'
         '  "persistent": false,\n'
         '  "physicsObject": false,\n'
@@ -41,16 +41,30 @@ def _make_object_yy_content(name, sprite_name=None):
         '  "spriteMaskId": null,\n'
         '  "visible": true,\n'
         '}}'
-    ).format(name=name, sprite_id=sprite_id)
+    ).format(name=name, sprite_id=sprite_id, parent_path=parent_path)
 
 
-def _create_fake_sprite_scene(godot_dir, sprite_name):
+def _create_fake_sprite_scene(godot_dir, sprite_name, subfolder=""):
     """Create a minimal sprite .tscn file in the Godot project."""
-    sprite_dir = os.path.join(godot_dir, "sprites", sprite_name)
+    if subfolder:
+        sprite_dir = os.path.join(godot_dir, "sprites", subfolder, sprite_name)
+    else:
+        sprite_dir = os.path.join(godot_dir, "sprites", sprite_name)
     os.makedirs(sprite_dir, exist_ok=True)
     tscn_path = os.path.join(sprite_dir, sprite_name + ".tscn")
     with open(tscn_path, "w", encoding="utf-8") as f:
         f.write('[gd_scene format=3]\n\n[node name="{}" type="Area2D"]\n'.format(sprite_name))
+
+
+def _make_sprite_yy_content(sprite_name, parent_path="folders/Sprites.yy"):
+    """Build a minimal sprite .yy file with parent folder info."""
+    return (
+        '{{\n'
+        '  "name": "{name}",\n'
+        '  "parent": {{"name": "Sprites", "path": "{parent_path}",}},\n'
+        '  "resourceType": "GMSprite",\n'
+        '}}'
+    ).format(name=sprite_name, parent_path=parent_path)
 
 
 class TestObjectConverterBasic(unittest.TestCase):
@@ -291,6 +305,88 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
                         "Object listed in .yyp should be converted")
         self.assertFalse(os.path.isfile(unlisted_path),
                          "Object not listed in .yyp should be skipped")
+
+
+class TestObjectConverterSubfolders(unittest.TestCase):
+    """Test that objects respect GameMaker's folder hierarchy."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self):
+        return ObjectConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def test_object_in_subfolder(self):
+        """Object with nested parent path should be placed in subfolder."""
+        obj_dir = os.path.join(self.gm_dir, "objects", "o_boss")
+        os.makedirs(obj_dir)
+        yy_content = _make_object_yy_content("o_boss", sprite_name=None,
+                                              parent_path="folders/Objects/Game/Enemies.yy")
+        with open(os.path.join(obj_dir, "o_boss.yy"), "w") as f:
+            f.write(yy_content)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "Game", "Enemies", "o_boss", "o_boss.tscn")
+        self.assertTrue(os.path.isfile(tscn_path),
+                        "Object should be in objects/Game/Enemies/o_boss/")
+
+    def test_object_with_sprite_in_subfolder(self):
+        """Object should resolve sprite cross-reference with correct subfolder path."""
+        # Create object
+        obj_dir = os.path.join(self.gm_dir, "objects", "o_player")
+        os.makedirs(obj_dir)
+        yy_content = _make_object_yy_content("o_player", sprite_name="s_player",
+                                              parent_path="folders/Objects.yy")
+        with open(os.path.join(obj_dir, "o_player.yy"), "w") as f:
+            f.write(yy_content)
+
+        # Create sprite .yy in GM project (for subfolder resolution)
+        sprite_gm_dir = os.path.join(self.gm_dir, "sprites", "s_player")
+        os.makedirs(sprite_gm_dir)
+        sprite_yy = _make_sprite_yy_content("s_player", parent_path="folders/Sprites/Player.yy")
+        with open(os.path.join(sprite_gm_dir, "s_player.yy"), "w") as f:
+            f.write(sprite_yy)
+
+        # Create converted sprite scene at the subfolder location
+        _create_fake_sprite_scene(self.godot_dir, "s_player", subfolder="Player")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.tscn")
+        with open(tscn_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn('res://sprites/Player/s_player/s_player.tscn', content)
+
+    def test_root_level_object_stays_flat(self):
+        """Object with root-level parent should stay in flat structure."""
+        obj_dir = os.path.join(self.gm_dir, "objects", "o_ctrl")
+        os.makedirs(obj_dir)
+        yy_content = _make_object_yy_content("o_ctrl", sprite_name=None,
+                                              parent_path="folders/Objects.yy")
+        with open(os.path.join(obj_dir, "o_ctrl.yy"), "w") as f:
+            f.write(yy_content)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "o_ctrl", "o_ctrl.tscn")
+        self.assertTrue(os.path.isfile(tscn_path),
+                        "Root-level object should remain at objects/o_ctrl/")
 
 
 if __name__ == "__main__":

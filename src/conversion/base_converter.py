@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import threading
 from abc import ABC, abstractmethod
 
@@ -52,6 +54,41 @@ class BaseConverter(ABC):
         """Thread-safe version of _log_progress."""
         with self._lock:
             self._log_progress(item_name, current, total)
+
+    def _read_yy_file(self, yy_path):
+        """Read and parse a GameMaker .yy file, cleaning trailing commas."""
+        try:
+            with open(yy_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
+            return json.loads(cleaned)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return None
+
+    def _get_subfolder_from_yy(self, yy_path):
+        """Extract the IDE subfolder path from a resource's .yy file.
+
+        Reads parent.path (e.g. "folders/Objects/Game/Abilities.yy"),
+        strips "folders/" prefix, ".yy" suffix, and the first path component
+        (resource type), returning the remaining subfolder (e.g. "Game/Abilities").
+
+        Returns "" for root-level resources or on any parse failure.
+        """
+        data = self._read_yy_file(yy_path)
+        if data is None:
+            return ""
+        try:
+            parent_path = data['parent']['path']
+            if parent_path.startswith('folders/'):
+                parent_path = parent_path[len('folders/'):]
+            if parent_path.endswith('.yy'):
+                parent_path = parent_path[:-len('.yy')]
+            parts = parent_path.split('/')
+            if len(parts) <= 1:
+                return ""
+            return '/'.join(parts[1:])
+        except (KeyError, TypeError, AttributeError):
+            return ""
 
     @abstractmethod
     def convert_all(self):

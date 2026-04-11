@@ -357,5 +357,53 @@ class TestFontConverterEmptyFolder(unittest.TestCase):
                         "Expected at least one log message for empty fonts folder")
 
 
+class TestFontConverterSubfolders(unittest.TestCase):
+    """Test that fonts respect GameMaker's folder hierarchy."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+        _make_font_yy(self.gm_dir, "fnt_ui", {
+            "fontName": "NonExistentTestFont99999",
+            "parent": {"name": "UI", "path": "folders/Fonts/UI.yy"},
+        })
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_font_in_subfolder(self):
+        converter = FontConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        expected = os.path.join(self.godot_dir, "fonts", "UI", "fnt_ui.tres")
+        self.assertTrue(os.path.isfile(expected),
+                        f"Expected font at {expected}")
+
+    def test_root_level_font_stays_flat(self):
+        """Font with root-level parent should remain in fonts/."""
+        _make_font_yy(self.gm_dir, "fnt_root", {
+            "fontName": "NonExistentTestFont99999",
+            "parent": {"name": "Fonts", "path": "folders/Fonts.yy"},
+        })
+        converter = FontConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        expected = os.path.join(self.godot_dir, "fonts", "fnt_root.tres")
+        self.assertTrue(os.path.isfile(expected),
+                        "Root-level font should stay in fonts/")
+
+
 if __name__ == "__main__":
     unittest.main()

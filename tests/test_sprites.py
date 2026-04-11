@@ -443,7 +443,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
 
         converter = self._make_converter()
         result = converter._get_valid_sprite_names()
-        self.assertEqual(result, {"s_player", "s_enemy", "s_bullet"})
+        self.assertEqual(set(result.keys()), {"s_player", "s_enemy", "s_bullet"})
 
     def test_handles_trailing_commas(self):
         # Trailing commas are present in the _make_yyp_content output
@@ -453,7 +453,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
 
         converter = self._make_converter()
         result = converter._get_valid_sprite_names()
-        self.assertEqual(result, {"s_test"})
+        self.assertEqual(set(result.keys()), {"s_test"})
 
     def test_returns_none_when_no_yyp(self):
         converter = self._make_converter()
@@ -468,7 +468,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
         result = converter._get_valid_sprite_names()
         self.assertIsNone(result)
 
-    def test_returns_empty_set_when_no_sprites(self):
+    def test_returns_empty_dict_when_no_sprites(self):
         sound_resource = '{"id":{"name":"snd_boom","path":"sounds/snd_boom/snd_boom.yy",},}'
         yyp = _make_yyp_content([], extra_resources=[sound_resource])
         with open(os.path.join(self.gm_dir, "Game.yyp"), "w") as f:
@@ -477,7 +477,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
         converter = self._make_converter()
         result = converter._get_valid_sprite_names()
         self.assertIsNotNone(result)
-        self.assertEqual(result, set())
+        self.assertEqual(result, {})
 
 
 class TestSpriteConverterFiltering(unittest.TestCase):

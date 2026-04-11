@@ -14,7 +14,8 @@ from src.conversion.tilesets import TileSetConverter
 
 def _make_tileset_yy_content(name, sprite_name, tile_width=16, tile_height=16,
                               tilehsep=0, tilevsep=0, tilexoff=0, tileyoff=0,
-                              tile_count=2, out_columns=1):
+                              tile_count=2, out_columns=1,
+                              parent_path="folders/Tilesets.yy"):
     """Build a GameMaker tileset .yy file string."""
     return (
         '{{\n'
@@ -31,6 +32,7 @@ def _make_tileset_yy_content(name, sprite_name, tile_width=16, tile_height=16,
         '  "out_columns": {out_columns},\n'
         '  "tileAnimationFrames": [],\n'
         '  "tileAnimationSpeed": 15.0,\n'
+        '  "parent": {{"name": "Tilesets", "path": "{parent_path}",}},\n'
         '  "resourceType": "GMTileSet",\n'
         '  "resourceVersion": "2.0",\n'
         '}}'
@@ -40,6 +42,7 @@ def _make_tileset_yy_content(name, sprite_name, tile_width=16, tile_height=16,
         tilehsep=tilehsep, tilevsep=tilevsep,
         tilexoff=tilexoff, tileyoff=tileyoff,
         tile_count=tile_count, out_columns=out_columns,
+        parent_path=parent_path,
     )
 
 
@@ -254,6 +257,58 @@ class TestParseTilesetYY(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["sprite_name"], "s_tc")
         self.assertEqual(result["tileWidth"], 16)
+
+
+class TestTileSetConverterSubfolders(unittest.TestCase):
+    """Test that tilesets respect GameMaker's folder hierarchy."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+        tileset_dir = os.path.join(self.gm_dir, "tilesets", "ts_terrain")
+        os.makedirs(tileset_dir)
+        yy_content = _make_tileset_yy_content("ts_terrain", "s_terrain",
+                                               tile_width=16, tile_height=16,
+                                               tile_count=4,
+                                               parent_path="folders/Tilesets/World.yy")
+        with open(os.path.join(tileset_dir, "ts_terrain.yy"), "w") as f:
+            f.write(yy_content)
+
+        _make_sprite_for_tileset(self.gm_dir, "s_terrain", width=64, height=64)
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_tileset_in_subfolder(self):
+        converter = TileSetConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        tres_path = os.path.join(self.godot_dir, "tilesets", "World", "ts_terrain", "ts_terrain.tres")
+        self.assertTrue(os.path.isfile(tres_path),
+                        f"Expected tileset at {tres_path}")
+
+    def test_tileset_tres_has_subfolder_res_path(self):
+        converter = TileSetConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        tres_path = os.path.join(self.godot_dir, "tilesets", "World", "ts_terrain", "ts_terrain.tres")
+        with open(tres_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn('res://tilesets/World/ts_terrain/ts_terrain.png', content)
 
 
 if __name__ == "__main__":

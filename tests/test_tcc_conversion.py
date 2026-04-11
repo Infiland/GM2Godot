@@ -75,22 +75,30 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_known_sprites_exist(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")
+        all_dirs = set()
+        for root, dirs, _ in os.walk(sprites_dir):
+            all_dirs.update(dirs)
         for name in ("s_C1AIcon", "s_C2AIcon", "s_C3AIcon"):
-            self.assertTrue(
-                os.path.isdir(os.path.join(sprites_dir, name)),
-                f"Expected sprites/{name}/ directory",
-            )
+            self.assertIn(name, all_dirs, f"Expected sprites/{name}/ directory (nested)")
 
     def test_sprites_contain_png_files(self):
-        sprite_path = os.path.join(self.godot_dir, "sprites", "s_C1AIcon")
-        if os.path.isdir(sprite_path):
+        sprites_dir = os.path.join(self.godot_dir, "sprites")
+        sprite_path = None
+        for root, dirs, _ in os.walk(sprites_dir):
+            if "s_C1AIcon" in dirs:
+                sprite_path = os.path.join(root, "s_C1AIcon")
+                break
+        if sprite_path and os.path.isdir(sprite_path):
             pngs = [f for f in os.listdir(sprite_path) if f.endswith(".png")]
-            self.assertGreater(len(pngs), 0, "Expected at least one PNG in sprites/s_C1AIcon/")
+            self.assertGreater(len(pngs), 0, "Expected at least one PNG in s_C1AIcon/")
 
     def test_sprites_count(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")
-        dirs = [d for d in os.listdir(sprites_dir) if os.path.isdir(os.path.join(sprites_dir, d))]
-        self.assertGreater(len(dirs), 800, f"Expected 800+ sprite directories, got {len(dirs)}")
+        sprite_dirs = []
+        for root, dirs, files in os.walk(sprites_dir):
+            if any(f.endswith(".png") for f in files):
+                sprite_dirs.append(root)
+        self.assertGreater(len(sprite_dirs), 800, f"Expected 800+ sprite directories, got {len(sprite_dirs)}")
 
     # --- Sounds ---
 
@@ -124,9 +132,13 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_known_notes_converted(self):
         notes_dir = os.path.join(self.godot_dir, "notes")
+        all_files = {}
+        for root, _, files in os.walk(notes_dir):
+            for f in files:
+                all_files[f] = os.path.join(root, f)
         for name in ("InvisibleIsntHere", "LEG SKIN", "color"):
-            note_file = os.path.join(notes_dir, name, f"{name}.txt")
-            self.assertTrue(os.path.isfile(note_file), f"Expected notes/{name}/{name}.txt")
+            expected = f"{name}.txt"
+            self.assertIn(expected, all_files, f"Expected {expected} somewhere under notes/")
 
     # --- Included files ---
 

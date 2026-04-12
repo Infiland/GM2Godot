@@ -11,7 +11,7 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.objects import ObjectConverter
 
 
-def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects.yy"):
+def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects.yy", event_list=None):
     """Build a GameMaker object .yy file string."""
     if sprite_name is not None:
         sprite_id = (
@@ -21,11 +21,33 @@ def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects
     else:
         sprite_id = "null"
 
+    if event_list is None:
+        event_list = []
+    event_entries = []
+    for evt in event_list:
+        collision_id = "null"
+        if evt.get("collisionObjectId") is not None:
+            col = evt["collisionObjectId"]
+            collision_id = '{{"name": "{name}", "path": "objects/{name}/{name}.yy",}}'.format(name=col["name"])
+        entry = (
+            '{{"isDnD":false,"eventNum":{eventNum},"eventType":{eventType},'
+            '"collisionObjectId":{collisionObjectId},'
+            '"resourceVersion":"2.0","name":"","resourceType":"GMEvent",}}'
+        ).format(
+            eventNum=evt.get("eventNum", 0),
+            eventType=evt.get("eventType", 0),
+            collisionObjectId=collision_id,
+        )
+        event_entries.append(entry)
+    event_list_str = ",\n    ".join(event_entries)
+    if event_list_str:
+        event_list_str = "\n    " + event_list_str + ",\n  "
+
     return (
         '{{\n'
         '  "$GMObject": "",\n'
         '  "%Name": "{name}",\n'
-        '  "eventList": [],\n'
+        '  "eventList": [{event_list_str}],\n'
         '  "managed": true,\n'
         '  "name": "{name}",\n'
         '  "overriddenProperties": [],\n'
@@ -41,7 +63,7 @@ def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects
         '  "spriteMaskId": null,\n'
         '  "visible": true,\n'
         '}}'
-    ).format(name=name, sprite_id=sprite_id, parent_path=parent_path)
+    ).format(name=name, sprite_id=sprite_id, parent_path=parent_path, event_list_str=event_list_str)
 
 
 def _create_fake_sprite_scene(godot_dir, sprite_name, subfolder=""):
@@ -143,8 +165,10 @@ class TestObjectConverterBasic(unittest.TestCase):
             content = f.read()
 
         self.assertIn('type="Node2D"', content)
-        self.assertNotIn('ext_resource', content)
+        self.assertNotIn('PackedScene', content)
         self.assertNotIn('instance', content)
+        self.assertIn('type="Script"', content)
+        self.assertIn('script = ExtResource', content)
 
 
 class TestObjectConverterEmpty(unittest.TestCase):
@@ -197,7 +221,8 @@ class TestObjectConverterEmpty(unittest.TestCase):
             content = f.read()
 
         self.assertIn('type="Node2D"', content)
-        self.assertNotIn('ext_resource', content)
+        self.assertNotIn('PackedScene', content)
+        self.assertIn('type="Script"', content)
 
 
 class TestParseObjectYY(unittest.TestCase):
@@ -387,6 +412,342 @@ class TestObjectConverterSubfolders(unittest.TestCase):
         tscn_path = os.path.join(self.godot_dir, "objects", "o_ctrl", "o_ctrl.tscn")
         self.assertTrue(os.path.isfile(tscn_path),
                         "Root-level object should remain at objects/o_ctrl/")
+
+
+class TestScriptGeneration(unittest.TestCase):
+    """Test .gd script file generation for objects."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self):
+        return ObjectConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def _setup_object(self, name, sprite_name=None, event_list=None):
+        obj_dir = os.path.join(self.gm_dir, "objects", name)
+        os.makedirs(obj_dir)
+        yy_content = _make_object_yy_content(name, sprite_name=sprite_name, event_list=event_list)
+        with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
+            f.write(yy_content)
+        if sprite_name:
+            _create_fake_sprite_scene(self.godot_dir, sprite_name)
+
+    def test_generates_gd_file(self):
+        """A .gd file should be created alongside the .tscn."""
+        self._setup_object("o_test")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        self.assertTrue(os.path.isfile(gd_path), "Expected .gd file to be generated")
+
+    def test_script_extends_node2d(self):
+        """Script should start with extends Node2D."""
+        self._setup_object("o_test")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertTrue(content.startswith("extends Node2D"))
+
+    def test_script_with_no_events(self):
+        """Object with empty eventList produces minimal script."""
+        self._setup_object("o_empty", event_list=[])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_empty", "o_empty.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertEqual(content, "extends Node2D\n")
+
+    def test_script_with_create_event(self):
+        """eventType 0 should produce func _ready()."""
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _ready():", content)
+        self.assertIn("pass", content)
+
+    def test_script_with_step_event(self):
+        """eventType 3, eventNum 0 should produce func _process(delta)."""
+        self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _process(delta):", content)
+
+    def test_script_with_begin_step(self):
+        """eventType 3, eventNum 1 should produce func _physics_process(delta)."""
+        self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 1}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _physics_process(delta):", content)
+
+    def test_script_with_draw_event(self):
+        """eventType 8, eventNum 0 should produce func _draw()."""
+        self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 0}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _draw():", content)
+
+    def test_script_with_cleanup_event(self):
+        """eventType 12 should produce func _exit_tree()."""
+        self._setup_object("o_test", event_list=[{"eventType": 12, "eventNum": 0}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _exit_tree():", content)
+
+    def test_script_with_alarm_event(self):
+        """eventType 2 should produce func _on_alarm_N()."""
+        self._setup_object("o_test", event_list=[{"eventType": 2, "eventNum": 3}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_alarm_3():", content)
+
+    def test_script_with_collision_event(self):
+        """eventType 4 with collisionObjectId should produce func _on_collision_NAME()."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
+        ])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_collision_o_bullet():", content)
+
+    def test_script_with_multiple_events(self):
+        """Multiple events should produce multiple function stubs."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 0, "eventNum": 0},
+            {"eventType": 3, "eventNum": 0},
+            {"eventType": 1, "eventNum": 0},
+        ])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _ready():", content)
+        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_destroy():", content)
+
+    def test_input_events_merged(self):
+        """Mouse and keyboard events should merge into a single _input(event)."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 6, "eventNum": 4},   # Mouse left click
+            {"eventType": 9, "eventNum": 32},   # KeyPress space
+            {"eventType": 10, "eventNum": 13},  # KeyRelease enter
+        ])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _input(event):", content)
+        self.assertEqual(content.count("func _input"), 1, "Should have exactly one _input function")
+
+    def test_script_attached_to_tscn(self):
+        """The .tscn file should reference the .gd script."""
+        self._setup_object("o_test")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.tscn")
+        with open(tscn_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('type="Script"', content)
+        self.assertIn('o_test.gd', content)
+        self.assertIn('script = ExtResource', content)
+
+    def test_load_steps_script_only(self):
+        """load_steps should be 2 when only script (no sprite)."""
+        self._setup_object("o_test")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.tscn")
+        with open(tscn_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('load_steps=2', content)
+
+    def test_load_steps_sprite_and_script(self):
+        """load_steps should be 3 when both sprite and script are present."""
+        self._setup_object("o_test", sprite_name="s_test")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        tscn_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.tscn")
+        with open(tscn_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('load_steps=3', content)
+        self.assertIn('PackedScene', content)
+        self.assertIn('type="Script"', content)
+
+    def test_function_ordering(self):
+        """Functions should be in canonical order: lifecycle, input, custom."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 2, "eventNum": 0},   # Alarm (custom)
+            {"eventType": 6, "eventNum": 4},   # Mouse (input)
+            {"eventType": 3, "eventNum": 0},   # Step (lifecycle)
+            {"eventType": 0, "eventNum": 0},   # Create (lifecycle)
+        ])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        ready_pos = content.index("_ready")
+        process_pos = content.index("_process")
+        input_pos = content.index("_input")
+        alarm_pos = content.index("_on_alarm")
+        self.assertLess(ready_pos, process_pos)
+        self.assertLess(process_pos, input_pos)
+        self.assertLess(input_pos, alarm_pos)
+
+    def test_script_with_destroy_event(self):
+        """eventType 1 should produce func _on_destroy()."""
+        self._setup_object("o_test", event_list=[{"eventType": 1, "eventNum": 0}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_destroy():", content)
+
+    def test_script_with_other_event(self):
+        """eventType 7 should produce func _on_other_N()."""
+        self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 5}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_other_5():", content)
+
+    def test_script_with_draw_gui_event(self):
+        """eventType 8, eventNum 64 should produce func _on_draw_gui()."""
+        self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 64}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_draw_gui():", content)
+
+    def test_unknown_event_type(self):
+        """Unknown event types should produce safe fallback function names."""
+        self._setup_object("o_test", event_list=[{"eventType": 99, "eventNum": 5}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _on_event_99_5():", content)
+
+
+class TestParseObjectYYEvents(unittest.TestCase):
+    """Test that _parse_object_yy extracts event lists."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.converter = ObjectConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda msg: None,
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_object_yy(self, object_name, content):
+        obj_dir = os.path.join(self.gm_dir, "objects", object_name)
+        os.makedirs(obj_dir, exist_ok=True)
+        with open(os.path.join(obj_dir, object_name + ".yy"), "w") as f:
+            f.write(content)
+
+    def test_parses_event_list(self):
+        """event_list should be included in parse result."""
+        content = _make_object_yy_content("o_test", event_list=[
+            {"eventType": 0, "eventNum": 0},
+            {"eventType": 3, "eventNum": 0},
+        ])
+        self._write_object_yy("o_test", content)
+
+        result = self.converter._parse_object_yy("o_test")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["event_list"]), 2)
+        self.assertEqual(result["event_list"][0]["eventType"], 0)
+        self.assertEqual(result["event_list"][1]["eventType"], 3)
+
+    def test_empty_event_list(self):
+        """Empty event list should parse as empty list."""
+        content = _make_object_yy_content("o_test")
+        self._write_object_yy("o_test", content)
+
+        result = self.converter._parse_object_yy("o_test")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["event_list"], [])
+
+    def test_event_with_collision_object(self):
+        """Collision events should preserve collisionObjectId."""
+        content = _make_object_yy_content("o_test", event_list=[
+            {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_enemy"}},
+        ])
+        self._write_object_yy("o_test", content)
+
+        result = self.converter._parse_object_yy("o_test")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["event_list"]), 1)
+        self.assertEqual(result["event_list"][0]["collisionObjectId"]["name"], "o_enemy")
 
 
 if __name__ == "__main__":

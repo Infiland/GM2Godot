@@ -109,24 +109,21 @@ To contribute:
 ---
 
 ## Instructions for Coding Agents (LLMs)
-Use the following prompt with coding agents (e.g., Claude Code, OpenCode) to automatically set up and run this project:
 
+```text
 You are setting up the GM2Godot project.
-1. Ensure Python 3.9 or later is installed.
-```bash
+
+Ensure Python 3.9 or later is installed.
 python -m pip install --upgrade pip
-```
-2. Create and activate a virtual environment.
-```bash
+
+Create and activate a virtual environment.
 python -m venv venv
-source venv/bin/activate   # On Windows use: venv\Scripts\activate
-```
-3. Install dependencies: Pillow, markdown2, tkhtmlview.
-```bash
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+Install dependencies: Pillow, markdown2, tkhtmlview.
 pip install Pillow markdown2 tkhtmlview
-```
-4. Run the application using:
-```bash
+
+Run the application using:
 python main.py
-```
+
 Ensure all dependencies are installed correctly before execution.

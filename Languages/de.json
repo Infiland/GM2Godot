@@ -98,10 +98,15 @@
 "Console_Convertor_Tilesets_Stopped" : "Tileset-Konvertierung gestoppt.",
 
 "Console_Convertor_Sounds" : "Sounds werden konvertiert...",
-"Console_Convertor_Sounds_Converted" : "Konvertiert: {path} -> sounds/{path}",
+"Console_Convertor_Sounds_Converted" : "Sound konvertiert: {name} ({sound_file})",
 "Console_Convertor_Sounds_Error_NotFound" : "Keine Sound-Dateien im GameMaker-Projekt gefunden.",
 "Console_Convertor_Sounds_Complete" : "Sound-Konvertierung abgeschlossen.",
 "Console_Convertor_Sounds_Stopped" : "Sound-Konvertierung gestoppt.",
+"Console_Convertor_Sounds_ParseError" : "Warnung: Sound-Metadaten aus {yy_path} konnten nicht gelesen werden, wird übersprungen.",
+"Console_Convertor_Sounds_NoFile" : "Warnung: Sound '{name}' hat keine Audiodatei angegeben, wird übersprungen.",
+"Console_Convertor_Sounds_FileMissing" : "Warnung: Sound '{name}' verweist auf '{sound_file}', die nicht gefunden wurde, wird übersprungen.",
+"Console_Convertor_Sounds_VolumeNote" : "  Hinweis: {name} Lautstärke={volume} (ca. {volume_db} dB in Godot)",
+"Console_Convertor_Sounds_BusNote" : "  Hinweis: {name} verwendet Audio-Bus '{bus_name}'",
 
 "Console_Convertor_Shaders" : "Shader werden konvertiert...",
 "Console_Convertor_Shaders_Converted" : "{filename} konvertiert -> {output_path}",

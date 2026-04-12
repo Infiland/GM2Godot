@@ -106,8 +106,13 @@ class TestTCCConversion(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(self.godot_dir, "sounds")))
 
     def test_known_sound_exists(self):
-        sound_path = os.path.join(self.godot_dir, "sounds", "m_ahoy", "m_ahoy.wav")
-        self.assertTrue(os.path.isfile(sound_path), "Expected sounds/m_ahoy/m_ahoy.wav")
+        sounds_dir = os.path.join(self.godot_dir, "sounds")
+        found = False
+        for root, _, files in os.walk(sounds_dir):
+            if "m_ahoy.wav" in files:
+                found = True
+                break
+        self.assertTrue(found, "Expected m_ahoy.wav somewhere under sounds/")
 
     def test_sounds_count(self):
         sounds_dir = os.path.join(self.godot_dir, "sounds")

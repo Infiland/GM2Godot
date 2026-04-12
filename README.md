@@ -104,3 +104,29 @@ To contribute:
 - Report issues on our [GitHub Issues](https://github.com/Infiland/GM2Godot/issues) page
 - Check our [Documentation](https://github.com/Infiland/GM2Godot/wiki) for detailed guides
 - Join our community (Add community links if available)
+
+
+---
+
+## Instructions for Coding Agents (LLMs)
+Use the following prompt with coding agents (e.g., Claude Code, OpenCode) to automatically set up and run this project:
+
+You are setting up the GM2Godot project.
+1. Ensure Python 3.9 or later is installed.
+```bash
+python -m pip install --upgrade pip
+```
+2. Create and activate a virtual environment.
+```bash
+python -m venv venv
+source venv/bin/activate   # On Windows use: venv\Scripts\activate
+```
+3. Install dependencies: Pillow, markdown2, tkhtmlview.
+```bash
+pip install Pillow markdown2 tkhtmlview
+```
+4. Run the application using:
+```bash
+python main.py
+```
+Ensure all dependencies are installed correctly before execution.

@@ -47,9 +47,10 @@ class ObjectConverter(BaseConverter):
             return None
 
     def _parse_object_yy(self, object_name):
-        """Parse an object .yy file and extract the sprite reference.
+        """Parse an object .yy file and extract the sprite reference and event list.
 
-        Returns a dict with 'sprite_name' (str or None) or None if parsing fails.
+        Returns a dict with 'sprite_name' (str or None) and 'event_list' (list)
+        or None if parsing fails.
         """
         yy_path = os.path.join(self.gm_project_path, 'objects', object_name, object_name + '.yy')
         try:
@@ -63,7 +64,9 @@ class ObjectConverter(BaseConverter):
             if sprite_id is not None:
                 sprite_name = sprite_id.get('name', None)
 
-            return {"sprite_name": sprite_name}
+            event_list = data.get('eventList', [])
+
+            return {"sprite_name": sprite_name, "event_list": event_list}
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_ParseError").format(
                 yy_path=yy_path, object_name=object_name))
@@ -82,28 +85,144 @@ class ObjectConverter(BaseConverter):
             tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_name, sprite_name + '.tscn')
         return os.path.isfile(tscn_path)
 
-    def _generate_object_scene(self, object_name, sprite_name, sprite_subfolder=""):
+    def _event_to_function(self, event):
+        """Map a single GameMaker event dict to a (func_name, params, sort_key) tuple.
+
+        sort_key determines canonical ordering: lifecycle funcs first, then
+        _input, then custom functions alphabetically.
+        Returns None for input events (types 6, 9, 10) since they are merged.
+        """
+        event_type = event.get('eventType', -1)
+        event_num = event.get('eventNum', 0)
+
+        # Lifecycle events with direct Godot equivalents
+        if event_type == 0:
+            return ("_ready", "", 0)
+        if event_type == 3 and event_num == 0:
+            return ("_process", "delta", 1)
+        if event_type == 3 and event_num == 1:
+            return ("_physics_process", "delta", 2)
+        if event_type == 8 and event_num == 0:
+            return ("_draw", "", 3)
+        if event_type == 12:
+            return ("_exit_tree", "", 5)
+
+        # Input events are merged into a single _input() — handled separately
+        if event_type in (6, 9, 10):
+            return None
+
+        # Custom functions for remaining event types
+        if event_type == 1:
+            return ("_on_destroy", "", 10)
+        if event_type == 2:
+            return (f"_on_alarm_{event_num}", "", 11)
+        if event_type == 3 and event_num == 2:
+            return ("_on_end_step", "", 12)
+        if event_type == 4:
+            collision_obj = event.get('collisionObjectId')
+            if collision_obj and isinstance(collision_obj, dict):
+                obj_name = collision_obj.get('name', 'unknown')
+                return (f"_on_collision_{obj_name}", "", 13)
+            return ("_on_collision", "", 13)
+        if event_type == 7:
+            return (f"_on_other_{event_num}", "", 14)
+        if event_type == 8 and event_num == 64:
+            return ("_on_draw_gui", "", 15)
+        if event_type == 8:
+            return (f"_on_draw_{event_num}", "", 16)
+
+        # Unknown event type — generate safe fallback
+        return (f"_on_event_{event_type}_{event_num}", "", 20)
+
+    def _generate_script_content(self, object_name, event_list):
+        """Generate .gd script content with empty function stubs for each event.
+
+        Events are mapped to Godot callback functions. Input events (mouse,
+        keyboard) are merged into a single _input() function. Functions are
+        ordered canonically: lifecycle callbacks first, then custom functions.
+        """
+        if not event_list:
+            return "extends Node2D\n"
+
+        functions = []
+        has_input = False
+
+        for event in event_list:
+            event_type = event.get('eventType', -1)
+            if event_type in (6, 9, 10):
+                has_input = True
+                continue
+
+            result = self._event_to_function(event)
+            if result is not None:
+                functions.append(result)
+
+        if has_input:
+            functions.append(("_input", "event", 4))
+
+        # Deduplicate by function name, keep first occurrence
+        seen = set()
+        unique_functions = []
+        for func in functions:
+            if func[0] not in seen:
+                seen.add(func[0])
+                unique_functions.append(func)
+
+        # Sort by sort_key, then alphabetically for same key
+        unique_functions.sort(key=lambda f: (f[2], f[0]))
+
+        lines = ["extends Node2D\n"]
+        for func_name, params, _ in unique_functions:
+            lines.append(f"\n\nfunc {func_name}({params}):")
+            lines.append("\n\tpass\n")
+
+        return ''.join(lines)
+
+    def _generate_object_scene(self, object_name, sprite_name, sprite_subfolder="", script_res_path=None):
         """Build the .tscn content string for an object scene.
 
         If sprite_name is not None, the scene instances the sprite's scene as a child.
+        If script_res_path is not None, the scene attaches the script to the root node.
         """
-        if sprite_name is None:
-            parts = ['[gd_scene format=3]\n']
-            parts.append(f'\n[node name="{object_name}" type="Node2D"]\n')
+        has_sprite = sprite_name is not None
+        has_script = script_res_path is not None
+        ext_resource_count = int(has_sprite) + int(has_script)
+        load_steps = ext_resource_count + 1 if ext_resource_count > 0 else 0
+
+        if load_steps > 0:
+            parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
         else:
+            parts = ['[gd_scene format=3]\n']
+
+        next_id = 1
+        sprite_id = None
+        script_id = None
+
+        if has_sprite:
+            sprite_id = str(next_id)
+            next_id += 1
             if sprite_subfolder:
-                sprite_res_path = f"res://sprites/{sprite_subfolder}/{sprite_name}/{sprite_name}.tscn"
+                sprite_path = f"res://sprites/{sprite_subfolder}/{sprite_name}/{sprite_name}.tscn"
             else:
-                sprite_res_path = f"res://sprites/{sprite_name}/{sprite_name}.tscn"
-            parts = ['[gd_scene format=3 load_steps=2]\n']
-            parts.append(f'\n[ext_resource type="PackedScene" path="{sprite_res_path}" id="1"]\n')
+                sprite_path = f"res://sprites/{sprite_name}/{sprite_name}.tscn"
+            parts.append(f'\n[ext_resource type="PackedScene" path="{sprite_path}" id="{sprite_id}"]\n')
+
+        if has_script:
+            script_id = str(next_id)
+            parts.append(f'\n[ext_resource type="Script" path="{script_res_path}" id="{script_id}"]\n')
+
+        if has_script:
+            parts.append(f'\n[node name="{object_name}" type="Node2D"]\nscript = ExtResource("{script_id}")\n')
+        else:
             parts.append(f'\n[node name="{object_name}" type="Node2D"]\n')
-            parts.append(f'\n[node name="{sprite_name}" parent="." instance=ExtResource("1")]\n')
+
+        if has_sprite:
+            parts.append(f'\n[node name="{sprite_name}" parent="." instance=ExtResource("{sprite_id}")]\n')
 
         return ''.join(parts)
 
     def _process_object(self, object_name, subfolder=""):
-        """Process a single object: parse .yy, generate scene, write .tscn file.
+        """Process a single object: parse .yy, generate scene and script, write files.
 
         Returns a result dict or None if conversion was stopped.
         """
@@ -115,6 +234,7 @@ class ObjectConverter(BaseConverter):
             return {"success": False, "name": object_name}
 
         sprite_name = parsed["sprite_name"]
+        event_list = parsed["event_list"]
         sprite_subfolder = ""
 
         if sprite_name is not None:
@@ -124,18 +244,28 @@ class ObjectConverter(BaseConverter):
                     object_name=object_name, sprite_name=sprite_name))
                 sprite_name = None
 
-        scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder)
-
         if subfolder:
             object_dir = os.path.join(self.godot_objects_path, subfolder, object_name)
+            script_res_path = f"res://objects/{subfolder}/{object_name}/{object_name}.gd"
         else:
             object_dir = os.path.join(self.godot_objects_path, object_name)
+            script_res_path = f"res://objects/{object_name}/{object_name}.gd"
+
+        script_content = self._generate_script_content(object_name, event_list)
+        scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder, script_res_path)
+
         os.makedirs(object_dir, exist_ok=True)
+
         tscn_path = os.path.join(object_dir, f"{object_name}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(scene_content)
 
-        return {"success": True, "name": object_name, "has_sprite": sprite_name is not None, "sprite_name": sprite_name}
+        gd_path = os.path.join(object_dir, f"{object_name}.gd")
+        with open(gd_path, 'w', encoding='utf-8') as f:
+            f.write(script_content)
+
+        return {"success": True, "name": object_name, "has_sprite": sprite_name is not None,
+                "sprite_name": sprite_name, "event_count": len(event_list)}
 
     def convert_objects(self):
         os.makedirs(self.godot_objects_path, exist_ok=True)
@@ -187,10 +317,11 @@ class ObjectConverter(BaseConverter):
                     else:
                         if result["has_sprite"]:
                             self._safe_log(get_localized("Console_Convertor_Objects_ConvertedWithSprite").format(
-                                object_name=result["name"], sprite_name=result["sprite_name"]))
+                                object_name=result["name"], sprite_name=result["sprite_name"],
+                                event_count=result["event_count"]))
                         else:
                             self._safe_log(get_localized("Console_Convertor_Objects_Converted").format(
-                                object_name=result["name"]))
+                                object_name=result["name"], event_count=result["event_count"]))
 
                 self._safe_progress(int(processed / total * 100))
 

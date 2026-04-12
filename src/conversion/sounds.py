@@ -150,15 +150,19 @@ class SoundConverter(BaseConverter):
 
         subfolder = self._get_subfolder_from_yy(yy_path)
         if subfolder:
-            output_dir = os.path.join(self.godot_sounds_path, subfolder)
+            output_dir = os.path.join(self.godot_sounds_path, subfolder, sound_name)
         else:
-            output_dir = self.godot_sounds_path
+            output_dir = os.path.join(self.godot_sounds_path, sound_name)
         os.makedirs(output_dir, exist_ok=True)
 
         dest_path = os.path.join(output_dir, sound_file)
         shutil.copy2(audio_path, dest_path)
 
-        import_content = self._generate_import_file(sound_file, subfolder)
+        if subfolder:
+            res_subfolder = f"{subfolder}/{sound_name}"
+        else:
+            res_subfolder = sound_name
+        import_content = self._generate_import_file(sound_file, res_subfolder)
         if import_content is not None:
             import_path = dest_path + '.import'
             with open(import_path, 'w', encoding='utf-8') as f:

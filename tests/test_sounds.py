@@ -78,7 +78,7 @@ class TestSoundConverterBasic(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "sounds", "jump.wav")
+        expected = os.path.join(self.godot_dir, "sounds", "jump", "jump.wav")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} to exist after conversion")
 
@@ -86,7 +86,7 @@ class TestSoundConverterBasic(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "jump.wav.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "jump", "jump.wav.import")
         self.assertTrue(os.path.isfile(import_path),
                         f"Expected {import_path} to exist after conversion")
 
@@ -94,13 +94,13 @@ class TestSoundConverterBasic(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "jump.wav.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "jump", "jump.wav.import")
         with open(import_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         self.assertIn('importer="wav"', content)
         self.assertIn('type="AudioStreamWAV"', content)
-        self.assertIn('source_file="res://sounds/jump.wav"', content)
+        self.assertIn('source_file="res://sounds/jump/jump.wav"', content)
         self.assertIn('edit/loop_mode=0', content)
 
 
@@ -139,7 +139,7 @@ class TestSoundConverterFormats(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "bgm.mp3.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "bgm", "bgm.mp3.import")
         self.assertTrue(os.path.isfile(import_path))
         with open(import_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -161,7 +161,7 @@ class TestSoundConverterFormats(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "hit.ogg.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "hit", "hit.ogg.import")
         self.assertTrue(os.path.isfile(import_path))
         with open(import_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -295,7 +295,7 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "sounds", "SFX", "explosion.wav")
+        expected = os.path.join(self.godot_dir, "sounds", "SFX", "explosion", "explosion.wav")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} in subfolder")
 
@@ -307,11 +307,11 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "SFX", "explosion.wav.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "SFX", "explosion", "explosion.wav.import")
         self.assertTrue(os.path.isfile(import_path))
         with open(import_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn('source_file="res://sounds/SFX/explosion.wav"', content)
+        self.assertIn('source_file="res://sounds/SFX/explosion/explosion.wav"', content)
 
     def test_root_level_sound(self):
         _make_sound_yy(self.gm_dir, "beep")
@@ -319,7 +319,7 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "sounds", "beep.wav")
+        expected = os.path.join(self.godot_dir, "sounds", "beep", "beep.wav")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} at root level")
 
@@ -360,7 +360,7 @@ class TestSoundConverterEdgeCases(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()  # should not raise
 
-        audio_path = os.path.join(self.godot_dir, "sounds", "ghost.wav")
+        audio_path = os.path.join(self.godot_dir, "sounds", "ghost", "ghost.wav")
         self.assertFalse(os.path.isfile(audio_path),
                          "Should not copy nonexistent audio file")
 

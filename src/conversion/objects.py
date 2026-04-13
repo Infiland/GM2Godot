@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.script_generator import generate_script_content
 
 
 class ObjectConverter(BaseConverter):
@@ -85,99 +86,6 @@ class ObjectConverter(BaseConverter):
             tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_name, sprite_name + '.tscn')
         return os.path.isfile(tscn_path)
 
-    def _event_to_function(self, event):
-        """Map a single GameMaker event dict to a (func_name, params, sort_key) tuple.
-
-        sort_key determines canonical ordering: lifecycle funcs first, then
-        _input, then custom functions alphabetically.
-        Returns None for input events (types 6, 9, 10) since they are merged.
-        """
-        event_type = event.get('eventType', -1)
-        event_num = event.get('eventNum', 0)
-
-        # Lifecycle events with direct Godot equivalents
-        if event_type == 0:
-            return ("_ready", "", 0)
-        if event_type == 3 and event_num == 0:
-            return ("_process", "delta", 1)
-        if event_type == 3 and event_num == 1:
-            return ("_physics_process", "delta", 2)
-        if event_type == 8 and event_num == 0:
-            return ("_draw", "", 3)
-        if event_type == 12:
-            return ("_exit_tree", "", 5)
-
-        # Input events are merged into a single _input() — handled separately
-        if event_type in (6, 9, 10):
-            return None
-
-        # Custom functions for remaining event types
-        if event_type == 1:
-            return ("_on_destroy", "", 10)
-        if event_type == 2:
-            return (f"_on_alarm_{event_num}", "", 11)
-        if event_type == 3 and event_num == 2:
-            return ("_on_end_step", "", 12)
-        if event_type == 4:
-            collision_obj = event.get('collisionObjectId')
-            if collision_obj and isinstance(collision_obj, dict):
-                obj_name = collision_obj.get('name', 'unknown')
-                return (f"_on_collision_{obj_name}", "", 13)
-            return ("_on_collision", "", 13)
-        if event_type == 7:
-            return (f"_on_other_{event_num}", "", 14)
-        if event_type == 8 and event_num == 64:
-            return ("_on_draw_gui", "", 15)
-        if event_type == 8:
-            return (f"_on_draw_{event_num}", "", 16)
-
-        # Unknown event type — generate safe fallback
-        return (f"_on_event_{event_type}_{event_num}", "", 20)
-
-    def _generate_script_content(self, object_name, event_list):
-        """Generate .gd script content with empty function stubs for each event.
-
-        Events are mapped to Godot callback functions. Input events (mouse,
-        keyboard) are merged into a single _input() function. Functions are
-        ordered canonically: lifecycle callbacks first, then custom functions.
-        """
-        if not event_list:
-            return "extends Node2D\n"
-
-        functions = []
-        has_input = False
-
-        for event in event_list:
-            event_type = event.get('eventType', -1)
-            if event_type in (6, 9, 10):
-                has_input = True
-                continue
-
-            result = self._event_to_function(event)
-            if result is not None:
-                functions.append(result)
-
-        if has_input:
-            functions.append(("_input", "event", 4))
-
-        # Deduplicate by function name, keep first occurrence
-        seen = set()
-        unique_functions = []
-        for func in functions:
-            if func[0] not in seen:
-                seen.add(func[0])
-                unique_functions.append(func)
-
-        # Sort by sort_key, then alphabetically for same key
-        unique_functions.sort(key=lambda f: (f[2], f[0]))
-
-        lines = ["extends Node2D\n"]
-        for func_name, params, _ in unique_functions:
-            lines.append(f"\n\nfunc {func_name}({params}):")
-            lines.append("\n\tpass\n")
-
-        return ''.join(lines)
-
     def _generate_object_scene(self, object_name, sprite_name, sprite_subfolder="", script_res_path=None):
         """Build the .tscn content string for an object scene.
 
@@ -251,7 +159,7 @@ class ObjectConverter(BaseConverter):
             object_dir = os.path.join(self.godot_objects_path, object_name)
             script_res_path = f"res://objects/{object_name}/{object_name}.gd"
 
-        script_content = self._generate_script_content(object_name, event_list)
+        script_content = generate_script_content(event_list)
         scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder, script_res_path)
 
         os.makedirs(object_dir, exist_ok=True)

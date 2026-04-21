@@ -35,9 +35,18 @@ GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.14.
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Releases
-Downloadable releases can be found on the side of this page, for now executables are only available on Windows but we will work on other platforms too
+
+Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
+
+To build a local macOS distributable (`.app` + `.dmg`), run `bash build_macos.sh` from the project root.
 
 ## Installation
+
+### Prerequisites
+
+- Python 3.9 or later
+
+### Setup
 
 1. **Clone the Repository**
 ```bash
@@ -45,21 +54,24 @@ git clone https://github.com/Infiland/GM2Godot
 cd GM2Godot
 ```
 
-2. **Install Python Requirements**
-- Requires Python 3.9.0 or later
-- Install required packages:
+2. **Create a Virtual Environment** (recommended)
 ```bash
-pip install Pillow markdown2 tkhtmlview
+python3 -m venv venv
 ```
 
-3. **Additional Requirements**
-- For Linux users (Ubuntu/Debian):
+3. **Activate the Virtual Environment**
+- On macOS/Linux:
 ```bash
-sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
+source venv/bin/activate
 ```
-Note: If tkhtmlview installation fails, try:
+- On Windows:
 ```bash
-pip install tkhtmlview --break-system-packages
+venv\Scripts\activate
+```
+
+4. **Install Dependencies**
+```bash
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -105,7 +117,6 @@ To contribute:
 - Check our [Documentation](https://github.com/Infiland/GM2Godot/wiki) for detailed guides
 - Join our community (Add community links if available)
 
-
 ---
 
 ## Instructions for Coding Agents (LLMs)
@@ -114,16 +125,22 @@ To contribute:
 You are setting up the GM2Godot project.
 
 Ensure Python 3.9 or later is installed.
-python -m pip install --upgrade pip
 
-Create and activate a virtual environment.
-python -m venv venv
+Create and activate a virtual environment:
+python3 -m venv venv
 source venv/bin/activate  # On Windows use: venv\Scripts\activate
 
-Install dependencies: Pillow, markdown2, tkhtmlview.
-pip install Pillow markdown2 tkhtmlview
+Install dependencies from requirements.txt:
+pip install -r requirements.txt
+
+The project uses PySide6 (not Tkinter). Required packages are:
+- Pillow
+- markdown2
+- requests
+- PySide6
 
 Run the application using:
 python main.py
 
 Ensure all dependencies are installed correctly before execution.
+```

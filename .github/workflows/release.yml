@@ -44,12 +44,15 @@ jobs:
           - os: windows-latest
             name: windows
             ext: .exe
+            pyinstaller_mode: --onefile
           - os: macos-latest
             name: macos
             ext: ""
+            pyinstaller_mode: --onedir
           - os: ubuntu-latest
             name: linux
             ext: ""
+            pyinstaller_mode: --onefile
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -72,7 +75,7 @@ jobs:
           else
             SEP=":"
           fi
-          pyinstaller --onefile \
+          pyinstaller ${{ matrix.pyinstaller_mode }} \
             --windowed \
             --clean \
             --name GM2Godot \
@@ -91,7 +94,11 @@ jobs:
       - name: Package build
         run: |
           mkdir -p release
-          cp dist/GM2Godot${{ matrix.ext }} release/
+          if [ "${{ matrix.name }}" = "macos" ]; then
+            cp -R dist/GM2Godot.app release/
+          else
+            cp dist/GM2Godot${{ matrix.ext }} release/
+          fi
           cp README.md release/
 
       - name: Zip release
@@ -99,11 +106,35 @@ jobs:
           cd release
           7z a ../GM2Godot-${{ matrix.name }}.zip .
 
+      - name: Create macOS DMG
+        if: matrix.name == 'macos'
+        run: |
+          rm -rf dmg
+          mkdir -p dmg
+          cp -R dist/GM2Godot.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create \
+            -volname "GM2Godot" \
+            -srcfolder dmg \
+            -ov \
+            -format UDZO \
+            GM2Godot-macos.dmg
+
       - name: Upload artifact
+        if: matrix.name != 'macos'
         uses: actions/upload-artifact@v4
         with:
           name: GM2Godot-${{ matrix.name }}
           path: GM2Godot-${{ matrix.name }}.zip
+
+      - name: Upload macOS artifacts
+        if: matrix.name == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GM2Godot-${{ matrix.name }}
+          path: |
+            GM2Godot-${{ matrix.name }}.zip
+            GM2Godot-${{ matrix.name }}.dmg
 
   release:
     needs: [get-version, build]
@@ -128,4 +159,5 @@ jobs:
           files: |
             artifacts/GM2Godot-windows/GM2Godot-windows.zip
             artifacts/GM2Godot-macos/GM2Godot-macos.zip
+            artifacts/GM2Godot-macos/GM2Godot-macos.dmg
             artifacts/GM2Godot-linux/GM2Godot-linux.zip

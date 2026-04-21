@@ -12,7 +12,7 @@ from src.localization import get_localized
 
 
 CONVERSION_CATEGORIES = {
-    "assets": ["sprites", "fonts", "sounds", "included_files", "objects"],
+    "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
     "wip": ["shaders", "tilesets"],
 }
@@ -30,6 +30,10 @@ class Converter:
         self.max_workers = max_workers
 
     def convert(self, gm_path, gm_platform, godot_path, settings):
+        group_sounds_by_audio_group = False
+        if "sound_group_folders" in settings:
+            group_sounds_by_audio_group = settings["sound_group_folders"].get()
+
         project_settings = ProjectSettingsConverter(
             gm_path, godot_path, self.log_callback,
             self.progress_callback, self.conversion_running.is_set,
@@ -69,6 +73,7 @@ class Converter:
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
+                organize_by_audio_group=group_sounds_by_audio_group,
             ).convert_all(), "Console_Convertor_Sounds"),
             ("notes", lambda: NoteConverter(
                 gm_path, godot_path, self.log_callback,

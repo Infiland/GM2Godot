@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import shutil
@@ -9,10 +10,12 @@ from src.conversion.base_converter import BaseConverter
 
 class SoundConverter(BaseConverter):
     def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+                 update_log_callback=None, compact_logging=False, max_workers=None,
+                 organize_by_audio_group=False):
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
+        self.organize_by_audio_group = bool(organize_by_audio_group)
 
     def find_sound_files(self):
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
@@ -54,6 +57,37 @@ class SoundConverter(BaseConverter):
         if volume <= 0.0:
             return -80.0
         return 20.0 * math.log10(volume)
+
+    def _build_output_paths(self, sound_name, subfolder, audio_group):
+        output_parts = []
+
+        if self.organize_by_audio_group:
+            output_parts.append(audio_group or 'audiogroup_default')
+
+        if subfolder:
+            output_parts.extend(part for part in subfolder.split('/') if part)
+
+        output_parts.append(sound_name)
+
+        output_dir = os.path.join(self.godot_sounds_path, *output_parts)
+        res_subfolder = '/'.join(output_parts)
+        return output_dir, res_subfolder
+
+    def _write_audio_group_map(self, audio_group_map):
+        map_path = os.path.join(self.godot_sounds_path, 'audio_group_map.json')
+        ordered_map = {name: audio_group_map[name] for name in sorted(audio_group_map)}
+        payload = {
+            'format_version': 1,
+            'sounds': ordered_map,
+        }
+
+        with open(map_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2)
+            f.write('\n')
+
+        if not self.compact_logging:
+            self._safe_log(get_localized("Console_Convertor_Sounds_MapGenerated").format(
+                map_path='sounds/audio_group_map.json', sounds_num=len(ordered_map)))
 
     def _generate_import_file(self, sound_file, subfolder=""):
         ext = os.path.splitext(sound_file)[1].lower()
@@ -133,35 +167,30 @@ class SoundConverter(BaseConverter):
 
         sound_data = self._parse_sound_yy(yy_path)
         if sound_data is None:
-            return False
+            sound_name = os.path.splitext(os.path.basename(yy_path))[0]
+            return {'success': False, 'name': sound_name, 'audio_group': 'audiogroup_default'}
 
         sound_name = sound_data['name']
         sound_file = sound_data['soundFile']
+        audio_group = sound_data['audioGroupId'] or 'audiogroup_default'
 
         if not sound_file:
             self._safe_log(get_localized("Console_Convertor_Sounds_NoFile").format(name=sound_name))
-            return False
+            return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
         audio_path = os.path.join(os.path.dirname(yy_path), sound_file)
         if not os.path.isfile(audio_path):
             self._safe_log(get_localized("Console_Convertor_Sounds_FileMissing").format(
                 name=sound_name, sound_file=sound_file))
-            return False
+            return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
         subfolder = self._get_subfolder_from_yy(yy_path)
-        if subfolder:
-            output_dir = os.path.join(self.godot_sounds_path, subfolder, sound_name)
-        else:
-            output_dir = os.path.join(self.godot_sounds_path, sound_name)
+        output_dir, res_subfolder = self._build_output_paths(sound_name, subfolder, audio_group)
         os.makedirs(output_dir, exist_ok=True)
 
         dest_path = os.path.join(output_dir, sound_file)
         shutil.copy2(audio_path, dest_path)
 
-        if subfolder:
-            res_subfolder = f"{subfolder}/{sound_name}"
-        else:
-            res_subfolder = sound_name
         import_content = self._generate_import_file(sound_file, res_subfolder)
         if import_content is not None:
             import_path = dest_path + '.import'
@@ -178,12 +207,11 @@ class SoundConverter(BaseConverter):
                     name=sound_name, volume=sound_data['volume'],
                     volume_db=f"{volume_db:.1f}"))
 
-            audio_group = sound_data['audioGroupId']
             if audio_group != 'audiogroup_default':
                 self._safe_log(get_localized("Console_Convertor_Sounds_BusNote").format(
                     name=sound_name, bus_name=audio_group))
 
-        return sound_name
+        return {'success': True, 'name': sound_name, 'audio_group': audio_group}
 
     def convert_sounds(self):
         os.makedirs(self.godot_project_path, exist_ok=True)
@@ -195,7 +223,7 @@ class SoundConverter(BaseConverter):
             self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
             return
 
-        sound_files = self.find_sound_files()
+        sound_files = sorted(self.find_sound_files())
 
         if not sound_files:
             self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
@@ -203,6 +231,7 @@ class SoundConverter(BaseConverter):
 
         total_sounds = len(sound_files)
         processed_sounds = 0
+        audio_group_map = {}
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {executor.submit(self._process_sound, sf): sf for sf in sound_files}
@@ -211,14 +240,17 @@ class SoundConverter(BaseConverter):
                 if result is None:
                     self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
                     return
-                if result is not False:
-                    processed_sounds += 1
+
+                processed_sounds += 1
+
+                if result['success']:
+                    audio_group_map[result['name']] = result['audio_group']
                     if self.compact_logging:
-                        self._safe_log_progress(result, processed_sounds, total_sounds)
-                    self._safe_progress(int(processed_sounds / total_sounds * 100))
-                else:
-                    processed_sounds += 1
-                    self._safe_progress(int(processed_sounds / total_sounds * 100))
+                        self._safe_log_progress(result['name'], processed_sounds, total_sounds)
+
+                self._safe_progress(int(processed_sounds / total_sounds * 100))
+
+        self._write_audio_group_map(audio_group_map)
 
         self.log_callback(get_localized("Console_Convertor_Sounds_Complete"))
 

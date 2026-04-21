@@ -107,6 +107,7 @@
 "Console_Convertor_Sounds_FileMissing" : "Warning: Sound '{name}' references '{sound_file}' which was not found, skipping.",
 "Console_Convertor_Sounds_VolumeNote" : "  Note: {name} volume={volume} (approx. {volume_db} dB in Godot)",
 "Console_Convertor_Sounds_BusNote" : "  Note: {name} uses audio bus '{bus_name}'",
+"Console_Convertor_Sounds_MapGenerated" : "Generated {map_path} with {sounds_num} sound-to-group mappings.",
 
 "Console_Convertor_Shaders" : "Converting shaders...",
 "Console_Convertor_Shaders_Converted" : "Converted {filename} -> {output_path}",
@@ -162,11 +163,12 @@
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",
 "Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "included_files", "objects"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Fonts",
     "sounds": "Sounds",
+    "sound_group_folders": "Sound Group Folders",
     "game_icon": "Game Icon",
     "project_name": "Project Name",
     "project_settings": "Project Settings",

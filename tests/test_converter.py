@@ -25,7 +25,7 @@ class TestConversionCategories(unittest.TestCase):
 
     def test_assets_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["assets"],
-                         ["sprites", "fonts", "sounds", "included_files", "objects"])
+                         ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"])
 
     def test_project_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["project"],

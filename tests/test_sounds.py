@@ -251,6 +251,71 @@ class TestSoundConverterMetadata(unittest.TestCase):
         self.assertEqual(result['audioGroupId'], "audiogroup_sfx")
 
 
+class TestSoundConverterAudioGroupMap(unittest.TestCase):
+    """Test sound-to-audio-group mapping export."""
+
+    def setUp(self):
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs = []
+
+    def tearDown(self):
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self, **kwargs):
+        defaults = dict(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            organize_by_audio_group=False,
+        )
+        defaults.update(kwargs)
+        return SoundConverter(self.gm_dir, self.godot_dir, **defaults)
+
+    def test_generates_audio_group_map_file(self):
+        _make_sound_yy(self.gm_dir, "snd_music", overrides={
+            "audioGroupId": {"name": "audiogroup_music", "path": "audiogroups/audiogroup_music.yy"},
+        })
+        _make_sound_yy(self.gm_dir, "snd_click")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        map_path = os.path.join(self.godot_dir, "sounds", "audio_group_map.json")
+        self.assertTrue(os.path.isfile(map_path))
+
+        with open(map_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.assertEqual(data.get("format_version"), 1)
+        self.assertEqual(data["sounds"]["snd_music"], "audiogroup_music")
+        self.assertEqual(data["sounds"]["snd_click"], "audiogroup_default")
+
+    def test_map_skips_failed_sound_entries(self):
+        _make_sound_yy(self.gm_dir, "ok")
+
+        # Build a .yy that references a missing audio file
+        sound_dir = os.path.join(self.gm_dir, "sounds", "ghost")
+        os.makedirs(sound_dir, exist_ok=True)
+        data = dict(MINIMAL_SOUND_YY)
+        data["name"] = "ghost"
+        data["%Name"] = "ghost"
+        data["soundFile"] = "ghost.wav"
+        with open(os.path.join(sound_dir, "ghost.yy"), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        map_path = os.path.join(self.godot_dir, "sounds", "audio_group_map.json")
+        with open(map_path, "r", encoding="utf-8") as f:
+            exported = json.load(f)["sounds"]
+
+        self.assertIn("ok", exported)
+        self.assertNotIn("ghost", exported)
+
+
 class TestSoundConverterVolumeConversion(unittest.TestCase):
     """Test the volume-to-dB static method."""
 
@@ -279,13 +344,15 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
-        return SoundConverter(
-            self.gm_dir, self.godot_dir,
+    def _make_converter(self, **kwargs):
+        defaults = dict(
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
+            organize_by_audio_group=False,
         )
+        defaults.update(kwargs)
+        return SoundConverter(self.gm_dir, self.godot_dir, **defaults)
 
     def test_subfolder_hierarchy(self):
         _make_sound_yy(self.gm_dir, "explosion", overrides={
@@ -322,6 +389,41 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         expected = os.path.join(self.godot_dir, "sounds", "beep", "beep.wav")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} at root level")
+
+    def test_grouped_folders_enabled(self):
+        _make_sound_yy(self.gm_dir, "theme", overrides={
+            "audioGroupId": {"name": "audiogroup_music", "path": "audiogroups/audiogroup_music.yy"},
+            "parent": {"name": "SFX", "path": "folders/Sounds/SFX.yy"},
+        })
+
+        converter = self._make_converter(organize_by_audio_group=True)
+        converter.convert_all()
+
+        expected = os.path.join(
+            self.godot_dir, "sounds", "audiogroup_music", "SFX", "theme", "theme.wav"
+        )
+        self.assertTrue(os.path.isfile(expected),
+                        f"Expected {expected} in grouped folder hierarchy")
+
+    def test_grouped_import_file_path(self):
+        _make_sound_yy(self.gm_dir, "theme", overrides={
+            "audioGroupId": {"name": "audiogroup_music", "path": "audiogroups/audiogroup_music.yy"},
+            "parent": {"name": "SFX", "path": "folders/Sounds/SFX.yy"},
+        })
+
+        converter = self._make_converter(organize_by_audio_group=True)
+        converter.convert_all()
+
+        import_path = os.path.join(
+            self.godot_dir, "sounds", "audiogroup_music", "SFX", "theme", "theme.wav.import"
+        )
+        self.assertTrue(os.path.isfile(import_path))
+        with open(import_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn(
+            'source_file="res://sounds/audiogroup_music/SFX/theme/theme.wav"',
+            content,
+        )
 
 
 class TestSoundConverterEdgeCases(unittest.TestCase):

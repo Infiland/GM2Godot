@@ -84,6 +84,7 @@
 "Console_Convertor_Sounds_Error_NotFound" : "No sound files found in the GameMaker project.",
 "Console_Convertor_Sounds_Complete" : "Sound conversion completed.",
 "Console_Convertor_Sounds_Stopped" : "Sound conversion stopped.",
+"Console_Convertor_Sounds_MapGenerated" : "Generated {map_path} with {sounds_num} sound-to-group mappings.",
 
 "Console_Convertor_Shaders_Converted" : "Converted {filename} -> {output_path}",
 
@@ -121,7 +122,23 @@
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",
 "Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["objects", "shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+
+"Settings_Labels": {
+    "sprites": "Sprites",
+    "fonts": "Fonts",
+    "sounds": "Sounds",
+    "sound_group_folders": "Sound Group Folders",
+    "game_icon": "Game Icon",
+    "project_name": "Project Name",
+    "project_settings": "Project Settings",
+    "audio_buses": "Audio Buses",
+    "notes": "Notes",
+    "objects": "Objects",
+    "shaders": "Shaders",
+    "tilesets": "Tilesets",
+    "included_files": "Included Files"
+},
 
 "Settings_Button_SelectAll" : "Select All",
 "Settings_Button_DeselectAll" : "Deselect All",

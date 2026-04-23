@@ -13,7 +13,7 @@
 "Language" : "Deutsch",
 "Language_Code" : "de",
 "Author" : "übersetzt von [Ihr Name]",
-"Version" : "0.0.16",
+"Version" : "0.2.0",
 
 "About_Title" : "Über GM2Godot",
 "About_Description" : "GM2Godot ist ein Werkzeug, das Entwicklern hilft, ihre GameMaker-Projekte zur Godot Engine zu migrieren.\nEs automatisiert die Konvertierung verschiedener Projekt-Assets und -Einstellungen und macht den Übergang reibungsloser.",

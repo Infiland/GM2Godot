@@ -15,6 +15,9 @@ from src.conversion.event_mapping import (
 class TestIsInputEvent(unittest.TestCase):
     """Test is_input_event for input and non-input event types."""
 
+    def test_keyboard_event(self):
+        self.assertTrue(is_input_event({"eventType": 5, "eventNum": 65}))
+
     def test_mouse_event(self):
         self.assertTrue(is_input_event({"eventType": 6, "eventNum": 4}))
 
@@ -23,6 +26,9 @@ class TestIsInputEvent(unittest.TestCase):
 
     def test_key_release_event(self):
         self.assertTrue(is_input_event({"eventType": 10, "eventNum": 13}))
+
+    def test_gesture_event(self):
+        self.assertTrue(is_input_event({"eventType": 13, "eventNum": 3}))
 
     def test_create_event_not_input(self):
         self.assertFalse(is_input_event({"eventType": 0, "eventNum": 0}))
@@ -149,11 +155,17 @@ class TestMapEventInputReturnsNone(unittest.TestCase):
     def test_mouse_returns_none(self):
         self.assertIsNone(map_event({"eventType": 6, "eventNum": 4}))
 
+    def test_keyboard_returns_none(self):
+        self.assertIsNone(map_event({"eventType": 5, "eventNum": 65}))
+
     def test_key_press_returns_none(self):
         self.assertIsNone(map_event({"eventType": 9, "eventNum": 32}))
 
     def test_key_release_returns_none(self):
         self.assertIsNone(map_event({"eventType": 10, "eventNum": 13}))
+
+    def test_gesture_returns_none(self):
+        self.assertIsNone(map_event({"eventType": 13, "eventNum": 3}))
 
 
 class TestMapEventUnknown(unittest.TestCase):

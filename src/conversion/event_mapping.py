@@ -17,8 +17,10 @@ class EventMapping:
     gml_filename: str
 
 
-# Input event types that are merged into a single _input(event) function
-INPUT_EVENT_TYPES = frozenset({6, 9, 10})
+# Input event types that are merged into a single _input(event) function.
+# GameMaker keyboard-down events also route through the shared input stub for
+# now so they are recognized as supported input instead of unknown events.
+INPUT_EVENT_TYPES = frozenset({5, 6, 9, 10, 13})
 
 # The merged input event mapping used when any input event is present
 INPUT_MERGED_MAPPING = EventMapping("_input", "event", 4, "")
@@ -42,17 +44,19 @@ _GML_EVENT_NAMES = {
     2: "Alarm",
     3: "Step",
     4: "Collision",
+    5: "Keyboard",
     6: "Mouse",
     7: "Other",
     8: "Draw",
     9: "KeyPress",
     10: "KeyRelease",
     12: "CleanUp",
+    13: "Gesture",
 }
 
 
 def is_input_event(event):
-    """Check whether an event dict represents an input event (types 6, 9, 10)."""
+    """Check whether an event dict represents a supported input event."""
     return event.get('eventType', -1) in INPUT_EVENT_TYPES
 
 

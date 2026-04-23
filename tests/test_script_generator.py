@@ -78,15 +78,25 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 class TestScriptGeneratorInputMerging(unittest.TestCase):
     """Input events (mouse, keyboard) should merge into a single _input."""
 
+    def test_keyboard_event_produces_input(self):
+        content = generate_script_content([{"eventType": 5, "eventNum": 65}])
+        self.assertIn("func _input(event):", content)
+
     def test_mouse_event_produces_input(self):
         content = generate_script_content([{"eventType": 6, "eventNum": 4}])
         self.assertIn("func _input(event):", content)
 
+    def test_gesture_event_produces_input(self):
+        content = generate_script_content([{"eventType": 13, "eventNum": 3}])
+        self.assertIn("func _input(event):", content)
+
     def test_multiple_input_events_merged(self):
         content = generate_script_content([
+            {"eventType": 5, "eventNum": 65},
             {"eventType": 6, "eventNum": 4},
             {"eventType": 9, "eventNum": 32},
             {"eventType": 10, "eventNum": 13},
+            {"eventType": 13, "eventNum": 3},
         ])
         self.assertIn("func _input(event):", content)
         self.assertEqual(content.count("func _input"), 1)

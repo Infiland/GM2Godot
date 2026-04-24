@@ -1,6 +1,21 @@
 from src.conversion.event_mapping import map_event, is_input_event, INPUT_MERGED_MAPPING
 
 
+_CLOSE_BUTTON_FUNC = "_notification"
+_READY_FUNC = "_ready"
+_DISABLE_AUTO_QUIT_BODY = "\tget_tree().auto_accept_quit = false"
+
+
+def _get_function_body(func, code_bodies):
+    if code_bodies and func.godot_func in code_bodies:
+        return code_bodies[func.godot_func]
+    return "\tpass"
+
+
+def _indent_body(body):
+    return "\n".join(f"\t{line}" if line else line for line in body.splitlines())
+
+
 def generate_script_content(event_list, code_bodies=None):
     """Generate .gd script content with function stubs for each event.
 
@@ -47,6 +62,7 @@ def generate_script_content(event_list, code_bodies=None):
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
     function_names = {func.godot_func for func in unique_functions}
+    has_close_button = _CLOSE_BUTTON_FUNC in function_names
 
     lines = ["extends Node2D\n"]
     if "_on_no_more_lives" in function_names:
@@ -66,10 +82,16 @@ def generate_script_content(event_list, code_bodies=None):
             "\n\t\t\t_on_no_more_health()\n"
         )
 
+    if has_close_button and _READY_FUNC not in function_names:
+        lines.append(f"\n\nfunc {_READY_FUNC}():")
+        lines.append(f"\n{_DISABLE_AUTO_QUIT_BODY}\n")
+
     for func in unique_functions:
-        body = "\tpass"
-        if code_bodies and func.godot_func in code_bodies:
-            body = code_bodies[func.godot_func]
+        body = _get_function_body(func, code_bodies)
+        if has_close_button and func.godot_func == _READY_FUNC:
+            body = f"{_DISABLE_AUTO_QUIT_BODY}\n{body}"
+        elif func.godot_func == _CLOSE_BUTTON_FUNC:
+            body = "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n" + _indent_body(body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

@@ -91,6 +91,13 @@ class TestMapEventStatic(unittest.TestCase):
         self.assertEqual(m.sort_key, 14)
         self.assertEqual(m.gml_filename, "Other_9.gml")
 
+    def test_close_button_event(self):
+        m = map_event({"eventType": 7, "eventNum": 30})
+        self.assertEqual(m.godot_func, "_notification")
+        self.assertEqual(m.params, "what")
+        self.assertEqual(m.sort_key, 6)
+        self.assertEqual(m.gml_filename, "Other_30.gml")
+
     def test_cleanup_event(self):
         m = map_event({"eventType": 12, "eventNum": 0})
         self.assertEqual(m.godot_func, "_exit_tree")

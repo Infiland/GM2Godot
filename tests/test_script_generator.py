@@ -80,6 +80,31 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn("_on_no_more_health()", content)
         self.assertIn("func _on_no_more_health():", content)
 
+    def test_close_button_event(self):
+        content = generate_script_content([{"eventType": 7, "eventNum": 30}])
+        self.assertIn("func _ready():", content)
+        self.assertIn("get_tree().auto_accept_quit = false", content)
+        self.assertIn("func _notification(what):", content)
+        self.assertIn("if what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+
+    def test_close_button_event_wraps_code_body(self):
+        content = generate_script_content(
+            [{"eventType": 7, "eventNum": 30}],
+            code_bodies={"_notification": "\tget_tree().quit()"},
+        )
+        self.assertIn(
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tget_tree().quit()",
+            content,
+        )
+
+    def test_close_button_uses_existing_ready_event(self):
+        content = generate_script_content([
+            {"eventType": 0, "eventNum": 0},
+            {"eventType": 7, "eventNum": 30},
+        ])
+        self.assertEqual(content.count("func _ready"), 1)
+        self.assertIn("get_tree().auto_accept_quit = false", content)
+
     def test_draw_gui_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 64}])
         self.assertIn("func _on_draw_gui():", content)

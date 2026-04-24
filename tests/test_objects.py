@@ -680,6 +680,19 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var lives = 0:", content)
         self.assertIn("func _on_no_more_lives():", content)
 
+    def test_script_with_close_button_event(self):
+        """eventType 7, eventNum 30 should generate close request handling."""
+        self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 30}])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("get_tree().auto_accept_quit = false", content)
+        self.assertIn("func _notification(what):", content)
+        self.assertIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+
     def test_script_with_draw_gui_event(self):
         """eventType 8, eventNum 64 should produce func _on_draw_gui()."""
         self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 64}])

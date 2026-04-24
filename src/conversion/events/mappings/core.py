@@ -9,6 +9,13 @@ STATIC_MAPPINGS = {
     (3, 2): EventMapping("_on_end_step", "", 12, "Step_2.gml"),
     (8, 0): EventMapping("_draw", "", 3, "Draw_0.gml"),
     (8, 64): EventMapping("_on_draw_gui", "", 15, "Draw_64.gml"),
+    (8, 65): EventMapping("_on_resize", "", 6, "Draw_65.gml"),
+    (8, 72): EventMapping("_on_draw_begin", "", 16, "Draw_72.gml"),
+    (8, 73): EventMapping("_on_draw_end", "", 16, "Draw_73.gml"),
+    (8, 74): EventMapping("_on_draw_gui_begin", "", 15, "Draw_74.gml"),
+    (8, 75): EventMapping("_on_draw_gui_end", "", 15, "Draw_75.gml"),
+    (8, 76): EventMapping("_on_pre_draw", "", 16, "Draw_76.gml"),
+    (8, 77): EventMapping("_on_post_draw", "", 16, "Draw_77.gml"),
     (12, 0): EventMapping("_exit_tree", "", 5, "CleanUp_0.gml"),
 }
 

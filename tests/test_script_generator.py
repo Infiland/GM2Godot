@@ -63,8 +63,8 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn("func _on_collision_o_bullet():", content)
 
     def test_other_event(self):
-        content = generate_script_content([{"eventType": 7, "eventNum": 5}])
-        self.assertIn("func _on_other_5():", content)
+        content = generate_script_content([{"eventType": 7, "eventNum": 26}])
+        self.assertIn("func _on_other_26():", content)
 
     def test_no_more_lives_event(self):
         content = generate_script_content([{"eventType": 7, "eventNum": 6}])
@@ -109,6 +109,33 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         content = generate_script_content([{"eventType": 8, "eventNum": 64}])
         self.assertIn("func _on_draw_gui():", content)
 
+    def test_draw_family_events(self):
+        content = generate_script_content([
+            {"eventType": 8, "eventNum": 72},
+            {"eventType": 8, "eventNum": 73},
+            {"eventType": 8, "eventNum": 74},
+            {"eventType": 8, "eventNum": 75},
+            {"eventType": 8, "eventNum": 76},
+            {"eventType": 8, "eventNum": 77},
+        ])
+
+        for function_name in (
+            "_on_draw_begin",
+            "_on_draw_end",
+            "_on_draw_gui_begin",
+            "_on_draw_gui_end",
+            "_on_pre_draw",
+            "_on_post_draw",
+        ):
+            self.assertIn(f"func {function_name}():", content)
+
+    def test_resize_event_connects_viewport_size_changed(self):
+        content = generate_script_content([{"eventType": 8, "eventNum": 65}])
+
+        self.assertIn("func _ready():", content)
+        self.assertIn("get_viewport().size_changed.connect(_on_resize)", content)
+        self.assertIn("func _on_resize():", content)
+
     def test_unknown_event(self):
         content = generate_script_content([{"eventType": 99, "eventNum": 5}])
         self.assertIn("func _on_event_99_5():", content)
@@ -125,9 +152,25 @@ class TestScriptGeneratorInputMerging(unittest.TestCase):
         content = generate_script_content([{"eventType": 6, "eventNum": 4}])
         self.assertIn("func _input(event):", content)
 
-    def test_gesture_event_produces_input(self):
-        content = generate_script_content([{"eventType": 13, "eventNum": 3}])
+    def test_mouse_event_ranges_produce_input(self):
+        content = generate_script_content([
+            {"eventType": 6, "eventNum": 0},
+            {"eventType": 6, "eventNum": 11},
+            {"eventType": 6, "eventNum": 50},
+            {"eventType": 6, "eventNum": 58},
+            {"eventType": 6, "eventNum": 60},
+            {"eventType": 6, "eventNum": 61},
+        ])
         self.assertIn("func _input(event):", content)
+        self.assertEqual(content.count("func _input"), 1)
+
+    def test_gesture_event_produces_input(self):
+        content = generate_script_content([
+            {"eventType": 13, "eventNum": event_num}
+            for event_num in range(13)
+        ])
+        self.assertIn("func _input(event):", content)
+        self.assertEqual(content.count("func _input"), 1)
 
     def test_multiple_input_events_merged(self):
         content = generate_script_content([

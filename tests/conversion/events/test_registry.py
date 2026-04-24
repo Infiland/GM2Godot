@@ -23,10 +23,10 @@ class TestEventRegistry(unittest.TestCase):
 
     def test_keeps_dynamic_handlers(self):
         alarm = map_event({"eventType": 2, "eventNum": 3})
-        other = map_event({"eventType": 7, "eventNum": 5})
+        other = map_event({"eventType": 7, "eventNum": 26})
 
         self.assertEqual(alarm.godot_func, "_on_alarm_3")
-        self.assertEqual(other.godot_func, "_on_other_5")
+        self.assertEqual(other.godot_func, "_on_other_26")
 
 
 if __name__ == "__main__":

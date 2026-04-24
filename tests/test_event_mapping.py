@@ -21,6 +21,12 @@ class TestIsInputEvent(unittest.TestCase):
     def test_mouse_event(self):
         self.assertTrue(is_input_event({"eventType": 6, "eventNum": 4}))
 
+    def test_mouse_event_variants(self):
+        # GameMaker ev_mouse ranges covered by issue #96.
+        for event_num in (0, 11, 50, 58, 60, 61):
+            with self.subTest(event_num=event_num):
+                self.assertTrue(is_input_event({"eventType": 6, "eventNum": event_num}))
+
     def test_key_press_event(self):
         self.assertTrue(is_input_event({"eventType": 9, "eventNum": 32}))
 
@@ -28,7 +34,9 @@ class TestIsInputEvent(unittest.TestCase):
         self.assertTrue(is_input_event({"eventType": 10, "eventNum": 13}))
 
     def test_gesture_event(self):
-        self.assertTrue(is_input_event({"eventType": 13, "eventNum": 3}))
+        for event_num in range(13):
+            with self.subTest(event_num=event_num):
+                self.assertTrue(is_input_event({"eventType": 13, "eventNum": event_num}))
 
     def test_create_event_not_input(self):
         self.assertFalse(is_input_event({"eventType": 0, "eventNum": 0}))
@@ -78,6 +86,22 @@ class TestMapEventStatic(unittest.TestCase):
         m = map_event({"eventType": 8, "eventNum": 64})
         self.assertEqual(m.godot_func, "_on_draw_gui")
         self.assertEqual(m.sort_key, 15)
+
+    def test_draw_family_events(self):
+        expected = {
+            65: "_on_resize",
+            72: "_on_draw_begin",
+            73: "_on_draw_end",
+            74: "_on_draw_gui_begin",
+            75: "_on_draw_gui_end",
+            76: "_on_pre_draw",
+            77: "_on_post_draw",
+        }
+        for event_num, godot_func in expected.items():
+            with self.subTest(event_num=event_num):
+                m = map_event({"eventType": 8, "eventNum": event_num})
+                self.assertEqual(m.godot_func, godot_func)
+                self.assertEqual(m.gml_filename, f"Draw_{event_num}.gml")
 
     def test_no_more_lives_event(self):
         m = map_event({"eventType": 7, "eventNum": 6})
@@ -141,14 +165,14 @@ class TestMapEventDynamic(unittest.TestCase):
         self.assertEqual(m.godot_func, "_on_collision")
 
     def test_other_event(self):
-        m = map_event({"eventType": 7, "eventNum": 5})
-        self.assertEqual(m.godot_func, "_on_other_5")
+        m = map_event({"eventType": 7, "eventNum": 26})
+        self.assertEqual(m.godot_func, "_on_other_26")
         self.assertEqual(m.sort_key, 14)
-        self.assertEqual(m.gml_filename, "Other_5.gml")
+        self.assertEqual(m.gml_filename, "Other_26.gml")
 
     def test_draw_variant(self):
         m = map_event({"eventType": 8, "eventNum": 72})
-        self.assertEqual(m.godot_func, "_on_draw_72")
+        self.assertEqual(m.godot_func, "_on_draw_begin")
         self.assertEqual(m.sort_key, 16)
         self.assertEqual(m.gml_filename, "Draw_72.gml")
 
@@ -174,6 +198,11 @@ class TestMapEventInputReturnsNone(unittest.TestCase):
     def test_mouse_returns_none(self):
         self.assertIsNone(map_event({"eventType": 6, "eventNum": 4}))
 
+    def test_mouse_variants_return_none(self):
+        for event_num in (0, 11, 50, 58, 60, 61):
+            with self.subTest(event_num=event_num):
+                self.assertIsNone(map_event({"eventType": 6, "eventNum": event_num}))
+
     def test_keyboard_returns_none(self):
         self.assertIsNone(map_event({"eventType": 5, "eventNum": 65}))
 
@@ -184,7 +213,9 @@ class TestMapEventInputReturnsNone(unittest.TestCase):
         self.assertIsNone(map_event({"eventType": 10, "eventNum": 13}))
 
     def test_gesture_returns_none(self):
-        self.assertIsNone(map_event({"eventType": 13, "eventNum": 3}))
+        for event_num in range(13):
+            with self.subTest(event_num=event_num):
+                self.assertIsNone(map_event({"eventType": 13, "eventNum": event_num}))
 
 
 class TestMapEventUnknown(unittest.TestCase):

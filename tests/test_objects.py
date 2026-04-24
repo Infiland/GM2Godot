@@ -587,6 +587,25 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _input(event):", content)
         self.assertEqual(content.count("func _input"), 1, "Should have exactly one _input function")
 
+    def test_mouse_event_ranges_merged(self):
+        """All ev_mouse ranges should still merge into one _input(event)."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 6, "eventNum": 0},
+            {"eventType": 6, "eventNum": 11},
+            {"eventType": 6, "eventNum": 50},
+            {"eventType": 6, "eventNum": 58},
+            {"eventType": 6, "eventNum": 60},
+            {"eventType": 6, "eventNum": 61},
+        ])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _input(event):", content)
+        self.assertEqual(content.count("func _input"), 1)
+
     def test_script_attached_to_tscn(self):
         """The .tscn file should reference the .gd script."""
         self._setup_object("o_test")
@@ -659,14 +678,14 @@ class TestScriptGeneration(unittest.TestCase):
 
     def test_script_with_other_event(self):
         """eventType 7 should produce func _on_other_N()."""
-        self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 5}])
+        self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 26}])
         converter = self._make_converter()
         converter.convert_all()
 
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _on_other_5():", content)
+        self.assertIn("func _on_other_26():", content)
 
     def test_script_with_no_more_lives_event(self):
         """eventType 7, eventNum 6 should add the legacy lives setter."""

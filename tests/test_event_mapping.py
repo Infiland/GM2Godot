@@ -79,6 +79,18 @@ class TestMapEventStatic(unittest.TestCase):
         self.assertEqual(m.godot_func, "_on_draw_gui")
         self.assertEqual(m.sort_key, 15)
 
+    def test_no_more_lives_event(self):
+        m = map_event({"eventType": 7, "eventNum": 6})
+        self.assertEqual(m.godot_func, "_on_no_more_lives")
+        self.assertEqual(m.sort_key, 14)
+        self.assertEqual(m.gml_filename, "Other_6.gml")
+
+    def test_no_more_health_event(self):
+        m = map_event({"eventType": 7, "eventNum": 9})
+        self.assertEqual(m.godot_func, "_on_no_more_health")
+        self.assertEqual(m.sort_key, 14)
+        self.assertEqual(m.gml_filename, "Other_9.gml")
+
     def test_cleanup_event(self):
         m = map_event({"eventType": 12, "eventNum": 0})
         self.assertEqual(m.godot_func, "_exit_tree")

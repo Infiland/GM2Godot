@@ -46,7 +46,26 @@ def generate_script_content(event_list, code_bodies=None):
     # Sort by sort_key, then alphabetically for same key
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
+    function_names = {func.godot_func for func in unique_functions}
+
     lines = ["extends Node2D\n"]
+    if "_on_no_more_lives" in function_names:
+        lines.append(
+            "\n\nvar lives = 0:"
+            "\n\tset(value):"
+            "\n\t\tlives = value"
+            "\n\t\tif lives <= 0:"
+            "\n\t\t\t_on_no_more_lives()\n"
+        )
+    if "_on_no_more_health" in function_names:
+        lines.append(
+            "\n\nvar health = 100:"
+            "\n\tset(value):"
+            "\n\t\thealth = value"
+            "\n\t\tif health <= 0:"
+            "\n\t\t\t_on_no_more_health()\n"
+        )
+
     for func in unique_functions:
         body = "\tpass"
         if code_bodies and func.godot_func in code_bodies:

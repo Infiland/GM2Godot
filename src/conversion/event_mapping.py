@@ -35,6 +35,8 @@ _STATIC_MAP = {
     (8, 0): EventMapping("_draw", "", 3, "Draw_0.gml"),
     (8, 64): EventMapping("_on_draw_gui", "", 15, "Draw_64.gml"),
     (12, 0): EventMapping("_exit_tree", "", 5, "CleanUp_0.gml"),
+    (7, 6): EventMapping("_on_no_more_lives", "", 14, "Other_6.gml"),
+    (7, 9): EventMapping("_on_no_more_health", "", 14, "Other_9.gml"),
 }
 
 # GameMaker event type number to GML filename prefix

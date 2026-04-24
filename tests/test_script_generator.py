@@ -66,6 +66,20 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         content = generate_script_content([{"eventType": 7, "eventNum": 5}])
         self.assertIn("func _on_other_5():", content)
 
+    def test_no_more_lives_event(self):
+        content = generate_script_content([{"eventType": 7, "eventNum": 6}])
+        self.assertIn("var lives = 0:", content)
+        self.assertIn("if lives <= 0:", content)
+        self.assertIn("_on_no_more_lives()", content)
+        self.assertIn("func _on_no_more_lives():", content)
+
+    def test_no_more_health_event(self):
+        content = generate_script_content([{"eventType": 7, "eventNum": 9}])
+        self.assertIn("var health = 100:", content)
+        self.assertIn("if health <= 0:", content)
+        self.assertIn("_on_no_more_health()", content)
+        self.assertIn("func _on_no_more_health():", content)
+
     def test_draw_gui_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 64}])
         self.assertIn("func _on_draw_gui():", content)

@@ -1,9 +1,5 @@
 from src.conversion.event_mapping import map_event, is_input_event, INPUT_MERGED_MAPPING
-
-
-_CLOSE_BUTTON_FUNC = "_notification"
-_READY_FUNC = "_ready"
-_DISABLE_AUTO_QUIT_BODY = "\tget_tree().auto_accept_quit = false"
+from src.conversion.events.features import get_script_features
 
 
 def _get_function_body(func, code_bodies):
@@ -12,8 +8,14 @@ def _get_function_body(func, code_bodies):
     return "\tpass"
 
 
-def _indent_body(body):
-    return "\n".join(f"\t{line}" if line else line for line in body.splitlines())
+def _deduplicate_functions(functions):
+    seen = set()
+    unique_functions = []
+    for func in functions:
+        if func.godot_func not in seen:
+            seen.add(func.godot_func)
+            unique_functions.append(func)
+    return unique_functions
 
 
 def generate_script_content(event_list, code_bodies=None):
@@ -50,48 +52,37 @@ def generate_script_content(event_list, code_bodies=None):
     if has_input:
         functions.append(INPUT_MERGED_MAPPING)
 
-    # Deduplicate by function name, keep first occurrence
-    seen = set()
-    unique_functions = []
-    for func in functions:
-        if func.godot_func not in seen:
-            seen.add(func.godot_func)
-            unique_functions.append(func)
+    unique_functions = _deduplicate_functions(functions)
+    function_names = {func.godot_func for func in unique_functions}
+    script_features = get_script_features()
+
+    for feature in script_features:
+        get_additional_functions = getattr(feature, "get_additional_functions", None)
+        if get_additional_functions is None:
+            continue
+
+        functions_to_add = get_additional_functions(function_names)
+        if not functions_to_add:
+            continue
+
+        unique_functions = _deduplicate_functions(unique_functions + functions_to_add)
+        function_names = {func.godot_func for func in unique_functions}
 
     # Sort by sort_key, then alphabetically for same key
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
-    function_names = {func.godot_func for func in unique_functions}
-    has_close_button = _CLOSE_BUTTON_FUNC in function_names
-
     lines = ["extends Node2D\n"]
-    if "_on_no_more_lives" in function_names:
-        lines.append(
-            "\n\nvar lives = 0:"
-            "\n\tset(value):"
-            "\n\t\tlives = value"
-            "\n\t\tif lives <= 0:"
-            "\n\t\t\t_on_no_more_lives()\n"
-        )
-    if "_on_no_more_health" in function_names:
-        lines.append(
-            "\n\nvar health = 100:"
-            "\n\tset(value):"
-            "\n\t\thealth = value"
-            "\n\t\tif health <= 0:"
-            "\n\t\t\t_on_no_more_health()\n"
-        )
-
-    if has_close_button and _READY_FUNC not in function_names:
-        lines.append(f"\n\nfunc {_READY_FUNC}():")
-        lines.append(f"\n{_DISABLE_AUTO_QUIT_BODY}\n")
+    for feature in script_features:
+        emit_prelude = getattr(feature, "emit_prelude", None)
+        if emit_prelude is not None:
+            emit_prelude(lines, function_names)
 
     for func in unique_functions:
         body = _get_function_body(func, code_bodies)
-        if has_close_button and func.godot_func == _READY_FUNC:
-            body = f"{_DISABLE_AUTO_QUIT_BODY}\n{body}"
-        elif func.godot_func == _CLOSE_BUTTON_FUNC:
-            body = "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n" + _indent_body(body)
+        for feature in script_features:
+            wrap_body = getattr(feature, "wrap_body", None)
+            if wrap_body is not None:
+                body = wrap_body(func, body, function_names)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

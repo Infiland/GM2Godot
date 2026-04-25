@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.project_godot import GodotProjectFile
+from src.conversion.room_layers import godot_string, serialize_room_layers
 from src.conversion.resource_index import GameMakerResourceIndex
 
 
@@ -42,7 +43,7 @@ class RoomConverter(BaseConverter):
         lines = [
             "[gd_scene format=3]",
             "",
-            f'[node name="{room.name}" type="Node2D"]',
+            f'[node name={godot_string(room.name)} type="Node2D"]',
             f'metadata/gamemaker_room_width = {json.dumps(room_settings.get("Width", 1024))}',
             f'metadata/gamemaker_room_height = {json.dumps(room_settings.get("Height", 768))}',
             f'metadata/gamemaker_room_persistent = {json.dumps(bool(room_settings.get("persistent", False)))}',
@@ -54,6 +55,7 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_source_yy_path = {json.dumps(room.yy_path)}',
             "",
         ]
+        lines.extend(serialize_room_layers(room, warn_callback=self._safe_log))
         return "\n".join(lines)
 
     def _room_output_path(self, room):

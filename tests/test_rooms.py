@@ -43,9 +43,10 @@ def _make_yyp(room_names, room_order=None):
 
 
 def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
-                  persistent=False, volume=1.0, physics_world=False):
+                  persistent=False, volume=1.0, physics_world=False, layers=None):
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
+    layers_json = json.dumps(layers if layers is not None else [])
     return (
         '{{\n'
         '  "$GMRoom":"v1",\n'
@@ -56,7 +57,7 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         '  "inheritCreationOrder":false,\n'
         '  "inheritLayers":false,\n'
         '  "instanceCreationOrder":[],\n'
-        '  "layers":[],\n'
+        '  "layers":{layers_json},\n'
         '  "parent":{{"name":"Rooms","path":"{parent_path}",}},\n'
         '  "parentRoom":null,\n'
         '  "physicsSettings":{{\n'
@@ -83,6 +84,7 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         persistent=persistent_value,
         volume=volume,
         physics_world=physics_world_value,
+        layers_json=layers_json,
     )
 
 
@@ -120,6 +122,17 @@ class TestRoomConverter(unittest.TestCase):
         room_path = os.path.join(self.gm_dir, "rooms", name, name + ".yy")
         _write_file(room_path, _make_room_yy(name, **kwargs))
         return room_path
+
+    def _read_scene(self, room_name, *subfolders):
+        tscn_path = os.path.join(
+            self.godot_dir,
+            "rooms",
+            *subfolders,
+            room_name,
+            room_name + ".tscn",
+        )
+        with open(tscn_path, "r", encoding="utf-8") as f:
+            return f.read()
 
     def test_generates_minimal_room_scene_with_metadata(self):
         self._write_yyp(["r_test"])
@@ -189,6 +202,162 @@ class TestRoomConverter(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(
             self.godot_dir, "rooms", "r_unlisted"
         )))
+
+    def test_generates_room_layer_placeholders_with_depth_and_visibility(self):
+        self._write_yyp(["r_layers"])
+        self._write_room("r_layers", layers=[
+            {
+                "%Name": "Instances",
+                "name": "internal_instances",
+                "resourceType": "GMRInstanceLayer",
+                "visible": True,
+                "depth": 100,
+                "gridX": 32,
+                "gridY": 16,
+                "properties": {"alpha": 1},
+                "instances": [{"name": "inst_a"}],
+            },
+            {
+                "name": "Backgrounds",
+                "resourceType": "GMRBackgroundLayer",
+                "visible": False,
+                "depth": -200,
+                "gridX": 64,
+                "gridY": 64,
+                "properties": {},
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_layers")
+
+        self.assertIn('[node name="Instances" type="Node2D" parent="."]', content)
+        self.assertIn('visible = true', content)
+        self.assertIn('z_index = -100', content)
+        self.assertIn('metadata/gamemaker_layer_type = "GMRInstanceLayer"', content)
+        self.assertIn('metadata/gamemaker_layer_depth = 100', content)
+        self.assertIn('metadata/gamemaker_layer_grid_x = 32', content)
+        self.assertIn('metadata/gamemaker_layer_grid_y = 16', content)
+        self.assertIn('metadata/gamemaker_layer_properties = {"alpha": 1}', content)
+        self.assertIn('metadata/gamemaker_instance_count = 1', content)
+        self.assertIn('metadata/gamemaker_instance_names = ["inst_a"]', content)
+
+        self.assertIn('[node name="Backgrounds" type="Node2D" parent="."]', content)
+        self.assertIn('visible = false', content)
+        self.assertIn('z_index = 200', content)
+        self.assertIn('metadata/gamemaker_background_sprite = null', content)
+        self.assertNotIn('instance=ExtResource', content)
+        self.assertNotIn('Sprite2D', content)
+        self.assertNotIn('TileMap', content)
+        self.assertNotIn('ParallaxBackground', content)
+
+    def test_layer_depth_maps_to_inverse_z_index(self):
+        self._write_yyp(["r_depths"])
+        self._write_room("r_depths", layers=[
+            {"%Name": "Depth200", "resourceType": "GMRInstanceLayer", "depth": 200},
+            {"%Name": "Depth100", "resourceType": "GMRInstanceLayer", "depth": 100},
+            {"%Name": "Depth0", "resourceType": "GMRInstanceLayer", "depth": 0},
+            {"%Name": "DepthMinus100", "resourceType": "GMRInstanceLayer", "depth": -100},
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_depths")
+
+        self.assertIn('[node name="Depth200" type="Node2D" parent="."]\nvisible = true\nz_index = -200', content)
+        self.assertIn('[node name="Depth100" type="Node2D" parent="."]\nvisible = true\nz_index = -100', content)
+        self.assertIn('[node name="Depth0" type="Node2D" parent="."]\nvisible = true\nz_index = 0', content)
+        self.assertIn('[node name="DepthMinus100" type="Node2D" parent="."]\nvisible = true\nz_index = 100', content)
+
+    def test_generates_nested_layer_placeholders_depth_first(self):
+        self._write_yyp(["r_nested"])
+        self._write_room("r_nested", layers=[
+            {
+                "%Name": "Parent",
+                "resourceType": "GMRInstanceLayer",
+                "depth": 10,
+                "layers": [
+                    {"%Name": "ChildA", "resourceType": "GMRTileLayer", "depth": 20},
+                    {"%Name": "ChildB", "resourceType": "GMRAssetLayer", "depth": 30},
+                ],
+            },
+            {"%Name": "Sibling", "resourceType": "GMRBackgroundLayer", "depth": 40},
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_nested")
+
+        parent_idx = content.index('[node name="Parent" type="Node2D" parent="."]')
+        child_a_idx = content.index('[node name="ChildA" type="Node2D" parent="Parent"]')
+        child_b_idx = content.index('[node name="ChildB" type="Node2D" parent="Parent"]')
+        sibling_idx = content.index('[node name="Sibling" type="Node2D" parent="."]')
+
+        self.assertLess(parent_idx, child_a_idx)
+        self.assertLess(child_a_idx, child_b_idx)
+        self.assertLess(child_b_idx, sibling_idx)
+        self.assertIn('metadata/gamemaker_tile_compressed_data_count = 0', content)
+        self.assertIn('metadata/gamemaker_asset_count = 0', content)
+
+    def test_effect_layer_preserves_effect_metadata(self):
+        self._write_yyp(["r_effect"])
+        self._write_room("r_effect", layers=[
+            {
+                "%Name": "FX",
+                "resourceType": "GMREffectLayer",
+                "visible": True,
+                "depth": 5,
+                "effectType": "_filter_whitenoise",
+                "properties": [
+                    {"name": "g_WhiteNoiseIntensity", "type": 0, "value": "0.15"},
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_effect")
+
+        self.assertIn('[node name="FX" type="Node2D" parent="."]', content)
+        self.assertIn('z_index = -5', content)
+        self.assertIn('metadata/gamemaker_layer_type = "GMREffectLayer"', content)
+        self.assertIn('metadata/gamemaker_layer_effect_type = "_filter_whitenoise"', content)
+        self.assertIn('metadata/gamemaker_layer_effect_properties = [{"name": "g_WhiteNoiseIntensity"', content)
+
+    def test_unsupported_layer_type_warns_and_emits_placeholder(self):
+        self._write_yyp(["r_unknown"])
+        self._write_room("r_unknown", layers=[
+            {"%Name": "Mystery", "resourceType": "GMRMysteryLayer", "depth": 0}
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_unknown")
+
+        self.assertIn('[node name="Mystery" type="Node2D" parent="."]', content)
+        self.assertIn('metadata/gamemaker_layer_type = "GMRMysteryLayer"', content)
+        self.assertIn('metadata/gamemaker_unsupported_layer = true', content)
+        self.assertTrue(any(
+            "Unsupported room layer type GMRMysteryLayer" in log
+            and "r_unknown" in log
+            and "Mystery" in log
+            for log in self.logs
+        ))
+
+    def test_layer_names_prefer_display_name_and_are_uniqued(self):
+        self._write_yyp(["r_names"])
+        self._write_room("r_names", layers=[
+            {"%Name": "Display Name", "name": "internal_name", "resourceType": "GMRInstanceLayer"},
+            {"%Name": "Display Name", "resourceType": "GMRInstanceLayer"},
+            {"name": "FallbackName", "resourceType": "GMRInstanceLayer"},
+            {"%Name": "Slash/Name", "resourceType": "GMRInstanceLayer"},
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_names")
+
+        self.assertIn('[node name="Display Name" type="Node2D" parent="."]', content)
+        self.assertIn('[node name="Display Name_2" type="Node2D" parent="."]', content)
+        self.assertIn('[node name="FallbackName" type="Node2D" parent="."]', content)
+        self.assertIn('[node name="Slash_Name" type="Node2D" parent="."]', content)
+        self.assertNotIn('[node name="internal_name"', content)
+        self.assertIn('metadata/gamemaker_layer_name = "Slash/Name"', content)
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])

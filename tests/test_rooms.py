@@ -110,6 +110,18 @@ def _make_object_yy(name, parent_path="folders/Objects.yy"):
     ).format(name=name, parent_path=parent_path)
 
 
+def _make_sprite_yy(name, parent_path="folders/Sprites.yy"):
+    return (
+        '{{\n'
+        '  "$GMSprite":"",\n'
+        '  "%Name":"{name}",\n'
+        '  "name":"{name}",\n'
+        '  "parent":{{"name":"Sprites","path":"{parent_path}",}},\n'
+        '  "resourceType":"GMSprite",\n'
+        '}}\n'
+    ).format(name=name, parent_path=parent_path)
+
+
 class TestRoomConverter(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
@@ -159,6 +171,22 @@ class TestRoomConverter(unittest.TestCase):
             name + ".tscn",
         )
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Node2D"]\n'.format(name))
+        return scene_path
+
+    def _write_sprite(self, name, parent_path="folders/Sprites.yy"):
+        sprite_path = os.path.join(self.gm_dir, "sprites", name, name + ".yy")
+        _write_file(sprite_path, _make_sprite_yy(name, parent_path))
+        return sprite_path
+
+    def _write_sprite_scene(self, name, *subfolders):
+        scene_path = os.path.join(
+            self.godot_dir,
+            "sprites",
+            *subfolders,
+            name,
+            name + ".tscn",
+        )
+        _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Area2D"]\n'.format(name))
         return scene_path
 
     def _read_scene(self, room_name, *subfolders):
@@ -288,6 +316,87 @@ class TestRoomConverter(unittest.TestCase):
         self.assertNotIn('Sprite2D', content)
         self.assertNotIn('TileMap', content)
         self.assertNotIn('ParallaxBackground', content)
+
+    def test_background_layer_without_sprite_emits_color_visual(self):
+        self._write_yyp(["r_background"])
+        self._write_room("r_background", width=320, height=180, layers=[
+            {
+                "%Name": "Backgrounds",
+                "resourceType": "GMRBackgroundLayer",
+                "depth": 500,
+                "colour": 4294967295,
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_background")
+
+        self.assertIn('[node name="Backgrounds" type="Node2D" parent="."]', content)
+        self.assertIn('[node name="BackgroundVisual" type="ColorRect" parent="Backgrounds"]', content)
+        self.assertIn('size = Vector2(320, 180)', content)
+        self.assertIn('color = Color(1, 1, 1, 1)', content)
+        self.assertIn('metadata/gamemaker_background_visual = true', content)
+        self.assertIn('metadata/gamemaker_background_visual_type = "color"', content)
+
+    def test_background_layer_with_sprite_instances_sprite_scene(self):
+        self._write_yyp(["r_background"], extra_resources=[("sprites", "s_background")])
+        self._write_sprite("s_background")
+        self._write_sprite_scene("s_background")
+        self._write_room("r_background", layers=[
+            {
+                "%Name": "Backgrounds",
+                "resourceType": "GMRBackgroundLayer",
+                "spriteId": {"name": "s_background", "path": "sprites/s_background/s_background.yy"},
+                "x": 16,
+                "y": 32,
+                "colour": 4294967295,
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_background")
+
+        self.assertIn(
+            '[ext_resource type="PackedScene" path="res://sprites/s_background/s_background.tscn" id="1"]',
+            content,
+        )
+        self.assertIn(
+            '[node name="s_background" parent="Backgrounds" instance=ExtResource("1")]',
+            content,
+        )
+        self.assertIn('position = Vector2(16, 32)', content)
+        self.assertIn('modulate = Color(1, 1, 1, 1)', content)
+        self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
+
+    def test_background_layer_preserves_scrolling_tiling_metadata_and_warns(self):
+        self._write_yyp(["r_background"])
+        self._write_room("r_background", layers=[
+            {
+                "%Name": "MovingBackground",
+                "resourceType": "GMRBackgroundLayer",
+                "htiled": True,
+                "vtiled": False,
+                "hspeed": 2,
+                "vspeed": 0,
+                "stretch": True,
+                "animationFPS": 12,
+                "animationSpeedType": 0,
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_background")
+
+        self.assertIn('metadata/gamemaker_background_htiled = true', content)
+        self.assertIn('metadata/gamemaker_background_vtiled = false', content)
+        self.assertIn('metadata/gamemaker_background_hspeed = 2', content)
+        self.assertIn('metadata/gamemaker_background_vspeed = 0', content)
+        self.assertIn('metadata/gamemaker_background_stretch = true', content)
+        self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
+        self.assertTrue(any(
+            "scrolling/tiling" in log and "MovingBackground" in log
+            for log in self.logs
+        ))
 
     def test_layer_depth_maps_to_inverse_z_index(self):
         self._write_yyp(["r_depths"])

@@ -279,10 +279,11 @@ class TestSpriteConverterFrameOrdering(unittest.TestCase):
 
 
 class TestSpriteConverterMultiLayer(unittest.TestCase):
-    """Test that multi-layer sprites pick the first visible layer."""
+    """Test that multi-layer sprites composite visible layers."""
 
     FRAME_GUID = "aaaaaaaa-0000-0000-0000-000000000000"
-    LAYER_VISIBLE = "22222222-0000-0000-0000-000000000000"
+    LAYER_VISIBLE_A = "22222222-0000-0000-0000-000000000000"
+    LAYER_VISIBLE_B = "33333333-0000-0000-0000-000000000000"
     LAYER_HIDDEN = "11111111-0000-0000-0000-000000000000"
 
     def setUp(self):
@@ -293,28 +294,33 @@ class TestSpriteConverterMultiLayer(unittest.TestCase):
         sprite_dir = os.path.join(self.gm_dir, "sprites", "multi_layer")
         os.makedirs(sprite_dir)
 
-        # Hidden layer listed first, visible layer second
+        # Hidden layer listed first, then two visible layers.
         yy_content = _make_yy_content(
             "multi_layer", [self.FRAME_GUID],
-            [self.LAYER_HIDDEN, self.LAYER_VISIBLE],
-            layer_visible=[False, True])
+            [self.LAYER_HIDDEN, self.LAYER_VISIBLE_A, self.LAYER_VISIBLE_B],
+            layer_visible=[False, True, True])
         with open(os.path.join(sprite_dir, "multi_layer.yy"), "w") as f:
             f.write(yy_content)
 
         frame_dir = os.path.join(sprite_dir, "layers", self.FRAME_GUID)
         os.makedirs(frame_dir)
-        # Hidden layer: red
-        img = Image.new("RGBA", (2, 2), "red")
+
+        img = Image.new("RGBA", (2, 2), (255, 0, 0, 255))
         img.save(os.path.join(frame_dir, self.LAYER_HIDDEN + ".png"), "PNG")
-        # Visible layer: green
-        img = Image.new("RGBA", (2, 2), "green")
-        img.save(os.path.join(frame_dir, self.LAYER_VISIBLE + ".png"), "PNG")
+
+        img = Image.new("RGBA", (2, 2), (0, 0, 0, 0))
+        img.putpixel((0, 0), (0, 255, 0, 255))
+        img.save(os.path.join(frame_dir, self.LAYER_VISIBLE_A + ".png"), "PNG")
+
+        img = Image.new("RGBA", (2, 2), (0, 0, 0, 0))
+        img.putpixel((1, 0), (0, 0, 255, 255))
+        img.save(os.path.join(frame_dir, self.LAYER_VISIBLE_B + ".png"), "PNG")
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def test_picks_first_visible_layer(self):
+    def test_composites_visible_layers_and_ignores_hidden_layers(self):
         converter = SpriteConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -328,9 +334,10 @@ class TestSpriteConverterMultiLayer(unittest.TestCase):
         self.assertEqual(len(png_files), 1, "Should output 1 file, not 1 per layer")
 
         with Image.open(os.path.join(godot_dir, png_files[0])) as img:
-            pixel = img.getpixel((0, 0))[:3]
-        self.assertEqual(pixel, (0, 128, 0),
-                         "Should use the visible layer (green), not hidden (red)")
+            converted = img.convert("RGBA")
+            self.assertEqual(converted.getpixel((0, 0)), (0, 255, 0, 255))
+            self.assertEqual(converted.getpixel((1, 0)), (0, 0, 255, 255))
+            self.assertEqual(converted.getpixel((1, 1))[3], 0)
 
 
 class TestParseSpriteYY(unittest.TestCase):
@@ -362,9 +369,9 @@ class TestParseSpriteYY(unittest.TestCase):
 
         result = self.converter._parse_sprite_yy("test_spr")
         self.assertIsNotNone(result)
-        frame_guids, layer_guid = result
+        frame_guids, layer_guids = result
         self.assertEqual(frame_guids, guids)
-        self.assertEqual(layer_guid, "layer1")
+        self.assertEqual(layer_guids, ["layer1"])
 
     def test_trailing_commas_handled(self):
         # Write content with trailing commas (as real .yy files have)
@@ -384,15 +391,15 @@ class TestParseSpriteYY(unittest.TestCase):
         result = self.converter._parse_sprite_yy("bad")
         self.assertIsNone(result)
 
-    def test_selects_first_visible_layer(self):
+    def test_selects_visible_layers(self):
         guids = ["frame1"]
         layers = ["hidden_layer", "visible_layer"]
         self._write_yy("vis", _make_yy_content("vis", guids, layers,
                                                  layer_visible=[False, True]))
         result = self.converter._parse_sprite_yy("vis")
         self.assertIsNotNone(result)
-        _, layer_guid = result
-        self.assertEqual(layer_guid, "visible_layer")
+        _, layer_guids = result
+        self.assertEqual(layer_guids, ["visible_layer"])
 
 
 def _make_yyp_content(sprite_names, extra_resources=None):

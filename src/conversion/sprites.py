@@ -356,15 +356,15 @@ class SpriteConverter(BaseConverter):
 
             frame_guids = [frame['name'] for frame in data['frames']]
 
-            primary_layer_guid = None
-            for layer in data.get('layers', []):
-                if layer.get('visible', True):
-                    primary_layer_guid = layer['name']
-                    break
-            if primary_layer_guid is None and data.get('layers'):
-                primary_layer_guid = data['layers'][0]['name']
+            visible_layer_guids = [
+                layer['name']
+                for layer in data.get('layers', [])
+                if layer.get('visible', True)
+            ]
+            if not visible_layer_guids and data.get('layers'):
+                visible_layer_guids = [data['layers'][0]['name']]
 
-            return (frame_guids, primary_layer_guid)
+            return (frame_guids, visible_layer_guids)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, IndexError):
             self._safe_log(get_localized("Console_Convertor_Sprites_YYParseFailed").format(
                 yy_path=yy_path, sprite_name=sprite_name))
@@ -373,9 +373,9 @@ class SpriteConverter(BaseConverter):
     def _build_ordered_frame_list(self, sprite_name, all_image_paths):
         result = self._parse_sprite_yy(sprite_name)
         if result is None:
-            return sorted(all_image_paths)
+            return [[path] for path in sorted(all_image_paths)]
 
-        frame_guids, primary_layer_guid = result
+        frame_guids, layer_guids = result
 
         path_index = {}
         for path in all_image_paths:
@@ -385,19 +385,23 @@ class SpriteConverter(BaseConverter):
             path_index.setdefault(frame_guid, {})[filename] = path
 
         ordered = []
-        layer_filename = primary_layer_guid + '.png' if primary_layer_guid else None
         for guid in frame_guids:
             frame_files = path_index.get(guid, {})
             if not frame_files:
                 continue
-            if layer_filename and layer_filename in frame_files:
-                ordered.append(frame_files[layer_filename])
+            frame_layers = [
+                frame_files[layer_guid + '.png']
+                for layer_guid in layer_guids
+                if layer_guid + '.png' in frame_files
+            ]
+            if frame_layers:
+                ordered.append(frame_layers)
             else:
-                ordered.append(next(iter(frame_files.values())))
+                ordered.append([next(iter(frame_files.values()))])
 
-        return ordered if ordered else sorted(all_image_paths)
+        return ordered if ordered else [[path] for path in sorted(all_image_paths)]
 
-    def _process_sprite(self, sprite_name, index, gm_sprite_path, images_count, subfolder=""):
+    def _process_sprite(self, sprite_name, index, gm_sprite_paths, images_count, subfolder=""):
         if not self.conversion_running():
             return None
 
@@ -405,10 +409,20 @@ class SpriteConverter(BaseConverter):
         sprite_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
         godot_sprite_path = os.path.join(sprite_dir, new_filename)
 
-        with Image.open(gm_sprite_path) as img:
-            img.save(godot_sprite_path, 'PNG')
+        if len(gm_sprite_paths) == 1:
+            with Image.open(gm_sprite_paths[0]) as img:
+                img.save(godot_sprite_path, 'PNG')
+        else:
+            composed = None
+            for gm_sprite_path in gm_sprite_paths:
+                with Image.open(gm_sprite_path) as img:
+                    layer = img.convert('RGBA')
+                if composed is None:
+                    composed = Image.new('RGBA', layer.size, (0, 0, 0, 0))
+                composed.alpha_composite(layer)
+            composed.save(godot_sprite_path, 'PNG')
 
-        return (sprite_name, index, images_count, gm_sprite_path, new_filename)
+        return (sprite_name, index, images_count, gm_sprite_paths[0], new_filename)
 
     def convert_sprites(self):
         os.makedirs(self.godot_sprites_path, exist_ok=True)

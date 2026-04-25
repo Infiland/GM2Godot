@@ -242,6 +242,28 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertIsNotNone(index.get_room("r_disk"))
         self.assertTrue(any("falling back" in msg for msg in self.logs))
 
+    def test_missing_room_order_nodes_uses_sorted_fallback_and_logs_warning(self):
+        _write_file(
+            os.path.join(self.gm_dir, "TestProject.yyp"),
+            "{\n"
+            '  "resources":[\n'
+            f'{_resource_entry("rooms", "r_z")},\n'
+            f'{_resource_entry("rooms", "r_a")}\n'
+            "  ],\n"
+            '  "resourceType":"GMProject"\n'
+            "}\n",
+        )
+        self._write_room("r_z")
+        self._write_room("r_a")
+
+        index = self._build_index()
+
+        self.assertEqual([room.name for room in index.ordered_rooms()], ["r_a", "r_z"])
+        self.assertEqual(index.first_room().name, "r_a")
+        self.assertTrue(index.used_room_order_fallback)
+        self.assertTrue(any("RoomOrderNodes missing" in msg for msg in self.logs))
+        self.assertTrue(any("fallback" in msg.lower() for msg in self.logs))
+
     def test_malformed_room_is_skipped_and_logged(self):
         self._write_yyp([("rooms", "r_bad")], room_order=["r_bad"])
         self._write_room("r_bad", content="not valid json {{{")

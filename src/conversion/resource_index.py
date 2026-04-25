@@ -63,6 +63,7 @@ class GameMakerResourceIndex(BaseConverter):
         self.resources = self._empty_resources()
         self.rooms = {}
         self.room_order = []
+        self.used_room_order_fallback = False
 
     def convert_all(self):
         """Build the in-memory index. No Godot files are written."""
@@ -73,6 +74,7 @@ class GameMakerResourceIndex(BaseConverter):
         self.resources = self._empty_resources()
         self.rooms = {}
         self.room_order = []
+        self.used_room_order_fallback = False
         self.yyp_path = self.find_yyp_path()
         self.yyp_data = self._read_yy_file(self.yyp_path) if self.yyp_path else None
 
@@ -91,6 +93,7 @@ class GameMakerResourceIndex(BaseConverter):
                 )
             self._index_disk_resources()
             self._parse_indexed_rooms()
+            self.used_room_order_fallback = True
             self.room_order = sorted(self.rooms)
 
         return self
@@ -215,6 +218,14 @@ class GameMakerResourceIndex(BaseConverter):
         )
 
     def _apply_yyp_room_order(self, yyp_data):
+        if "RoomOrderNodes" not in yyp_data:
+            self.used_room_order_fallback = True
+            self._safe_log(
+                "Warning: RoomOrderNodes missing; using deterministic room order fallback."
+            )
+            self.room_order = sorted(self.rooms)
+            return
+
         ordered = []
         for room_node in yyp_data.get("RoomOrderNodes", []):
             room_id = room_node.get("roomId", {})

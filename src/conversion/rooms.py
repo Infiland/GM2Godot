@@ -4,6 +4,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.project_godot import GodotProjectFile
+from src.conversion.room_creation_code import (
+    ROOM_EXECUTION_ORDER,
+    instance_creation_order_names,
+    resolve_room_creation_code,
+)
 from src.conversion.room_layers import godot_string, serialize_room_layers
 from src.conversion.resource_index import GameMakerResourceIndex
 
@@ -39,8 +44,14 @@ class RoomConverter(BaseConverter):
     def _generate_room_scene(self, room, resource_index=None):
         room_settings = room.room_settings
         physics_settings = room.physics_settings
+        room_creation_code = resolve_room_creation_code(
+            room,
+            self.gm_project_path,
+            warn_callback=self._safe_log,
+        )
         serialized_layers = serialize_room_layers(
             room,
+            gm_project_path=self.gm_project_path,
             resource_index=resource_index,
             warn_callback=self._safe_log,
         )
@@ -69,6 +80,16 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_physics_gravity_y = {json.dumps(physics_settings.get("PhysicsWorldGravityY", 10.0))}',
             f'metadata/gamemaker_physics_pixels_to_meters = {json.dumps(physics_settings.get("PhysicsWorldPixToMetres", 0.1))}',
             f'metadata/gamemaker_source_yy_path = {json.dumps(room.yy_path)}',
+            f'metadata/gamemaker_creation_code_file = {json.dumps(room.creation_code_file)}',
+            f'metadata/gamemaker_creation_code_source_path = {json.dumps(room_creation_code.source_path)}',
+            f'metadata/gamemaker_has_creation_code = {json.dumps(room_creation_code.has_code)}',
+            f'metadata/gamemaker_inherit_code = {json.dumps(room_creation_code.inherit_code)}',
+            f'metadata/gamemaker_is_dnd = {json.dumps(room_creation_code.is_dnd)}',
+            f'metadata/gamemaker_creation_code_file_exists = {json.dumps(room_creation_code.exists)}',
+            f'metadata/gamemaker_execution_order = {json.dumps(ROOM_EXECUTION_ORDER)}',
+            f'metadata/gamemaker_instance_creation_order = {json.dumps(instance_creation_order_names(room))}',
+            f'metadata/gamemaker_room_creation_code_execution_phase = {json.dumps(room_creation_code.execution_phase)}',
+            f'metadata/gamemaker_room_creation_code_execution_phase_index = {json.dumps(room_creation_code.execution_phase_index)}',
             "",
         ])
         lines.extend(serialized_layers.node_lines)

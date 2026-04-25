@@ -219,6 +219,27 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertEqual(room.room_settings["Width"], 640)
         self.assertEqual(room.room_settings["Height"], 480)
 
+    def test_indexes_room_creation_code_metadata(self):
+        content = _make_room_yy("r_code").replace(
+            '"creationCodeFile":"",',
+            '"creationCodeFile":"rooms/r_code/RoomCreationCode.gml",',
+        ).replace(
+            '"inheritCode":false,',
+            '"inheritCode":true,',
+        ).replace(
+            '"isDnd":false,',
+            '"isDnd":true,',
+        )
+        self._write_yyp([("rooms", "r_code")], room_order=["r_code"])
+        self._write_room("r_code", content=content)
+
+        index = self._build_index()
+        room = index.get_room("r_code")
+
+        self.assertEqual(room.creation_code_file, "rooms/r_code/RoomCreationCode.gml")
+        self.assertTrue(room.inherit_code)
+        self.assertTrue(room.is_dnd)
+
     def test_missing_yyp_falls_back_to_disk_scan(self):
         self._write_room("r_disk")
         self._write_resource("objects", "o_disk", "folders/Objects.yy", "GMObject")

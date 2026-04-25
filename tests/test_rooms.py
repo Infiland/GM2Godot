@@ -50,9 +50,12 @@ def _make_yyp(room_names, room_order=None, extra_resources=None):
 
 def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
                   persistent=False, volume=1.0, physics_world=False, layers=None,
-                  instance_creation_order=None):
+                  instance_creation_order=None, creation_code_file="",
+                  inherit_code=False, is_dnd=False):
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
+    inherit_code_value = "true" if inherit_code else "false"
+    is_dnd_value = "true" if is_dnd else "false"
     layers_json = json.dumps(layers if layers is not None else [])
     instance_creation_order_json = json.dumps(instance_creation_order or [])
     return (
@@ -60,11 +63,12 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         '  "$GMRoom":"v1",\n'
         '  "%Name":"{name}",\n'
         '  "name":"{name}",\n'
-        '  "creationCodeFile":"",\n'
-        '  "inheritCode":false,\n'
+        '  "creationCodeFile":{creation_code_file},\n'
+        '  "inheritCode":{inherit_code},\n'
         '  "inheritCreationOrder":false,\n'
         '  "inheritLayers":false,\n'
         '  "instanceCreationOrder":{instance_creation_order_json},\n'
+        '  "isDnd":{is_dnd},\n'
         '  "layers":{layers_json},\n'
         '  "parent":{{"name":"Rooms","path":"{parent_path}",}},\n'
         '  "parentRoom":null,\n'
@@ -94,6 +98,9 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         physics_world=physics_world_value,
         layers_json=layers_json,
         instance_creation_order_json=instance_creation_order_json,
+        creation_code_file=json.dumps(creation_code_file),
+        inherit_code=inherit_code_value,
+        is_dnd=is_dnd_value,
     )
 
 
@@ -570,6 +577,207 @@ class TestRoomConverter(unittest.TestCase):
         )
         self.assertIn('metadata/gamemaker_instance_creation_order_index = 0', content)
         self.assertIn('metadata/gamemaker_instance_creation_order_index = 1', content)
+
+    def test_room_root_emits_creation_code_metadata(self):
+        self._write_yyp(["r_code"])
+        room_creation_path = os.path.join(
+            self.gm_dir, "rooms", "r_code", "RoomCreationCode.gml"
+        )
+        _write_file(room_creation_path, "// metadata only\n")
+        self._write_room(
+            "r_code",
+            creation_code_file="RoomCreationCode.gml",
+            inherit_code=True,
+            is_dnd=True,
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_code")
+
+        self.assertIn('metadata/gamemaker_creation_code_file = "RoomCreationCode.gml"', content)
+        self.assertIn(
+            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(room_creation_path),
+            content,
+        )
+        self.assertIn('metadata/gamemaker_has_creation_code = true', content)
+        self.assertIn('metadata/gamemaker_inherit_code = true', content)
+        self.assertIn('metadata/gamemaker_is_dnd = true', content)
+        self.assertIn('metadata/gamemaker_creation_code_file_exists = true', content)
+        self.assertIn(
+            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "room_creation_code", "room_start"]',
+            content,
+        )
+        self.assertIn(
+            'metadata/gamemaker_room_creation_code_execution_phase = "room_creation_code"',
+            content,
+        )
+        self.assertIn('metadata/gamemaker_room_creation_code_execution_phase_index = 2', content)
+        self.assertNotIn('func ', content)
+        self.assertNotIn('.gd', content)
+
+    def test_room_creation_code_missing_warns_and_marks_missing(self):
+        self._write_yyp(["r_missing_code"])
+        missing_path = os.path.join(
+            self.gm_dir, "rooms", "r_missing_code", "MissingCreationCode.gml"
+        )
+        self._write_room(
+            "r_missing_code",
+            creation_code_file="MissingCreationCode.gml",
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_missing_code")
+
+        self.assertIn(
+            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(missing_path),
+            content,
+        )
+        self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
+        self.assertTrue(any(
+            "Missing GameMaker room creation code file" in log
+            and "r_missing_code" in log
+            and missing_path in log
+            for log in self.logs
+        ))
+
+    def test_instance_emits_creation_code_metadata(self):
+        self._write_yyp(["r_instance_code"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        instance_code_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_instance_code",
+            "InstanceCreationCode_inst_player.gml",
+        )
+        _write_file(instance_code_path, "// metadata only\n")
+        self._write_room("r_instance_code", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": "inst_player",
+                        "objectId": {"name": "o_player"},
+                        "hasCreationCode": True,
+                        "inheritCode": True,
+                        "isDnd": True,
+                    }
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_instance_code")
+
+        self.assertIn('metadata/gamemaker_has_creation_code = true', content)
+        self.assertIn('metadata/gamemaker_inherit_code = true', content)
+        self.assertIn('metadata/gamemaker_is_dnd = true', content)
+        self.assertIn(
+            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(instance_code_path),
+            content,
+        )
+        self.assertIn('metadata/gamemaker_creation_code_file_exists = true', content)
+        self.assertIn(
+            'metadata/gamemaker_creation_code_execution_phase = "instance_creation_code"',
+            content,
+        )
+        self.assertIn('metadata/gamemaker_creation_code_execution_phase_index = 1', content)
+        self.assertNotIn('func ', content)
+        self.assertNotIn('.gd', content)
+
+    def test_instance_creation_code_missing_warns_and_marks_missing(self):
+        self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        missing_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_missing_instance_code",
+            "InstanceCreationCode_inst_player.gml",
+        )
+        self._write_room("r_missing_instance_code", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": "inst_player",
+                        "objectId": {"name": "o_player"},
+                        "hasCreationCode": True,
+                    }
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_missing_instance_code")
+
+        self.assertIn(
+            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(missing_path),
+            content,
+        )
+        self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
+        self.assertTrue(any(
+            "Missing GameMaker instance creation code file" in log
+            and "inst_player" in log
+            and "r_missing_instance_code" in log
+            and missing_path in log
+            for log in self.logs
+        ))
+
+    def test_execution_metadata_preserves_lifecycle_order(self):
+        self._write_yyp(["r_lifecycle"], extra_resources=[("objects", "o_enemy")])
+        self._write_object("o_enemy")
+        self._write_object_scene("o_enemy")
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_lifecycle", "InstanceCreationCode_inst_a.gml"),
+            "// metadata only\n",
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_lifecycle", "InstanceCreationCode_inst_b.gml"),
+            "// metadata only\n",
+        )
+        self._write_room(
+            "r_lifecycle",
+            instance_creation_order=[
+                {"name": "inst_a", "path": "rooms/r_lifecycle/r_lifecycle.yy"},
+                {"name": "inst_b", "path": "rooms/r_lifecycle/r_lifecycle.yy"},
+            ],
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {"name": "inst_b", "objectId": {"name": "o_enemy"}, "hasCreationCode": True},
+                        {"name": "inst_a", "objectId": {"name": "o_enemy"}, "hasCreationCode": True},
+                    ],
+                }
+            ],
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_lifecycle")
+
+        self.assertIn(
+            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "room_creation_code", "room_start"]',
+            content,
+        )
+        self.assertIn('metadata/gamemaker_instance_creation_order = ["inst_a", "inst_b"]', content)
+        self.assertLess(
+            content.index('[node name="inst_a" parent="Instances"'),
+            content.index('[node name="inst_b" parent="Instances"'),
+        )
+        self.assertIn('metadata/gamemaker_instance_creation_order_index = 0', content)
+        self.assertIn('metadata/gamemaker_instance_creation_order_index = 1', content)
+        self.assertEqual(
+            content.count('metadata/gamemaker_creation_code_execution_phase = "instance_creation_code"'),
+            2,
+        )
+        self.assertEqual(
+            content.count('metadata/gamemaker_creation_code_execution_phase_index = 1'),
+            2,
+        )
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])

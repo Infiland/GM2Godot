@@ -18,13 +18,19 @@ def _write_file(path, content):
         f.write(content)
 
 
-def _make_yyp(room_names, room_order=None):
+def _make_yyp(room_names, room_order=None, extra_resources=None):
     room_order = room_order or room_names
+    extra_resources = extra_resources or []
     resources = []
     for name in room_names:
         resources.append(
             '    {{"id":{{"name":"{name}",'
             '"path":"rooms/{name}/{name}.yy",}},}}'.format(name=name)
+        )
+    for kind, name in extra_resources:
+        resources.append(
+            '    {{"id":{{"name":"{name}",'
+            '"path":"{kind}/{name}/{name}.yy",}},}}'.format(kind=kind, name=name)
         )
     order_entries = []
     for name in room_order:
@@ -43,10 +49,12 @@ def _make_yyp(room_names, room_order=None):
 
 
 def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
-                  persistent=False, volume=1.0, physics_world=False, layers=None):
+                  persistent=False, volume=1.0, physics_world=False, layers=None,
+                  instance_creation_order=None):
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
     layers_json = json.dumps(layers if layers is not None else [])
+    instance_creation_order_json = json.dumps(instance_creation_order or [])
     return (
         '{{\n'
         '  "$GMRoom":"v1",\n'
@@ -56,7 +64,7 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         '  "inheritCode":false,\n'
         '  "inheritCreationOrder":false,\n'
         '  "inheritLayers":false,\n'
-        '  "instanceCreationOrder":[],\n'
+        '  "instanceCreationOrder":{instance_creation_order_json},\n'
         '  "layers":{layers_json},\n'
         '  "parent":{{"name":"Rooms","path":"{parent_path}",}},\n'
         '  "parentRoom":null,\n'
@@ -85,7 +93,21 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
         volume=volume,
         physics_world=physics_world_value,
         layers_json=layers_json,
+        instance_creation_order_json=instance_creation_order_json,
     )
+
+
+def _make_object_yy(name, parent_path="folders/Objects.yy"):
+    return (
+        '{{\n'
+        '  "$GMObject":"",\n'
+        '  "%Name":"{name}",\n'
+        '  "name":"{name}",\n'
+        '  "eventList":[],\n'
+        '  "parent":{{"name":"Objects","path":"{parent_path}",}},\n'
+        '  "resourceType":"GMObject",\n'
+        '}}\n'
+    ).format(name=name, parent_path=parent_path)
 
 
 class TestRoomConverter(unittest.TestCase):
@@ -109,10 +131,10 @@ class TestRoomConverter(unittest.TestCase):
             max_workers=1,
         )
 
-    def _write_yyp(self, room_names, room_order=None):
+    def _write_yyp(self, room_names, room_order=None, extra_resources=None):
         _write_file(
             os.path.join(self.gm_dir, "TestProject.yyp"),
-            _make_yyp(room_names, room_order),
+            _make_yyp(room_names, room_order, extra_resources),
         )
 
     def _write_project_godot(self, content='[application]\nconfig/name="Existing"\n'):
@@ -122,6 +144,22 @@ class TestRoomConverter(unittest.TestCase):
         room_path = os.path.join(self.gm_dir, "rooms", name, name + ".yy")
         _write_file(room_path, _make_room_yy(name, **kwargs))
         return room_path
+
+    def _write_object(self, name, parent_path="folders/Objects.yy"):
+        object_path = os.path.join(self.gm_dir, "objects", name, name + ".yy")
+        _write_file(object_path, _make_object_yy(name, parent_path))
+        return object_path
+
+    def _write_object_scene(self, name, *subfolders):
+        scene_path = os.path.join(
+            self.godot_dir,
+            "objects",
+            *subfolders,
+            name,
+            name + ".tscn",
+        )
+        _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Node2D"]\n'.format(name))
+        return scene_path
 
     def _read_scene(self, room_name, *subfolders):
         tscn_path = os.path.join(
@@ -358,6 +396,180 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[node name="Slash_Name" type="Node2D" parent="."]', content)
         self.assertNotIn('[node name="internal_name"', content)
         self.assertIn('metadata/gamemaker_layer_name = "Slash/Name"', content)
+
+    def test_instance_layer_emits_object_scene_children(self):
+        self._write_yyp(["r_instances"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_room("r_instances", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": "inst_player",
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 100,
+                        "y": 200,
+                        "rotation": 90,
+                        "scaleX": 2,
+                        "scaleY": 0.5,
+                        "colour": 4294967295,
+                        "imageIndex": 3,
+                        "imageSpeed": 0.25,
+                        "hasCreationCode": True,
+                        "properties": [{"name": "hp", "value": 10}],
+                    }
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_instances")
+
+        self.assertIn('[gd_scene format=3 load_steps=2]', content)
+        self.assertIn(
+            '[ext_resource type="PackedScene" path="res://objects/o_player/o_player.tscn" id="1"]',
+            content,
+        )
+        self.assertIn(
+            '[node name="inst_player" parent="Instances" instance=ExtResource("1")]',
+            content,
+        )
+        self.assertIn('position = Vector2(100, 200)', content)
+        self.assertIn('rotation_degrees = 90', content)
+        self.assertIn('scale = Vector2(2, 0.5)', content)
+        self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
+        self.assertIn('metadata/gamemaker_instance_object_name = "o_player"', content)
+        self.assertIn('metadata/gamemaker_colour = 4294967295', content)
+        self.assertIn('metadata/gamemaker_image_index = 3', content)
+        self.assertIn('metadata/gamemaker_image_speed = 0.25', content)
+        self.assertIn('metadata/gamemaker_object_id = {"name": "o_player"', content)
+        self.assertIn('metadata/gamemaker_properties = [{"name": "hp", "value": 10}]', content)
+        self.assertIn('metadata/gamemaker_has_creation_code = true', content)
+
+    def test_instance_layer_reuses_object_scene_ext_resource(self):
+        self._write_yyp(["r_reuse"], extra_resources=[("objects", "o_enemy")])
+        self._write_object("o_enemy")
+        self._write_object_scene("o_enemy")
+        self._write_room("r_reuse", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {"name": "inst_enemy_a", "objectId": {"name": "o_enemy"}},
+                    {"name": "inst_enemy_b", "objectId": {"name": "o_enemy"}},
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_reuse")
+
+        self.assertEqual(content.count('path="res://objects/o_enemy/o_enemy.tscn"'), 1)
+        self.assertIn('[node name="inst_enemy_a" parent="Instances" instance=ExtResource("1")]', content)
+        self.assertIn('[node name="inst_enemy_b" parent="Instances" instance=ExtResource("1")]', content)
+
+    def test_instance_layer_resolves_object_subfolder_path(self):
+        self._write_yyp(["r_subfolder"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player", parent_path="folders/Objects/Game/Actors.yy")
+        self._write_object_scene("o_player", "Game", "Actors")
+        self._write_room("r_subfolder", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [{"name": "inst_player", "objectId": {"name": "o_player"}}],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_subfolder")
+
+        self.assertIn(
+            'path="res://objects/Game/Actors/o_player/o_player.tscn"',
+            content,
+        )
+
+    def test_ignored_instances_are_skipped_with_warning(self):
+        self._write_yyp(["r_ignored"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_room("r_ignored", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {"name": "inst_ignored", "objectId": {"name": "o_player"}, "ignore": True}
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_ignored")
+
+        self.assertNotIn('[node name="inst_ignored"', content)
+        self.assertNotIn('[ext_resource type="PackedScene"', content)
+        self.assertTrue(any(
+            "Skipping ignored GameMaker room instance inst_ignored" in log
+            for log in self.logs
+        ))
+
+    def test_unresolved_object_instance_emits_placeholder_with_warning(self):
+        self._write_yyp(["r_missing"])
+        self._write_room("r_missing", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {"name": "inst_missing", "objectId": {"name": "o_missing"}, "x": 10, "y": 20}
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_missing")
+
+        self.assertNotIn('[ext_resource type="PackedScene"', content)
+        self.assertIn('[node name="inst_missing" type="Node2D" parent="Instances"]', content)
+        self.assertIn('position = Vector2(10, 20)', content)
+        self.assertIn('metadata/gamemaker_placeholder = true', content)
+        self.assertIn('metadata/gamemaker_unresolved_object_scene = true', content)
+        self.assertTrue(any(
+            "Could not resolve object scene" in log and "inst_missing" in log
+            for log in self.logs
+        ))
+
+    def test_instance_creation_order_controls_layer_child_order(self):
+        self._write_yyp(["r_order"], extra_resources=[("objects", "o_enemy")])
+        self._write_object("o_enemy")
+        self._write_object_scene("o_enemy")
+        self._write_room(
+            "r_order",
+            instance_creation_order=[
+                {"name": "inst_a", "path": "rooms/r_order/r_order.yy"},
+                {"name": "inst_b", "path": "rooms/r_order/r_order.yy"},
+            ],
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {"name": "inst_b", "objectId": {"name": "o_enemy"}},
+                        {"name": "inst_a", "objectId": {"name": "o_enemy"}},
+                    ],
+                }
+            ],
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_order")
+
+        self.assertLess(
+            content.index('[node name="inst_a" parent="Instances"'),
+            content.index('[node name="inst_b" parent="Instances"'),
+        )
+        self.assertIn('metadata/gamemaker_instance_creation_order_index = 0', content)
+        self.assertIn('metadata/gamemaker_instance_creation_order_index = 1', content)
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])

@@ -40,18 +40,38 @@ class RoomLayerSerializationContext:
         self.ext_resource_ids = {}
         self.creation_order = _instance_creation_order(room)
 
+    def ext_resource_id(self, resource_type, resource_path):
+        key = (resource_type, resource_path)
+        if key not in self.ext_resource_ids:
+            self.ext_resource_ids[key] = str(len(self.ext_resource_ids) + 1)
+        return self.ext_resource_ids[key]
+
     def object_scene_ext_resource_id(self, object_name):
         scene_path = self.object_scene_path(object_name)
         if scene_path is None:
             return None
-        if scene_path not in self.ext_resource_ids:
-            self.ext_resource_ids[scene_path] = str(len(self.ext_resource_ids) + 1)
-        return self.ext_resource_ids[scene_path]
+        return self.ext_resource_id("PackedScene", scene_path)
 
     def object_scene_path(self, object_name):
         if not object_name or self.resource_index is None:
             return None
         scene_path = self.resource_index.resolve_godot_path("objects", object_name)
+        if scene_path is None:
+            return None
+        if not self._scene_path_exists(scene_path):
+            return None
+        return scene_path
+
+    def sprite_scene_ext_resource_id(self, sprite_name):
+        scene_path = self.sprite_scene_path(sprite_name)
+        if scene_path is None:
+            return None
+        return self.ext_resource_id("PackedScene", scene_path)
+
+    def sprite_scene_path(self, sprite_name):
+        if not sprite_name or self.resource_index is None:
+            return None
+        scene_path = self.resource_index.resolve_godot_path("sprites", sprite_name)
         if scene_path is None:
             return None
         if not self._scene_path_exists(scene_path):
@@ -64,11 +84,12 @@ class RoomLayerSerializationContext:
 
     def ext_resource_lines(self):
         return [
-            '[ext_resource type="PackedScene" path={path} id="{resource_id}"]'.format(
+            '[ext_resource type="{resource_type}" path={path} id="{resource_id}"]'.format(
+                resource_type=resource_type,
                 path=godot_string(path),
                 resource_id=resource_id,
             )
-            for path, resource_id in self.ext_resource_ids.items()
+            for (resource_type, path), resource_id in self.ext_resource_ids.items()
         ]
 
     def _scene_path_exists(self, scene_path):
@@ -110,6 +131,9 @@ def _serialize_layer(layer, parent_path, sibling_names, lines, context):
     lines.extend(_layer_node_lines(layer, node_name, parent_path, original_name, resource_type))
 
     child_parent_path = node_name if parent_path == "." else f"{parent_path}/{node_name}"
+
+    if resource_type == "GMRBackgroundLayer":
+        lines.extend(_background_visual_lines(layer, child_parent_path, original_name, context))
 
     if resource_type == "GMRInstanceLayer":
         lines.extend(_instance_node_lines(layer, child_parent_path, original_name, context))
@@ -200,6 +224,147 @@ def _layer_node_lines(layer, node_name, parent_path, original_name, resource_typ
 def _append_optional_metadata(lines, source, source_key, metadata_key):
     if source_key in source:
         lines.append(f"metadata/{metadata_key} = {godot_value(source.get(source_key))}")
+
+
+def _background_visual_lines(layer, parent_path, layer_name, context):
+    sprite_name = _background_sprite_name(layer)
+    if sprite_name:
+        ext_resource_id = context.sprite_scene_ext_resource_id(sprite_name)
+        if ext_resource_id is None:
+            context.warn(
+                "Warning: Could not resolve sprite scene for GameMaker background layer "
+                "{layer_name} in room {room_name}, sprite {sprite_name}; no visual child emitted.".format(
+                    layer_name=layer_name,
+                    room_name=context.room.name,
+                    sprite_name=sprite_name,
+                )
+            )
+            return []
+        return _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, context)
+
+    return _background_color_lines(layer, parent_path, context)
+
+
+def _background_color_lines(layer, parent_path, context):
+    width, height = _room_size(context)
+    lines = [
+        f'[node name="BackgroundVisual" type="ColorRect" parent={godot_string(parent_path)}]',
+        f"visible = {godot_value(bool(layer.get('visible', True)))}",
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(layer.get("x", 0)),
+            y=_format_number(layer.get("y", 0)),
+        ),
+        "size = Vector2({width}, {height})".format(
+            width=_format_number(width),
+            height=_format_number(height),
+        ),
+        "color = {color}".format(color=_godot_color(layer.get("colour", 4278190080))),
+    ]
+    lines.extend(_background_metadata_lines(layer, "color"))
+    _warn_background_runtime_requirements(layer, context)
+    lines.append("")
+    return lines
+
+
+def _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, context):
+    node_name = _sanitize_node_name(sprite_name) or "BackgroundSprite"
+    lines = [
+        '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
+            name=godot_string(node_name),
+            parent=godot_string(parent_path),
+            resource_id=ext_resource_id,
+        ),
+        f"visible = {godot_value(bool(layer.get('visible', True)))}",
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(layer.get("x", 0)),
+            y=_format_number(layer.get("y", 0)),
+        ),
+        "modulate = {color}".format(color=_godot_color(layer.get("colour", 4294967295))),
+    ]
+    lines.extend(_background_metadata_lines(layer, "sprite"))
+    _warn_background_runtime_requirements(layer, context)
+    lines.append("")
+    return lines
+
+
+def _background_metadata_lines(layer, visual_type):
+    colour = layer.get("colour")
+    lines = [
+        "metadata/gamemaker_background_visual = true",
+        f"metadata/gamemaker_background_visual_type = {godot_value(visual_type)}",
+        f"metadata/gamemaker_background_sprite = {godot_value(_background_sprite_name(layer))}",
+        f"metadata/gamemaker_background_colour = {godot_value(colour)}",
+        f"metadata/gamemaker_background_colour_rgba = {godot_value(_decode_gamemaker_colour(colour))}",
+    ]
+    for source_key, metadata_key in (
+        ("x", "gamemaker_background_x"),
+        ("y", "gamemaker_background_y"),
+        ("stretch", "gamemaker_background_stretch"),
+        ("htiled", "gamemaker_background_htiled"),
+        ("vtiled", "gamemaker_background_vtiled"),
+        ("hspeed", "gamemaker_background_hspeed"),
+        ("vspeed", "gamemaker_background_vspeed"),
+        ("animationFPS", "gamemaker_background_animation_fps"),
+        ("animationSpeedType", "gamemaker_background_animation_speed_type"),
+        ("userdefinedAnimFPS", "gamemaker_background_userdefined_anim_fps"),
+    ):
+        _append_optional_metadata(lines, layer, source_key, metadata_key)
+    return lines
+
+
+def _warn_background_runtime_requirements(layer, context):
+    if not (_truthy(layer.get("htiled")) or _truthy(layer.get("vtiled"))
+            or _nonzero(layer.get("hspeed")) or _nonzero(layer.get("vspeed"))):
+        return
+    context.warn(
+        "Warning: GameMaker background layer {layer_name} in room {room_name} uses "
+        "scrolling/tiling; runtime support is required for hspeed/vspeed/htiled/vtiled.".format(
+            layer_name=_layer_name(layer),
+            room_name=context.room.name,
+        )
+    )
+
+
+def _background_sprite_name(layer):
+    sprite_id = layer.get("spriteId") or {}
+    return sprite_id.get("name") if isinstance(sprite_id, dict) else None
+
+
+def _room_size(context):
+    settings = context.room.room_settings or {}
+    return settings.get("Width", 1024), settings.get("Height", 768)
+
+
+def _godot_color(value):
+    r, g, b, a = _decode_gamemaker_colour(value)
+    return "Color({r}, {g}, {b}, {a})".format(
+        r=_format_color_component(r),
+        g=_format_color_component(g),
+        b=_format_color_component(b),
+        a=_format_color_component(a),
+    )
+
+
+def _decode_gamemaker_colour(value):
+    try:
+        packed = int(value)
+    except (TypeError, ValueError):
+        packed = 4278190080
+    packed = packed & 0xFFFFFFFF
+    return [
+        (packed & 0xFF) / 255.0,
+        ((packed >> 8) & 0xFF) / 255.0,
+        ((packed >> 16) & 0xFF) / 255.0,
+        ((packed >> 24) & 0xFF) / 255.0,
+    ]
+
+
+def _format_color_component(value):
+    if value == 0:
+        return "0"
+    if value == 1:
+        return "1"
+    return ("{:.6f}".format(value)).rstrip("0").rstrip(".")
 
 
 def _instance_node_lines(layer, parent_path, layer_name, context):
@@ -376,6 +541,17 @@ def _format_number(value):
     if number.is_integer():
         return str(int(number))
     return str(number)
+
+
+def _truthy(value):
+    return bool(value)
+
+
+def _nonzero(value):
+    try:
+        return float(value) != 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _sanitize_node_name(name):

@@ -36,13 +36,29 @@ class RoomConverter(BaseConverter):
             max_workers=self.max_workers,
         ).build()
 
-    def _generate_room_scene(self, room):
+    def _generate_room_scene(self, room, resource_index=None):
         room_settings = room.room_settings
         physics_settings = room.physics_settings
+        serialized_layers = serialize_room_layers(
+            room,
+            resource_index=resource_index,
+            warn_callback=self._safe_log,
+        )
 
-        lines = [
-            "[gd_scene format=3]",
-            "",
+        if serialized_layers.ext_resource_lines:
+            lines = [
+                f"[gd_scene format=3 load_steps={len(serialized_layers.ext_resource_lines) + 1}]",
+                "",
+            ]
+            lines.extend(serialized_layers.ext_resource_lines)
+            lines.append("")
+        else:
+            lines = [
+                "[gd_scene format=3]",
+                "",
+            ]
+
+        lines.extend([
             f'[node name={godot_string(room.name)} type="Node2D"]',
             f'metadata/gamemaker_room_width = {json.dumps(room_settings.get("Width", 1024))}',
             f'metadata/gamemaker_room_height = {json.dumps(room_settings.get("Height", 768))}',
@@ -54,8 +70,8 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_physics_pixels_to_meters = {json.dumps(physics_settings.get("PhysicsWorldPixToMetres", 0.1))}',
             f'metadata/gamemaker_source_yy_path = {json.dumps(room.yy_path)}',
             "",
-        ]
-        lines.extend(serialize_room_layers(room, warn_callback=self._safe_log))
+        ])
+        lines.extend(serialized_layers.node_lines)
         return "\n".join(lines)
 
     def _room_output_path(self, room):
@@ -69,14 +85,14 @@ class RoomConverter(BaseConverter):
             )
         return os.path.join(self.godot_rooms_path, room.name, room.name + ".tscn")
 
-    def _process_room(self, room):
+    def _process_room(self, room, resource_index=None):
         if not self.conversion_running():
             return None
 
         output_path = self._room_output_path(room)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(self._generate_room_scene(room))
+            f.write(self._generate_room_scene(room, resource_index))
 
         width = room.room_settings.get("Width", 1024)
         height = room.room_settings.get("Height", 768)
@@ -132,7 +148,7 @@ class RoomConverter(BaseConverter):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_room, room): room.name
+                executor.submit(self._process_room, room, index): room.name
                 for room in rooms
             }
             for future in as_completed(futures_map):

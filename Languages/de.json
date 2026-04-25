@@ -123,6 +123,10 @@
 "Console_Convertor_Objects_SpriteNotFound" : "Warnung: Objekt {object_name} verweist auf Sprite {sprite_name}, dessen Szene nicht gefunden wurde. Objekt wird ohne Sprite erstellt.",
 "Console_Convertor_Objects_ParseError" : "Warnung: {yy_path} konnte nicht gelesen werden, Objekt {object_name} wird uebersprungen.",
 
+"Console_Convertor_Rooms" : "Raeume werden konvertiert...",
+"Console_Convertor_Rooms_Complete" : "Raum-Konvertierung abgeschlossen.",
+"Console_Convertor_Rooms_Stopped" : "Raum-Konvertierung gestoppt.",
+
 "Console_Convertor_Notes" : "Notizen werden konvertiert...",
 "Console_Convertor_Notes_Copied" : "Notiz kopiert: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Notiz-Konvertierung gestoppt.",
@@ -163,7 +167,7 @@
 "Settings_Title" : "Konvertierungseinstellungen",
 "Settings_Files_Heading" : "Wählen Sie zu konvertierende Dateien aus:",
 "Settings_Categories_Headings" : ["Assets", "Projekt", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Schriftarten",
@@ -175,6 +179,7 @@
     "audio_buses": "Audio-Busse",
     "notes": "Notizen",
     "objects": "Objekte",
+    "rooms": "Raeume",
     "shaders": "Shader",
     "tilesets": "Tilesets",
     "included_files": "Eingeschlossene Dateien"

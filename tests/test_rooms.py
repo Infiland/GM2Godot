@@ -18,15 +18,17 @@ def _write_file(path, content):
         f.write(content)
 
 
-def _make_yyp(room_names):
+def _make_yyp(room_names, room_order=None):
+    room_order = room_order or room_names
     resources = []
-    room_order = []
     for name in room_names:
         resources.append(
             '    {{"id":{{"name":"{name}",'
             '"path":"rooms/{name}/{name}.yy",}},}}'.format(name=name)
         )
-        room_order.append(
+    order_entries = []
+    for name in room_order:
+        order_entries.append(
             '    {{"roomId":{{"name":"{name}",'
             '"path":"rooms/{name}/{name}.yy",}},}}'.format(name=name)
         )
@@ -34,7 +36,7 @@ def _make_yyp(room_names):
     return (
         "{\n"
         f'  "resources":[\n{",\n".join(resources)},\n  ],\n'
-        f'  "RoomOrderNodes":[\n{",\n".join(room_order)},\n  ],\n'
+        f'  "RoomOrderNodes":[\n{",\n".join(order_entries)},\n  ],\n'
         '  "resourceType":"GMProject",\n'
         "}\n"
     )
@@ -105,8 +107,14 @@ class TestRoomConverter(unittest.TestCase):
             max_workers=1,
         )
 
-    def _write_yyp(self, room_names):
-        _write_file(os.path.join(self.gm_dir, "TestProject.yyp"), _make_yyp(room_names))
+    def _write_yyp(self, room_names, room_order=None):
+        _write_file(
+            os.path.join(self.gm_dir, "TestProject.yyp"),
+            _make_yyp(room_names, room_order),
+        )
+
+    def _write_project_godot(self, content='[application]\nconfig/name="Existing"\n'):
+        _write_file(os.path.join(self.godot_dir, "project.godot"), content)
 
     def _write_room(self, name, **kwargs):
         room_path = os.path.join(self.gm_dir, "rooms", name, name + ".yy")
@@ -182,21 +190,110 @@ class TestRoomConverter(unittest.TestCase):
             self.godot_dir, "rooms", "r_unlisted"
         )))
 
+    def test_sets_project_startup_scene_to_first_room_order_node(self):
+        self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])
+        self._write_room("r_second")
+        self._write_room("r_first")
+        self._write_project_godot(
+            '[application]\n'
+            'config/name="Existing"\n'
+            'run/main_scene="res://old.tscn"\n'
+            '\n'
+            '[display]\n'
+            'window/size/viewport_width=1280\n'
+        )
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('run/main_scene="res://rooms/r_first/r_first.tscn"', content)
+        self.assertNotIn('run/main_scene="res://old.tscn"', content)
+        self.assertIn('config/name="Existing"', content)
+        self.assertIn('[display]', content)
+        self.assertIn('window/size/viewport_width=1280', content)
+        self.assertTrue(any("startup scene" in log.lower() for log in self.logs))
+        self.assertTrue(any("r_first" in log for log in self.logs))
+
+    def test_sets_project_startup_scene_to_first_room_subfolder_path(self):
+        self._write_yyp(["r_intro"])
+        self._write_room("r_intro", parent_path="folders/Rooms/Game/Intro.yy")
+        self._write_project_godot()
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn(
+            'run/main_scene="res://rooms/Game/Intro/r_intro/r_intro.tscn"',
+            content,
+        )
+        self.assertIn('config/name="Existing"', content)
+
+    def test_missing_room_order_nodes_sets_startup_scene_from_sorted_fallback(self):
+        _write_file(
+            os.path.join(self.gm_dir, "TestProject.yyp"),
+            "{\n"
+            '  "resources":[\n'
+            '    {"id":{"name":"r_z","path":"rooms/r_z/r_z.yy",}},\n'
+            '    {"id":{"name":"r_a","path":"rooms/r_a/r_a.yy",}}\n'
+            "  ],\n"
+            '  "resourceType":"GMProject"\n'
+            "}\n",
+        )
+        self._write_room("r_z")
+        self._write_room("r_a")
+        self._write_project_godot()
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('run/main_scene="res://rooms/r_a/r_a.tscn"', content)
+        self.assertTrue(any("RoomOrderNodes missing" in log for log in self.logs))
+        self.assertTrue(any("fallback" in log.lower() for log in self.logs))
+
     def test_no_rooms_does_not_crash_or_create_output(self):
         self._make_converter().convert_all()
 
         self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "rooms")))
         self.assertTrue(any("completed" in log.lower() for log in self.logs))
 
+    def test_no_generated_room_scene_leaves_main_scene_unchanged(self):
+        self._write_project_godot(
+            '[application]\n'
+            'config/name="Existing"\n'
+            'run/main_scene="res://keep.tscn"\n'
+        )
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('run/main_scene="res://keep.tscn"', content)
+        self.assertTrue(any("No room scene generated" in log for log in self.logs))
+        self.assertTrue(any("main_scene unchanged" in log for log in self.logs))
+
     def test_stops_without_writing_scene(self):
         self._write_yyp(["r_test"])
         self._write_room("r_test")
+        self._write_project_godot(
+            '[application]\n'
+            'run/main_scene="res://keep.tscn"\n'
+        )
 
         self._make_converter(conversion_running=lambda: False).convert_all()
 
         self.assertFalse(os.path.exists(os.path.join(
             self.godot_dir, "rooms", "r_test", "r_test.tscn"
         )))
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn('run/main_scene="res://keep.tscn"', content)
         self.assertTrue(any("stopped" in log.lower() for log in self.logs))
 
 

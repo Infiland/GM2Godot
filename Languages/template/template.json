@@ -88,6 +88,10 @@
 
 "Console_Convertor_Shaders_Converted" : "Converted {filename} -> {output_path}",
 
+"Console_Convertor_Rooms" : "Converting rooms...",
+"Console_Convertor_Rooms_Complete" : "Room conversion completed.",
+"Console_Convertor_Rooms_Stopped" : "Room conversion stopped.",
+
 "Console_Convertor_Notes" : "Converting notes...",
 "Console_Convertor_Notes_Copied" : "Copied note: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Note conversion stopped.",
@@ -122,7 +126,7 @@
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",
 "Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
 
 "Settings_Labels": {
     "sprites": "Sprites",
@@ -135,6 +139,7 @@
     "audio_buses": "Audio Buses",
     "notes": "Notes",
     "objects": "Objects",
+    "rooms": "Rooms",
     "shaders": "Shaders",
     "tilesets": "Tilesets",
     "included_files": "Included Files"

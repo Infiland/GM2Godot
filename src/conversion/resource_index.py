@@ -37,6 +37,7 @@ class IndexedRoom:
     inherit_code: bool = False
     inherit_creation_order: bool = False
     inherit_layers: bool = False
+    is_dnd: bool = False
     raw_data: Dict = field(default_factory=dict)
 
 
@@ -214,6 +215,7 @@ class GameMakerResourceIndex(BaseConverter):
             inherit_code=bool(data.get("inheritCode", False)),
             inherit_creation_order=bool(data.get("inheritCreationOrder", False)),
             inherit_layers=bool(data.get("inheritLayers", False)),
+            is_dnd=bool(data.get("isDnd", False)),
             raw_data=data,
         )
 

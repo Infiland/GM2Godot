@@ -3,6 +3,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from src.conversion.room_creation_code import resolve_instance_creation_code
+
 
 KNOWN_LAYER_TYPES = {
     "GMRInstanceLayer",
@@ -30,8 +32,9 @@ class SerializedRoomLayers:
 
 
 class RoomLayerSerializationContext:
-    def __init__(self, room, resource_index=None, warn_callback=None):
+    def __init__(self, room, gm_project_path=None, resource_index=None, warn_callback=None):
         self.room = room
+        self.gm_project_path = gm_project_path
         self.resource_index = resource_index
         self.warn_callback = warn_callback
         self.ext_resource_ids = {}
@@ -79,9 +82,9 @@ class RoomLayerSerializationContext:
         return os.path.isfile(filesystem_path)
 
 
-def serialize_room_layers(room, resource_index=None, warn_callback=None):
+def serialize_room_layers(room, gm_project_path=None, resource_index=None, warn_callback=None):
     """Serialize GameMaker room layers and supported layer children."""
-    context = RoomLayerSerializationContext(room, resource_index, warn_callback)
+    context = RoomLayerSerializationContext(room, gm_project_path, resource_index, warn_callback)
     node_lines = []
     used_names = {}
     for layer in room.layers:
@@ -243,13 +246,19 @@ def _instance_node_lines(layer, parent_path, layer_name, context):
                 object_name,
                 ext_resource_id,
                 order_index,
+                context,
             )
         )
     return lines
 
 
 def _instance_scene_lines(instance, node_name, parent_path, instance_name, object_name,
-                          ext_resource_id, order_index):
+                          ext_resource_id, order_index, context):
+    creation_code = resolve_instance_creation_code(
+        context.room,
+        instance,
+        warn_callback=context.warn,
+    )
     if ext_resource_id is None:
         lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
     else:
@@ -283,7 +292,13 @@ def _instance_scene_lines(instance, node_name, parent_path, instance_name, objec
         f"metadata/gamemaker_image_speed = {godot_value(instance.get('imageSpeed'))}",
         f"metadata/gamemaker_object_id = {godot_value(instance.get('objectId'))}",
         f"metadata/gamemaker_properties = {godot_value(instance.get('properties', []))}",
-        f"metadata/gamemaker_has_creation_code = {godot_value(bool(instance.get('hasCreationCode', False)))}",
+        f"metadata/gamemaker_has_creation_code = {godot_value(creation_code.has_code)}",
+        f"metadata/gamemaker_inherit_code = {godot_value(creation_code.inherit_code)}",
+        f"metadata/gamemaker_is_dnd = {godot_value(creation_code.is_dnd)}",
+        f"metadata/gamemaker_creation_code_source_path = {godot_value(creation_code.source_path)}",
+        f"metadata/gamemaker_creation_code_file_exists = {godot_value(creation_code.exists)}",
+        f"metadata/gamemaker_creation_code_execution_phase = {godot_value(creation_code.execution_phase)}",
+        f"metadata/gamemaker_creation_code_execution_phase_index = {godot_value(creation_code.execution_phase_index)}",
     ])
 
     if ext_resource_id is None:

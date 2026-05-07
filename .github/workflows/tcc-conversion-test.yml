@@ -22,6 +22,14 @@ jobs:
       - name: Install test dependencies
         run: pip install Pillow
 
+      - name: Clone SimpleTopDown test game (shallow)
+        run: git clone --depth 1 --no-recurse-submodules https://github.com/Infiland/GM2GodotGameTest_SimpleTopDown.git "${{ runner.temp }}/GM2GodotGameTest_SimpleTopDown"
+
+      - name: Run SimpleTopDown conversion test
+        env:
+          SIMPLE_TOPDOWN_PROJECT_PATH: ${{ runner.temp }}/GM2GodotGameTest_SimpleTopDown
+        run: python -m unittest tests.test_simple_topdown_conversion -v
+
       - name: Clone The Colorful Creature (shallow)
         run: git clone --depth 1 --no-recurse-submodules https://github.com/Infiland/TheColorfulCreature.git "${{ runner.temp }}/TheColorfulCreature"
 

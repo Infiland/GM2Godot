@@ -517,6 +517,31 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         self.assertIn("func _process(delta):", content)
 
+    def test_script_transpiles_topdown_step_movement(self):
+        """Step polling movement should become Godot held-input movement."""
+        self._setup_object("o_player", event_list=[{"eventType": 3, "eventNum": 0}])
+        source_path = os.path.join(self.gm_dir, "objects", "o_player", "Step_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write(
+                "if keyboard_check(vk_left) { x -= 10; }\n"
+                "if keyboard_check(vk_right) { x += 10; }\n"
+                "if keyboard_check(vk_up) { y -= 10; }\n"
+                "if keyboard_check(vk_down) { y += 10; }\n"
+            )
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn("func _process(delta):", content)
+        self.assertIn("\tif Input.is_action_pressed(\"ui_left\"):\n\t\tposition.x -= 10", content)
+        self.assertIn("\tif Input.is_action_pressed(\"ui_right\"):\n\t\tposition.x += 10", content)
+        self.assertIn("\tif Input.is_action_pressed(\"ui_up\"):\n\t\tposition.y -= 10", content)
+        self.assertIn("\tif Input.is_action_pressed(\"ui_down\"):\n\t\tposition.y += 10", content)
+
     def test_script_with_begin_step(self):
         """eventType 3, eventNum 1 should produce func _physics_process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 1}])

@@ -486,6 +486,26 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _ready():", content)
         self.assertIn("pass", content)
 
+    def test_script_transpiles_create_event_gml_body(self):
+        """Simple expression/operator GML bodies should populate event functions."""
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("var speed = base_speed * 2; score ??= 0; score += speed div 2;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn("func _ready():", content)
+        self.assertIn("\tvar speed = base_speed * 2", content)
+        self.assertIn("\tif score == null:\n\t\tscore = 0", content)
+        self.assertIn("\tscore += int(speed / 2)", content)
+        self.assertNotIn("\tpass", content)
+
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce func _process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])

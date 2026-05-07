@@ -70,13 +70,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_compound_assignments(self):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),
-            "x += y * 2",
+            "position.x += position.y * 2",
         )
 
     def test_transpiles_nullish_assignment(self):
         self.assertEqual(
-            transpile_gml_code("x ??= 10;", indent=""),
-            "if x == null:\n\tx = 10",
+            transpile_gml_code("score ??= 10;", indent=""),
+            "if score == null:\n\tscore = 10",
         )
 
     def test_transpiles_increment_decrement_statements(self):
@@ -87,6 +87,46 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("show_debug_message(score ?? 0);", indent=""),
             "show_debug_message(score if score != null else 0)",
+        )
+
+    def test_local_vars_shadow_instance_position_builtins(self):
+        self.assertEqual(
+            transpile_gml_code("var x = 1, y = x + 2; x += y;", indent=""),
+            "var x = 1\nvar y = x + 2\nx += y",
+        )
+
+    def test_transpiles_if_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("if score > 0 { score -= 1; } else { score = 0; }", indent=""),
+            "if score > 0:\n\tscore -= 1\nelse:\n\tscore = 0",
+        )
+
+    def test_transpiles_keyboard_check_and_position_movement(self):
+        source = """
+        if keyboard_check(vk_left) {
+            x -= 10;
+        }
+        if keyboard_check(vk_right) {
+            x += 10;
+        }
+        if keyboard_check(vk_up) {
+            y -= 10;
+        }
+        if keyboard_check(vk_down) {
+            y += 10;
+        }
+        """
+
+        self.assertEqual(
+            transpile_gml_code(source, indent=""),
+            "if Input.is_action_pressed(\"ui_left\"):\n"
+            "\tposition.x -= 10\n"
+            "if Input.is_action_pressed(\"ui_right\"):\n"
+            "\tposition.x += 10\n"
+            "if Input.is_action_pressed(\"ui_up\"):\n"
+            "\tposition.y -= 10\n"
+            "if Input.is_action_pressed(\"ui_down\"):\n"
+            "\tposition.y += 10",
         )
 
 

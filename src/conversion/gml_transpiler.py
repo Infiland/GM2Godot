@@ -149,25 +149,30 @@ _NAME_REPLACEMENTS = {
     "undefined": "null",
 }
 
+_INSTANCE_NAME_REPLACEMENTS = {
+    "x": "position.x",
+    "y": "position.y",
+}
 
-def transpile_gml_expression(source):
+_VIRTUAL_KEY_ACTIONS = {
+    "vk_left": "ui_left",
+    "vk_right": "ui_right",
+    "vk_up": "ui_up",
+    "vk_down": "ui_down",
+}
+
+
+def transpile_gml_expression(source, local_names=None):
     """Transpile a single GML expression to a GDScript expression."""
     parser = _ExpressionParser(_tokenize(source))
     expr = parser.parse()
-    return _emit_expression(expr)[0]
+    return _emit_expression(expr, _normalize_local_names(local_names))[0]
 
 
 def transpile_gml_code(source, indent="\t"):
-    """Transpile simple expression/assignment GML statements to GDScript.
-
-    This intentionally covers the expressions-and-operators milestone slice:
-    declarations, assignments, compound assignments, nullish assignment,
-    increment/decrement statements, and expression statements. Control flow is
-    left for later GML language-structure issues.
-    """
-    lines = []
-    for statement in _split_statements(_strip_comments(source)):
-        lines.extend(_transpile_statement(statement.strip()))
+    """Transpile supported GML statements to GDScript."""
+    parser = _StatementParser(_tokenize(_strip_comments(source)))
+    lines = parser.parse()
 
     if not lines:
         return f"{indent}pass"
@@ -313,6 +318,164 @@ class _ExpressionParser:
         return self._peek().kind == "EOF"
 
 
+class _StatementParser:
+    def __init__(self, tokens, local_names=None):
+        self.tokens = tokens
+        self.position = 0
+        self.local_names = set(local_names or [])
+
+    def parse(self, terminator=None):
+        lines = []
+        while not self._at_end() and not self._check(terminator):
+            if self._match(";"):
+                continue
+            lines.extend(self._parse_statement())
+        return lines
+
+    def _parse_statement(self):
+        if self._check_identifier("if"):
+            return self._parse_if_statement()
+
+        statement_tokens = self._read_simple_statement()
+        if not statement_tokens:
+            return []
+        return _transpile_statement(_tokens_to_source(statement_tokens), self.local_names)
+
+    def _parse_if_statement(self):
+        self._consume_identifier("if")
+        condition_tokens = self._read_condition_tokens()
+        if not condition_tokens:
+            raise GMLTranspileError("Expected if condition")
+
+        condition = transpile_gml_expression(
+            _tokens_to_source(condition_tokens),
+            local_names=self.local_names,
+        )
+        body_lines = self._parse_body()
+        lines = [f"if {condition}:"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
+
+        if self._match_identifier("else"):
+            if self._check_identifier("if"):
+                else_lines = self._parse_if_statement()
+                lines.append(f"elif {else_lines[0][3:]}")
+                lines.extend(else_lines[1:])
+            else:
+                else_body_lines = self._parse_body()
+                lines.append("else:")
+                lines.extend(_indent_lines(else_body_lines or ["pass"]))
+
+        return lines
+
+    def _parse_body(self):
+        if self._match("{"):
+            lines = self.parse(terminator="}")
+            self._consume("}")
+            return lines
+        if self._at_end() or self._check("}"):
+            return []
+        return self._parse_statement()
+
+    def _read_condition_tokens(self):
+        if self._match("("):
+            return self._read_balanced_tokens("(", ")")
+
+        tokens = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.value == "{":
+                break
+            if depth == 0 and token.value == ";":
+                break
+
+            if token.value in "([":
+                depth += 1
+            elif token.value in ")]" and depth > 0:
+                depth -= 1
+            tokens.append(self._advance())
+
+        return tokens
+
+    def _read_balanced_tokens(self, opener, closer):
+        tokens = []
+        depth = 1
+        while not self._at_end():
+            token = self._advance()
+            if token.value == opener:
+                depth += 1
+            elif token.value == closer:
+                depth -= 1
+                if depth == 0:
+                    return tokens
+            tokens.append(token)
+
+        raise GMLTranspileError(f"Expected '{closer}'")
+
+    def _read_simple_statement(self):
+        tokens = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.value == "}":
+                break
+            if depth == 0 and token.value == ";":
+                self._advance()
+                break
+
+            if token.value in "([{":
+                depth += 1
+            elif token.value in ")]}":
+                if depth > 0:
+                    depth -= 1
+            tokens.append(self._advance())
+
+        return tokens
+
+    def _match(self, value):
+        if self._check(value):
+            self.position += 1
+            return True
+        return False
+
+    def _match_identifier(self, value):
+        if self._check_identifier(value):
+            self.position += 1
+            return True
+        return False
+
+    def _consume(self, value):
+        if not self._match(value):
+            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+
+    def _consume_identifier(self, value):
+        if not self._match_identifier(value):
+            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+
+    def _check(self, value):
+        if value is None:
+            return False
+        return self._peek().value == value
+
+    def _check_identifier(self, value):
+        token = self._peek()
+        return token.kind == "IDENT" and token.value == value
+
+    def _advance(self):
+        token = self._peek()
+        if not self._at_end():
+            self.position += 1
+        return token
+
+    def _peek(self):
+        if self.position >= len(self.tokens):
+            return _EOF
+        return self.tokens[self.position]
+
+    def _at_end(self):
+        return self._peek().kind == "EOF"
+
+
 def _tokenize(source):
     tokens = []
     index = 0
@@ -385,62 +548,95 @@ def _read_string(source, start):
     raise GMLTranspileError("Unterminated string literal")
 
 
-def _emit_expression(expr):
+def _normalize_local_names(local_names):
+    return frozenset(local_names or [])
+
+
+def _tokens_to_source(tokens):
+    return " ".join(token.value for token in tokens if token.kind != "EOF")
+
+
+def _indent_lines(lines):
+    return [f"\t{line}" if line else "" for line in lines]
+
+
+def _emit_expression(expr, local_names=None):
+    local_names = _normalize_local_names(local_names)
     if isinstance(expr, _Literal):
         return expr.value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
-        return expr.value, _PRIMARY_PRECEDENCE
+        value = expr.value
+        if value not in local_names:
+            value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
+        return value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Grouped):
-        return f"({_emit_expression(expr.expr)[0]})", _PRIMARY_PRECEDENCE
+        return f"({_emit_expression(expr.expr, local_names)[0]})", _PRIMARY_PRECEDENCE
     if isinstance(expr, _Unary):
-        operand = _emit_child(expr.operand, _UNARY_PRECEDENCE)
+        operand = _emit_child(expr.operand, _UNARY_PRECEDENCE, local_names=local_names)
         if expr.operator == "!":
             return f"not {operand}", _UNARY_PRECEDENCE
         if expr.operator == "not":
             return f"not {operand}", _UNARY_PRECEDENCE
         return f"{expr.operator}{operand}", _UNARY_PRECEDENCE
     if isinstance(expr, _Binary):
-        return _emit_binary(expr)
+        return _emit_binary(expr, local_names)
     if isinstance(expr, _Ternary):
-        condition = _emit_child(expr.condition, _TERNARY_PRECEDENCE)
-        true_expr = _emit_child(expr.true_expr, _TERNARY_PRECEDENCE)
-        false_expr = _emit_child(expr.false_expr, _TERNARY_PRECEDENCE)
+        condition = _emit_child(expr.condition, _TERNARY_PRECEDENCE, local_names=local_names)
+        true_expr = _emit_child(expr.true_expr, _TERNARY_PRECEDENCE, local_names=local_names)
+        false_expr = _emit_child(expr.false_expr, _TERNARY_PRECEDENCE, local_names=local_names)
         return f"{true_expr} if {condition} else {false_expr}", _TERNARY_PRECEDENCE
     if isinstance(expr, _Call):
-        callee = _emit_child(expr.callee, _POSTFIX_PRECEDENCE)
-        args = ", ".join(_emit_expression(arg)[0] for arg in expr.args)
+        builtin_call = _emit_builtin_call(expr, local_names)
+        if builtin_call is not None:
+            return builtin_call, _POSTFIX_PRECEDENCE
+        callee = _emit_child(expr.callee, _POSTFIX_PRECEDENCE, local_names=local_names)
+        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"{callee}({args})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
-        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE)
-        index = _emit_expression(expr.index)[0]
+        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+        index = _emit_expression(expr.index, local_names)[0]
         return f"{target}[{index}]", _POSTFIX_PRECEDENCE
     if isinstance(expr, _Member):
-        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE)
+        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
         return f"{target}.{expr.member}", _POSTFIX_PRECEDENCE
     raise GMLTranspileError("Unknown expression node")
 
 
-def _emit_binary(expr):
+def _emit_builtin_call(expr, local_names):
+    if isinstance(expr.callee, _Name) and expr.callee.value == "keyboard_check" and len(expr.args) == 1:
+        key = expr.args[0]
+        if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
+            return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
+    return None
+
+
+def _emit_binary(expr, local_names):
     operator = _OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
 
     if expr.operator == "div":
-        left = _emit_expression(expr.left)[0]
-        right = _emit_expression(expr.right)[0]
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_expression(expr.right, local_names)[0]
         return f"int({left} / {right})", _PRIMARY_PRECEDENCE
 
     if expr.operator == "??":
-        left = _emit_expression(expr.left)[0]
-        right = _emit_child(expr.right, _TERNARY_PRECEDENCE)
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
         return f"{left} if {left} != null else {right}", _TERNARY_PRECEDENCE
 
     precedence = _BINARY_PRECEDENCE[expr.operator]
-    left = _emit_child(expr.left, precedence)
-    right = _emit_child(expr.right, precedence, is_right_child=True, parent_operator=expr.operator)
+    left = _emit_child(expr.left, precedence, local_names=local_names)
+    right = _emit_child(
+        expr.right,
+        precedence,
+        is_right_child=True,
+        parent_operator=expr.operator,
+        local_names=local_names,
+    )
     return f"{left} {operator} {right}", precedence
 
 
-def _emit_child(expr, parent_precedence, is_right_child=False, parent_operator=None):
-    text, precedence = _emit_expression(expr)
+def _emit_child(expr, parent_precedence, is_right_child=False, parent_operator=None, local_names=None):
+    text, precedence = _emit_expression(expr, local_names)
     needs_parentheses = precedence < parent_precedence
     if is_right_child and precedence == parent_precedence and parent_operator not in _RIGHT_ASSOCIATIVE:
         needs_parentheses = True
@@ -528,44 +724,53 @@ def _split_statements(source):
     return [statement for statement in statements if statement.strip()]
 
 
-def _transpile_statement(statement):
+def _transpile_statement(statement, local_names=None):
     if not statement:
         return []
 
+    if local_names is None:
+        local_names = set()
+
     if statement.startswith("var "):
-        return _transpile_var_statement(statement[4:].strip())
+        return _transpile_var_statement(statement[4:].strip(), local_names)
 
     increment = _parse_increment_statement(statement)
     if increment is not None:
         target, delta = increment
-        return [f"{transpile_gml_expression(target)} {'+=' if delta > 0 else '-='} 1"]
+        return [f"{transpile_gml_expression(target, local_names)} {'+=' if delta > 0 else '-='} 1"]
 
     assignment = _split_assignment(statement)
     if assignment is not None:
         target, operator, value = assignment
-        target = transpile_gml_expression(target)
-        value = transpile_gml_expression(value)
+        target = transpile_gml_expression(target, local_names)
+        value = transpile_gml_expression(value, local_names)
         if operator == "??=":
             return [f"if {target} == null:", f"\t{target} = {value}"]
         return [f"{target} {operator} {value}"]
 
-    return [transpile_gml_expression(statement)]
+    return [transpile_gml_expression(statement, local_names)]
 
 
-def _transpile_var_statement(statement):
+def _transpile_var_statement(statement, local_names=None):
     lines = []
+    if local_names is None:
+        local_names = set()
     for declaration in _split_top_level(statement, ","):
         declaration = declaration.strip()
         if not declaration:
             continue
         assignment = _split_assignment(declaration)
         if assignment is None:
-            lines.append(f"var {declaration}")
+            name = declaration.strip()
+            lines.append(f"var {name}")
+            local_names.add(name)
             continue
         name, operator, value = assignment
         if operator != "=":
             raise GMLTranspileError("Variable declarations only support '=' assignments")
-        lines.append(f"var {name.strip()} = {transpile_gml_expression(value)}")
+        name = name.strip()
+        lines.append(f"var {name} = {transpile_gml_expression(value, local_names)}")
+        local_names.add(name)
     return lines
 
 

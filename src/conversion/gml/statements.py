@@ -25,6 +25,8 @@ def transpile_simple_statement(statement, local_names=None):
         value = transpile_expression(value, local_names)
         if operator == "??=":
             return [f"if {target} == null:", f"\t{target} = {value}"]
+        if operator == "/=":
+            return [f"{target} = GMRuntime.gml_div({target}, {value})"]
         return [f"{target} {operator} {value}"]
 
     return [transpile_expression(statement, local_names)]

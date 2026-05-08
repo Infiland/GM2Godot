@@ -45,7 +45,7 @@ def emit_expression(expr, local_names=None):
         false_expr = _emit_child(expr.false_expr, TERNARY_PRECEDENCE, local_names=local_names)
         return f"{true_expr} if {condition} else {false_expr}", TERNARY_PRECEDENCE
     if isinstance(expr, Call):
-        builtin_call = emit_builtin_call(expr)
+        builtin_call = emit_builtin_call(expr, lambda arg: emit_expression(arg, local_names)[0])
         if builtin_call is not None:
             return builtin_call, POSTFIX_PRECEDENCE
         callee = _emit_child(expr.callee, POSTFIX_PRECEDENCE, local_names=local_names)
@@ -73,6 +73,11 @@ def _emit_binary(expr, local_names):
         left = emit_expression(expr.left, local_names)[0]
         right = _emit_child(expr.right, TERNARY_PRECEDENCE, local_names=local_names)
         return f"{left} if {left} != null else {right}", TERNARY_PRECEDENCE
+
+    if expr.operator == "/":
+        left = emit_expression(expr.left, local_names)[0]
+        right = emit_expression(expr.right, local_names)[0]
+        return f"GMRuntime.gml_div({left}, {right})", POSTFIX_PRECEDENCE
 
     precedence = BINARY_PRECEDENCE[expr.operator]
     left = _emit_child(expr.left, precedence, local_names=local_names)

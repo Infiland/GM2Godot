@@ -244,6 +244,15 @@ class TestScriptGeneratorCodeBodies(unittest.TestCase):
         self.assertIn("\tvar x = 1", content)
         self.assertNotIn("\tpass", content)
 
+    def test_runtime_prelude_added_when_body_uses_runtime(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": "\tvalue = GMRuntime.gml_div(1, 0)"},
+        )
+
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
+        self.assertIn("\tvalue = GMRuntime.gml_div(1, 0)", content)
+
     def test_partial_code_bodies(self):
         """Functions not in code_bodies should still get pass."""
         content = generate_script_content(

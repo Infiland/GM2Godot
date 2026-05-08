@@ -7,6 +7,7 @@ from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.gml.runtime import write_gml_runtime
 from src.conversion.script_generator import generate_script_content
 
 
@@ -220,6 +221,8 @@ class ObjectConverter(BaseConverter):
         if not os.path.isdir(gm_objects_path):
             self.log_callback(get_localized("Console_Convertor_Objects_Error_NotFound"))
             return
+
+        write_gml_runtime(self.godot_project_path)
 
         object_names = [
             name for name in os.listdir(gm_objects_path)

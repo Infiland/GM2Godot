@@ -1,5 +1,10 @@
 from src.conversion.event_mapping import map_event, is_input_event, INPUT_MERGED_MAPPING
 from src.conversion.events.features import get_script_features
+from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
+
+
+def _uses_gml_runtime(code_bodies):
+    return any("GMRuntime." in body for body in (code_bodies or {}).values())
 
 
 def _get_function_body(func, code_bodies):
@@ -72,6 +77,8 @@ def generate_script_content(event_list, code_bodies=None):
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
     lines = ["extends Node2D\n"]
+    if _uses_gml_runtime(code_bodies):
+        lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = getattr(feature, "emit_prelude", None)
         if emit_prelude is not None:

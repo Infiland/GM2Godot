@@ -28,6 +28,52 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("score div 10"), "int(score / 10)")
         self.assertEqual(transpile_gml_expression("score mod 3"), "score % 3")
 
+    def test_transpiles_runtime_safe_real_division(self):
+        self.assertEqual(
+            transpile_gml_expression("1 / 0"),
+            "GMRuntime.gml_div(1, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("a / b + c"),
+            "GMRuntime.gml_div(a, b) + c",
+        )
+
+    def test_transpiles_infinity_and_nan_constants(self):
+        self.assertEqual(transpile_gml_expression("infinity"), "INF")
+        self.assertEqual(transpile_gml_expression("NaN"), "NAN")
+
+    def test_preserves_infinity_equality_cases(self):
+        self.assertEqual(
+            transpile_gml_expression("infinity == infinity"),
+            "INF == INF",
+        )
+        self.assertEqual(
+            transpile_gml_expression("infinity == NaN"),
+            "INF == NAN",
+        )
+        self.assertEqual(
+            transpile_gml_expression("infinity == undefined"),
+            "INF == null",
+        )
+
+    def test_transpiles_infinity_variable_functions(self):
+        self.assertEqual(
+            transpile_gml_expression("is_infinity(infinity)"),
+            "GMRuntime.is_infinity(INF)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("typeof(infinity)"),
+            "GMRuntime.gml_typeof(INF)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("string(infinity)"),
+            "GMRuntime.gml_string(INF)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("bool(infinity)"),
+            "GMRuntime.gml_bool(INF)",
+        )
+
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),
@@ -71,6 +117,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),
             "position.x += position.y * 2",
+        )
+
+    def test_transpiles_divide_assignment_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_code("x /= 0;", indent=""),
+            "position.x = GMRuntime.gml_div(position.x, 0)",
         )
 
     def test_transpiles_nullish_assignment(self):

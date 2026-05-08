@@ -146,6 +146,9 @@ _OPERATOR_REPLACEMENTS = {
 }
 
 _NAME_REPLACEMENTS = {
+    "infinity": "INF",
+    "NaN": "NAN",
+    "nan": "NAN",
     "undefined": "null",
 }
 
@@ -159,6 +162,13 @@ _VIRTUAL_KEY_ACTIONS = {
     "vk_right": "ui_right",
     "vk_up": "ui_up",
     "vk_down": "ui_down",
+}
+
+_RUNTIME_FUNCTIONS = {
+    "is_infinity": "is_infinity",
+    "typeof": "gml_typeof",
+    "string": "gml_string",
+    "bool": "gml_bool",
 }
 
 
@@ -607,6 +617,13 @@ def _emit_builtin_call(expr, local_names):
         key = expr.args[0]
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
             return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
+    if (
+        isinstance(expr.callee, _Name)
+        and expr.callee.value in _RUNTIME_FUNCTIONS
+        and len(expr.args) == 1
+    ):
+        arg = _emit_expression(expr.args[0], local_names)[0]
+        return f"GMRuntime.{_RUNTIME_FUNCTIONS[expr.callee.value]}({arg})"
     return None
 
 
@@ -622,6 +639,11 @@ def _emit_binary(expr, local_names):
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
         return f"{left} if {left} != null else {right}", _TERNARY_PRECEDENCE
+
+    if expr.operator == "/":
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_expression(expr.right, local_names)[0]
+        return f"GMRuntime.gml_div({left}, {right})", _POSTFIX_PRECEDENCE
 
     precedence = _BINARY_PRECEDENCE[expr.operator]
     left = _emit_child(expr.left, precedence, local_names=local_names)
@@ -746,6 +768,8 @@ def _transpile_statement(statement, local_names=None):
         value = transpile_gml_expression(value, local_names)
         if operator == "??=":
             return [f"if {target} == null:", f"\t{target} = {value}"]
+        if operator == "/=":
+            return [f"{target} = GMRuntime.gml_div({target}, {value})"]
         return [f"{target} {operator} {value}"]
 
     return [transpile_gml_expression(statement, local_names)]

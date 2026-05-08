@@ -506,6 +506,31 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tscore += int(speed / 2)", content)
         self.assertNotIn("\tpass", content)
 
+    def test_script_transpiles_infinity_runtime_support(self):
+        """Infinity-sensitive GML should use the shared runtime support layer."""
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write(
+                "var limit = infinity; "
+                "var ratio = 1 / 0; "
+                "show_debug_message(string(limit));"
+            )
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        runtime_path = os.path.join(self.godot_dir, "gm2godot", "gml_runtime.gd")
+        self.assertTrue(os.path.isfile(runtime_path))
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
+        self.assertIn("\tvar limit = INF", content)
+        self.assertIn("\tvar ratio = GMRuntime.gml_div(1, 0)", content)
+        self.assertIn("\tshow_debug_message(GMRuntime.gml_string(limit))", content)
+
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce func _process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])

@@ -1,6 +1,11 @@
+import re
+
 from src.conversion.event_mapping import map_event, is_input_event, INPUT_MERGED_MAPPING
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
+
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _uses_gml_runtime(code_bodies):
@@ -23,7 +28,16 @@ def _deduplicate_functions(functions):
     return unique_functions
 
 
-def generate_script_content(event_list, code_bodies=None):
+def _valid_instance_variables(instance_variables):
+    if not instance_variables:
+        return []
+    return sorted(
+        name for name in instance_variables
+        if _IDENTIFIER_RE.match(name)
+    )
+
+
+def generate_script_content(event_list, code_bodies=None, instance_variables=None):
     """Generate .gd script content with function stubs for each event.
 
     Events are mapped to Godot callback functions. Input events (mouse,
@@ -35,6 +49,8 @@ def generate_script_content(event_list, code_bodies=None):
         code_bodies: Optional dict mapping function names to GDScript code
             strings. When None, all function bodies are "pass". This is the
             seam where a future transpiler injects converted GML code.
+        instance_variables: Optional iterable of GameMaker instance variable
+            names to declare as GDScript member variables.
 
     Returns:
         Complete .gd file content as a string.
@@ -83,6 +99,8 @@ def generate_script_content(event_list, code_bodies=None):
         emit_prelude = getattr(feature, "emit_prelude", None)
         if emit_prelude is not None:
             emit_prelude(lines, function_names)
+    for variable_name in _valid_instance_variables(instance_variables):
+        lines.append(f"\n\nvar {variable_name}\n")
 
     for func in unique_functions:
         body = _get_function_body(func, code_bodies)

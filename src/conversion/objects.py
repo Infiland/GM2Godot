@@ -134,6 +134,7 @@ class ObjectConverter(BaseConverter):
 
     def _load_event_code_bodies(self, object_name, event_list):
         code_bodies = {}
+        instance_variables = set()
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
 
         for event in event_list or []:
@@ -158,14 +159,17 @@ class ObjectConverter(BaseConverter):
                 continue
 
             try:
-                code_bodies[mapping.godot_func] = transpile_gml_code(source)
+                code_bodies[mapping.godot_func] = transpile_gml_code(
+                    source,
+                    instance_variables=instance_variables,
+                )
             except GMLTranspileError as exc:
                 self._safe_log(
                     "Warning: Could not transpile GameMaker event code for "
                     f"{object_name}/{mapping.gml_filename}: {exc}"
                 )
 
-        return code_bodies
+        return code_bodies, instance_variables
 
     def _process_object(self, object_name, subfolder=""):
         """Process a single object: parse .yy, generate scene and script, write files.
@@ -197,8 +201,12 @@ class ObjectConverter(BaseConverter):
             object_dir = os.path.join(self.godot_objects_path, object_name)
             script_res_path = f"res://objects/{object_name}/{object_name}.gd"
 
-        code_bodies = self._load_event_code_bodies(object_name, event_list)
-        script_content = generate_script_content(event_list, code_bodies=code_bodies)
+        code_bodies, instance_variables = self._load_event_code_bodies(object_name, event_list)
+        script_content = generate_script_content(
+            event_list,
+            code_bodies=code_bodies,
+            instance_variables=instance_variables,
+        )
         scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder, script_res_path)
 
         os.makedirs(object_dir, exist_ok=True)

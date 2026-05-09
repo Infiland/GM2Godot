@@ -567,6 +567,41 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tif Input.is_action_pressed(\"ui_up\"):\n\t\tposition.y -= 10", content)
         self.assertIn("\tif Input.is_action_pressed(\"ui_down\"):\n\t\tposition.y += 10", content)
 
+    def test_script_declares_instance_variables_shared_across_events(self):
+        """Assignments without var should become reusable object member state."""
+        self._setup_object(
+            "o_player",
+            event_list=[
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 3, "eventNum": 0},
+            ],
+        )
+        object_dir = os.path.join(self.gm_dir, "objects", "o_player")
+        with open(os.path.join(object_dir, "Create_0.gml"), "w", encoding="utf-8") as f:
+            f.write("superSpeed = 0\nfaster = false;")
+        with open(os.path.join(object_dir, "Step_0.gml"), "w", encoding="utf-8") as f:
+            f.write(
+                "if keyboard_check(vk_shift) { faster = true } else { faster = false }\n"
+                "if faster = true { superSpeed = 20 }\n"
+                "if keyboard_check(vk_left) { x -= superSpeed; }\n"
+                "superSpeed = 10;"
+            )
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn("var faster", content)
+        self.assertIn("var superSpeed", content)
+        self.assertIn("\tsuperSpeed = 0", content)
+        self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
+        self.assertIn("\tif faster == true:", content)
+        self.assertIn("\t\tposition.x -= superSpeed", content)
+        self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
+
     def test_script_with_begin_step(self):
         """eventType 3, eventNum 1 should produce func _physics_process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 1}])

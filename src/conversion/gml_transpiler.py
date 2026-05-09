@@ -115,6 +115,7 @@ _BINARY_PRECEDENCE = {
     "|": 40,
     "^": 50,
     "&": 60,
+    "=": 70,
     "==": 70,
     "!=": 70,
     "<": 70,
@@ -142,6 +143,7 @@ _RIGHT_ASSOCIATIVE = {"??"}
 _OPERATOR_REPLACEMENTS = {
     "&&": "and",
     "||": "or",
+    "=": "==",
     "mod": "%",
 }
 
@@ -164,6 +166,10 @@ _VIRTUAL_KEY_ACTIONS = {
     "vk_down": "ui_down",
 }
 
+_VIRTUAL_KEY_CONSTANTS = {
+    "vk_shift": "KEY_SHIFT",
+}
+
 _RUNTIME_FUNCTIONS = {
     "is_infinity": "is_infinity",
     "typeof": "gml_typeof",
@@ -174,14 +180,17 @@ _RUNTIME_FUNCTIONS = {
 
 def transpile_gml_expression(source, local_names=None):
     """Transpile a single GML expression to a GDScript expression."""
-    parser = _ExpressionParser(_tokenize(source))
+    parser = _ExpressionParser(_expression_tokens(source))
     expr = parser.parse()
     return _emit_expression(expr, _normalize_local_names(local_names))[0]
 
 
-def transpile_gml_code(source, indent="\t"):
+def transpile_gml_code(source, indent="\t", instance_variables=None):
     """Transpile supported GML statements to GDScript."""
-    parser = _StatementParser(_tokenize(_strip_comments(source)))
+    parser = _StatementParser(
+        _tokenize(_strip_comments(source)),
+        instance_variables=instance_variables,
+    )
     lines = parser.parse()
 
     if not lines:
@@ -329,15 +338,16 @@ class _ExpressionParser:
 
 
 class _StatementParser:
-    def __init__(self, tokens, local_names=None):
+    def __init__(self, tokens, local_names=None, instance_variables=None):
         self.tokens = tokens
         self.position = 0
         self.local_names = set(local_names or [])
+        self.instance_variables = instance_variables
 
     def parse(self, terminator=None):
         lines = []
         while not self._at_end() and not self._check(terminator):
-            if self._match(";"):
+            if self._match(";") or self._match("\n"):
                 continue
             lines.extend(self._parse_statement())
         return lines
@@ -349,7 +359,11 @@ class _StatementParser:
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []
-        return _transpile_statement(_tokens_to_source(statement_tokens), self.local_names)
+        return _transpile_statement(
+            _tokens_to_source(statement_tokens),
+            self.local_names,
+            self.instance_variables,
+        )
 
     def _parse_if_statement(self):
         self._consume_identifier("if")
@@ -365,6 +379,7 @@ class _StatementParser:
         lines = [f"if {condition}:"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
 
+        self._skip_newlines()
         if self._match_identifier("else"):
             if self._check_identifier("if"):
                 else_lines = self._parse_if_statement()
@@ -407,6 +422,10 @@ class _StatementParser:
 
         return tokens
 
+    def _skip_newlines(self):
+        while self._match("\n"):
+            pass
+
     def _read_balanced_tokens(self, opener, closer):
         tokens = []
         depth = 1
@@ -429,7 +448,7 @@ class _StatementParser:
             token = self._peek()
             if depth == 0 and token.value == "}":
                 break
-            if depth == 0 and token.value == ";":
+            if depth == 0 and token.value in (";", "\n"):
                 self._advance()
                 break
 
@@ -492,6 +511,13 @@ def _tokenize(source):
     while index < len(source):
         char = source[index]
 
+        if char in "\r\n":
+            if char == "\r" and index + 1 < len(source) and source[index + 1] == "\n":
+                index += 1
+            tokens.append(_Token("NEWLINE", "\n"))
+            index += 1
+            continue
+
         if char.isspace():
             index += 1
             continue
@@ -542,6 +568,10 @@ def _tokenize(source):
     return tokens
 
 
+def _expression_tokens(source):
+    return [token for token in _tokenize(source) if token.kind != "NEWLINE"]
+
+
 def _read_string(source, start):
     quote = source[start]
     index = start + 1
@@ -563,7 +593,7 @@ def _normalize_local_names(local_names):
 
 
 def _tokens_to_source(tokens):
-    return " ".join(token.value for token in tokens if token.kind != "EOF")
+    return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
 
 
 def _indent_lines(lines):
@@ -617,6 +647,8 @@ def _emit_builtin_call(expr, local_names):
         key = expr.args[0]
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
             return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
+        if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
+            return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS
@@ -746,7 +778,7 @@ def _split_statements(source):
     return [statement for statement in statements if statement.strip()]
 
 
-def _transpile_statement(statement, local_names=None):
+def _transpile_statement(statement, local_names=None, instance_variables=None):
     if not statement:
         return []
 
@@ -764,6 +796,7 @@ def _transpile_statement(statement, local_names=None):
     assignment = _split_assignment(statement)
     if assignment is not None:
         target, operator, value = assignment
+        _record_instance_assignment(target, local_names, instance_variables)
         target = transpile_gml_expression(target, local_names)
         value = transpile_gml_expression(value, local_names)
         if operator == "??=":
@@ -773,6 +806,20 @@ def _transpile_statement(statement, local_names=None):
         return [f"{target} {operator} {value}"]
 
     return [transpile_gml_expression(statement, local_names)]
+
+
+def _record_instance_assignment(target, local_names, instance_variables):
+    if instance_variables is None:
+        return
+
+    tokens = _expression_tokens(target.strip())
+    if len(tokens) != 2 or tokens[0].kind != "IDENT" or tokens[1].kind != "EOF":
+        return
+
+    name = tokens[0].value
+    if name in local_names or name in _INSTANCE_NAME_REPLACEMENTS:
+        return
+    instance_variables.add(name)
 
 
 def _transpile_var_statement(statement, local_names=None):

@@ -56,6 +56,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "INF == null",
         )
 
+    def test_transpiles_single_equals_as_expression_equality(self):
+        self.assertEqual(
+            transpile_gml_expression("faster = true"),
+            "faster == true",
+        )
+
     def test_transpiles_infinity_variable_functions(self):
         self.assertEqual(
             transpile_gml_expression("is_infinity(infinity)"),
@@ -119,6 +125,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "position.x += position.y * 2",
         )
 
+    def test_transpiles_newline_separated_statements(self):
+        self.assertEqual(
+            transpile_gml_code("superSpeed = 0\nfaster = false;", indent=""),
+            "superSpeed = 0\nfaster = false",
+        )
+
     def test_transpiles_divide_assignment_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("x /= 0;", indent=""),
@@ -153,6 +165,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "if score > 0:\n\tscore -= 1\nelse:\n\tscore = 0",
         )
 
+    def test_transpiles_if_blocks_with_single_equals_conditions(self):
+        self.assertEqual(
+            transpile_gml_code("if faster = true { superSpeed = 20 }", indent=""),
+            "if faster == true:\n\tsuperSpeed = 20",
+        )
+
+    def test_transpiles_shift_keyboard_check(self):
+        self.assertEqual(
+            transpile_gml_code("if keyboard_check(vk_shift) { faster = true }", indent=""),
+            "if Input.is_key_pressed(KEY_SHIFT):\n\tfaster = true",
+        )
+
     def test_transpiles_keyboard_check_and_position_movement(self):
         source = """
         if keyboard_check(vk_left) {
@@ -179,6 +203,66 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tposition.y -= 10\n"
             "if Input.is_action_pressed(\"ui_down\"):\n"
             "\tposition.y += 10",
+        )
+
+    def test_collects_assigned_instance_variables(self):
+        instance_variables = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                "superSpeed = 0\nvar localSpeed = 1; localSpeed += 1; x += localSpeed;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "superSpeed = 0\nvar localSpeed = 1\nlocalSpeed += 1\nposition.x += localSpeed",
+        )
+        self.assertEqual(instance_variables, {"superSpeed"})
+
+    def test_transpiles_current_simple_topdown_step_body(self):
+        source = """
+        if keyboard_check(vk_shift) {
+            faster = true
+        } else {
+            faster = false
+        }
+
+        if faster = true {
+            superSpeed = 20
+        }
+
+        if keyboard_check(vk_left) {
+            x -= superSpeed;
+        }
+        if keyboard_check(vk_right) {
+            x += superSpeed;
+        }
+        if keyboard_check(vk_up) {
+            y -= superSpeed;
+        }
+        if keyboard_check(vk_down) {
+            y += superSpeed;
+        }
+
+        superSpeed = 10;
+        """
+
+        self.assertEqual(
+            transpile_gml_code(source, indent=""),
+            "if Input.is_key_pressed(KEY_SHIFT):\n"
+            "\tfaster = true\n"
+            "else:\n"
+            "\tfaster = false\n"
+            "if faster == true:\n"
+            "\tsuperSpeed = 20\n"
+            "if Input.is_action_pressed(\"ui_left\"):\n"
+            "\tposition.x -= superSpeed\n"
+            "if Input.is_action_pressed(\"ui_right\"):\n"
+            "\tposition.x += superSpeed\n"
+            "if Input.is_action_pressed(\"ui_up\"):\n"
+            "\tposition.y -= superSpeed\n"
+            "if Input.is_action_pressed(\"ui_down\"):\n"
+            "\tposition.y += superSpeed\n"
+            "superSpeed = 10",
         )
 
 

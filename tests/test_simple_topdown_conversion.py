@@ -85,15 +85,36 @@ class TestSimpleTopDownConversion(unittest.TestCase):
 
         self.assertIn("func _process(delta):", content)
         self.assertIn('if Input.is_action_pressed("ui_left"):', content)
-        self.assertIn("position.x -= 10", content)
         self.assertIn('if Input.is_action_pressed("ui_right"):', content)
-        self.assertIn("position.x += 10", content)
         self.assertIn('if Input.is_action_pressed("ui_up"):', content)
-        self.assertIn("position.y -= 10", content)
         self.assertIn('if Input.is_action_pressed("ui_down"):', content)
-        self.assertIn("position.y += 10", content)
+        self.assertNotIn("func _process(delta):\n\tpass", content)
         self.assertNotIn("keyboard_check", content)
         self.assertNotIn("vk_left", content)
+        self.assertNotIn("vk_shift", content)
+
+        if "superSpeed" in content or "faster" in content:
+            self.assertIn("var faster", content)
+            self.assertIn("var superSpeed", content)
+            self.assertIn("func _ready():", content)
+            self.assertIn("\tsuperSpeed = 0", content)
+            self.assertIn("\tfaster = false", content)
+            self.assertNotIn("func _ready():\n\tpass", content)
+            self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
+            self.assertIn("\t\tfaster = true", content)
+            self.assertIn("\telse:\n\t\tfaster = false", content)
+            self.assertIn("\tif faster == true:", content)
+            self.assertIn("\t\tsuperSpeed = 20", content)
+            self.assertIn("position.x -= superSpeed", content)
+            self.assertIn("position.x += superSpeed", content)
+            self.assertIn("position.y -= superSpeed", content)
+            self.assertIn("position.y += superSpeed", content)
+            self.assertIn("\tsuperSpeed = 10", content)
+        else:
+            self.assertIn("position.x -= 10", content)
+            self.assertIn("position.x += 10", content)
+            self.assertIn("position.y -= 10", content)
+            self.assertIn("position.y += 10", content)
 
     def test_player_object_instances_sprite(self):
         content = self._read_generated_file("objects", "o_player.tscn")
@@ -120,6 +141,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
     def test_no_tracebacks_in_logs(self):
         joined = "\n".join(str(msg) for msg in self.logs)
         self.assertNotIn("Traceback", joined, "Conversion produced a Python traceback")
+        self.assertNotIn("Could not transpile GameMaker event code", joined)
 
 
 if __name__ == "__main__":

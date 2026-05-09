@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Protocol, cast
+from typing import NamedTuple, Protocol, cast
 
 from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
@@ -16,6 +16,34 @@ KNOWN_LAYER_TYPES = {
     "GMRAssetLayer",
     "GMREffectLayer",
 }
+
+GAMEMAKER_EMPTY_TILE_SENTINEL = -2147483648
+GAMEMAKER_TILE_INDEX_MASK = (1 << 19) - 1
+GAMEMAKER_TILE_MIRROR_BIT = 1 << 28
+GAMEMAKER_TILE_FLIP_BIT = 1 << 29
+GAMEMAKER_TILE_ROTATE_BIT = 1 << 30
+
+GODOT_TILE_TRANSFORM_FLIP_H = 1 << 12
+GODOT_TILE_TRANSFORM_FLIP_V = 1 << 13
+GODOT_TILE_TRANSFORM_TRANSPOSE = 1 << 14
+
+
+class GameMakerTile(NamedTuple):
+    raw_value: int
+    tile_index: int
+    mirror: bool
+    flip: bool
+    rotate: bool
+
+
+class GodotTileCell(NamedTuple):
+    x: int
+    y: int
+    source_id: int
+    atlas_x: int
+    atlas_y: int
+    alternative_tile: int
+    raw_value: int
 
 
 class RoomLayerRoom(Protocol):
@@ -40,9 +68,17 @@ class RoomLayerRoom(Protocol):
     @property
     def instance_creation_order(self) -> JsonList: ...
 
+    @property
+    def view_settings(self) -> JsonDict: ...
+
+    @property
+    def views(self) -> JsonList: ...
+
 
 class RoomLayerResourceIndex(Protocol):
     godot_project_path: str
+
+    def resolve_gm_path(self, kind: str, name: str) -> str | None: ...
 
     def resolve_godot_path(self, kind: str, name: str) -> str | None: ...
 
@@ -118,6 +154,22 @@ class RoomLayerSerializationContext:
             return None
         return scene_path
 
+    def tileset_ext_resource_id(self, tileset_name: str | None) -> str | None:
+        tileset_path = self.tileset_path(tileset_name)
+        if tileset_path is None:
+            return None
+        return self.ext_resource_id("TileSet", tileset_path)
+
+    def tileset_path(self, tileset_name: str | None) -> str | None:
+        if not tileset_name or self.resource_index is None:
+            return None
+        tileset_path = self.resource_index.resolve_godot_path("tilesets", tileset_name)
+        if tileset_path is None:
+            return None
+        if not self._resource_path_exists(tileset_path):
+            return None
+        return tileset_path
+
     def warn(self, message: str) -> None:
         if self.warn_callback is not None:
             self.warn_callback(message)
@@ -133,6 +185,9 @@ class RoomLayerSerializationContext:
         ]
 
     def _scene_path_exists(self, scene_path: str) -> bool:
+        return self._resource_path_exists(scene_path)
+
+    def _resource_path_exists(self, scene_path: str) -> bool:
         if not scene_path.startswith("res://"):
             return False
         relative_path = scene_path[len("res://"):]
@@ -155,6 +210,7 @@ def serialize_room_layers(
     """Serialize GameMaker room layers and supported layer children."""
     context = RoomLayerSerializationContext(room, gm_project_path, resource_index, warn_callback)
     node_lines: list[str] = []
+    node_lines.extend(_camera_node_lines(context))
     used_names: dict[str, int] = {}
     for layer in room.layers:
         if isinstance(layer, dict):
@@ -192,6 +248,12 @@ def _serialize_layer(
 
     if resource_type == "GMRInstanceLayer":
         lines.extend(_instance_node_lines(layer, child_parent_path, original_name, context))
+
+    if resource_type == "GMRTileLayer":
+        lines.extend(_tile_map_layer_lines(layer, child_parent_path, original_name, context))
+
+    if resource_type == "GMRAssetLayer":
+        lines.extend(_asset_node_lines(layer, child_parent_path, original_name, context))
 
     child_names: dict[str, int] = {}
     for child_layer in _child_layers(layer):
@@ -287,6 +349,457 @@ def _append_optional_metadata(
 ) -> None:
     if source_key in source:
         lines.append(f"metadata/{metadata_key} = {godot_value(source.get(source_key))}")
+
+
+def decode_tile_compressed_data(
+    serialise_width: int,
+    serialise_height: int,
+    compressed_data: list[JsonValue],
+    tile_data_format: int = 1,
+) -> list[int]:
+    """Expand GameMaker TileCompressedData format 1 into a row-major cell array."""
+    if tile_data_format != 1:
+        raise ValueError(f"Unsupported GameMaker tile data format: {tile_data_format}")
+    if serialise_width < 0 or serialise_height < 0:
+        raise ValueError("GameMaker tile data dimensions must be non-negative")
+
+    expected_length = serialise_width * serialise_height
+    decoded: list[int] = []
+    index = 0
+    while index < len(compressed_data):
+        value = _require_int(compressed_data[index], "TileCompressedData value")
+        if value < 0 and value != GAMEMAKER_EMPTY_TILE_SENTINEL:
+            if index + 1 >= len(compressed_data):
+                raise ValueError("Malformed GameMaker tile data: repeated run has no value")
+            repeat_value = _require_int(
+                compressed_data[index + 1], "TileCompressedData repeated value"
+            )
+            decoded.extend([repeat_value] * -value)
+            index += 2
+        else:
+            decoded.append(value)
+            index += 1
+
+        if len(decoded) > expected_length:
+            raise ValueError(
+                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
+                    actual=len(decoded),
+                    expected=expected_length,
+                )
+            )
+
+    if len(decoded) != expected_length:
+        raise ValueError(
+            "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
+                actual=len(decoded),
+                expected=expected_length,
+            )
+        )
+    return decoded
+
+
+def is_empty_gamemaker_tile(raw_value: int) -> bool:
+    if raw_value == GAMEMAKER_EMPTY_TILE_SENTINEL:
+        return True
+    return decode_gamemaker_tile(raw_value).tile_index == 0
+
+
+def decode_gamemaker_tile(raw_value: int) -> GameMakerTile:
+    unsigned_value = raw_value & 0xFFFFFFFF
+    return GameMakerTile(
+        raw_value=raw_value,
+        tile_index=unsigned_value & GAMEMAKER_TILE_INDEX_MASK,
+        mirror=bool(unsigned_value & GAMEMAKER_TILE_MIRROR_BIT),
+        flip=bool(unsigned_value & GAMEMAKER_TILE_FLIP_BIT),
+        rotate=bool(unsigned_value & GAMEMAKER_TILE_ROTATE_BIT),
+    )
+
+
+def _tile_map_layer_lines(
+    layer: JsonDict,
+    parent_path: str,
+    layer_name: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
+    tileset_id = _dict_value(layer.get("tilesetId"))
+    raw_tileset_name = tileset_id.get("name")
+    tileset_name = raw_tileset_name if isinstance(raw_tileset_name, str) else None
+    ext_resource_id = context.tileset_ext_resource_id(tileset_name)
+    if ext_resource_id is None:
+        context.warn(
+            "Warning: Could not resolve TileSet resource for GameMaker tile layer "
+            "{layer_name} in room {room_name}, tileset {tileset_name}; no TileMapLayer emitted.".format(
+                layer_name=layer_name,
+                room_name=context.room.name,
+                tileset_name=tileset_name or "<missing>",
+            )
+        )
+        return []
+
+    tiles = _dict_value(layer.get("tiles"))
+    width = _coerce_int(tiles.get("SerialiseWidth", 0))
+    height = _coerce_int(tiles.get("SerialiseHeight", 0))
+    tile_data_format = _coerce_int(tiles.get("TileDataFormat", 1))
+    compressed_data_value = tiles.get("TileCompressedData") or []
+    compressed_data = cast(list[JsonValue], compressed_data_value) if isinstance(compressed_data_value, list) else []
+
+    try:
+        decoded_tiles = decode_tile_compressed_data(
+            width,
+            height,
+            compressed_data,
+            tile_data_format,
+        )
+    except ValueError as error:
+        context.warn(
+            "Warning: Could not decode GameMaker tile data for room {room_name}, "
+            "layer {layer_name}: {error}".format(
+                room_name=context.room.name,
+                layer_name=layer_name,
+                error=error,
+            )
+        )
+        return []
+
+    layout = _tileset_layout(context, tileset_name)
+    columns = _tileset_columns(layout, decoded_tiles)
+    cells = _godot_tile_cells(decoded_tiles, width, columns)
+    tile_map_data = _format_godot_tile_map_data(cells)
+    transform_count = sum(
+        1 for cell in cells if decode_gamemaker_tile(cell.raw_value).mirror
+        or decode_gamemaker_tile(cell.raw_value).flip
+        or decode_gamemaker_tile(cell.raw_value).rotate
+    )
+
+    if transform_count:
+        context.warn(
+            "Warning: GameMaker tile layer {layer_name} in room {room_name} uses "
+            "tile transform flags; mapped mirror/flip/rotate to Godot TileMapLayer alternative bits.".format(
+                layer_name=layer_name,
+                room_name=context.room.name,
+            )
+        )
+
+    lines = [
+        f'[node name="TileMap" type="TileMapLayer" parent={godot_string(parent_path)}]',
+        f"visible = {godot_value(bool(layer.get('visible', True)))}",
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(layer.get("x", 0)),
+            y=_format_number(layer.get("y", 0)),
+        ),
+        f'tile_set = ExtResource("{ext_resource_id}")',
+    ]
+    if tile_map_data:
+        lines.append(f"tile_map_data = {tile_map_data}")
+    lines.extend([
+        "metadata/gamemaker_tile_layer = true",
+        f"metadata/gamemaker_tileset = {godot_value(tileset_name)}",
+        f"metadata/gamemaker_tile_width = {godot_value(width)}",
+        f"metadata/gamemaker_tile_height = {godot_value(height)}",
+        f"metadata/gamemaker_tile_data_format = {godot_value(tile_data_format)}",
+        f"metadata/gamemaker_tile_decoded_cell_count = {godot_value(len(decoded_tiles))}",
+        f"metadata/gamemaker_tile_non_empty_cell_count = {godot_value(len(cells))}",
+        f"metadata/gamemaker_tile_transform_cell_count = {godot_value(transform_count)}",
+        f"metadata/gamemaker_tile_empty_values = {godot_value([0, GAMEMAKER_EMPTY_TILE_SENTINEL])}",
+    ])
+    lines.append("")
+    return lines
+
+
+def _tileset_layout(
+    context: RoomLayerSerializationContext, tileset_name: str | None
+) -> JsonDict:
+    if not tileset_name or context.resource_index is None:
+        return {}
+    tileset_path = context.resource_index.resolve_gm_path("tilesets", tileset_name)
+    if tileset_path is None:
+        return {}
+    data = _read_yy_json(tileset_path)
+    return data or {}
+
+
+def _tileset_columns(layout: JsonDict, decoded_tiles: list[int]) -> int:
+    columns = _coerce_int(layout.get("out_columns", 0))
+    if columns > 0:
+        return columns
+    tile_count = _coerce_int(layout.get("tile_count", 0))
+    if tile_count > 0:
+        return tile_count
+    max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=1)
+    return max(1, max_index)
+
+
+def _godot_tile_cells(
+    decoded_tiles: list[int], width: int, columns: int
+) -> list[GodotTileCell]:
+    cells: list[GodotTileCell] = []
+    if width <= 0 or columns <= 0:
+        return cells
+    for index, raw_tile in enumerate(decoded_tiles):
+        if is_empty_gamemaker_tile(raw_tile):
+            continue
+        tile = decode_gamemaker_tile(raw_tile)
+        atlas_index = max(0, tile.tile_index - 1)
+        alternative_tile = 0
+        if tile.mirror:
+            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_H
+        if tile.flip:
+            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_V
+        if tile.rotate:
+            alternative_tile |= GODOT_TILE_TRANSFORM_TRANSPOSE
+        cells.append(
+            GodotTileCell(
+                x=index % width,
+                y=index // width,
+                source_id=0,
+                atlas_x=atlas_index % columns,
+                atlas_y=atlas_index // columns,
+                alternative_tile=alternative_tile,
+                raw_value=raw_tile,
+            )
+        )
+    return cells
+
+
+def _format_godot_tile_map_data(cells: list[GodotTileCell]) -> str:
+    if not cells:
+        return ""
+    data: list[int] = [0, 0]
+    for cell in cells:
+        for value in (
+            cell.x,
+            cell.y,
+            cell.source_id,
+            cell.atlas_x,
+            cell.atlas_y,
+            cell.alternative_tile,
+        ):
+            data.extend(_encode_uint16(value))
+    return "PackedByteArray({values})".format(values=", ".join(str(value) for value in data))
+
+
+def _encode_uint16(value: int) -> list[int]:
+    unsigned = value & 0xFFFF
+    return [unsigned & 0xFF, (unsigned >> 8) & 0xFF]
+
+
+def _read_yy_json(path: str) -> JsonDict | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        cleaned = re.sub(r",\s*([}\]])", r"\1", content)
+        data = json.loads(cleaned)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return cast(JsonDict, data) if isinstance(data, dict) else None
+
+
+def _asset_node_lines(
+    layer: JsonDict,
+    parent_path: str,
+    layer_name: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
+    lines: list[str] = []
+    sibling_names: dict[str, int] = {}
+    for asset in _dict_items(layer.get("assets")):
+        asset_name = _asset_name(asset)
+        if asset.get("ignore") is True:
+            context.warn(
+                "Warning: Skipping ignored GameMaker asset {asset_name} in room {room_name}, "
+                "layer {layer_name}.".format(
+                    asset_name=asset_name,
+                    room_name=context.room.name,
+                    layer_name=layer_name,
+                )
+            )
+            continue
+
+        node_name = _unique_name(_sanitize_node_name(asset_name), sibling_names)
+        asset_type = _asset_resource_type(asset)
+        if asset_type == "GMRSpriteGraphic":
+            lines.extend(_sprite_asset_lines(asset, node_name, parent_path, layer_name, context))
+        else:
+            context.warn(
+                "Warning: Unsupported GameMaker room asset type {asset_type} in room {room_name}, "
+                "layer {layer_name}, asset {asset_name}; emitted Node2D placeholder.".format(
+                    asset_type=asset_type,
+                    room_name=context.room.name,
+                    layer_name=layer_name,
+                    asset_name=asset_name,
+                )
+            )
+            lines.extend(_unsupported_asset_lines(asset, node_name, parent_path, asset_type))
+    return lines
+
+
+def _sprite_asset_lines(
+    asset: JsonDict,
+    node_name: str,
+    parent_path: str,
+    layer_name: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
+    sprite_id = _dict_value(asset.get("spriteId"))
+    raw_sprite_name = sprite_id.get("name")
+    sprite_name = raw_sprite_name if isinstance(raw_sprite_name, str) else None
+    ext_resource_id = context.sprite_scene_ext_resource_id(sprite_name)
+    if ext_resource_id is None:
+        context.warn(
+            "Warning: Could not resolve sprite scene for GameMaker room asset {asset_name} "
+            "in room {room_name}, layer {layer_name}, sprite {sprite_name}; emitted Node2D placeholder.".format(
+                asset_name=_asset_name(asset),
+                room_name=context.room.name,
+                layer_name=layer_name,
+                sprite_name=sprite_name or "<missing>",
+            )
+        )
+        lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
+    else:
+        lines = [
+            '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
+                name=godot_string(node_name),
+                parent=godot_string(parent_path),
+                resource_id=ext_resource_id,
+            )
+        ]
+
+    lines.extend(_asset_transform_lines(asset))
+    lines.extend([
+        f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
+        f"metadata/gamemaker_asset_node_name = {godot_value(node_name)}",
+        f"metadata/gamemaker_asset_type = {godot_value(_asset_resource_type(asset))}",
+        f"metadata/gamemaker_asset_sprite_name = {godot_value(sprite_name)}",
+        f"metadata/gamemaker_asset_sprite_id = {godot_value(asset.get('spriteId'))}",
+        f"metadata/gamemaker_asset_colour = {godot_value(asset.get('colour'))}",
+        f"metadata/gamemaker_asset_head_position = {godot_value(asset.get('headPosition'))}",
+        f"metadata/gamemaker_asset_animation_speed = {godot_value(asset.get('animationSpeed'))}",
+        f"metadata/gamemaker_asset_animation_fps = {godot_value(asset.get('animationFPS'))}",
+        f"metadata/gamemaker_asset_animation_speed_type = {godot_value(asset.get('animationSpeedType'))}",
+        f"metadata/gamemaker_asset_properties = {godot_value(asset.get('properties', []))}",
+        f"metadata/gamemaker_asset_inherited_item_id = {godot_value(asset.get('inheritedItemId'))}",
+        f"metadata/gamemaker_asset_inherit_item_settings = {godot_value(bool(asset.get('inheritItemSettings', False)))}",
+    ])
+    if ext_resource_id is None:
+        lines.append("metadata/gamemaker_placeholder = true")
+        lines.append("metadata/gamemaker_unresolved_sprite_scene = true")
+    lines.append("")
+    return lines
+
+
+def _unsupported_asset_lines(
+    asset: JsonDict, node_name: str, parent_path: str, asset_type: str
+) -> list[str]:
+    lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
+    lines.extend(_asset_transform_lines(asset))
+    lines.extend([
+        f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
+        f"metadata/gamemaker_asset_node_name = {godot_value(node_name)}",
+        f"metadata/gamemaker_asset_type = {godot_value(asset_type)}",
+        f"metadata/gamemaker_asset_raw = {godot_value(asset)}",
+        "metadata/gamemaker_placeholder = true",
+        "metadata/gamemaker_unsupported_asset = true",
+        "",
+    ])
+    return lines
+
+
+def _asset_transform_lines(asset: JsonDict) -> list[str]:
+    return [
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(asset.get("x", 0)),
+            y=_format_number(asset.get("y", 0)),
+        ),
+        "rotation_degrees = {rotation}".format(
+            rotation=_format_number(asset.get("rotation", 0))
+        ),
+        "scale = Vector2({scale_x}, {scale_y})".format(
+            scale_x=_format_number(asset.get("scaleX", 1)),
+            scale_y=_format_number(asset.get("scaleY", 1)),
+        ),
+        "modulate = {color}".format(color=_godot_color(asset.get("colour", 4294967295))),
+    ]
+
+
+def _camera_node_lines(context: RoomLayerSerializationContext) -> list[str]:
+    if not bool(context.room.view_settings.get("enableViews", False)):
+        return []
+
+    views = [view for view in _dict_items(context.room.views) if bool(view.get("visible", False))]
+    if not views:
+        return []
+    if len(views) > 1:
+        context.warn(
+            "Warning: Room {room_name} has multiple visible GameMaker views; only the first "
+            "Camera2D is enabled, additional views are preserved as disabled cameras with metadata.".format(
+                room_name=context.room.name,
+            )
+        )
+
+    lines: list[str] = []
+    sibling_names: dict[str, int] = {}
+    for visible_index, view in enumerate(views):
+        node_name = _unique_name("ViewCamera", sibling_names)
+        xview = _coerce_float(view.get("xview", 0))
+        yview = _coerce_float(view.get("yview", 0))
+        wview = _coerce_float(view.get("wview", 0))
+        hview = _coerce_float(view.get("hview", 0))
+        xport = _coerce_float(view.get("xport", 0))
+        yport = _coerce_float(view.get("yport", 0))
+        wport = _coerce_float(view.get("wport", 0))
+        hport = _coerce_float(view.get("hport", 0))
+        object_id = _dict_value(view.get("objectId"))
+        object_name = object_id.get("name") if isinstance(object_id.get("name"), str) else None
+
+        if object_name:
+            context.warn(
+                "Warning: GameMaker view in room {room_name} follows object {object_name}; "
+                "follow behavior is preserved as Camera2D metadata for runtime support.".format(
+                    room_name=context.room.name,
+                    object_name=object_name,
+                )
+            )
+
+        lines.extend([
+            f'[node name={godot_string(node_name)} type="Camera2D" parent="."]',
+            "position = Vector2({x}, {y})".format(
+                x=_format_number(xview + (wview / 2)),
+                y=_format_number(yview + (hview / 2)),
+            ),
+            f"enabled = {godot_value(visible_index == 0)}",
+            f"limit_left = {_format_number(xview)}",
+            f"limit_top = {_format_number(yview)}",
+            f"limit_right = {_format_number(xview + wview)}",
+            f"limit_bottom = {_format_number(yview + hview)}",
+        ])
+        if wview > 0 and hview > 0 and wport > 0 and hport > 0:
+            lines.append(
+                "zoom = Vector2({x}, {y})".format(
+                    x=_format_number(wport / wview),
+                    y=_format_number(hport / hview),
+                )
+            )
+        lines.extend([
+            f"metadata/gamemaker_view_camera = {godot_value(True)}",
+            f"metadata/gamemaker_view_enabled_camera = {godot_value(visible_index == 0)}",
+            f"metadata/gamemaker_view_index = {godot_value(visible_index)}",
+            f"metadata/gamemaker_view_xview = {godot_value(view.get('xview'))}",
+            f"metadata/gamemaker_view_yview = {godot_value(view.get('yview'))}",
+            f"metadata/gamemaker_view_wview = {godot_value(view.get('wview'))}",
+            f"metadata/gamemaker_view_hview = {godot_value(view.get('hview'))}",
+            f"metadata/gamemaker_view_xport = {godot_value(xport)}",
+            f"metadata/gamemaker_view_yport = {godot_value(yport)}",
+            f"metadata/gamemaker_view_wport = {godot_value(wport)}",
+            f"metadata/gamemaker_view_hport = {godot_value(hport)}",
+            f"metadata/gamemaker_view_object_name = {godot_value(object_name)}",
+            f"metadata/gamemaker_view_object_id = {godot_value(view.get('objectId'))}",
+            f"metadata/gamemaker_view_hborder = {godot_value(view.get('hborder'))}",
+            f"metadata/gamemaker_view_vborder = {godot_value(view.get('vborder'))}",
+            f"metadata/gamemaker_view_hspeed = {godot_value(view.get('hspeed'))}",
+            f"metadata/gamemaker_view_vspeed = {godot_value(view.get('vspeed'))}",
+            "",
+        ])
+    return lines
 
 
 def _background_visual_lines(
@@ -596,6 +1109,25 @@ def _instance_name(instance: JsonDict) -> str:
     return name if isinstance(name, str) and name else "Instance"
 
 
+def _asset_name(asset: JsonDict) -> str:
+    name = asset.get("%Name") or asset.get("name")
+    if isinstance(name, str) and name:
+        return name
+    sprite_id = _dict_value(asset.get("spriteId"))
+    sprite_name = sprite_id.get("name")
+    return sprite_name if isinstance(sprite_name, str) and sprite_name else "Asset"
+
+
+def _asset_resource_type(asset: JsonDict) -> str:
+    resource_type = asset.get("resourceType")
+    if isinstance(resource_type, str) and resource_type:
+        return resource_type
+    for key in asset:
+        if key.startswith("$GMR"):
+            return key[1:]
+    return "UnknownAsset"
+
+
 def _layer_name(layer: JsonDict) -> str:
     name = layer.get("%Name") or layer.get("name")
     return name if isinstance(name, str) and name else "Layer"
@@ -630,6 +1162,20 @@ def _coerce_int(value: JsonValue) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _require_int(value: JsonValue, label: str) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be an integer") from None
+
+
+def _coerce_float(value: JsonValue) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _format_number(value: JsonValue) -> str:

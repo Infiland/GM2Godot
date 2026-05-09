@@ -13,6 +13,18 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.rooms import RoomConverter
+from src.conversion.room_layers import (
+    GAMEMAKER_EMPTY_TILE_SENTINEL,
+    GAMEMAKER_TILE_FLIP_BIT,
+    GAMEMAKER_TILE_MIRROR_BIT,
+    GAMEMAKER_TILE_ROTATE_BIT,
+    GODOT_TILE_TRANSFORM_FLIP_H,
+    GODOT_TILE_TRANSFORM_FLIP_V,
+    GODOT_TILE_TRANSFORM_TRANSPOSE,
+    decode_gamemaker_tile,
+    decode_tile_compressed_data,
+    is_empty_gamemaker_tile,
+)
 
 
 def _write_file(path: str, content: str) -> None:
@@ -60,13 +72,25 @@ def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int =
                   physics_world: bool = False, layers: list[dict[str, Any]] | None = None,
                   instance_creation_order: list[dict[str, Any]] | None = None,
                   creation_code_file: str = "", inherit_code: bool = False,
-                  is_dnd: bool = False) -> str:
+                  is_dnd: bool = False, inherit_creation_order: bool = False,
+                  inherit_layers: bool = False, parent_room: dict[str, Any] | None = None,
+                  inherit_room_settings: bool = False,
+                  inherit_physics_settings: bool = False,
+                  views: list[dict[str, Any]] | None = None,
+                  view_settings: dict[str, Any] | None = None) -> str:
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
     inherit_code_value = "true" if inherit_code else "false"
+    inherit_creation_order_value = "true" if inherit_creation_order else "false"
+    inherit_layers_value = "true" if inherit_layers else "false"
+    inherit_room_settings_value = "true" if inherit_room_settings else "false"
+    inherit_physics_settings_value = "true" if inherit_physics_settings else "false"
     is_dnd_value = "true" if is_dnd else "false"
     layers_json = json.dumps(layers if layers is not None else [])
     instance_creation_order_json = json.dumps(instance_creation_order or [])
+    parent_room_json = json.dumps(parent_room)
+    views_json = json.dumps(views or [])
+    view_settings_json = json.dumps(view_settings or {"enableViews": False})
     return (
         '{{\n'
         '  "$GMRoom":"v1",\n'
@@ -74,14 +98,15 @@ def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int =
         '  "name":"{name}",\n'
         '  "creationCodeFile":{creation_code_file},\n'
         '  "inheritCode":{inherit_code},\n'
-        '  "inheritCreationOrder":false,\n'
-        '  "inheritLayers":false,\n'
+        '  "inheritCreationOrder":{inherit_creation_order},\n'
+        '  "inheritLayers":{inherit_layers},\n'
         '  "instanceCreationOrder":{instance_creation_order_json},\n'
         '  "isDnd":{is_dnd},\n'
         '  "layers":{layers_json},\n'
         '  "parent":{{"name":"Rooms","path":"{parent_path}",}},\n'
-        '  "parentRoom":null,\n'
+        '  "parentRoom":{parent_room_json},\n'
         '  "physicsSettings":{{\n'
+        '    "inheritPhysicsSettings":{inherit_physics_settings},\n'
         '    "PhysicsWorld":{physics_world},\n'
         '    "PhysicsWorldGravityX":0.0,\n'
         '    "PhysicsWorldGravityY":10.0,\n'
@@ -91,10 +116,11 @@ def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int =
         '  "roomSettings":{{\n'
         '    "Width":{width},\n'
         '    "Height":{height},\n'
+        '    "inheritRoomSettings":{inherit_room_settings},\n'
         '    "persistent":{persistent},\n'
         '  }},\n'
-        '  "views":[],\n'
-        '  "viewSettings":{{"enableViews":false,}},\n'
+        '  "views":{views_json},\n'
+        '  "viewSettings":{view_settings_json},\n'
         '  "volume":{volume},\n'
         '}}\n'
     ).format(
@@ -109,6 +135,13 @@ def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int =
         instance_creation_order_json=instance_creation_order_json,
         creation_code_file=json.dumps(creation_code_file),
         inherit_code=inherit_code_value,
+        inherit_creation_order=inherit_creation_order_value,
+        inherit_layers=inherit_layers_value,
+        parent_room_json=parent_room_json,
+        inherit_room_settings=inherit_room_settings_value,
+        inherit_physics_settings=inherit_physics_settings_value,
+        views_json=views_json,
+        view_settings_json=view_settings_json,
         is_dnd=is_dnd_value,
     )
 
@@ -213,6 +246,56 @@ class TestRoomConverter(unittest.TestCase):
         )
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Area2D"]\n'.format(name))
         return scene_path
+
+    def _write_tileset(
+        self,
+        name: str,
+        parent_path: str = "folders/Tile Sets.yy",
+        tile_count: int = 4,
+        out_columns: int = 2,
+    ) -> str:
+        tileset_path = os.path.join(self.gm_dir, "tilesets", name, name + ".yy")
+        _write_file(
+            tileset_path,
+            (
+                '{{\n'
+                '  "$GMTileSet":"v1",\n'
+                '  "%Name":"{name}",\n'
+                '  "name":"{name}",\n'
+                '  "out_columns":{out_columns},\n'
+                '  "parent":{{"name":"Tile Sets","path":"{parent_path}",}},\n'
+                '  "resourceType":"GMTileSet",\n'
+                '  "spriteId":{{"name":"s_tiles","path":"sprites/s_tiles/s_tiles.yy",}},\n'
+                '  "tileHeight":16,\n'
+                '  "tileWidth":16,\n'
+                '  "tile_count":{tile_count},\n'
+                '  "tilehsep":0,\n'
+                '  "tilevsep":0,\n'
+                '  "tilexoff":0,\n'
+                '  "tileyoff":0,\n'
+                '}}\n'
+            ).format(
+                name=name,
+                out_columns=out_columns,
+                parent_path=parent_path,
+                tile_count=tile_count,
+            ),
+        )
+        return tileset_path
+
+    def _write_tileset_resource(self, name: str, *subfolders: str) -> str:
+        tres_path = os.path.join(
+            self.godot_dir,
+            "tilesets",
+            *subfolders,
+            name,
+            name + ".tres",
+        )
+        _write_file(
+            tres_path,
+            '[gd_resource type="TileSet" format=3]\n\n[resource]\ntile_size = Vector2i(16, 16)\n',
+        )
+        return tres_path
 
     def _read_scene(self, room_name: str, *subfolders: str) -> str:
         tscn_path = os.path.join(
@@ -469,6 +552,81 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tile_compressed_data_count = 0', content)
         self.assertIn('metadata/gamemaker_asset_count = 0', content)
 
+    def test_decodes_gamemaker_tile_compressed_data(self):
+        decoded = decode_tile_compressed_data(
+            3,
+            2,
+            [-2, 1, 0, -2, GAMEMAKER_EMPTY_TILE_SENTINEL, 2],
+        )
+
+        self.assertEqual(decoded, [1, 1, 0, GAMEMAKER_EMPTY_TILE_SENTINEL, GAMEMAKER_EMPTY_TILE_SENTINEL, 2])
+        self.assertTrue(is_empty_gamemaker_tile(0))
+        self.assertTrue(is_empty_gamemaker_tile(GAMEMAKER_EMPTY_TILE_SENTINEL))
+        self.assertFalse(is_empty_gamemaker_tile(1))
+
+    def test_gamemaker_tile_flags_map_to_godot_alternative_bits(self):
+        raw_tile = 3 | GAMEMAKER_TILE_MIRROR_BIT | GAMEMAKER_TILE_FLIP_BIT | GAMEMAKER_TILE_ROTATE_BIT
+        tile = decode_gamemaker_tile(raw_tile)
+
+        self.assertEqual(tile.tile_index, 3)
+        self.assertTrue(tile.mirror)
+        self.assertTrue(tile.flip)
+        self.assertTrue(tile.rotate)
+        self.assertEqual(
+            GODOT_TILE_TRANSFORM_FLIP_H | GODOT_TILE_TRANSFORM_FLIP_V | GODOT_TILE_TRANSFORM_TRANSPOSE,
+            28672,
+        )
+
+    def test_tile_layer_emits_tilemaplayer_with_decoded_cells(self):
+        self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_tiles", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "x": 8,
+                "y": 16,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 3,
+                    "SerialiseHeight": 2,
+                    "TileDataFormat": 1,
+                    "TileCompressedData": [-2, 1, 0, 2, -2, GAMEMAKER_EMPTY_TILE_SENTINEL],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_tiles")
+
+        self.assertIn('[ext_resource type="TileSet" path="res://tilesets/ts_ground/ts_ground.tres" id="1"]', content)
+        self.assertIn('[node name="TileMap" type="TileMapLayer" parent="Tiles"]', content)
+        self.assertIn('position = Vector2(8, 16)', content)
+        self.assertIn('tile_set = ExtResource("1")', content)
+        self.assertIn('tile_map_data = PackedByteArray(0, 0', content)
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
+        self.assertIn('metadata/gamemaker_tile_empty_values = [0, -2147483648]', content)
+
+    def test_missing_tileset_warns_without_emitting_tilemaplayer(self):
+        self._write_yyp(["r_tiles"])
+        self._write_room("r_tiles", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_missing"},
+                "tiles": {"SerialiseWidth": 1, "SerialiseHeight": 1, "TileCompressedData": [1], "TileDataFormat": 1},
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_tiles")
+
+        self.assertNotIn('type="TileMapLayer"', content)
+        self.assertTrue(any("Could not resolve TileSet" in log for log in self.logs))
+
     def test_effect_layer_preserves_effect_metadata(self):
         self._write_yyp(["r_effect"])
         self._write_room("r_effect", layers=[
@@ -623,6 +781,71 @@ class TestRoomConverter(unittest.TestCase):
             'path="res://objects/Game/Actors/o_player/o_player.tscn"',
             content,
         )
+
+    def test_asset_layer_instances_sprite_graphic(self):
+        self._write_yyp(["r_assets"], extra_resources=[("sprites", "s_decor")])
+        self._write_sprite("s_decor")
+        self._write_sprite_scene("s_decor")
+        self._write_room("r_assets", layers=[
+            {
+                "%Name": "Assets",
+                "resourceType": "GMRAssetLayer",
+                "assets": [
+                    {
+                        "$GMRSpriteGraphic": "",
+                        "%Name": "spr_decor_1",
+                        "resourceType": "GMRSpriteGraphic",
+                        "spriteId": {"name": "s_decor", "path": "sprites/s_decor/s_decor.yy"},
+                        "x": 24,
+                        "y": 48,
+                        "rotation": 15,
+                        "scaleX": 2,
+                        "scaleY": 3,
+                        "colour": 4294967295,
+                        "headPosition": 4,
+                        "animationSpeed": 0.5,
+                    }
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_assets")
+
+        self.assertIn('[ext_resource type="PackedScene" path="res://sprites/s_decor/s_decor.tscn" id="1"]', content)
+        self.assertIn('[node name="spr_decor_1" parent="Assets" instance=ExtResource("1")]', content)
+        self.assertIn('position = Vector2(24, 48)', content)
+        self.assertIn('rotation_degrees = 15', content)
+        self.assertIn('scale = Vector2(2, 3)', content)
+        self.assertIn('modulate = Color(1, 1, 1, 1)', content)
+        self.assertIn('metadata/gamemaker_asset_sprite_name = "s_decor"', content)
+        self.assertIn('metadata/gamemaker_asset_head_position = 4', content)
+        self.assertIn('metadata/gamemaker_asset_animation_speed = 0.5', content)
+
+    def test_ignored_asset_is_skipped_with_warning(self):
+        self._write_yyp(["r_assets"], extra_resources=[("sprites", "s_decor")])
+        self._write_sprite("s_decor")
+        self._write_sprite_scene("s_decor")
+        self._write_room("r_assets", layers=[
+            {
+                "%Name": "Assets",
+                "resourceType": "GMRAssetLayer",
+                "assets": [
+                    {
+                        "%Name": "ignored_decor",
+                        "resourceType": "GMRSpriteGraphic",
+                        "spriteId": {"name": "s_decor"},
+                        "ignore": True,
+                    }
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_assets")
+
+        self.assertNotIn('[node name="ignored_decor"', content)
+        self.assertTrue(any("Skipping ignored GameMaker asset ignored_decor" in log for log in self.logs))
 
     def test_ignored_instances_are_skipped_with_warning(self):
         self._write_yyp(["r_ignored"], extra_resources=[("objects", "o_player")])
@@ -905,6 +1128,87 @@ class TestRoomConverter(unittest.TestCase):
             content.count('metadata/gamemaker_creation_code_execution_phase_index = 1'),
             2,
         )
+
+    def test_visible_view_emits_camera2d_metadata(self):
+        self._write_yyp(["r_camera"])
+        self._write_room(
+            "r_camera",
+            views=[
+                {
+                    "visible": True,
+                    "xview": 100,
+                    "yview": 200,
+                    "wview": 640,
+                    "hview": 360,
+                    "xport": 0,
+                    "yport": 0,
+                    "wport": 1280,
+                    "hport": 720,
+                    "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                    "hborder": 32,
+                    "vborder": 16,
+                    "hspeed": -1,
+                    "vspeed": 4,
+                }
+            ],
+            view_settings={"enableViews": True},
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_camera")
+
+        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]', content)
+        self.assertIn('position = Vector2(420, 380)', content)
+        self.assertIn('enabled = true', content)
+        self.assertIn('limit_left = 100', content)
+        self.assertIn('limit_top = 200', content)
+        self.assertIn('limit_right = 740', content)
+        self.assertIn('limit_bottom = 560', content)
+        self.assertIn('zoom = Vector2(2, 2)', content)
+        self.assertIn('metadata/gamemaker_view_object_name = "o_player"', content)
+        self.assertTrue(any("follows object o_player" in log for log in self.logs))
+
+    def test_multiple_visible_views_disable_additional_cameras_and_warn(self):
+        self._write_yyp(["r_cameras"])
+        self._write_room(
+            "r_cameras",
+            views=[
+                {"visible": True, "xview": 0, "yview": 0, "wview": 320, "hview": 180},
+                {"visible": True, "xview": 320, "yview": 0, "wview": 320, "hview": 180},
+            ],
+            view_settings={"enableViews": True},
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_cameras")
+
+        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\nenabled = true', content)
+        self.assertIn('[node name="ViewCamera_2" type="Camera2D" parent="."]\nposition = Vector2(480, 90)\nenabled = false', content)
+        self.assertTrue(any("multiple visible GameMaker views" in log for log in self.logs))
+
+    def test_room_inheritance_resolves_settings_and_layers(self):
+        self._write_yyp(["r_parent", "r_child"], room_order=["r_child"])
+        self._write_room("r_parent", width=320, height=180, layers=[
+            {"%Name": "ParentLayer", "resourceType": "GMRInstanceLayer"}
+        ])
+        self._write_room(
+            "r_child",
+            width=999,
+            height=999,
+            inherit_room_settings=True,
+            inherit_layers=True,
+            parent_room={"name": "r_parent", "path": "rooms/r_parent/r_parent.yy"},
+            layers=[{"%Name": "ChildLayer", "resourceType": "GMRInstanceLayer"}],
+        )
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_child")
+
+        self.assertIn('metadata/gamemaker_room_width = 320', content)
+        self.assertIn('metadata/gamemaker_room_height = 180', content)
+        self.assertIn('metadata/gamemaker_parent_room = {"name": "r_parent"', content)
+        self.assertIn('[node name="ParentLayer" type="Node2D" parent="."]', content)
+        self.assertIn('[node name="ChildLayer" type="Node2D" parent="."]', content)
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])

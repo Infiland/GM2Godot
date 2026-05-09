@@ -1,9 +1,12 @@
 import webbrowser
-import markdown2
+from typing import cast
+
+import markdown2  # type: ignore[reportMissingTypeStubs]
 
 from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QTextBrowser, QProgressBar, QFileDialog, QMessageBox,
 )
 
@@ -18,12 +21,12 @@ class DownloadWorker(QObject):
     progress = Signal(int)
     finished = Signal(bool)
 
-    def __init__(self, url, dest_path):
+    def __init__(self, url: str, dest_path: str) -> None:
         super().__init__()
         self.url = url
         self.dest_path = dest_path
 
-    def run(self):
+    def run(self) -> None:
         success = UpdateChecker.download_update(
             self.url, self.dest_path,
             progress_callback=self.progress.emit
@@ -32,16 +35,16 @@ class DownloadWorker(QObject):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, update_info: UpdateInfo, parent=None):
+    def __init__(self, update_info: UpdateInfo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._info = update_info
-        self._download_thread = None
-        self._worker = None
+        self._download_thread: QThread | None = None
+        self._worker: DownloadWorker | None = None
         self.setWindowTitle(get_localized("Update_Available_Title"))
         self.resize(600, 500)
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
@@ -79,7 +82,7 @@ class UpdateDialog(QDialog):
                 f"color: {THEME['fg_white']}; "
                 f"border: none; border-radius: 6px; padding: 10px;"
             )
-            html = markdown2.markdown(self._info.release_notes, extras=["fenced-code-blocks"])
+            html = cast(str, markdown2.markdown(self._info.release_notes, extras=["fenced-code-blocks"]))
             browser.setHtml(html)
             layout.addWidget(browser, stretch=1)
 
@@ -122,8 +125,12 @@ class UpdateDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    def _start_download(self):
+    def _start_download(self) -> None:
         """Open file dialog and start download."""
+        download_url = self._info.download_url
+        if download_url is None:
+            return
+
         suggested_name = self._info.asset_name or f"GM2Godot-{self._info.latest_version}"
         dest_path, _ = QFileDialog.getSaveFileName(
             self, get_localized("Update_Button_Download"),
@@ -138,20 +145,20 @@ class UpdateDialog(QDialog):
         self._status_label.setVisible(True)
         self._status_label.setText(get_localized("Update_Download_Progress").format(percent=0))
 
-        self._worker = DownloadWorker(self._info.download_url, dest_path)
+        self._worker = DownloadWorker(download_url, dest_path)
         self._download_thread = QThread()
         self._worker.moveToThread(self._download_thread)
 
         self._worker.progress.connect(self._on_download_progress)
-        self._worker.finished.connect(lambda success: self._on_download_finished(success, dest_path))
+        self._worker.finished.connect(lambda success=False: self._on_download_finished(success, dest_path))
         self._download_thread.started.connect(self._worker.run)
         self._download_thread.start()
 
-    def _on_download_progress(self, percent):
+    def _on_download_progress(self, percent: int) -> None:
         self._progress_bar.setValue(percent)
         self._status_label.setText(get_localized("Update_Download_Progress").format(percent=percent))
 
-    def _on_download_finished(self, success, dest_path):
+    def _on_download_finished(self, success: bool, dest_path: str) -> None:
         if self._download_thread:
             self._download_thread.quit()
             self._download_thread.wait()
@@ -170,11 +177,11 @@ class UpdateDialog(QDialog):
             self._status_label.setText(get_localized("Update_Error_Download").format(error="Download failed"))
             self._download_btn.setEnabled(True)
 
-    def _skip_version(self):
+    def _skip_version(self) -> None:
         UpdateChecker.set_skipped_version(self._info.latest_version)
         self.reject()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         if self._download_thread and self._download_thread.isRunning():
             self._download_thread.quit()
             self._download_thread.wait(3000)

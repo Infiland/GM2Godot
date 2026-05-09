@@ -3,21 +3,21 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton,
     QFileDialog,
 )
-from PySide6.QtGui import QPixmap
 
+from src.gui.icons import AppIcons
 from src.localization import get_localized
 
 
 class PathPanel(QWidget):
     path_selected = Signal(str, str)  # (key, folder_path)
 
-    def __init__(self, icons, parent=None):
+    def __init__(self, icons: AppIcons, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._icons = icons
-        self._entries = {}
+        self._entries: dict[str, QLineEdit] = {}
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
@@ -51,20 +51,20 @@ class PathPanel(QWidget):
             browse_btn = QPushButton(
                 get_localized("Menu_UI_Directory_Button").format(Game_Engine=engine_name)
             )
-            browse_btn.clicked.connect(lambda checked, k=key: self._browse(k))
+            browse_btn.clicked.connect(lambda checked=False, k=key: self._browse(k))
             row.addWidget(browse_btn)
 
             self._entries[key] = entry
             layout.addLayout(row)
 
-    def _browse(self, key):
+    def _browse(self, key: str) -> None:
         folder = QFileDialog.getExistingDirectory(self, get_localized(f"Prompt_Path_{'GameMaker' if key == 'gamemaker' else 'Godot'}"))
         if folder:
             self._entries[key].setText(folder)
             self.path_selected.emit(key, folder)
 
-    def gamemaker_path(self):
+    def gamemaker_path(self) -> str:
         return self._entries["gamemaker"].text().strip()
 
-    def godot_path(self):
+    def godot_path(self) -> str:
         return self._entries["godot"].text().strip()

@@ -1,18 +1,32 @@
+# pyright: reportPrivateUsage=false
+
 import json
 import os
 import sys
 import shutil
 import tempfile
 import unittest
+from typing import NotRequired, TypeAlias, TypedDict, Unpack, cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.sounds import SoundConverter
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 
-MINIMAL_SOUND_YY = {
+SoundYY: TypeAlias = dict[str, object]
+
+
+class SoundConverterKwargs(TypedDict, total=False):
+    log_callback: LogCallback
+    progress_callback: ProgressCallback
+    conversion_running: ConversionRunning
+    organize_by_audio_group: NotRequired[bool]
+
+
+MINIMAL_SOUND_YY: SoundYY = {
     "$GMSound": "",
     "%Name": "snd_test",
     "name": "snd_test",
@@ -32,7 +46,7 @@ MINIMAL_SOUND_YY = {
 }
 
 
-def _make_sound_yy(base_dir, sound_name, overrides=None):
+def _make_sound_yy(base_dir: str, sound_name: str, overrides: SoundYY | None = None) -> str:
     """Create a sound .yy file + placeholder audio in standard GM structure."""
     sound_dir = os.path.join(base_dir, "sounds", sound_name)
     os.makedirs(sound_dir, exist_ok=True)
@@ -46,7 +60,9 @@ def _make_sound_yy(base_dir, sound_name, overrides=None):
     with open(yy_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     # Create placeholder audio file
-    audio_path = os.path.join(sound_dir, data["soundFile"])
+    sound_file = data["soundFile"]
+    assert isinstance(sound_file, str)
+    audio_path = os.path.join(sound_dir, sound_file)
     with open(audio_path, "wb") as f:
         f.write(b"\x00" * 64)
     return yy_path
@@ -58,19 +74,19 @@ class TestSoundConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         _make_sound_yy(self.gm_dir, "jump")
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, **kwargs):
-        defaults = dict(
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-        )
+    def _make_converter(self, **kwargs: Unpack[SoundConverterKwargs]) -> SoundConverter:
+        defaults: SoundConverterKwargs = {
+            "log_callback": lambda msg: self.logs.append(msg),
+            "progress_callback": lambda v: None,
+            "conversion_running": lambda: True,
+        }
         defaults.update(kwargs)
         return SoundConverter(self.gm_dir, self.godot_dir, **defaults)
 
@@ -110,7 +126,7 @@ class TestSoundConverterFormats(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -176,7 +192,7 @@ class TestSoundConverterMetadata(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -244,8 +260,11 @@ class TestSoundConverterMetadata(unittest.TestCase):
         result = converter._parse_sound_yy(yy_path)
 
         self.assertIsNotNone(result)
+        result = cast(dict[str, str | int | float], result)
+        volume = result["volume"]
+        assert isinstance(volume, (int, float))
         self.assertEqual(result['name'], "test_parse")
-        self.assertAlmostEqual(result['volume'], 0.7)
+        self.assertAlmostEqual(volume, 0.7)
         self.assertEqual(result['sampleRate'], 22050)
         self.assertEqual(result['bitDepth'], 8)
         self.assertEqual(result['audioGroupId'], "audiogroup_sfx")
@@ -257,19 +276,19 @@ class TestSoundConverterAudioGroupMap(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, **kwargs):
-        defaults = dict(
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-            organize_by_audio_group=False,
-        )
+    def _make_converter(self, **kwargs: Unpack[SoundConverterKwargs]) -> SoundConverter:
+        defaults: SoundConverterKwargs = {
+            "log_callback": lambda msg: self.logs.append(msg),
+            "progress_callback": lambda v: None,
+            "conversion_running": lambda: True,
+            "organize_by_audio_group": False,
+        }
         defaults.update(kwargs)
         return SoundConverter(self.gm_dir, self.godot_dir, **defaults)
 
@@ -286,11 +305,12 @@ class TestSoundConverterAudioGroupMap(unittest.TestCase):
         self.assertTrue(os.path.isfile(map_path))
 
         with open(map_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            data = cast(dict[str, object], json.load(f))
+        sounds = cast(dict[str, str], data["sounds"])
 
         self.assertEqual(data.get("format_version"), 1)
-        self.assertEqual(data["sounds"]["snd_music"], "audiogroup_music")
-        self.assertEqual(data["sounds"]["snd_click"], "audiogroup_default")
+        self.assertEqual(sounds["snd_music"], "audiogroup_music")
+        self.assertEqual(sounds["snd_click"], "audiogroup_default")
 
     def test_map_skips_failed_sound_entries(self):
         _make_sound_yy(self.gm_dir, "ok")
@@ -310,7 +330,8 @@ class TestSoundConverterAudioGroupMap(unittest.TestCase):
 
         map_path = os.path.join(self.godot_dir, "sounds", "audio_group_map.json")
         with open(map_path, "r", encoding="utf-8") as f:
-            exported = json.load(f)["sounds"]
+            map_data = cast(dict[str, object], json.load(f))
+        exported = cast(dict[str, str], map_data["sounds"])
 
         self.assertIn("ok", exported)
         self.assertNotIn("ghost", exported)
@@ -338,19 +359,19 @@ class TestSoundConverterSubfolders(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, **kwargs):
-        defaults = dict(
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-            organize_by_audio_group=False,
-        )
+    def _make_converter(self, **kwargs: Unpack[SoundConverterKwargs]) -> SoundConverter:
+        defaults: SoundConverterKwargs = {
+            "log_callback": lambda msg: self.logs.append(msg),
+            "progress_callback": lambda v: None,
+            "conversion_running": lambda: True,
+            "organize_by_audio_group": False,
+        }
         defaults.update(kwargs)
         return SoundConverter(self.gm_dir, self.godot_dir, **defaults)
 
@@ -432,7 +453,7 @@ class TestSoundConverterEdgeCases(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)

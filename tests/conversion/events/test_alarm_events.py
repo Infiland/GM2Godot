@@ -15,6 +15,7 @@ class TestAlarmEvents(unittest.TestCase):
         for alarm_index in range(12):
             with self.subTest(alarm_index=alarm_index):
                 mapping = map_event({"eventType": 2, "eventNum": alarm_index})
+                assert mapping is not None
 
                 self.assertEqual(mapping.godot_func, f"_on_alarm_{alarm_index}")
                 self.assertEqual(mapping.params, "")

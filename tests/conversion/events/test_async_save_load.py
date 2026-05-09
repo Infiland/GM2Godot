@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncSaveLoadEvent(unittest.TestCase):
     def test_maps_async_save_load_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 72})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_async_save_load")
         self.assertEqual(mapping.params, "")

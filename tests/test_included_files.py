@@ -17,7 +17,7 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         datafiles_dir = os.path.join(self.gm_dir, "datafiles")
         os.makedirs(datafiles_dir)
@@ -70,7 +70,7 @@ class TestIncludedFilesConverterNestedDirs(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create nested structure like the Asteroids++ project
         langs_dir = os.path.join(self.gm_dir, "datafiles", "Languages")
@@ -117,7 +117,7 @@ class TestIncludedFilesConverterSkipsYY(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         datafiles_dir = os.path.join(self.gm_dir, "datafiles")
         os.makedirs(datafiles_dir)
@@ -151,7 +151,7 @@ class TestIncludedFilesConverterMissingFolder(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)

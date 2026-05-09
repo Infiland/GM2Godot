@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestCreateEvent(unittest.TestCase):
     def test_maps_create_event_to_ready(self):
         mapping = map_event({"eventType": 0, "eventNum": 0})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_ready")
         self.assertEqual(mapping.params, "")

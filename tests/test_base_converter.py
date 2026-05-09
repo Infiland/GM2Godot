@@ -1,3 +1,7 @@
+# pyright: reportAbstractUsage=false, reportPrivateUsage=false
+
+from __future__ import annotations
+
 import os
 import shutil
 import sys
@@ -34,7 +38,7 @@ class TestBaseConverterAbstract(unittest.TestCase):
         """A proper subclass that implements convert_all should work."""
 
         class GoodConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
         converter = GoodConverter("/gm", "/godot")
@@ -46,10 +50,10 @@ class TestBaseConverterDefaults(unittest.TestCase):
 
     def setUp(self):
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        self.converter = StubConverter("/gm", "/godot")
+        self.converter: BaseConverter = StubConverter("/gm", "/godot")
 
     def test_log_callback_defaults_to_print(self):
         self.assertIs(self.converter.log_callback, print)
@@ -68,11 +72,11 @@ class TestBaseConverterThreadSafety(unittest.TestCase):
 
     def setUp(self):
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        self.messages = []
-        self.progress_values = []
+        self.messages: list[str] = []
+        self.progress_values: list[int | float] = []
 
         self.converter = StubConverter(
             "/gm", "/godot",
@@ -81,9 +85,9 @@ class TestBaseConverterThreadSafety(unittest.TestCase):
         )
 
     def test_safe_log_thread_safety(self):
-        errors = []
+        errors: list[Exception] = []
 
-        def log_many(start):
+        def log_many(start: int) -> None:
             try:
                 for i in range(50):
                     self.converter._safe_log(f"thread-{start}-msg-{i}")
@@ -100,9 +104,9 @@ class TestBaseConverterThreadSafety(unittest.TestCase):
         self.assertEqual(len(self.messages), 200)
 
     def test_safe_progress_thread_safety(self):
-        errors = []
+        errors: list[Exception] = []
 
-        def progress_many(start):
+        def progress_many(start: int) -> None:
             try:
                 for i in range(50):
                     self.converter._safe_progress(start * 100 + i)
@@ -124,11 +128,11 @@ class TestBaseConverterCompactLogging(unittest.TestCase):
 
     def setUp(self):
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        self.log_messages = []
-        self.update_messages = []
+        self.log_messages: list[str] = []
+        self.update_messages: list[str] = []
         self.converter = StubConverter(
             "/gm", "/godot",
             log_callback=lambda msg: self.log_messages.append(msg),
@@ -163,10 +167,10 @@ class TestBaseConverterCompactLogging(unittest.TestCase):
     def test_update_log_defaults_to_log_callback(self):
         """When update_log_callback is not provided, it falls back to log_callback."""
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        messages = []
+        messages: list[str] = []
         converter = StubConverter(
             "/gm", "/godot",
             log_callback=lambda msg: messages.append(msg),
@@ -182,10 +186,10 @@ class TestReadYYFile(unittest.TestCase):
 
     def setUp(self):
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        self.converter = StubConverter("/gm", "/godot")
+        self.converter: BaseConverter = StubConverter("/gm", "/godot")
         self.tmp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
@@ -204,6 +208,7 @@ class TestReadYYFile(unittest.TestCase):
             f.write('{"name": "test", "items": [1, 2, 3,],}')
         result = self.converter._read_yy_file(yy_path)
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(result["items"], [1, 2, 3])
 
     def test_returns_none_for_missing_file(self):
@@ -223,16 +228,16 @@ class TestGetSubfolderFromYY(unittest.TestCase):
 
     def setUp(self):
         class StubConverter(BaseConverter):
-            def convert_all(self):
+            def convert_all(self) -> None:
                 pass
 
-        self.converter = StubConverter("/gm", "/godot")
+        self.converter: BaseConverter = StubConverter("/gm", "/godot")
         self.tmp_dir = tempfile.mkdtemp()
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir)
 
-    def _write_yy(self, parent_path):
+    def _write_yy(self, parent_path: str) -> str:
         yy_path = os.path.join(self.tmp_dir, "test.yy")
         content = '{{"name": "test", "parent": {{"name": "folder", "path": "{path}",}},}}'.format(
             path=parent_path)

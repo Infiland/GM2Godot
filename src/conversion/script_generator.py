@@ -1,26 +1,41 @@
 import re
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Callable, TypeAlias, cast
 
-from src.conversion.event_mapping import map_event, is_input_event, INPUT_MERGED_MAPPING
+from src.conversion.event_mapping import INPUT_MERGED_MAPPING, is_input_event, map_event
+from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
+from src.conversion.type_defs import JsonDict
+
+
+_CodeBodies: TypeAlias = Mapping[str, str]
+_MapEvent: TypeAlias = Callable[[JsonDict], EventMapping | None]
+_IsInputEvent: TypeAlias = Callable[[JsonDict], bool]
+_GetAdditionalFunctions: TypeAlias = Callable[[set[str]], list[EventMapping]]
+_EmitPrelude: TypeAlias = Callable[[list[str], set[str]], None]
+_WrapBody: TypeAlias = Callable[[EventMapping, str, set[str]], str]
+
+_map_event = cast(_MapEvent, map_event)
+_is_input_event = cast(_IsInputEvent, is_input_event)
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def _uses_gml_runtime(code_bodies):
+def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
     return any("GMRuntime." in body for body in (code_bodies or {}).values())
 
 
-def _get_function_body(func, code_bodies):
+def _get_function_body(func: EventMapping, code_bodies: _CodeBodies | None) -> str:
     if code_bodies and func.godot_func in code_bodies:
         return code_bodies[func.godot_func]
     return "\tpass"
 
 
-def _deduplicate_functions(functions):
-    seen = set()
-    unique_functions = []
+def _deduplicate_functions(functions: Iterable[EventMapping]) -> list[EventMapping]:
+    seen: set[str] = set()
+    unique_functions: list[EventMapping] = []
     for func in functions:
         if func.godot_func not in seen:
             seen.add(func.godot_func)
@@ -28,7 +43,7 @@ def _deduplicate_functions(functions):
     return unique_functions
 
 
-def _valid_instance_variables(instance_variables):
+def _valid_instance_variables(instance_variables: Iterable[str] | None) -> list[str]:
     if not instance_variables:
         return []
     return sorted(
@@ -37,7 +52,11 @@ def _valid_instance_variables(instance_variables):
     )
 
 
-def generate_script_content(event_list, code_bodies=None, instance_variables=None):
+def generate_script_content(
+    event_list: Sequence[JsonDict] | None,
+    code_bodies: _CodeBodies | None = None,
+    instance_variables: Iterable[str] | None = None,
+) -> str:
     """Generate .gd script content with function stubs for each event.
 
     Events are mapped to Godot callback functions. Input events (mouse,
@@ -58,15 +77,15 @@ def generate_script_content(event_list, code_bodies=None, instance_variables=Non
     if not event_list:
         return "extends Node2D\n"
 
-    functions = []
+    functions: list[EventMapping] = []
     has_input = False
 
     for event in event_list:
-        if is_input_event(event):
+        if _is_input_event(event):
             has_input = True
             continue
 
-        mapping = map_event(event)
+        mapping = _map_event(event)
         if mapping is not None:
             functions.append(mapping)
 
@@ -78,7 +97,10 @@ def generate_script_content(event_list, code_bodies=None, instance_variables=Non
     script_features = get_script_features()
 
     for feature in script_features:
-        get_additional_functions = getattr(feature, "get_additional_functions", None)
+        get_additional_functions = cast(
+            _GetAdditionalFunctions | None,
+            getattr(feature, "get_additional_functions", None),
+        )
         if get_additional_functions is None:
             continue
 
@@ -96,7 +118,7 @@ def generate_script_content(event_list, code_bodies=None, instance_variables=Non
     if _uses_gml_runtime(code_bodies):
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
-        emit_prelude = getattr(feature, "emit_prelude", None)
+        emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
         if emit_prelude is not None:
             emit_prelude(lines, function_names)
     for variable_name in _valid_instance_variables(instance_variables):
@@ -105,7 +127,7 @@ def generate_script_content(event_list, code_bodies=None, instance_variables=Non
     for func in unique_functions:
         body = _get_function_body(func, code_bodies)
         for feature in script_features:
-            wrap_body = getattr(feature, "wrap_body", None)
+            wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
             if wrap_body is not None:
                 body = wrap_body(func, body, function_names)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")

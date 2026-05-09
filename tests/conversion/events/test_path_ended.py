@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestPathEndedEvent(unittest.TestCase):
     def test_maps_path_ended_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 8})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_path_ended")
         self.assertEqual(mapping.params, "")

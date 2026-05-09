@@ -23,6 +23,7 @@ class TestAsyncPlatformEvents(unittest.TestCase):
         for event_num, godot_func, gml_filename in ASYNC_PLATFORM_EVENTS:
             with self.subTest(event_num=event_num):
                 mapping = map_event({"eventType": 7, "eventNum": event_num})
+                assert mapping is not None
 
                 self.assertEqual(mapping.godot_func, godot_func)
                 self.assertEqual(mapping.params, "")

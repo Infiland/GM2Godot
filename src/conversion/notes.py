@@ -1,24 +1,29 @@
+from __future__ import annotations
+
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
 class NoteConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
 
-    def _process_note(self, src_file, dst_file, note_name):
+    def _process_note(self, src_file: str, dst_file: str, note_name: str) -> str | None:
         if not self.conversion_running():
             return None
         shutil.copy2(src_file, dst_file)
         return note_name
 
-    def convert_notes(self):
+    def convert_notes(self) -> None:
         gm_notes_path = os.path.join(self.gm_project_path, "notes")
         godot_notes_path = os.path.join(self.godot_project_path, "notes")
 
@@ -29,9 +34,9 @@ class NoteConverter(BaseConverter):
         os.makedirs(godot_notes_path, exist_ok=True)
 
         # Collect all note files and their subfolders
-        note_files = []
-        note_subfolders = {}
-        for root, dirs, files in os.walk(gm_notes_path):
+        note_files: list[str] = []
+        note_subfolders: dict[str, str] = {}
+        for root, _, files in os.walk(gm_notes_path):
             for file in files:
                 if file.endswith('.txt'):
                     src_path = os.path.join(root, file)
@@ -58,7 +63,7 @@ class NoteConverter(BaseConverter):
         processed_notes = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {}
+            futures_map: dict[Future[str | None], str] = {}
             for src_file in note_files:
                 note_name = os.path.splitext(os.path.basename(src_file))[0]
                 subfolder = note_subfolders.get(src_file, "")
@@ -82,5 +87,5 @@ class NoteConverter(BaseConverter):
                     self._safe_log(get_localized("Console_Convertor_Notes_Copied").format(note_name=result))
                 self._safe_progress(int((processed_notes / total_notes) * 100))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_notes()

@@ -30,7 +30,7 @@ class TestShaderConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         shaders_dir = os.path.join(self.gm_dir, "shaders")
         os.makedirs(shaders_dir)
@@ -121,7 +121,7 @@ class TestShaderConverterEmpty(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         # No shaders directory created
 
     def tearDown(self):
@@ -146,7 +146,7 @@ class TestShaderConverterSubfolders(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create a shader in a named directory with a .yy specifying subfolder
         shader_dir = os.path.join(self.gm_dir, "shaders", "sh_blur")

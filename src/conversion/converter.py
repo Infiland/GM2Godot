@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Callable, Mapping, Protocol, TypeAlias
+
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
@@ -8,29 +12,40 @@ from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
 
 from src.localization import get_localized
 
 
-CONVERSION_CATEGORIES = {
+CONVERSION_CATEGORIES: dict[str, list[str]] = {
     "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
     "wip": ["shaders", "tilesets"],
 }
 
 
+class RunningFlag(Protocol):
+    def is_set(self) -> bool: ...
+
+
+ConverterFn: TypeAlias = Callable[[], object]
+
+
 class Converter:
-    def __init__(self, log_callback, progress_callback, status_callback, conversion_running,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
-        self.log_callback = log_callback
-        self.progress_callback = progress_callback
-        self.status_callback = status_callback
+    def __init__(self, log_callback: LogCallback, progress_callback: ProgressCallback,
+                 status_callback: LogCallback, conversion_running: RunningFlag,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
+        self.log_callback: LogCallback = log_callback
+        self.progress_callback: ProgressCallback = progress_callback
+        self.status_callback: LogCallback = status_callback
         self.conversion_running = conversion_running
-        self.update_log_callback = update_log_callback or log_callback
+        self.update_log_callback: LogCallback = update_log_callback or log_callback
         self.compact_logging = compact_logging
         self.max_workers = max_workers
 
-    def convert(self, gm_path, gm_platform, godot_path, settings):
+    def convert(self, gm_path: str, gm_platform: str, godot_path: str,
+                settings: Mapping[str, BoolSetting]) -> None:
         group_sounds_by_audio_group = False
         if "sound_group_folders" in settings:
             group_sounds_by_audio_group = settings["sound_group_folders"].get()
@@ -42,7 +57,7 @@ class Converter:
             max_workers=self.max_workers,
         )
 
-        converters = [
+        converters: list[tuple[str, ConverterFn, str]] = [
             ("game_icon", project_settings.convert_icon, "Console_Convertor_Icon"),
             ("project_name", project_settings.update_project_name, "Console_Convertor_Name"),
             ("project_settings", project_settings.update_project_settings, "Console_Convertor_Settings"),

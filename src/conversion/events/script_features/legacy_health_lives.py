@@ -1,4 +1,4 @@
-def emit_prelude(lines, function_names):
+def emit_prelude(lines: list[str], function_names: set[str]) -> None:
     if "_on_no_more_lives" in function_names:
         lines.append(
             "\n\nvar lives = 0:"

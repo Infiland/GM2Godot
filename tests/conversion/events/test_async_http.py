@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncHttpEvent(unittest.TestCase):
     def test_maps_async_http_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 62})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_http_request_completed")
         self.assertEqual(mapping.params, "")

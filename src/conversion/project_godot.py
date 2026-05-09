@@ -1,17 +1,18 @@
 import os
+from typing import Any
 
 
 class GodotProjectFile:
     """Line-preserving helper for small `project.godot` setting updates."""
 
-    def __init__(self, project_godot_path):
+    def __init__(self, project_godot_path: str) -> None:
         self.project_godot_path = project_godot_path
 
-    def set_main_scene(self, scene_path):
+    def set_main_scene(self, scene_path: str) -> bool:
         """Set [application] run/main_scene while preserving unrelated settings."""
         return self.set_setting("application", "run/main_scene", scene_path)
 
-    def set_setting(self, section, key, value):
+    def set_setting(self, section: str, key: str, value: Any) -> bool:
         if not os.path.isfile(self.project_godot_path):
             return False
 
@@ -25,7 +26,7 @@ class GodotProjectFile:
         return True
 
     @staticmethod
-    def _format_value(value):
+    def _format_value(value: Any) -> str:
         if isinstance(value, str):
             escaped = value.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
@@ -34,7 +35,9 @@ class GodotProjectFile:
         return str(value)
 
     @classmethod
-    def _set_setting(cls, content, section, key, formatted_value):
+    def _set_setting(
+        cls, content: str, section: str, key: str, formatted_value: str
+    ) -> str:
         lines = content.splitlines(keepends=True)
         newline = cls._detect_newline(content)
         section_header = f"[{section}]"
@@ -70,7 +73,9 @@ class GodotProjectFile:
         return "".join(lines)
 
     @staticmethod
-    def _append_section(content, section_header, setting_line, newline):
+    def _append_section(
+        content: str, section_header: str, setting_line: str, newline: str
+    ) -> str:
         if not content:
             return f"{section_header}{newline}{setting_line}{newline}"
 
@@ -78,15 +83,15 @@ class GodotProjectFile:
         return f"{content}{separator}{newline}{section_header}{newline}{setting_line}{newline}"
 
     @staticmethod
-    def _is_section_header(stripped_line):
+    def _is_section_header(stripped_line: str) -> bool:
         return stripped_line.startswith("[") and stripped_line.endswith("]")
 
     @staticmethod
-    def _detect_newline(content):
+    def _detect_newline(content: str) -> str:
         return "\r\n" if "\r\n" in content else "\n"
 
     @staticmethod
-    def _line_ending(line, default_newline):
+    def _line_ending(line: str, default_newline: str) -> str:
         if line.endswith("\r\n"):
             return "\r\n"
         if line.endswith("\n"):
@@ -94,11 +99,13 @@ class GodotProjectFile:
         return default_newline
 
     @staticmethod
-    def _ends_with_newline(line):
+    def _ends_with_newline(line: str) -> bool:
         return line.endswith(("\n", "\r"))
 
     @staticmethod
-    def _setting_insert_index(lines, section_start, section_end):
+    def _setting_insert_index(
+        lines: list[str], section_start: int, section_end: int
+    ) -> int:
         insert_at = section_end
         while insert_at > section_start + 1 and not lines[insert_at - 1].strip():
             insert_at -= 1

@@ -2,6 +2,7 @@ import os
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
@@ -9,16 +10,33 @@ from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.script_generator import generate_script_content
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+
+
+class ParsedObject(TypedDict):
+    sprite_name: str | None
+    event_list: list[JsonDict]
+
+
+class ObjectProcessResult(TypedDict):
+    success: bool
+    name: str
+    has_sprite: bool
+    sprite_name: str | None
+    event_count: int
 
 
 class ObjectConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath,
+                 log_callback: LogCallback = print, progress_callback: ProgressCallback | None = None,
+                 conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_objects_path = os.path.join(self.godot_project_path, 'objects')
 
-    def _get_valid_object_names(self):
+    def _get_valid_object_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of object name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
@@ -34,14 +52,14 @@ class ObjectConverter(BaseConverter):
                 content = f.read()
 
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
-            valid_objects = {}
-            for resource in data.get('resources', []):
-                res_id = resource.get('id', {})
-                path = res_id.get('path', '')
+            valid_objects: dict[str, str] = {}
+            for resource in cast(list[JsonDict], data.get('resources', [])):
+                res_id = cast(JsonDict, resource.get('id', {}))
+                path = cast(str, res_id.get('path', ''))
                 if path.startswith('objects/'):
-                    name = res_id.get('name', '')
+                    name = cast(str, res_id.get('name', ''))
                     yy_path = os.path.join(self.gm_project_path, 'objects', name, name + '.yy')
                     valid_objects[name] = self._get_subfolder_from_yy(yy_path)
 
@@ -50,7 +68,7 @@ class ObjectConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Objects_YYPFilterWarning"))
             return None
 
-    def _parse_object_yy(self, object_name):
+    def _parse_object_yy(self, object_name: str) -> ParsedObject | None:
         """Parse an object .yy file and extract the sprite reference and event list.
 
         Returns a dict with 'sprite_name' (str or None) and 'event_list' (list)
@@ -61,14 +79,15 @@ class ObjectConverter(BaseConverter):
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
             sprite_id = data.get('spriteId')
-            sprite_name = None
-            if sprite_id is not None:
-                sprite_name = sprite_id.get('name', None)
+            sprite_name: str | None = None
+            if isinstance(sprite_id, dict):
+                sprite_data = cast(JsonDict, sprite_id)
+                sprite_name = cast(str | None, sprite_data.get('name', None))
 
-            event_list = data.get('eventList', [])
+            event_list = cast(list[JsonDict], data.get('eventList', []))
 
             return {"sprite_name": sprite_name, "event_list": event_list}
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -76,12 +95,12 @@ class ObjectConverter(BaseConverter):
                 yy_path=yy_path, object_name=object_name))
             return None
 
-    def _get_sprite_subfolder(self, sprite_name):
+    def _get_sprite_subfolder(self, sprite_name: str) -> str:
         """Resolve a sprite's subfolder by reading its .yy file from the GM project."""
         yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
         return self._get_subfolder_from_yy(yy_path)
 
-    def _sprite_scene_exists(self, sprite_name, sprite_subfolder=""):
+    def _sprite_scene_exists(self, sprite_name: str, sprite_subfolder: str = "") -> bool:
         """Check whether the converted sprite scene exists in the Godot project."""
         if sprite_subfolder:
             tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_subfolder, sprite_name, sprite_name + '.tscn')
@@ -89,7 +108,8 @@ class ObjectConverter(BaseConverter):
             tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_name, sprite_name + '.tscn')
         return os.path.isfile(tscn_path)
 
-    def _generate_object_scene(self, object_name, sprite_name, sprite_subfolder="", script_res_path=None):
+    def _generate_object_scene(self, object_name: str, sprite_name: str | None,
+                               sprite_subfolder: str = "", script_res_path: str | None = None) -> str:
         """Build the .tscn content string for an object scene.
 
         If sprite_name is not None, the scene instances the sprite's scene as a child.
@@ -132,9 +152,9 @@ class ObjectConverter(BaseConverter):
 
         return ''.join(parts)
 
-    def _load_event_code_bodies(self, object_name, event_list):
-        code_bodies = {}
-        instance_variables = set()
+    def _load_event_code_bodies(self, object_name: str, event_list: list[JsonDict]) -> tuple[dict[str, str], set[str]]:
+        code_bodies: dict[str, str] = {}
+        instance_variables: set[str] = set()
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
 
         for event in event_list or []:
@@ -171,7 +191,7 @@ class ObjectConverter(BaseConverter):
 
         return code_bodies, instance_variables
 
-    def _process_object(self, object_name, subfolder=""):
+    def _process_object(self, object_name: str, subfolder: str = "") -> ObjectProcessResult | None:
         """Process a single object: parse .yy, generate scene and script, write files.
 
         Returns a result dict or None if conversion was stopped.
@@ -181,7 +201,7 @@ class ObjectConverter(BaseConverter):
 
         parsed = self._parse_object_yy(object_name)
         if parsed is None:
-            return {"success": False, "name": object_name}
+            return {"success": False, "name": object_name, "has_sprite": False, "sprite_name": None, "event_count": 0}
 
         sprite_name = parsed["sprite_name"]
         event_list = parsed["event_list"]
@@ -222,7 +242,7 @@ class ObjectConverter(BaseConverter):
         return {"success": True, "name": object_name, "has_sprite": sprite_name is not None,
                 "sprite_name": sprite_name, "event_count": len(event_list)}
 
-    def convert_objects(self):
+    def convert_objects(self) -> None:
         os.makedirs(self.godot_objects_path, exist_ok=True)
 
         gm_objects_path = os.path.join(self.gm_project_path, 'objects')
@@ -284,5 +304,5 @@ class ObjectConverter(BaseConverter):
 
         self.log_callback(get_localized("Console_Convertor_Objects_Complete"))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_objects()

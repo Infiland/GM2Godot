@@ -1,15 +1,18 @@
+# pyright: reportPrivateUsage=false
+
 import os
 import sys
 import shutil
 import tempfile
 import unittest
+from typing import cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
-from src.conversion.sprites import SpriteConverter
+from src.conversion.sprites import AnimationData, CollisionData, SpriteConverter, SpriteParseResult
 
 
 class TestSpriteConverterBasic(unittest.TestCase):
@@ -18,7 +21,7 @@ class TestSpriteConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Build a fake GM sprite directory structure:
         # sprites/test_sprite/layers/<layer_id>/
@@ -80,8 +83,8 @@ class TestSpriteConverterCompactLogging(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.log_messages = []
-        self.update_messages = []
+        self.log_messages: list[str] = []
+        self.update_messages: list[str] = []
 
         # Build two sprites with 2 frames each
         for sprite_name in ["sprite_a", "sprite_b"]:
@@ -120,7 +123,7 @@ class TestSpriteConverterCompactLogging(unittest.TestCase):
                         "Expected compact progress messages")
 
     def test_verbose_logging_when_compact_disabled(self):
-        logs = []
+        logs: list[str] = []
         converter = SpriteConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: logs.append(msg),
@@ -141,7 +144,7 @@ class TestSpriteConverterEmpty(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create the sprites folder but leave it empty
         os.makedirs(os.path.join(self.gm_dir, "sprites"))
@@ -160,13 +163,13 @@ class TestSpriteConverterEmpty(unittest.TestCase):
         converter.convert_all()  # should not raise
 
         # Should log the "not found" message
-        joined = " ".join(self.logs)
         self.assertTrue(len(self.logs) > 0,
                         "Expected at least one log message for empty sprites folder")
 
 
 # Helper to create a minimal .yy file with trailing commas (like real GameMaker files)
-def _make_yy_content(sprite_name, frame_guids, layer_guids, layer_visible=None):
+def _make_yy_content(sprite_name: str, frame_guids: list[str], layer_guids: list[str],
+                     layer_visible: list[bool] | None = None) -> str:
     """Build a .yy file string with the given frames and layers."""
     if layer_visible is None:
         layer_visible = [True] * len(layer_guids)
@@ -198,7 +201,7 @@ class TestSpriteConverterFrameOrdering(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         sprite_dir = os.path.join(self.gm_dir, "sprites", "ordered_sprite")
         os.makedirs(sprite_dir)
@@ -238,8 +241,11 @@ class TestSpriteConverterFrameOrdering(unittest.TestCase):
             path = os.path.join(godot_dir, f"ordered_sprite_{idx}.png")
             self.assertTrue(os.path.exists(path), f"Missing {path}")
             with Image.open(path) as img:
-                pixel = img.getpixel((0, 0))[:3]
-            expected_rgb = Image.new("RGBA", (1, 1), expected_color).getpixel((0, 0))[:3]
+                pixel = cast(tuple[int, int, int, int], img.getpixel((0, 0)))[:3]
+            expected_rgb = cast(
+                tuple[int, int, int, int],
+                Image.new("RGBA", (1, 1), expected_color).getpixel((0, 0)),
+            )[:3]
             self.assertEqual(pixel, expected_rgb,
                              f"Frame {idx} has wrong color: {pixel} != {expected_rgb}")
 
@@ -289,7 +295,7 @@ class TestSpriteConverterMultiLayer(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         sprite_dir = os.path.join(self.gm_dir, "sprites", "multi_layer")
         os.makedirs(sprite_dir)
@@ -337,7 +343,7 @@ class TestSpriteConverterMultiLayer(unittest.TestCase):
             converted = img.convert("RGBA")
             self.assertEqual(converted.getpixel((0, 0)), (0, 255, 0, 255))
             self.assertEqual(converted.getpixel((1, 0)), (0, 0, 255, 255))
-            self.assertEqual(converted.getpixel((1, 1))[3], 0)
+            self.assertEqual(cast(tuple[int, int, int, int], converted.getpixel((1, 1)))[3], 0)
 
 
 class TestParseSpriteYY(unittest.TestCase):
@@ -357,7 +363,7 @@ class TestParseSpriteYY(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_yy(self, sprite_name, content):
+    def _write_yy(self, sprite_name: str, content: str) -> None:
         sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
         os.makedirs(sprite_dir, exist_ok=True)
         with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w") as f:
@@ -369,6 +375,7 @@ class TestParseSpriteYY(unittest.TestCase):
 
         result = self.converter._parse_sprite_yy("test_spr")
         self.assertIsNotNone(result)
+        result = cast(SpriteParseResult, result)
         frame_guids, layer_guids = result
         self.assertEqual(frame_guids, guids)
         self.assertEqual(layer_guids, ["layer1"])
@@ -380,6 +387,7 @@ class TestParseSpriteYY(unittest.TestCase):
 
         result = self.converter._parse_sprite_yy("tc")
         self.assertIsNotNone(result)
+        result = cast(SpriteParseResult, result)
         self.assertEqual(result[0], ["frame1"])
 
     def test_returns_none_for_missing_file(self):
@@ -398,13 +406,14 @@ class TestParseSpriteYY(unittest.TestCase):
                                                  layer_visible=[False, True]))
         result = self.converter._parse_sprite_yy("vis")
         self.assertIsNotNone(result)
+        result = cast(SpriteParseResult, result)
         _, layer_guids = result
         self.assertEqual(layer_guids, ["visible_layer"])
 
 
-def _make_yyp_content(sprite_names, extra_resources=None):
+def _make_yyp_content(sprite_names: list[str], extra_resources: list[str] | None = None) -> str:
     """Build a minimal .yyp file string with the given sprite names in the resources array."""
-    resources = []
+    resources: list[str] = []
     for name in sprite_names:
         resources.append(
             '{{"id":{{"name":"{name}","path":"sprites/{name}/{name}.yy",}},}}'.format(name=name)
@@ -415,7 +424,8 @@ def _make_yyp_content(sprite_names, extra_resources=None):
     return '{{\n  "%Name": "TestProject",\n  "resources": [\n    {res}\n  ],\n}}'.format(res=res_str)
 
 
-def _make_sprite_on_disk(gm_dir, sprite_name, layer_guid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"):
+def _make_sprite_on_disk(gm_dir: str, sprite_name: str,
+                         layer_guid: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") -> None:
     """Create a minimal sprite folder structure with a single-frame PNG."""
     layer_dir = os.path.join(gm_dir, "sprites", sprite_name, "layers", layer_guid)
     os.makedirs(layer_dir, exist_ok=True)
@@ -450,6 +460,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
 
         converter = self._make_converter()
         result = converter._get_valid_sprite_names()
+        result = cast(dict[str, str], result)
         self.assertEqual(set(result.keys()), {"s_player", "s_enemy", "s_bullet"})
 
     def test_handles_trailing_commas(self):
@@ -460,6 +471,7 @@ class TestGetValidSpriteNames(unittest.TestCase):
 
         converter = self._make_converter()
         result = converter._get_valid_sprite_names()
+        result = cast(dict[str, str], result)
         self.assertEqual(set(result.keys()), {"s_test"})
 
     def test_returns_none_when_no_yyp(self):
@@ -493,7 +505,7 @@ class TestSpriteConverterFiltering(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -520,7 +532,7 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         converter.convert_all()
 
         godot_sprites = os.path.join(self.godot_dir, "sprites")
-        converted = set(os.listdir(godot_sprites)) if os.path.exists(godot_sprites) else set()
+        converted: set[str] = set(os.listdir(godot_sprites)) if os.path.exists(godot_sprites) else set()
         self.assertIn("s_valid1", converted)
         self.assertIn("s_valid2", converted)
         self.assertNotIn("s_orphan", converted)
@@ -575,13 +587,13 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         self.assertIn("s_n", converted)
 
 
-def _make_yy_content_with_collision(sprite_name, frame_guids, layer_guids,
-                                    collision_kind=1, bbox_mode=0,
-                                    bbox_left=0, bbox_right=31,
-                                    bbox_top=0, bbox_bottom=31,
-                                    width=32, height=32,
-                                    origin=0, xorigin=0, yorigin=0,
-                                    layer_visible=None):
+def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], layer_guids: list[str],
+                                    collision_kind: int = 1, bbox_mode: int = 0,
+                                    bbox_left: int = 0, bbox_right: int = 31,
+                                    bbox_top: int = 0, bbox_bottom: int = 31,
+                                    width: int = 32, height: int = 32,
+                                    origin: int = 0, xorigin: int = 0, yorigin: int = 0,
+                                    layer_visible: list[bool] | None = None) -> str:
     """Build a .yy file string with collision mask fields."""
     if layer_visible is None:
         layer_visible = [True] * len(layer_guids)
@@ -621,15 +633,15 @@ def _make_yy_content_with_collision(sprite_name, frame_guids, layer_guids,
     )
 
 
-def _make_yy_content_with_sequence(sprite_name, frame_guids, layer_guids,
-                                    collision_kind=1, bbox_mode=0,
-                                    bbox_left=0, bbox_right=31,
-                                    bbox_top=0, bbox_bottom=31,
-                                    width=32, height=32,
-                                    origin=0, xorigin=0, yorigin=0,
-                                    layer_visible=None,
-                                    playback_speed=30.0, playback_speed_type=0,
-                                    playback=1, frame_lengths=None):
+def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], layer_guids: list[str],
+                                     collision_kind: int = 1, bbox_mode: int = 0,
+                                     bbox_left: int = 0, bbox_right: int = 31,
+                                     bbox_top: int = 0, bbox_bottom: int = 31,
+                                     width: int = 32, height: int = 32,
+                                     origin: int = 0, xorigin: int = 0, yorigin: int = 0,
+                                     layer_visible: list[bool] | None = None,
+                                     playback_speed: float = 30.0, playback_speed_type: int = 0,
+                                     playback: int = 1, frame_lengths: list[float] | None = None) -> str:
     """Build a .yy file string with collision fields AND sequence animation data."""
     if layer_visible is None:
         layer_visible = [True] * len(layer_guids)
@@ -645,7 +657,7 @@ def _make_yy_content_with_sequence(sprite_name, frame_guids, layer_guids,
         for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
     )
     # Build sequence keyframes
-    keyframes = []
+    keyframes: list[str] = []
     for idx, (guid, length) in enumerate(zip(frame_guids, frame_lengths)):
         keyframes.append(
             '{{"Key": {key}, "Length": {length}, "Channels": {{"0": {{"Id": {{"name": "{guid}"}}}}}}}}'.format(
@@ -710,7 +722,7 @@ class TestParseCollisionData(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_yy(self, sprite_name, content):
+    def _write_yy(self, sprite_name: str, content: str) -> None:
         sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
         os.makedirs(sprite_dir, exist_ok=True)
         with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w") as f:
@@ -728,6 +740,7 @@ class TestParseCollisionData(unittest.TestCase):
 
         result = self.converter._parse_collision_data("spr_test")
         self.assertIsNotNone(result)
+        result = cast(CollisionData, result)
         self.assertEqual(result["collisionKind"], 1)
         self.assertEqual(result["bboxMode"], 2)
         self.assertEqual(result["bbox_left"], 5)
@@ -748,6 +761,7 @@ class TestParseCollisionData(unittest.TestCase):
 
         result = self.converter._parse_collision_data("spr_custom")
         self.assertIsNotNone(result)
+        result = cast(CollisionData, result)
         self.assertEqual(result["origin"], 9)
         self.assertEqual(result["xorigin"], 10)
         self.assertEqual(result["yorigin"], 20)
@@ -773,8 +787,12 @@ class TestComputeOriginOffset(unittest.TestCase):
             conversion_running=lambda: True,
         )
 
-    def _make_data(self, origin, w=64, h=32, xorigin=0, yorigin=0):
+    def _make_data(self, origin: int, w: int = 64, h: int = 32,
+                   xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
+            "collisionKind": 1, "bboxMode": 0,
+            "bbox_left": 0, "bbox_right": w - 1,
+            "bbox_top": 0, "bbox_bottom": h - 1,
             "width": w, "height": h,
             "origin": origin,
             "xorigin": xorigin, "yorigin": yorigin,
@@ -831,9 +849,9 @@ class TestGenerateSpriteScene(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_collision_data(self, collision_kind=1, bbox_left=0, bbox_right=31,
-                              bbox_top=0, bbox_bottom=31, width=32, height=32,
-                              origin=0, xorigin=0, yorigin=0):
+    def _make_collision_data(self, collision_kind: int = 1, bbox_left: int = 0, bbox_right: int = 31,
+                              bbox_top: int = 0, bbox_bottom: int = 31, width: int = 32, height: int = 32,
+                              origin: int = 0, xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
             "collisionKind": collision_kind,
             "bboxMode": 0,
@@ -877,8 +895,8 @@ class TestGenerateSpriteScene(unittest.TestCase):
 
     def test_multiframe_references_first_frame(self):
         data = self._make_collision_data(collision_kind=1)
-        anim_data = {"playbackSpeed": 30.0, "playbackSpeedType": 0,
-                     "loop": True, "frame_durations": [1.0, 1.0, 1.0]}
+        anim_data: AnimationData = {"playbackSpeed": 30.0, "playbackSpeedType": 0,
+                                    "loop": True, "frame_durations": [1.0, 1.0, 1.0]}
         self.converter._generate_sprite_scene("spr_anim", data, 3, anim_data)
 
         tscn_path = os.path.join(self.godot_dir, "sprites", "spr_anim", "spr_anim.tscn")
@@ -954,7 +972,7 @@ class TestParseAnimationData(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_yy(self, sprite_name, content):
+    def _write_yy(self, sprite_name: str, content: str) -> None:
         sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
         os.makedirs(sprite_dir, exist_ok=True)
         with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w") as f:
@@ -968,6 +986,7 @@ class TestParseAnimationData(unittest.TestCase):
         self._write_yy("spr_fps", content)
         result = self.converter._parse_animation_data("spr_fps")
         self.assertIsNotNone(result)
+        result = cast(AnimationData, result)
         self.assertEqual(result["playbackSpeed"], 30.0)
         self.assertEqual(result["playbackSpeedType"], 0)
         self.assertTrue(result["loop"])
@@ -980,6 +999,7 @@ class TestParseAnimationData(unittest.TestCase):
         self._write_yy("spr_pgf", content)
         result = self.converter._parse_animation_data("spr_pgf")
         self.assertIsNotNone(result)
+        result = cast(AnimationData, result)
         self.assertEqual(result["playbackSpeed"], 1.0)
         self.assertEqual(result["playbackSpeedType"], 1)
 
@@ -991,6 +1011,7 @@ class TestParseAnimationData(unittest.TestCase):
         self._write_yy("spr_noloop", content)
         result = self.converter._parse_animation_data("spr_noloop")
         self.assertIsNotNone(result)
+        result = cast(AnimationData, result)
         self.assertFalse(result["loop"])
 
     def test_parses_custom_frame_durations(self):
@@ -1001,6 +1022,7 @@ class TestParseAnimationData(unittest.TestCase):
         self._write_yy("spr_dur", content)
         result = self.converter._parse_animation_data("spr_dur")
         self.assertIsNotNone(result)
+        result = cast(AnimationData, result)
         self.assertEqual(result["frame_durations"], [1.0, 2.0, 0.5])
 
     def test_returns_none_for_missing_file(self):
@@ -1021,27 +1043,27 @@ class TestComputeGodotFps(unittest.TestCase):
     """Test _compute_godot_fps() static method."""
 
     def test_fps_type_passthrough(self):
-        data = {"playbackSpeed": 30.0, "playbackSpeedType": 0}
+        data: AnimationData = {"playbackSpeed": 30.0, "playbackSpeedType": 0, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 30.0)
 
     def test_fps_type_sixty(self):
-        data = {"playbackSpeed": 60.0, "playbackSpeedType": 0}
+        data: AnimationData = {"playbackSpeed": 60.0, "playbackSpeedType": 0, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 60.0)
 
     def test_per_game_frame_one(self):
-        data = {"playbackSpeed": 1.0, "playbackSpeedType": 1}
+        data: AnimationData = {"playbackSpeed": 1.0, "playbackSpeedType": 1, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 60.0)
 
     def test_per_game_frame_half(self):
-        data = {"playbackSpeed": 0.5, "playbackSpeedType": 1}
+        data: AnimationData = {"playbackSpeed": 0.5, "playbackSpeedType": 1, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 30.0)
 
     def test_per_game_frame_zero(self):
-        data = {"playbackSpeed": 0.0, "playbackSpeedType": 1}
+        data: AnimationData = {"playbackSpeed": 0.0, "playbackSpeedType": 1, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 0.0)
 
     def test_zero_fps(self):
-        data = {"playbackSpeed": 0.0, "playbackSpeedType": 0}
+        data: AnimationData = {"playbackSpeed": 0.0, "playbackSpeedType": 0, "loop": True, "frame_durations": [1.0]}
         self.assertEqual(SpriteConverter._compute_godot_fps(data), 0.0)
 
 
@@ -1062,9 +1084,9 @@ class TestGenerateAnimatedScene(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_collision_data(self, collision_kind=1, bbox_left=0, bbox_right=31,
-                              bbox_top=0, bbox_bottom=31, width=32, height=32,
-                              origin=0, xorigin=0, yorigin=0):
+    def _make_collision_data(self, collision_kind: int = 1, bbox_left: int = 0, bbox_right: int = 31,
+                              bbox_top: int = 0, bbox_bottom: int = 31, width: int = 32, height: int = 32,
+                              origin: int = 0, xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
             "collisionKind": collision_kind,
             "bboxMode": 0,
@@ -1074,7 +1096,8 @@ class TestGenerateAnimatedScene(unittest.TestCase):
             "origin": origin, "xorigin": xorigin, "yorigin": yorigin,
         }
 
-    def _make_anim_data(self, speed=30.0, speed_type=0, loop=True, durations=None):
+    def _make_anim_data(self, speed: float = 30.0, speed_type: int = 0,
+                        loop: bool = True, durations: list[float] | None = None) -> AnimationData:
         if durations is None:
             durations = [1.0]
         return {
@@ -1084,7 +1107,7 @@ class TestGenerateAnimatedScene(unittest.TestCase):
             "frame_durations": durations,
         }
 
-    def _read_tscn(self, sprite_name):
+    def _read_tscn(self, sprite_name: str) -> str:
         tscn_path = os.path.join(self.godot_dir, "sprites", sprite_name, sprite_name + ".tscn")
         with open(tscn_path, "r") as f:
             return f.read()

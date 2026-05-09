@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestDestroyEvent(unittest.TestCase):
     def test_maps_destroy_event_to_destroy_callback(self):
         mapping = map_event({"eventType": 1, "eventNum": 0})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_destroy")
         self.assertEqual(mapping.params, "")

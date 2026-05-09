@@ -1,15 +1,25 @@
 import os
 import sys
 import unittest
+from typing import cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.event_mapping import (
-    EventMapping, map_event, is_input_event,
-    INPUT_EVENT_TYPES, INPUT_MERGED_MAPPING,
+    EventMapping, map_event as _map_event, is_input_event,
+    INPUT_MERGED_MAPPING,
 )
+from src.conversion.type_defs import JsonDict
+
+
+def map_event(event: JsonDict) -> EventMapping:
+    return cast(EventMapping, _map_event(event))
+
+
+def map_event_optional(event: JsonDict) -> EventMapping | None:
+    return _map_event(event)
 
 
 class TestIsInputEvent(unittest.TestCase):
@@ -196,26 +206,26 @@ class TestMapEventInputReturnsNone(unittest.TestCase):
     """Input events should return None (they are merged by the script generator)."""
 
     def test_mouse_returns_none(self):
-        self.assertIsNone(map_event({"eventType": 6, "eventNum": 4}))
+        self.assertIsNone(map_event_optional({"eventType": 6, "eventNum": 4}))
 
     def test_mouse_variants_return_none(self):
         for event_num in (0, 11, 50, 58, 60, 61):
             with self.subTest(event_num=event_num):
-                self.assertIsNone(map_event({"eventType": 6, "eventNum": event_num}))
+                self.assertIsNone(map_event_optional({"eventType": 6, "eventNum": event_num}))
 
     def test_keyboard_returns_none(self):
-        self.assertIsNone(map_event({"eventType": 5, "eventNum": 65}))
+        self.assertIsNone(map_event_optional({"eventType": 5, "eventNum": 65}))
 
     def test_key_press_returns_none(self):
-        self.assertIsNone(map_event({"eventType": 9, "eventNum": 32}))
+        self.assertIsNone(map_event_optional({"eventType": 9, "eventNum": 32}))
 
     def test_key_release_returns_none(self):
-        self.assertIsNone(map_event({"eventType": 10, "eventNum": 13}))
+        self.assertIsNone(map_event_optional({"eventType": 10, "eventNum": 13}))
 
     def test_gesture_returns_none(self):
         for event_num in range(13):
             with self.subTest(event_num=event_num):
-                self.assertIsNone(map_event({"eventType": 13, "eventNum": event_num}))
+                self.assertIsNone(map_event_optional({"eventType": 13, "eventNum": event_num}))
 
 
 class TestMapEventUnknown(unittest.TestCase):
@@ -246,7 +256,7 @@ class TestEventMappingFrozen(unittest.TestCase):
     def test_cannot_modify(self):
         m = map_event({"eventType": 0, "eventNum": 0})
         with self.assertRaises(AttributeError):
-            m.godot_func = "changed"
+            setattr(m, "godot_func", "changed")
 
     def test_input_merged_mapping(self):
         self.assertEqual(INPUT_MERGED_MAPPING.godot_func, "_input")

@@ -1,4 +1,25 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Iterable, Literal, MutableSet, TypeAlias
+
+
+_AssignmentOperator: TypeAlias = Literal[
+    "??=",
+    "<<=",
+    ">>=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "&=",
+    "|=",
+    "^=",
+    "=",
+]
+
+_IncrementDelta: TypeAlias = Literal[-1, 1]
 
 
 class GMLTranspileError(ValueError):
@@ -24,44 +45,47 @@ class _Literal:
 @dataclass(frozen=True)
 class _Unary:
     operator: str
-    operand: object
+    operand: _Expression
 
 
 @dataclass(frozen=True)
 class _Binary:
-    left: object
+    left: _Expression
     operator: str
-    right: object
+    right: _Expression
 
 
 @dataclass(frozen=True)
 class _Ternary:
-    condition: object
-    true_expr: object
-    false_expr: object
+    condition: _Expression
+    true_expr: _Expression
+    false_expr: _Expression
 
 
 @dataclass(frozen=True)
 class _Call:
-    callee: object
-    args: tuple
+    callee: _Expression
+    args: tuple[_Expression, ...]
 
 
 @dataclass(frozen=True)
 class _Index:
-    target: object
-    index: object
+    target: _Expression
+    index: _Expression
 
 
 @dataclass(frozen=True)
 class _Member:
-    target: object
+    target: _Expression
     member: str
 
 
 @dataclass(frozen=True)
 class _Grouped:
-    expr: object
+    expr: _Expression
+
+
+_Expression: TypeAlias = _Name | _Literal | _Unary | _Binary | _Ternary | _Call | _Index | _Member | _Grouped
 
 
 _EOF = _Token("EOF", "")
@@ -91,7 +115,7 @@ _MULTI_CHAR_OPERATORS = (
     ">>",
 )
 
-_ASSIGNMENT_OPERATORS = (
+_ASSIGNMENT_OPERATORS: tuple[_AssignmentOperator, ...] = (
     "??=",
     "<<=",
     ">>=",
@@ -178,14 +202,18 @@ _RUNTIME_FUNCTIONS = {
 }
 
 
-def transpile_gml_expression(source, local_names=None):
+def transpile_gml_expression(source: str, local_names: Iterable[str] | None = None) -> str:
     """Transpile a single GML expression to a GDScript expression."""
     parser = _ExpressionParser(_expression_tokens(source))
     expr = parser.parse()
     return _emit_expression(expr, _normalize_local_names(local_names))[0]
 
 
-def transpile_gml_code(source, indent="\t", instance_variables=None):
+def transpile_gml_code(
+    source: str,
+    indent: str = "\t",
+    instance_variables: MutableSet[str] | None = None,
+) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
         _tokenize(_strip_comments(source)),
@@ -200,17 +228,17 @@ def transpile_gml_code(source, indent="\t", instance_variables=None):
 
 
 class _ExpressionParser:
-    def __init__(self, tokens):
+    def __init__(self, tokens: list[_Token]) -> None:
         self.tokens = tokens
         self.position = 0
 
-    def parse(self):
+    def parse(self) -> _Expression:
         expr = self._parse_expression()
         if not self._at_end():
             raise GMLTranspileError(f"Unexpected token: {self._peek().value}")
         return expr
 
-    def _parse_expression(self, min_precedence=0):
+    def _parse_expression(self, min_precedence: int = 0) -> _Expression:
         left = self._parse_unary()
 
         while True:
@@ -239,18 +267,18 @@ class _ExpressionParser:
 
         return left
 
-    def _parse_unary(self):
+    def _parse_unary(self) -> _Expression:
         operator = self._current_unary_operator()
         if operator in ("+", "-", "!", "not", "~"):
             self._advance()
             return _Unary(operator, self._parse_unary())
         return self._parse_postfix()
 
-    def _parse_postfix(self):
+    def _parse_postfix(self) -> _Expression:
         expr = self._parse_primary()
         while True:
             if self._match("("):
-                args = []
+                args: list[_Expression] = []
                 if not self._check(")"):
                     while True:
                         args.append(self._parse_expression())
@@ -275,7 +303,7 @@ class _ExpressionParser:
 
         return expr
 
-    def _parse_primary(self):
+    def _parse_primary(self) -> _Expression:
         token = self._advance()
         if token.kind == "NUMBER" or token.kind == "STRING":
             return _Literal(token.value)
@@ -287,7 +315,7 @@ class _ExpressionParser:
             return _Grouped(expr)
         raise GMLTranspileError(f"Expected expression, got: {token.value}")
 
-    def _current_operator(self):
+    def _current_operator(self) -> str | None:
         token = self._peek()
         if token.kind == "IDENT" and token.value in _BINARY_PRECEDENCE:
             return token.value
@@ -295,7 +323,7 @@ class _ExpressionParser:
             return token.value
         return None
 
-    def _current_unary_operator(self):
+    def _current_unary_operator(self) -> str | None:
         token = self._peek()
         if token.kind == "IDENT" and token.value == "not":
             return token.value
@@ -303,56 +331,61 @@ class _ExpressionParser:
             return token.value
         return None
 
-    def _match(self, value):
+    def _match(self, value: str) -> bool:
         if self._check(value):
             self.position += 1
             return True
         return False
 
-    def _consume(self, value):
+    def _consume(self, value: str) -> None:
         if not self._match(value):
             raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
 
-    def _consume_identifier(self):
+    def _consume_identifier(self) -> str:
         token = self._advance()
         if token.kind != "IDENT":
             raise GMLTranspileError(f"Expected identifier, got: {token.value}")
         return token.value
 
-    def _check(self, value):
+    def _check(self, value: str) -> bool:
         return self._peek().value == value
 
-    def _advance(self):
+    def _advance(self) -> _Token:
         token = self._peek()
         if not self._at_end():
             self.position += 1
         return token
 
-    def _peek(self):
+    def _peek(self) -> _Token:
         if self.position >= len(self.tokens):
             return _EOF
         return self.tokens[self.position]
 
-    def _at_end(self):
+    def _at_end(self) -> bool:
         return self._peek().kind == "EOF"
 
 
 class _StatementParser:
-    def __init__(self, tokens, local_names=None, instance_variables=None):
+    def __init__(
+        self,
+        tokens: list[_Token],
+        local_names: Iterable[str] | None = None,
+        instance_variables: MutableSet[str] | None = None,
+    ) -> None:
         self.tokens = tokens
         self.position = 0
         self.local_names = set(local_names or [])
         self.instance_variables = instance_variables
 
-    def parse(self, terminator=None):
-        lines = []
+    def parse(self, terminator: str | None = None) -> list[str]:
+        lines: list[str] = []
         while not self._at_end() and not self._check(terminator):
             if self._match(";") or self._match("\n"):
                 continue
             lines.extend(self._parse_statement())
         return lines
 
-    def _parse_statement(self):
+    def _parse_statement(self) -> list[str]:
         if self._check_identifier("if"):
             return self._parse_if_statement()
 
@@ -365,7 +398,7 @@ class _StatementParser:
             self.instance_variables,
         )
 
-    def _parse_if_statement(self):
+    def _parse_if_statement(self) -> list[str]:
         self._consume_identifier("if")
         condition_tokens = self._read_condition_tokens()
         if not condition_tokens:
@@ -392,7 +425,7 @@ class _StatementParser:
 
         return lines
 
-    def _parse_body(self):
+    def _parse_body(self) -> list[str]:
         if self._match("{"):
             lines = self.parse(terminator="}")
             self._consume("}")
@@ -401,11 +434,11 @@ class _StatementParser:
             return []
         return self._parse_statement()
 
-    def _read_condition_tokens(self):
+    def _read_condition_tokens(self) -> list[_Token]:
         if self._match("("):
             return self._read_balanced_tokens("(", ")")
 
-        tokens = []
+        tokens: list[_Token] = []
         depth = 0
         while not self._at_end():
             token = self._peek()
@@ -422,12 +455,12 @@ class _StatementParser:
 
         return tokens
 
-    def _skip_newlines(self):
+    def _skip_newlines(self) -> None:
         while self._match("\n"):
             pass
 
-    def _read_balanced_tokens(self, opener, closer):
-        tokens = []
+    def _read_balanced_tokens(self, opener: str, closer: str) -> list[_Token]:
+        tokens: list[_Token] = []
         depth = 1
         while not self._at_end():
             token = self._advance()
@@ -441,8 +474,8 @@ class _StatementParser:
 
         raise GMLTranspileError(f"Expected '{closer}'")
 
-    def _read_simple_statement(self):
-        tokens = []
+    def _read_simple_statement(self) -> list[_Token]:
+        tokens: list[_Token] = []
         depth = 0
         while not self._at_end():
             token = self._peek()
@@ -461,52 +494,52 @@ class _StatementParser:
 
         return tokens
 
-    def _match(self, value):
+    def _match(self, value: str) -> bool:
         if self._check(value):
             self.position += 1
             return True
         return False
 
-    def _match_identifier(self, value):
+    def _match_identifier(self, value: str) -> bool:
         if self._check_identifier(value):
             self.position += 1
             return True
         return False
 
-    def _consume(self, value):
+    def _consume(self, value: str) -> None:
         if not self._match(value):
             raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
 
-    def _consume_identifier(self, value):
+    def _consume_identifier(self, value: str) -> None:
         if not self._match_identifier(value):
             raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
 
-    def _check(self, value):
+    def _check(self, value: str | None) -> bool:
         if value is None:
             return False
         return self._peek().value == value
 
-    def _check_identifier(self, value):
+    def _check_identifier(self, value: str) -> bool:
         token = self._peek()
         return token.kind == "IDENT" and token.value == value
 
-    def _advance(self):
+    def _advance(self) -> _Token:
         token = self._peek()
         if not self._at_end():
             self.position += 1
         return token
 
-    def _peek(self):
+    def _peek(self) -> _Token:
         if self.position >= len(self.tokens):
             return _EOF
         return self.tokens[self.position]
 
-    def _at_end(self):
+    def _at_end(self) -> bool:
         return self._peek().kind == "EOF"
 
 
-def _tokenize(source):
-    tokens = []
+def _tokenize(source: str) -> list[_Token]:
+    tokens: list[_Token] = []
     index = 0
     while index < len(source):
         char = source[index]
@@ -568,11 +601,11 @@ def _tokenize(source):
     return tokens
 
 
-def _expression_tokens(source):
+def _expression_tokens(source: str) -> list[_Token]:
     return [token for token in _tokenize(source) if token.kind != "NEWLINE"]
 
 
-def _read_string(source, start):
+def _read_string(source: str, start: int) -> str:
     quote = source[start]
     index = start + 1
     escaped = False
@@ -588,19 +621,22 @@ def _read_string(source, start):
     raise GMLTranspileError("Unterminated string literal")
 
 
-def _normalize_local_names(local_names):
+def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
     return frozenset(local_names or [])
 
 
-def _tokens_to_source(tokens):
+def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
 
 
-def _indent_lines(lines):
+def _indent_lines(lines: Iterable[str]) -> list[str]:
     return [f"\t{line}" if line else "" for line in lines]
 
 
-def _emit_expression(expr, local_names=None):
+def _emit_expression(
+    expr: _Expression,
+    local_names: Iterable[str] | None = None,
+) -> tuple[str, int]:
     local_names = _normalize_local_names(local_names)
     if isinstance(expr, _Literal):
         return expr.value, _PRIMARY_PRECEDENCE
@@ -636,13 +672,11 @@ def _emit_expression(expr, local_names=None):
         target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
         index = _emit_expression(expr.index, local_names)[0]
         return f"{target}[{index}]", _POSTFIX_PRECEDENCE
-    if isinstance(expr, _Member):
-        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
-        return f"{target}.{expr.member}", _POSTFIX_PRECEDENCE
-    raise GMLTranspileError("Unknown expression node")
+    target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+    return f"{target}.{expr.member}", _POSTFIX_PRECEDENCE
 
 
-def _emit_builtin_call(expr, local_names):
+def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     if isinstance(expr.callee, _Name) and expr.callee.value == "keyboard_check" and len(expr.args) == 1:
         key = expr.args[0]
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
@@ -659,7 +693,7 @@ def _emit_builtin_call(expr, local_names):
     return None
 
 
-def _emit_binary(expr, local_names):
+def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
     operator = _OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
 
     if expr.operator == "div":
@@ -689,7 +723,13 @@ def _emit_binary(expr, local_names):
     return f"{left} {operator} {right}", precedence
 
 
-def _emit_child(expr, parent_precedence, is_right_child=False, parent_operator=None, local_names=None):
+def _emit_child(
+    expr: _Expression,
+    parent_precedence: int,
+    is_right_child: bool = False,
+    parent_operator: str | None = None,
+    local_names: Iterable[str] | None = None,
+) -> str:
     text, precedence = _emit_expression(expr, local_names)
     needs_parentheses = precedence < parent_precedence
     if is_right_child and precedence == parent_precedence and parent_operator not in _RIGHT_ASSOCIATIVE:
@@ -699,10 +739,10 @@ def _emit_child(expr, parent_precedence, is_right_child=False, parent_operator=N
     return text
 
 
-def _strip_comments(source):
-    result = []
+def _strip_comments(source: str) -> str:
+    result: list[str] = []
     index = 0
-    in_string = None
+    in_string: str | None = None
     escaped = False
     while index < len(source):
         char = source[index]
@@ -742,11 +782,11 @@ def _strip_comments(source):
     return "".join(result)
 
 
-def _split_statements(source):
-    statements = []
+def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnusedFunction]
+    statements: list[str] = []
     start = 0
     depth = 0
-    in_string = None
+    in_string: str | None = None
     escaped = False
 
     for index, char in enumerate(source):
@@ -778,7 +818,11 @@ def _split_statements(source):
     return [statement for statement in statements if statement.strip()]
 
 
-def _transpile_statement(statement, local_names=None, instance_variables=None):
+def _transpile_statement(
+    statement: str,
+    local_names: MutableSet[str] | None = None,
+    instance_variables: MutableSet[str] | None = None,
+) -> list[str]:
     if not statement:
         return []
 
@@ -808,7 +852,11 @@ def _transpile_statement(statement, local_names=None, instance_variables=None):
     return [transpile_gml_expression(statement, local_names)]
 
 
-def _record_instance_assignment(target, local_names, instance_variables):
+def _record_instance_assignment(
+    target: str,
+    local_names: Iterable[str],
+    instance_variables: MutableSet[str] | None,
+) -> None:
     if instance_variables is None:
         return
 
@@ -822,8 +870,11 @@ def _record_instance_assignment(target, local_names, instance_variables):
     instance_variables.add(name)
 
 
-def _transpile_var_statement(statement, local_names=None):
-    lines = []
+def _transpile_var_statement(
+    statement: str,
+    local_names: MutableSet[str] | None = None,
+) -> list[str]:
+    lines: list[str] = []
     if local_names is None:
         local_names = set()
     for declaration in _split_top_level(statement, ","):
@@ -845,7 +896,7 @@ def _transpile_var_statement(statement, local_names=None):
     return lines
 
 
-def _parse_increment_statement(statement):
+def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | None:
     stripped = statement.strip()
     if stripped.endswith("++"):
         return stripped[:-2].strip(), 1
@@ -858,9 +909,9 @@ def _parse_increment_statement(statement):
     return None
 
 
-def _split_assignment(statement):
+def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | None:
     depth = 0
-    in_string = None
+    in_string: str | None = None
     escaped = False
     index = 0
 
@@ -902,17 +953,17 @@ def _split_assignment(statement):
     return None
 
 
-def _is_comparison_assignment_false_positive(statement, index):
+def _is_comparison_assignment_false_positive(statement: str, index: int) -> bool:
     previous_char = statement[index - 1] if index > 0 else ""
     next_char = statement[index + 1] if index + 1 < len(statement) else ""
     return previous_char in "!<>=?" or next_char == "="
 
 
-def _split_top_level(source, separator):
-    parts = []
+def _split_top_level(source: str, separator: str) -> list[str]:
+    parts: list[str] = []
     start = 0
     depth = 0
-    in_string = None
+    in_string: str | None = None
     escaped = False
 
     for index, char in enumerate(source):

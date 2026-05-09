@@ -1,25 +1,50 @@
+from __future__ import annotations
+
 import json
 import math
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import TypedDict, cast
 
 # Import localization manager
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+
+
+class SoundData(TypedDict):
+    name: str
+    soundFile: str
+    volume: float
+    type: int
+    bitDepth: int
+    bitRate: int
+    sampleRate: int
+    compression: int
+    preload: bool
+    audioGroupId: str
+    duration: float
+
+
+class SoundResult(TypedDict):
+    success: bool
+    name: str
+    audio_group: str
 
 class SoundConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None,
-                 organize_by_audio_group=False):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False, max_workers: int | None = None,
+                 organize_by_audio_group: bool = False) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
         self.organize_by_audio_group = bool(organize_by_audio_group)
 
-    def find_sound_files(self):
+    def find_sound_files(self) -> list[str]:
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
-        sound_files = []
+        sound_files: list[str] = []
         for root, _, files in os.walk(sound_folder):
             sound_files.extend(
                 os.path.join(root, file)
@@ -28,7 +53,7 @@ class SoundConverter(BaseConverter):
             )
         return sound_files
 
-    def _parse_sound_yy(self, yy_path):
+    def _parse_sound_yy(self, yy_path: str) -> SoundData | None:
         data = self._read_yy_file(yy_path)
         if data is None:
             self._safe_log(get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=yy_path))
@@ -36,8 +61,8 @@ class SoundConverter(BaseConverter):
 
         try:
             return {
-                'name': data['name'],
-                'soundFile': data.get('soundFile', ''),
+                'name': str(data['name']),
+                'soundFile': str(data.get('soundFile', '')),
                 'volume': float(data.get('volume', 1.0)),
                 'type': int(data.get('type', 0)),
                 'bitDepth': int(data.get('bitDepth', 16)),
@@ -45,7 +70,7 @@ class SoundConverter(BaseConverter):
                 'sampleRate': int(data.get('sampleRate', 44100)),
                 'compression': int(data.get('compression', 0)),
                 'preload': bool(data.get('preload', True)),
-                'audioGroupId': data.get('audioGroupId', {}).get('name', 'audiogroup_default'),
+                'audioGroupId': str(cast(JsonDict, data.get('audioGroupId', {})).get('name', 'audiogroup_default')),
                 'duration': float(data.get('duration', 0.0)),
             }
         except (KeyError, TypeError, ValueError):
@@ -53,13 +78,13 @@ class SoundConverter(BaseConverter):
             return None
 
     @staticmethod
-    def _volume_to_db(volume):
+    def _volume_to_db(volume: float) -> float:
         if volume <= 0.0:
             return -80.0
         return 20.0 * math.log10(volume)
 
-    def _build_output_paths(self, sound_name, subfolder, audio_group):
-        output_parts = []
+    def _build_output_paths(self, sound_name: str, subfolder: str, audio_group: str) -> tuple[str, str]:
+        output_parts: list[str] = []
 
         if self.organize_by_audio_group:
             output_parts.append(audio_group or 'audiogroup_default')
@@ -73,7 +98,7 @@ class SoundConverter(BaseConverter):
         res_subfolder = '/'.join(output_parts)
         return output_dir, res_subfolder
 
-    def _write_audio_group_map(self, audio_group_map):
+    def _write_audio_group_map(self, audio_group_map: dict[str, str]) -> None:
         map_path = os.path.join(self.godot_sounds_path, 'audio_group_map.json')
         ordered_map = {name: audio_group_map[name] for name in sorted(audio_group_map)}
         payload = {
@@ -89,7 +114,7 @@ class SoundConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Sounds_MapGenerated").format(
                 map_path='sounds/audio_group_map.json', sounds_num=len(ordered_map)))
 
-    def _generate_import_file(self, sound_file, subfolder=""):
+    def _generate_import_file(self, sound_file: str, subfolder: str = "") -> str | None:
         ext = os.path.splitext(sound_file)[1].lower()
 
         if subfolder:
@@ -161,7 +186,7 @@ class SoundConverter(BaseConverter):
             )
         return None
 
-    def _process_sound(self, yy_path):
+    def _process_sound(self, yy_path: str) -> SoundResult | None:
         if not self.conversion_running():
             return None
 
@@ -213,7 +238,7 @@ class SoundConverter(BaseConverter):
 
         return {'success': True, 'name': sound_name, 'audio_group': audio_group}
 
-    def convert_sounds(self):
+    def convert_sounds(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_sounds_path, exist_ok=True)
 
@@ -231,10 +256,10 @@ class SoundConverter(BaseConverter):
 
         total_sounds = len(sound_files)
         processed_sounds = 0
-        audio_group_map = {}
+        audio_group_map: dict[str, str] = {}
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {executor.submit(self._process_sound, sf): sf for sf in sound_files}
+            futures_map: dict[Future[SoundResult | None], str] = {executor.submit(self._process_sound, sf): sf for sf in sound_files}
             for future in as_completed(futures_map):
                 result = future.result()
                 if result is None:
@@ -254,5 +279,5 @@ class SoundConverter(BaseConverter):
 
         self.log_callback(get_localized("Console_Convertor_Sounds_Complete"))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_sounds()

@@ -1,7 +1,8 @@
 import webbrowser
+from collections.abc import Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import Qt, QEvent
+from PySide6.QtGui import QCursor, QEnterEvent, QIcon, QMouseEvent
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 
 from src.gui.theme import THEME
@@ -10,7 +11,7 @@ from src.localization import get_localized
 
 
 class ClickableLabel(QLabel):
-    def __init__(self, text, callback, parent=None):
+    def __init__(self, text: str, callback: Callable[[], object], parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self._callback = callback
         self._default_color = THEME["fg_primary"]
@@ -18,24 +19,30 @@ class ClickableLabel(QLabel):
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.setStyleSheet(f"font-size: {THEME['font_size_small']}pt;")
 
-    def enterEvent(self, event):
+    def enterEvent(self, event: QEnterEvent) -> None:
         self.setStyleSheet(
             f"color: {self._hover_color}; font-size: {THEME['font_size_small']}pt;"
         )
         super().enterEvent(event)
 
-    def leaveEvent(self, event):
+    def leaveEvent(self, event: QEvent) -> None:
         self.setStyleSheet(f"font-size: {THEME['font_size_small']}pt;")
         super().leaveEvent(event)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._callback()
         super().mousePressEvent(event)
 
 
 class InfoBar(QWidget):
-    def __init__(self, on_version_click, on_language_click, language_icon, parent=None):
+    def __init__(
+        self,
+        on_version_click: Callable[[], object],
+        on_language_click: Callable[[], object],
+        language_icon: QIcon,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

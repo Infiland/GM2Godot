@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 import shutil
@@ -5,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from datetime import date
+from typing import Any, ClassVar, cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -25,6 +28,10 @@ def _get_tcc_path():
 @unittest.skipUnless(_get_tcc_path(), "TCC_PROJECT_PATH not set or not a valid directory")
 class TestTCCConversion(unittest.TestCase):
     """Integration test: convert The Colorful Creature project to Godot."""
+
+    tcc_path: ClassVar[str | None]
+    godot_dir: ClassVar[str]
+    logs: ClassVar[list[str]]
 
     @classmethod
     def setUpClass(cls):
@@ -53,10 +60,19 @@ class TestTCCConversion(unittest.TestCase):
         conversion_running = threading.Event()
         conversion_running.set()
 
-        converter = Converter(
-            log_callback=lambda msg: cls.logs.append(msg),
-            progress_callback=lambda v: None,
-            status_callback=lambda msg: None,
+        def log_message(msg: object) -> None:
+            cls.logs.append(str(msg))
+
+        def ignore_progress(_value: object) -> None:
+            return None
+
+        def ignore_status(_msg: object) -> None:
+            return None
+
+        converter = cast(Any, Converter)(
+            log_callback=log_message,
+            progress_callback=ignore_progress,
+            status_callback=ignore_status,
             conversion_running=conversion_running,
             compact_logging=True,
         )
@@ -64,7 +80,7 @@ class TestTCCConversion(unittest.TestCase):
         converter.convert(cls.tcc_path, "windows", cls.godot_dir, settings)
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         if hasattr(cls, "godot_dir") and os.path.isdir(cls.godot_dir):
             shutil.rmtree(cls.godot_dir)
 
@@ -75,8 +91,8 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_known_sprites_exist(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")
-        all_dirs = set()
-        for root, dirs, _ in os.walk(sprites_dir):
+        all_dirs: set[str] = set()
+        for _root, dirs, _ in os.walk(sprites_dir):
             all_dirs.update(dirs)
         for name in ("s_C1AIcon", "s_C2AIcon", "s_C3AIcon"):
             self.assertIn(name, all_dirs, f"Expected sprites/{name}/ directory (nested)")
@@ -94,8 +110,8 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_sprites_count(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")
-        sprite_dirs = []
-        for root, dirs, files in os.walk(sprites_dir):
+        sprite_dirs: list[str] = []
+        for root, _dirs, files in os.walk(sprites_dir):
             if any(f.endswith(".png") for f in files):
                 sprite_dirs.append(root)
         self.assertGreater(len(sprite_dirs), 800, f"Expected 800+ sprite directories, got {len(sprite_dirs)}")
@@ -108,7 +124,7 @@ class TestTCCConversion(unittest.TestCase):
     def test_known_sound_exists(self):
         sounds_dir = os.path.join(self.godot_dir, "sounds")
         found = False
-        for root, _, files in os.walk(sounds_dir):
+        for _root, _, files in os.walk(sounds_dir):
             if "m_ahoy.wav" in files:
                 found = True
                 break
@@ -116,8 +132,8 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_sounds_count(self):
         sounds_dir = os.path.join(self.godot_dir, "sounds")
-        sound_files = []
-        for root, _, files in os.walk(sounds_dir):
+        sound_files: list[str] = []
+        for _root, _, files in os.walk(sounds_dir):
             sound_files.extend(f for f in files if f.endswith((".wav", ".mp3", ".ogg")))
         self.assertGreater(len(sound_files), 50, f"Expected 50+ sound files, got {len(sound_files)}")
 
@@ -137,7 +153,7 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_known_notes_converted(self):
         notes_dir = os.path.join(self.godot_dir, "notes")
-        all_files = {}
+        all_files: dict[str, str] = {}
         for root, _, files in os.walk(notes_dir):
             for f in files:
                 all_files[f] = os.path.join(root, f)

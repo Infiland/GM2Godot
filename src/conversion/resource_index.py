@@ -1,8 +1,23 @@
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import (
+    ConversionRunning,
+    JsonDict,
+    JsonList,
+    LogCallback,
+    ProgressCallback,
+)
+
+
+def _empty_json_dict() -> JsonDict:
+    return cast(JsonDict, {})
+
+
+def _empty_json_list() -> JsonList:
+    return cast(JsonList, [])
 
 
 @dataclass(frozen=True)
@@ -26,51 +41,54 @@ class IndexedRoom:
     yyp_path: str
     godot_path: str
     subfolder: str = ""
-    room_settings: Dict = field(default_factory=dict)
-    physics_settings: Dict = field(default_factory=dict)
-    view_settings: Dict = field(default_factory=dict)
-    views: List = field(default_factory=list)
-    layers: List = field(default_factory=list)
-    instance_creation_order: List = field(default_factory=list)
-    parent_room: Optional[Dict] = None
+    room_settings: JsonDict = field(default_factory=_empty_json_dict)
+    physics_settings: JsonDict = field(default_factory=_empty_json_dict)
+    view_settings: JsonDict = field(default_factory=_empty_json_dict)
+    views: JsonList = field(default_factory=_empty_json_list)
+    layers: JsonList = field(default_factory=_empty_json_list)
+    instance_creation_order: JsonList = field(default_factory=_empty_json_list)
+    parent_room: JsonDict | None = None
     creation_code_file: str = ""
     inherit_code: bool = False
     inherit_creation_order: bool = False
     inherit_layers: bool = False
     is_dnd: bool = False
-    raw_data: Dict = field(default_factory=dict)
+    raw_data: JsonDict = field(default_factory=_empty_json_dict)
 
 
 class GameMakerResourceIndex(BaseConverter):
     """Index GameMaker project resources for converters that need cross references."""
 
-    RESOURCE_EXTENSIONS = {
+    RESOURCE_EXTENSIONS: ClassVar[dict[str, str]] = {
         "rooms": ".tscn",
         "objects": ".tscn",
         "sprites": ".tscn",
         "tilesets": ".tres",
     }
 
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print,
-                 progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False,
-                 max_workers=None):
+    def __init__(self, gm_project_path: str, godot_project_path: str,
+                 log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None,
+                 conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None,
+                 compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging,
                          max_workers=max_workers)
-        self.yyp_path = None
-        self.yyp_data = None
-        self.resources = self._empty_resources()
-        self.rooms = {}
-        self.room_order = []
+        self.yyp_path: str | None = None
+        self.yyp_data: JsonDict | None = None
+        self.resources: dict[str, dict[str, IndexedResource]] = self._empty_resources()
+        self.rooms: dict[str, IndexedRoom] = {}
+        self.room_order: list[str] = []
         self.used_room_order_fallback = False
 
-    def convert_all(self):
+    def convert_all(self) -> "GameMakerResourceIndex":
         """Build the in-memory index. No Godot files are written."""
         return self.build()
 
-    def build(self):
+    def build(self) -> "GameMakerResourceIndex":
         """Build and return this resource index."""
         self.resources = self._empty_resources()
         self.rooms = {}
@@ -99,7 +117,7 @@ class GameMakerResourceIndex(BaseConverter):
 
         return self
 
-    def find_yyp_path(self):
+    def find_yyp_path(self) -> str | None:
         """Return the first .yyp path in the GameMaker project, if any."""
         try:
             yyp_files = sorted(
@@ -113,41 +131,41 @@ class GameMakerResourceIndex(BaseConverter):
             return None
         return os.path.join(self.gm_project_path, yyp_files[0])
 
-    def get_resource(self, kind, name):
+    def get_resource(self, kind: str, name: str) -> IndexedResource | None:
         """Return an indexed non-room resource, or a room resource, by kind/name."""
         return self.resources.get(kind, {}).get(name)
 
-    def get_resources(self, kind):
+    def get_resources(self, kind: str) -> dict[str, IndexedResource]:
         """Return all indexed resources for a supported kind."""
         return dict(self.resources.get(kind, {}))
 
-    def get_room(self, name):
+    def get_room(self, name: str) -> IndexedRoom | None:
         """Return normalized room data by name."""
         return self.rooms.get(name)
 
-    def ordered_rooms(self):
+    def ordered_rooms(self) -> list[IndexedRoom]:
         """Return normalized rooms in GameMaker room order when available."""
         return [self.rooms[name] for name in self.room_order if name in self.rooms]
 
-    def first_room(self):
+    def first_room(self) -> IndexedRoom | None:
         """Return the first GameMaker room, or None when no room is indexed."""
         ordered = self.ordered_rooms()
         return ordered[0] if ordered else None
 
-    def resolve_gm_path(self, kind, name):
+    def resolve_gm_path(self, kind: str, name: str) -> str | None:
         """Return the source GameMaker .yy path for a resource, if indexed."""
         resource = self.get_resource(kind, name)
         return resource.yy_path if resource else None
 
-    def resolve_godot_path(self, kind, name):
+    def resolve_godot_path(self, kind: str, name: str) -> str | None:
         """Return the generated res:// path for a resource, if indexed."""
         resource = self.get_resource(kind, name)
         return resource.godot_path if resource else None
 
-    def _empty_resources(self):
+    def _empty_resources(self) -> dict[str, dict[str, IndexedResource]]:
         return {kind: {} for kind in self.RESOURCE_EXTENSIONS}
 
-    def _index_yyp_resources(self, yyp_data):
+    def _index_yyp_resources(self, yyp_data: JsonDict) -> None:
         for resource_entry in yyp_data.get("resources", []):
             res_id = resource_entry.get("id", {})
             yyp_path = res_id.get("path", "")
@@ -168,7 +186,7 @@ class GameMakerResourceIndex(BaseConverter):
 
             self.resources[kind][name] = self._make_resource(kind, name, yy_path, yyp_path)
 
-    def _index_disk_resources(self):
+    def _index_disk_resources(self) -> None:
         for kind in self.RESOURCE_EXTENSIONS:
             kind_dir = os.path.join(self.gm_project_path, kind)
             if not os.path.isdir(kind_dir):
@@ -184,13 +202,13 @@ class GameMakerResourceIndex(BaseConverter):
                     kind, name, yy_path, yyp_path
                 )
 
-    def _parse_indexed_rooms(self):
+    def _parse_indexed_rooms(self) -> None:
         for name, resource in self.resources["rooms"].items():
             room = self._parse_room(resource)
             if room is not None:
                 self.rooms[name] = room
 
-    def _parse_room(self, resource):
+    def _parse_room(self, resource: IndexedResource) -> IndexedRoom | None:
         data = self._read_yy_file(resource.yy_path)
         if data is None:
             self._safe_log(
@@ -219,7 +237,7 @@ class GameMakerResourceIndex(BaseConverter):
             raw_data=data,
         )
 
-    def _apply_yyp_room_order(self, yyp_data):
+    def _apply_yyp_room_order(self, yyp_data: JsonDict) -> None:
         if "RoomOrderNodes" not in yyp_data:
             self.used_room_order_fallback = True
             self._safe_log(
@@ -228,7 +246,7 @@ class GameMakerResourceIndex(BaseConverter):
             self.room_order = sorted(self.rooms)
             return
 
-        ordered = []
+        ordered: list[str] = []
         for room_node in yyp_data.get("RoomOrderNodes", []):
             room_id = room_node.get("roomId", {})
             name = room_id.get("name") or self._name_from_yyp_path(room_id.get("path", ""))
@@ -241,7 +259,9 @@ class GameMakerResourceIndex(BaseConverter):
 
         self.room_order = ordered
 
-    def _make_resource(self, kind, name, yy_path, yyp_path):
+    def _make_resource(
+        self, kind: str, name: str, yy_path: str, yyp_path: str
+    ) -> IndexedResource:
         subfolder = self._get_subfolder_from_yy(yy_path)
         return IndexedResource(
             kind=kind,
@@ -253,7 +273,7 @@ class GameMakerResourceIndex(BaseConverter):
         )
 
     @classmethod
-    def godot_res_path(cls, kind, name, subfolder=""):
+    def godot_res_path(cls, kind: str, name: str, subfolder: str = "") -> str:
         """Build a generated res:// path using existing converter conventions."""
         extension = cls.RESOURCE_EXTENSIONS[kind]
         path_parts = ["res:/", kind]
@@ -263,13 +283,13 @@ class GameMakerResourceIndex(BaseConverter):
         return "/".join(path_parts)
 
     @staticmethod
-    def _kind_from_yyp_path(yyp_path):
+    def _kind_from_yyp_path(yyp_path: str) -> str:
         if not yyp_path or "/" not in yyp_path:
             return ""
         return yyp_path.split("/", 1)[0]
 
     @staticmethod
-    def _name_from_yyp_path(yyp_path):
+    def _name_from_yyp_path(yyp_path: str) -> str:
         if not yyp_path:
             return ""
         filename = os.path.basename(yyp_path)

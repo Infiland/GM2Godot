@@ -1,25 +1,41 @@
+from __future__ import annotations
+
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TypedDict
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.project_godot import GodotProjectFile
+from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.room_creation_code import (
     ROOM_EXECUTION_ORDER,
     instance_creation_order_names,
     resolve_room_creation_code,
 )
 from src.conversion.room_layers import godot_string, serialize_room_layers
-from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+
+
+class RoomProcessResult(TypedDict):
+    success: bool
+    name: str
+    width: object
+    height: object
+    scene_path: str
 
 
 class RoomConverter(BaseConverter):
     """Convert GameMaker rooms into minimal Godot room scenes."""
 
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print,
-                 progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False,
-                 max_workers=None, resource_index=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath,
+                  log_callback: LogCallback = print,
+                  progress_callback: ProgressCallback | None = None,
+                  conversion_running: ConversionRunning | None = None,
+                  update_log_callback: LogCallback | None = None,
+                  compact_logging: bool = False,
+                  max_workers: int | None = None,
+                  resource_index: GameMakerResourceIndex | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging,
@@ -27,7 +43,7 @@ class RoomConverter(BaseConverter):
         self.godot_rooms_path = os.path.join(self.godot_project_path, "rooms")
         self.resource_index = resource_index
 
-    def _build_resource_index(self):
+    def _build_resource_index(self) -> GameMakerResourceIndex:
         if self.resource_index is not None:
             return self.resource_index
         return GameMakerResourceIndex(
@@ -41,7 +57,9 @@ class RoomConverter(BaseConverter):
             max_workers=self.max_workers,
         ).build()
 
-    def _generate_room_scene(self, room, resource_index=None):
+    def _generate_room_scene(
+        self, room: IndexedRoom, resource_index: GameMakerResourceIndex | None = None
+    ) -> str:
         room_settings = room.room_settings
         physics_settings = room.physics_settings
         room_creation_code = resolve_room_creation_code(
@@ -95,7 +113,7 @@ class RoomConverter(BaseConverter):
         lines.extend(serialized_layers.node_lines)
         return "\n".join(lines)
 
-    def _room_output_path(self, room):
+    def _room_output_path(self, room: IndexedRoom) -> str:
         if room.godot_path.startswith("res://"):
             relative_path = room.godot_path[len("res://"):]
             return os.path.join(self.godot_project_path, *relative_path.split("/"))
@@ -106,7 +124,9 @@ class RoomConverter(BaseConverter):
             )
         return os.path.join(self.godot_rooms_path, room.name, room.name + ".tscn")
 
-    def _process_room(self, room, resource_index=None):
+    def _process_room(
+        self, room: IndexedRoom, resource_index: GameMakerResourceIndex | None = None
+    ) -> RoomProcessResult | None:
         if not self.conversion_running():
             return None
 
@@ -125,7 +145,9 @@ class RoomConverter(BaseConverter):
             "scene_path": room.godot_path,
         }
 
-    def _set_startup_scene(self, index, generated_scene_paths):
+    def _set_startup_scene(
+        self, index: GameMakerResourceIndex, generated_scene_paths: dict[str, str]
+    ) -> None:
         if not generated_scene_paths:
             self.log_callback(
                 "Warning: No room scene generated; leaving project.godot main_scene unchanged."
@@ -155,7 +177,7 @@ class RoomConverter(BaseConverter):
                 "Warning: project.godot not found; could not set startup scene."
             )
 
-    def convert_rooms(self):
+    def convert_rooms(self) -> None:
         index = self._build_resource_index()
         rooms = index.ordered_rooms()
         if not rooms:
@@ -165,7 +187,7 @@ class RoomConverter(BaseConverter):
 
         total = len(rooms)
         processed = 0
-        generated_scene_paths = {}
+        generated_scene_paths: dict[str, str] = {}
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
@@ -197,5 +219,5 @@ class RoomConverter(BaseConverter):
         self._set_startup_scene(index, generated_scene_paths)
         self.log_callback("Room conversion completed.")
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_rooms()

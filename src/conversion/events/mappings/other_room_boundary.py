@@ -1,7 +1,7 @@
-from src.conversion.events.base import EventMapping
+from src.conversion.events.base import EventMapping, StaticMappings
 
 
-STATIC_MAPPINGS = {
+STATIC_MAPPINGS: StaticMappings = {
     (7, 0): EventMapping("_on_outside_room", "", 14, "Other_0.gml"),
     (7, 1): EventMapping("_on_intersect_boundary", "", 14, "Other_1.gml"),
 }

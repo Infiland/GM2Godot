@@ -1,23 +1,56 @@
+from __future__ import annotations
+
 import os
 import re
 import json
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Literal, NotRequired, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+
+
+class TilesetData(TypedDict):
+    sprite_name: str
+    sprite_path: str
+    tileWidth: int
+    tileHeight: int
+    tilehsep: int
+    tilevsep: int
+    tilexoff: int
+    tileyoff: int
+    tile_count: int
+
+
+class TilesetSuccess(TypedDict):
+    success: Literal[True]
+    name: str
+    tileset_data: TilesetData
+
+
+class TilesetFailure(TypedDict):
+    success: Literal[False]
+    name: str
+    error: str
+    sprite_name: NotRequired[str]
+
+
+TilesetResult = TilesetSuccess | TilesetFailure
 
 
 class TileSetConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print,
-                 progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_tilesets_path = os.path.join(self.godot_project_path, 'tilesets')
 
-    def _get_valid_tileset_names(self):
+    def _get_valid_tileset_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of tileset name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
@@ -33,14 +66,14 @@ class TileSetConverter(BaseConverter):
                 content = f.read()
 
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
-            valid_tilesets = {}
-            for resource in data.get('resources', []):
-                res_id = resource.get('id', {})
-                path = res_id.get('path', '')
+            valid_tilesets: dict[str, str] = {}
+            for resource in cast(list[JsonDict], data.get('resources', [])):
+                res_id = cast(JsonDict, resource.get('id', {}))
+                path = str(res_id.get('path', ''))
                 if path.startswith('tilesets/'):
-                    name = res_id.get('name', '')
+                    name = str(res_id.get('name', ''))
                     yy_path = os.path.join(self.gm_project_path, 'tilesets', name, name + '.yy')
                     valid_tilesets[name] = self._get_subfolder_from_yy(yy_path)
 
@@ -48,7 +81,7 @@ class TileSetConverter(BaseConverter):
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
 
-    def _parse_tileset_yy(self, tileset_name):
+    def _parse_tileset_yy(self, tileset_name: str) -> TilesetData | None:
         """Read and parse a tileset .yy file.
 
         Returns a dict with tileset properties, or None on failure.
@@ -58,12 +91,12 @@ class TileSetConverter(BaseConverter):
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
-            sprite_id = data.get('spriteId', {})
+            sprite_id = cast(JsonDict, data.get('spriteId', {}))
             return {
-                "sprite_name": sprite_id.get('name', ''),
-                "sprite_path": sprite_id.get('path', ''),
+                "sprite_name": str(sprite_id.get('name', '')),
+                "sprite_path": str(sprite_id.get('path', '')),
                 "tileWidth": int(data.get('tileWidth', 16)),
                 "tileHeight": int(data.get('tileHeight', 16)),
                 "tilehsep": int(data.get('tilehsep', 0)),
@@ -75,7 +108,7 @@ class TileSetConverter(BaseConverter):
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
 
-    def _find_sprite_image(self, sprite_name):
+    def _find_sprite_image(self, sprite_name: str) -> str | None:
         """Find the primary layer image for a sprite referenced by a tileset.
 
         Parses the sprite's .yy to identify the first visible layer, then
@@ -89,22 +122,23 @@ class TileSetConverter(BaseConverter):
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
             # Get the first frame GUID
-            frames = data.get('frames', [])
+            frames = cast(list[JsonDict], data.get('frames', []))
             if not frames:
                 return None
-            frame_guid = frames[0].get('name', '')
+            frame_guid = str(frames[0].get('name', ''))
 
             # Get the primary visible layer GUID
             primary_layer_guid = None
-            for layer in data.get('layers', []):
+            layers = cast(list[JsonDict], data.get('layers', []))
+            for layer in layers:
                 if layer.get('visible', True):
-                    primary_layer_guid = layer.get('name', '')
+                    primary_layer_guid = str(layer.get('name', ''))
                     break
-            if primary_layer_guid is None and data.get('layers'):
-                primary_layer_guid = data['layers'][0].get('name', '')
+            if primary_layer_guid is None and layers:
+                primary_layer_guid = str(layers[0].get('name', ''))
 
             if not frame_guid or not primary_layer_guid:
                 return None
@@ -127,7 +161,7 @@ class TileSetConverter(BaseConverter):
 
         return None
 
-    def _generate_tileset_tres(self, tileset_name, tileset_data, subfolder=""):
+    def _generate_tileset_tres(self, tileset_name: str, tileset_data: TilesetData, subfolder: str = "") -> str:
         """Generate a Godot TileSet .tres resource string."""
         tile_w = tileset_data["tileWidth"]
         tile_h = tileset_data["tileHeight"]
@@ -141,7 +175,7 @@ class TileSetConverter(BaseConverter):
         else:
             res_path = f"res://tilesets/{tileset_name}/{tileset_name}.png"
 
-        lines = []
+        lines: list[str] = []
         lines.append('[gd_resource type="TileSet" format=3]')
         lines.append('')
         lines.append(f'[ext_resource type="Texture2D" path="{res_path}" id="1"]')
@@ -163,7 +197,7 @@ class TileSetConverter(BaseConverter):
 
         return '\n'.join(lines)
 
-    def _process_tileset(self, tileset_name, subfolder=""):
+    def _process_tileset(self, tileset_name: str, subfolder: str = "") -> TilesetResult | None:
         """Process a single tileset: parse, copy image, generate .tres.
 
         Returns a dict with conversion results, or None if stopped.
@@ -202,7 +236,7 @@ class TileSetConverter(BaseConverter):
 
         return {"success": True, "name": tileset_name, "tileset_data": tileset_data}
 
-    def convert_tilesets(self):
+    def convert_tilesets(self) -> None:
         """Main tileset conversion method."""
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_tilesets_path, exist_ok=True)
@@ -215,7 +249,7 @@ class TileSetConverter(BaseConverter):
             return
 
         # Discover tileset directories by walking the tilesets folder
-        tileset_names = []
+        tileset_names: list[str] = []
         for entry in os.listdir(gm_tilesets_path):
             entry_path = os.path.join(gm_tilesets_path, entry)
             yy_path = os.path.join(entry_path, entry + '.yy')
@@ -224,7 +258,7 @@ class TileSetConverter(BaseConverter):
 
         # Filter against .yyp if available
         valid_names = self._get_valid_tileset_names()
-        tileset_subfolders = {}
+        tileset_subfolders: dict[str, str] = {}
         if valid_names is not None:
             tileset_names = [n for n in tileset_names if n in valid_names]
             tileset_subfolders = {n: valid_names[n] for n in tileset_names}
@@ -241,7 +275,7 @@ class TileSetConverter(BaseConverter):
         processed_tilesets = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {
+            futures_map: dict[Future[TilesetResult | None], str] = {
                 executor.submit(self._process_tileset, name, tileset_subfolders.get(name, "")): name
                 for name in tileset_names
             }
@@ -254,12 +288,13 @@ class TileSetConverter(BaseConverter):
                 processed_tilesets += 1
 
                 if result["success"]:
-                    td = result["tileset_data"]
+                    success_result = cast(TilesetSuccess, result)
+                    td = success_result["tileset_data"]
                     if self.compact_logging:
-                        self._safe_log_progress(result["name"], processed_tilesets, total_tilesets)
+                        self._safe_log_progress(success_result["name"], processed_tilesets, total_tilesets)
                     else:
                         self._safe_log(get_localized("Console_Convertor_Tilesets_Converted").format(
-                            name=result["name"],
+                            name=success_result["name"],
                             tile_count=td["tile_count"],
                             tileWidth=td["tileWidth"],
                             tileHeight=td["tileHeight"]))
@@ -268,5 +303,5 @@ class TileSetConverter(BaseConverter):
 
         self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_tilesets()

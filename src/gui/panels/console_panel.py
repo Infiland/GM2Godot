@@ -5,7 +5,7 @@ from src.gui.theme import THEME
 
 
 class ConsolePanel(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -26,7 +26,7 @@ class ConsolePanel(QWidget):
         self._success_format = QTextCharFormat()
         self._success_format.setForeground(QColor(THEME["log_success"]))
 
-    def _get_format(self, message):
+    def _get_format(self, message: str) -> QTextCharFormat:
         msg_lower = message.lower()
         if msg_lower.startswith("warning:") or ": warning:" in msg_lower:
             return self._warning_format
@@ -34,7 +34,7 @@ class ConsolePanel(QWidget):
             return self._error_format
         return self._default_format
 
-    def append_log(self, message, success=False):
+    def append_log(self, message: str, success: bool = False) -> None:
         fmt = self._success_format if success else self._get_format(message)
         cursor = self._text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -44,7 +44,7 @@ class ConsolePanel(QWidget):
         cursor.insertText(message)
         self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
 
-    def update_last_line(self, message):
+    def update_last_line(self, message: str) -> None:
         fmt = self._get_format(message)
         cursor = self._text_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -54,5 +54,5 @@ class ConsolePanel(QWidget):
         cursor.insertText(message)
         self._text_edit.moveCursor(QTextCursor.MoveOperation.End)
 
-    def clear(self):
+    def clear(self) -> None:
         self._text_edit.clear()

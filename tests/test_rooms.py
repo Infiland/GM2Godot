@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+from typing import Any, Callable
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -12,16 +15,20 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.rooms import RoomConverter
 
 
-def _write_file(path, content):
+def _write_file(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
-def _make_yyp(room_names, room_order=None, extra_resources=None):
+def _make_yyp(
+    room_names: list[str],
+    room_order: list[str] | None = None,
+    extra_resources: list[tuple[str, str]] | None = None,
+) -> str:
     room_order = room_order or room_names
     extra_resources = extra_resources or []
-    resources = []
+    resources: list[str] = []
     for name in room_names:
         resources.append(
             '    {{"id":{{"name":"{name}",'
@@ -32,7 +39,7 @@ def _make_yyp(room_names, room_order=None, extra_resources=None):
             '    {{"id":{{"name":"{name}",'
             '"path":"{kind}/{name}/{name}.yy",}},}}'.format(kind=kind, name=name)
         )
-    order_entries = []
+    order_entries: list[str] = []
     for name in room_order:
         order_entries.append(
             '    {{"roomId":{{"name":"{name}",'
@@ -48,10 +55,12 @@ def _make_yyp(room_names, room_order=None, extra_resources=None):
     )
 
 
-def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
-                  persistent=False, volume=1.0, physics_world=False, layers=None,
-                  instance_creation_order=None, creation_code_file="",
-                  inherit_code=False, is_dnd=False):
+def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int = 1024,
+                  height: int = 768, persistent: bool = False, volume: float = 1.0,
+                  physics_world: bool = False, layers: list[dict[str, Any]] | None = None,
+                  instance_creation_order: list[dict[str, Any]] | None = None,
+                  creation_code_file: str = "", inherit_code: bool = False,
+                  is_dnd: bool = False) -> str:
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
     inherit_code_value = "true" if inherit_code else "false"
@@ -104,7 +113,7 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy", width=1024, height=768,
     )
 
 
-def _make_object_yy(name, parent_path="folders/Objects.yy"):
+def _make_object_yy(name: str, parent_path: str = "folders/Objects.yy") -> str:
     return (
         '{{\n'
         '  "$GMObject":"",\n'
@@ -117,7 +126,7 @@ def _make_object_yy(name, parent_path="folders/Objects.yy"):
     ).format(name=name, parent_path=parent_path)
 
 
-def _make_sprite_yy(name, parent_path="folders/Sprites.yy"):
+def _make_sprite_yy(name: str, parent_path: str = "folders/Sprites.yy") -> str:
     return (
         '{{\n'
         '  "$GMSprite":"",\n'
@@ -130,17 +139,19 @@ def _make_sprite_yy(name, parent_path="folders/Sprites.yy"):
 
 
 class TestRoomConverter(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
-        self.progress = []
+        self.logs: list[str] = []
+        self.progress: list[int | float] = []
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, conversion_running=lambda: True):
+    def _make_converter(
+        self, conversion_running: Callable[[], bool] = lambda: True
+    ) -> RoomConverter:
         return RoomConverter(
             self.gm_dir,
             self.godot_dir,
@@ -150,26 +161,33 @@ class TestRoomConverter(unittest.TestCase):
             max_workers=1,
         )
 
-    def _write_yyp(self, room_names, room_order=None, extra_resources=None):
+    def _write_yyp(
+        self,
+        room_names: list[str],
+        room_order: list[str] | None = None,
+        extra_resources: list[tuple[str, str]] | None = None,
+    ) -> None:
         _write_file(
             os.path.join(self.gm_dir, "TestProject.yyp"),
             _make_yyp(room_names, room_order, extra_resources),
         )
 
-    def _write_project_godot(self, content='[application]\nconfig/name="Existing"\n'):
+    def _write_project_godot(
+        self, content: str = '[application]\nconfig/name="Existing"\n'
+    ) -> None:
         _write_file(os.path.join(self.godot_dir, "project.godot"), content)
 
-    def _write_room(self, name, **kwargs):
+    def _write_room(self, name: str, **kwargs: Any) -> str:
         room_path = os.path.join(self.gm_dir, "rooms", name, name + ".yy")
         _write_file(room_path, _make_room_yy(name, **kwargs))
         return room_path
 
-    def _write_object(self, name, parent_path="folders/Objects.yy"):
+    def _write_object(self, name: str, parent_path: str = "folders/Objects.yy") -> str:
         object_path = os.path.join(self.gm_dir, "objects", name, name + ".yy")
         _write_file(object_path, _make_object_yy(name, parent_path))
         return object_path
 
-    def _write_object_scene(self, name, *subfolders):
+    def _write_object_scene(self, name: str, *subfolders: str) -> str:
         scene_path = os.path.join(
             self.godot_dir,
             "objects",
@@ -180,12 +198,12 @@ class TestRoomConverter(unittest.TestCase):
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Node2D"]\n'.format(name))
         return scene_path
 
-    def _write_sprite(self, name, parent_path="folders/Sprites.yy"):
+    def _write_sprite(self, name: str, parent_path: str = "folders/Sprites.yy") -> str:
         sprite_path = os.path.join(self.gm_dir, "sprites", name, name + ".yy")
         _write_file(sprite_path, _make_sprite_yy(name, parent_path))
         return sprite_path
 
-    def _write_sprite_scene(self, name, *subfolders):
+    def _write_sprite_scene(self, name: str, *subfolders: str) -> str:
         scene_path = os.path.join(
             self.godot_dir,
             "sprites",
@@ -196,7 +214,7 @@ class TestRoomConverter(unittest.TestCase):
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Area2D"]\n'.format(name))
         return scene_path
 
-    def _read_scene(self, room_name, *subfolders):
+    def _read_scene(self, room_name: str, *subfolders: str) -> str:
         tscn_path = os.path.join(
             self.godot_dir,
             "rooms",

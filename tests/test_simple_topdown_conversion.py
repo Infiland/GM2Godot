@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import shutil
 import sys
@@ -5,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from datetime import date
+from typing import Any, ClassVar, cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -28,6 +31,10 @@ def _get_simple_topdown_path():
 )
 class TestSimpleTopDownConversion(unittest.TestCase):
     """Integration test: convert the SimpleTopDown GameMaker test project."""
+
+    project_path: ClassVar[str | None]
+    godot_dir: ClassVar[str]
+    logs: ClassVar[list[str]]
 
     @classmethod
     def setUpClass(cls):
@@ -54,28 +61,37 @@ class TestSimpleTopDownConversion(unittest.TestCase):
         conversion_running = threading.Event()
         conversion_running.set()
 
-        converter = Converter(
-            log_callback=lambda msg: cls.logs.append(msg),
-            progress_callback=lambda v: None,
-            status_callback=lambda msg: None,
+        def log_message(msg: object) -> None:
+            cls.logs.append(str(msg))
+
+        def ignore_progress(_value: object) -> None:
+            return None
+
+        def ignore_status(_msg: object) -> None:
+            return None
+
+        converter = cast(Any, Converter)(
+            log_callback=log_message,
+            progress_callback=ignore_progress,
+            status_callback=ignore_status,
             conversion_running=conversion_running,
             compact_logging=True,
         )
         converter.convert(cls.project_path, "windows", cls.godot_dir, settings)
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         if hasattr(cls, "godot_dir") and os.path.isdir(cls.godot_dir):
             shutil.rmtree(cls.godot_dir)
 
-    def _find_generated_file(self, resource_dir, filename):
+    def _find_generated_file(self, resource_dir: str, filename: str) -> str:
         root_dir = os.path.join(self.godot_dir, resource_dir)
         for root, _dirs, files in os.walk(root_dir):
             if filename in files:
                 return os.path.join(root, filename)
         self.fail(f"Expected {filename} somewhere under {resource_dir}/")
 
-    def _read_generated_file(self, resource_dir, filename):
+    def _read_generated_file(self, resource_dir: str, filename: str) -> str:
         path = self._find_generated_file(resource_dir, filename)
         with open(path, "r", encoding="utf-8") as f:
             return f.read()

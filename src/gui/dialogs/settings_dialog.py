@@ -1,4 +1,5 @@
 import multiprocessing
+from typing import cast
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -7,21 +8,29 @@ from PySide6.QtWidgets import (
 )
 
 from src.gui.theme import THEME
+from src.gui.setting_value import SettingValue
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.localization import get_localized
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, conversion_settings, compact_logging, platform_value, max_workers, parent=None):
+    def __init__(
+        self,
+        conversion_settings: dict[str, SettingValue],
+        compact_logging: SettingValue,
+        platform_value: str,
+        max_workers: int,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._settings = conversion_settings
         self._compact_logging = compact_logging
         self._platform = platform_value
         self._max_workers = max_workers
-        self._checkboxes = {}
+        self._checkboxes: dict[str, QCheckBox] = {}
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         self.setWindowTitle(get_localized("Settings_Title"))
         self.resize(800, 500)
 
@@ -42,11 +51,11 @@ class SettingsDialog(QDialog):
         grid = QGridLayout(categories_widget)
         grid.setSpacing(20)
 
-        labels = get_localized("Settings_Labels")
-        headings = get_localized("Settings_Categories_Headings")
+        labels = cast(dict[str, str], get_localized("Settings_Labels"))
+        headings = cast(list[str], get_localized("Settings_Categories_Headings"))
         categories_items = list(CONVERSION_CATEGORIES.items())
 
-        for col, (cat_key, setting_keys) in enumerate(categories_items):
+        for col, (_cat_key, setting_keys) in enumerate(categories_items):
             col_layout = QVBoxLayout()
 
             cat_heading = QLabel(headings[col])
@@ -59,7 +68,7 @@ class SettingsDialog(QDialog):
                 display_name = labels.get(key, key.replace("_", " ").title())
                 cb = QCheckBox(display_name)
                 cb.setChecked(self._settings[key].get())
-                cb.toggled.connect(lambda checked, k=key: self._settings[k].set(checked))
+                cb.toggled.connect(lambda checked=False, k=key: self._settings[k].set(checked))
                 col_layout.addWidget(cb)
                 self._checkboxes[key] = cb
 
@@ -136,16 +145,16 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(btn_row)
 
-    def _select_all(self):
-        for key, cb in self._checkboxes.items():
+    def _select_all(self) -> None:
+        for cb in self._checkboxes.values():
             cb.setChecked(True)
 
-    def _deselect_all(self):
-        for key, cb in self._checkboxes.items():
+    def _deselect_all(self) -> None:
+        for cb in self._checkboxes.values():
             cb.setChecked(False)
 
-    def selected_platform(self):
+    def selected_platform(self) -> str:
         return self._platform_combo.currentText()
 
-    def selected_max_workers(self):
+    def selected_max_workers(self) -> int:
         return self._workers_spin.value()

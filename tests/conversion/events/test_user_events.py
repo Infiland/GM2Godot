@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestUserEventMappings(unittest.TestCase):
     def test_user_event_lower_bound(self):
         mapping = map_event({"eventType": 7, "eventNum": 10})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_user_event_0")
         self.assertEqual(mapping.params, "")
@@ -21,12 +22,14 @@ class TestUserEventMappings(unittest.TestCase):
 
     def test_user_event_middle(self):
         mapping = map_event({"eventType": 7, "eventNum": 17})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_user_event_7")
         self.assertEqual(mapping.gml_filename, "Other_17.gml")
 
     def test_user_event_upper_bound(self):
         mapping = map_event({"eventType": 7, "eventNum": 25})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_user_event_15")
         self.assertEqual(mapping.gml_filename, "Other_25.gml")

@@ -1,22 +1,53 @@
+from __future__ import annotations
+
 import os
 import re
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from PIL import Image
 from collections import defaultdict
+from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+
+
+class CollisionData(TypedDict):
+    collisionKind: int
+    bboxMode: int
+    bbox_left: int
+    bbox_right: int
+    bbox_top: int
+    bbox_bottom: int
+    width: int
+    height: int
+    origin: int
+    xorigin: int
+    yorigin: int
+
+
+class AnimationData(TypedDict):
+    playbackSpeed: float
+    playbackSpeedType: int
+    loop: bool
+    frame_durations: list[float]
+
+
+SpriteParseResult = tuple[list[str], list[str]]
+SpriteProcessResult = tuple[str, int, int, str, str]
 
 
 class SpriteConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
 
-    def _get_valid_sprite_names(self):
+    def _get_valid_sprite_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of sprite name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
@@ -32,14 +63,14 @@ class SpriteConverter(BaseConverter):
                 content = f.read()
 
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
-            valid_sprites = {}
-            for resource in data.get('resources', []):
-                res_id = resource.get('id', {})
-                path = res_id.get('path', '')
+            valid_sprites: dict[str, str] = {}
+            for resource in cast(list[JsonDict], data.get('resources', [])):
+                res_id = cast(JsonDict, resource.get('id', {}))
+                path = str(res_id.get('path', ''))
                 if path.startswith('sprites/'):
-                    name = res_id.get('name', '')
+                    name = str(res_id.get('name', ''))
                     yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
                     valid_sprites[name] = self._get_subfolder_from_yy(yy_path)
 
@@ -49,15 +80,15 @@ class SpriteConverter(BaseConverter):
             return None
 
     @staticmethod
-    def _sprite_res_path(subfolder, sprite_name):
+    def _sprite_res_path(subfolder: str, sprite_name: str) -> str:
         """Build a res://sprites/... path, avoiding double slashes."""
         if subfolder:
             return f"res://sprites/{subfolder}/{sprite_name}"
         return f"res://sprites/{sprite_name}"
 
-    def _find_all_sprite_images(self):
+    def _find_all_sprite_images(self) -> defaultdict[str, list[str]]:
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
-        image_files = defaultdict(list)
+        image_files: defaultdict[str, list[str]] = defaultdict(list)
         for root, _, files in os.walk(sprite_folder):
             if 'layers' in root.split(os.path.sep):
                 sprite_name = root.split(os.path.sep)[-3]
@@ -68,7 +99,7 @@ class SpriteConverter(BaseConverter):
                 )
         return image_files
 
-    def _parse_collision_data(self, sprite_name):
+    def _parse_collision_data(self, sprite_name: str) -> CollisionData | None:
         """Parse collision mask properties from a sprite .yy file.
 
         Returns a dict with collision fields or None if parsing fails.
@@ -78,7 +109,7 @@ class SpriteConverter(BaseConverter):
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
             return {
                 "collisionKind": int(data.get("collisionKind", 1)),
@@ -96,7 +127,7 @@ class SpriteConverter(BaseConverter):
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
 
-    def _parse_animation_data(self, sprite_name):
+    def _parse_animation_data(self, sprite_name: str) -> AnimationData | None:
         """Parse animation metadata from a sprite .yy file's sequence object.
 
         Returns a dict with animation fields or None if parsing fails.
@@ -106,21 +137,22 @@ class SpriteConverter(BaseConverter):
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
             sequence = data.get("sequence")
-            if sequence is None:
+            if not isinstance(sequence, dict):
                 return None
+            sequence_data = cast(JsonDict, sequence)
 
-            playback_speed = float(sequence.get("playbackSpeed", 30.0))
-            playback_speed_type = int(sequence.get("playbackSpeedType", 0))
-            loop = int(sequence.get("playback", 1)) == 1
+            playback_speed = float(sequence_data.get("playbackSpeed", 30.0))
+            playback_speed_type = int(sequence_data.get("playbackSpeedType", 0))
+            loop = int(sequence_data.get("playback", 1)) == 1
 
-            frame_durations = []
-            tracks = sequence.get("tracks", [])
+            frame_durations: list[float] = []
+            tracks = cast(list[JsonDict], sequence_data.get("tracks", []))
             if tracks:
-                keyframes_store = tracks[0].get("keyframes", {})
-                keyframes = keyframes_store.get("Keyframes", [])
+                keyframes_store = cast(JsonDict, tracks[0].get("keyframes", {}))
+                keyframes = cast(list[JsonDict], keyframes_store.get("Keyframes", []))
                 sorted_kf = sorted(keyframes, key=lambda kf: float(kf.get("Key", 0)))
                 frame_durations = [float(kf.get("Length", 1.0)) for kf in sorted_kf]
 
@@ -134,7 +166,7 @@ class SpriteConverter(BaseConverter):
             return None
 
     @staticmethod
-    def _compute_godot_fps(animation_data):
+    def _compute_godot_fps(animation_data: AnimationData) -> float:
         """Convert GameMaker playback speed to Godot FPS.
 
         Type 0 (FPS): use value directly.
@@ -145,7 +177,7 @@ class SpriteConverter(BaseConverter):
             return speed * 60.0
         return speed
 
-    def _compute_origin_offset(self, collision_data):
+    def _compute_origin_offset(self, collision_data: CollisionData) -> tuple[float, float] | tuple[int, int]:
         """Compute the sprite origin position in pixels.
 
         Returns (origin_x, origin_y) based on the origin preset or custom values.
@@ -154,7 +186,7 @@ class SpriteConverter(BaseConverter):
         h = collision_data["height"]
         origin = collision_data["origin"]
 
-        origin_map = {
+        origin_map: dict[int, tuple[float, float] | tuple[int, int]] = {
             0: (0, 0),
             1: (w / 2, 0),
             2: (w, 0),
@@ -170,7 +202,7 @@ class SpriteConverter(BaseConverter):
             return (collision_data["xorigin"], collision_data["yorigin"])
         return origin_map.get(origin, (0, 0))
 
-    def _build_collision_block(self, collision_data):
+    def _build_collision_block(self, collision_data: CollisionData | None) -> tuple[str | None, str | None, str | None]:
         """Build collision sub_resource text, shape id, and node text from collision data.
 
         Returns (sub_resource_text, shape_id, node_text) or (None, None, None)
@@ -248,7 +280,8 @@ class SpriteConverter(BaseConverter):
 
         return (sub_resource_text, shape_id, node_text)
 
-    def _write_static_scene(self, sprite_name, collision_sub, collision_node, subfolder=""):
+    def _write_static_scene(self, sprite_name: str, collision_sub: str | None, collision_node: str | None,
+                            subfolder: str = "") -> None:
         """Generate a Sprite2D .tscn scene file.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
@@ -257,7 +290,7 @@ class SpriteConverter(BaseConverter):
         load_steps = 2 if has_collision else 1
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
 
-        parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
+        parts: list[str] = [f'[gd_scene format=3 load_steps={load_steps}]\n']
         parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_name}.png" id="1"]\n')
 
         if has_collision:
@@ -278,7 +311,8 @@ class SpriteConverter(BaseConverter):
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
-    def _write_animated_scene(self, sprite_name, frame_count, animation_data, collision_sub, collision_node, subfolder=""):
+    def _write_animated_scene(self, sprite_name: str, frame_count: int, animation_data: AnimationData,
+                              collision_sub: str | None, collision_node: str | None, subfolder: str = "") -> None:
         """Generate an AnimatedSprite2D .tscn scene file with embedded SpriteFrames.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
@@ -296,7 +330,7 @@ class SpriteConverter(BaseConverter):
 
         # Build frame entries for the SpriteFrames animation array
         durations = animation_data.get("frame_durations", [])
-        frame_entries = []
+        frame_entries: list[str] = []
         for i in range(1, frame_count + 1):
             duration = durations[i - 1] if i - 1 < len(durations) else 1.0
             frame_entries.append(
@@ -331,7 +365,8 @@ class SpriteConverter(BaseConverter):
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
-    def _generate_sprite_scene(self, sprite_name, collision_data, frame_count, animation_data=None, subfolder=""):
+    def _generate_sprite_scene(self, sprite_name: str, collision_data: CollisionData | None, frame_count: int,
+                               animation_data: AnimationData | None = None, subfolder: str = "") -> None:
         """Generate a .tscn scene file for a sprite.
 
         Creates either an AnimatedSprite2D scene (multi-frame with animation data)
@@ -339,30 +374,32 @@ class SpriteConverter(BaseConverter):
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
-        collision_sub, shape_id, collision_node = self._build_collision_block(collision_data)
+        collision_sub, _, collision_node = self._build_collision_block(collision_data)
 
         if frame_count > 1 and animation_data is not None:
             self._write_animated_scene(sprite_name, frame_count, animation_data, collision_sub, collision_node, subfolder)
         else:
             self._write_static_scene(sprite_name, collision_sub, collision_node, subfolder)
 
-    def _parse_sprite_yy(self, sprite_name):
+    def _parse_sprite_yy(self, sprite_name: str) -> SpriteParseResult | None:
         yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
 
-            frame_guids = [frame['name'] for frame in data['frames']]
+            frames = cast(list[JsonDict], data['frames'])
+            frame_guids = [str(frame['name']) for frame in frames]
 
+            layers = cast(list[JsonDict], data.get('layers', []))
             visible_layer_guids = [
-                layer['name']
-                for layer in data.get('layers', [])
+                str(layer['name'])
+                for layer in layers
                 if layer.get('visible', True)
             ]
-            if not visible_layer_guids and data.get('layers'):
-                visible_layer_guids = [data['layers'][0]['name']]
+            if not visible_layer_guids and layers:
+                visible_layer_guids = [str(layers[0]['name'])]
 
             return (frame_guids, visible_layer_guids)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, IndexError):
@@ -370,21 +407,21 @@ class SpriteConverter(BaseConverter):
                 yy_path=yy_path, sprite_name=sprite_name))
             return None
 
-    def _build_ordered_frame_list(self, sprite_name, all_image_paths):
+    def _build_ordered_frame_list(self, sprite_name: str, all_image_paths: list[str]) -> list[list[str]]:
         result = self._parse_sprite_yy(sprite_name)
         if result is None:
             return [[path] for path in sorted(all_image_paths)]
 
         frame_guids, layer_guids = result
 
-        path_index = {}
+        path_index: dict[str, dict[str, str]] = {}
         for path in all_image_paths:
             parts = path.replace('\\', '/').split('/')
             frame_guid = parts[-2]
             filename = parts[-1]
             path_index.setdefault(frame_guid, {})[filename] = path
 
-        ordered = []
+        ordered: list[list[str]] = []
         for guid in frame_guids:
             frame_files = path_index.get(guid, {})
             if not frame_files:
@@ -401,7 +438,8 @@ class SpriteConverter(BaseConverter):
 
         return ordered if ordered else [[path] for path in sorted(all_image_paths)]
 
-    def _process_sprite(self, sprite_name, index, gm_sprite_paths, images_count, subfolder=""):
+    def _process_sprite(self, sprite_name: str, index: int, gm_sprite_paths: list[str], images_count: int,
+                        subfolder: str = "") -> SpriteProcessResult | None:
         if not self.conversion_running():
             return None
 
@@ -420,19 +458,20 @@ class SpriteConverter(BaseConverter):
                 if composed is None:
                     composed = Image.new('RGBA', layer.size, (0, 0, 0, 0))
                 composed.alpha_composite(layer)
+            assert composed is not None
             composed.save(godot_sprite_path, 'PNG')
 
         return (sprite_name, index, images_count, gm_sprite_paths[0], new_filename)
 
-    def convert_sprites(self):
+    def convert_sprites(self) -> None:
         os.makedirs(self.godot_sprites_path, exist_ok=True)
 
         sprite_images = self._find_all_sprite_images()
 
         valid_names = self._get_valid_sprite_names()
-        sprite_subfolders = {}
+        sprite_subfolders: dict[str, str] = {}
         if valid_names is not None:
-            filtered = {}
+            filtered: defaultdict[str, list[str]] = defaultdict(list)
             for name, images in sprite_images.items():
                 if name in valid_names:
                     filtered[name] = images
@@ -457,7 +496,7 @@ class SpriteConverter(BaseConverter):
             os.makedirs(sprite_dir, exist_ok=True)
 
         # Flatten all work items
-        work_items = []
+        work_items: list[tuple[str, int, list[str], int, str]] = []
         for sprite_name, images in sprite_images.items():
             ordered_images = self._build_ordered_frame_list(sprite_name, images)
             subfolder = sprite_subfolders.get(sprite_name, "")
@@ -468,7 +507,7 @@ class SpriteConverter(BaseConverter):
         processed_images = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {
+            futures_map: dict[Future[SpriteProcessResult | None], tuple[str, int, list[str], int, str]] = {
                 executor.submit(self._process_sprite, name, idx, path, count, sub): (name, idx, path, count, sub)
                 for name, idx, path, count, sub in work_items
             }
@@ -478,7 +517,7 @@ class SpriteConverter(BaseConverter):
                     self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
                     return
 
-                sprite_name, index, images_count, gm_sprite_path, new_filename = result
+                sprite_name, _index, _images_count, gm_sprite_path, new_filename = result
                 processed_images += 1
 
                 if self.compact_logging:
@@ -513,5 +552,5 @@ class SpriteConverter(BaseConverter):
 
         self.log_callback(get_localized("Console_Convertor_Sprites_Complete"))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_sprites()

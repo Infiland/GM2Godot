@@ -6,7 +6,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.script_generator import generate_script_content
+from src.conversion.script_generator import SpriteRuntimeConfig, generate_script_content
 
 
 class TestScriptGeneratorBasic(unittest.TestCase):
@@ -274,6 +274,49 @@ class TestScriptGeneratorCodeBodies(unittest.TestCase):
             code_bodies={},
         )
         self.assertIn("\tpass", content)
+
+
+class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
+    """GameMaker sprite_index and image_index runtime support."""
+
+    def test_sprite_runtime_generates_ready_and_helpers_without_events(self):
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="s_player",
+                sprite_scene_paths={
+                    "s_enemy": "res://sprites/s_enemy/s_enemy.tscn",
+                    "s_player": "res://sprites/s_player/s_player.tscn",
+                },
+            ),
+        )
+
+        self.assertIn('const s_enemy = "s_enemy"', content)
+        self.assertIn('const s_player = "s_player"', content)
+        self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
+        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var image_index = 0.0:', content)
+        self.assertIn('func _gm_apply_sprite_index():', content)
+        self.assertIn('func _gm_apply_image_index():', content)
+        self.assertIn('if has_meta("gamemaker_image_index"):', content)
+        self.assertIn('func _ready():\n\t_gm_initialize_sprite_runtime()', content)
+
+    def test_sprite_runtime_uses_gml_body_without_duplicate_builtin_vars(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": "\timage_index = 2\n\tsprite_index = s_enemy"},
+            instance_variables={"image_index", "score", "sprite_index"},
+            sprite_runtime=SpriteRuntimeConfig(
+                sprite_scene_paths={"s_enemy": "res://sprites/s_enemy/s_enemy.tscn"},
+            ),
+        )
+
+        self.assertIn('const s_enemy = "s_enemy"', content)
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\timage_index = 2", content)
+        self.assertIn("\tsprite_index = s_enemy", content)
+        self.assertIn("\n\nvar score\n", content)
+        self.assertNotIn("\n\nvar image_index\n", content)
+        self.assertNotIn("\n\nvar sprite_index\n", content)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import os
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Mapping
 from typing import TypedDict, cast
 
 from src.localization import get_localized
@@ -9,7 +10,7 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
-from src.conversion.script_generator import generate_script_content
+from src.conversion.script_generator import SpriteRuntimeConfig, generate_script_content
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -108,6 +109,23 @@ class ObjectConverter(BaseConverter):
             tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_name, sprite_name + '.tscn')
         return os.path.isfile(tscn_path)
 
+    def _get_available_sprite_scene_paths(self) -> dict[str, str]:
+        """Return sprite resource names mapped to converted Godot scene paths."""
+        sprites_root = os.path.join(self.godot_project_path, 'sprites')
+        if not os.path.isdir(sprites_root):
+            return {}
+
+        scene_paths: dict[str, str] = {}
+        for dirpath, _, filenames in os.walk(sprites_root):
+            for filename in filenames:
+                if not filename.endswith('.tscn'):
+                    continue
+                sprite_name = os.path.splitext(filename)[0]
+                scene_path = os.path.join(dirpath, filename)
+                relative_path = os.path.relpath(scene_path, self.godot_project_path).replace(os.sep, '/')
+                scene_paths[sprite_name] = f"res://{relative_path}"
+        return scene_paths
+
     def _generate_object_scene(self, object_name: str, sprite_name: str | None,
                                sprite_subfolder: str = "", script_res_path: str | None = None) -> str:
         """Build the .tscn content string for an object scene.
@@ -191,7 +209,12 @@ class ObjectConverter(BaseConverter):
 
         return code_bodies, instance_variables
 
-    def _process_object(self, object_name: str, subfolder: str = "") -> ObjectProcessResult | None:
+    def _process_object(
+        self,
+        object_name: str,
+        subfolder: str = "",
+        sprite_scene_paths: Mapping[str, str] | None = None,
+    ) -> ObjectProcessResult | None:
         """Process a single object: parse .yy, generate scene and script, write files.
 
         Returns a result dict or None if conversion was stopped.
@@ -226,6 +249,10 @@ class ObjectConverter(BaseConverter):
             event_list,
             code_bodies=code_bodies,
             instance_variables=instance_variables,
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name=sprite_name,
+                sprite_scene_paths=sprite_scene_paths,
+            ),
         )
         scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder, script_res_path)
 
@@ -274,10 +301,11 @@ class ObjectConverter(BaseConverter):
 
         total = len(object_names)
         processed = 0
+        sprite_scene_paths = self._get_available_sprite_scene_paths()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_object, name, object_subfolders.get(name, "")): name
+                executor.submit(self._process_object, name, object_subfolders.get(name, ""), sprite_scene_paths): name
                 for name in object_names
             }
             for future in as_completed(futures_map):

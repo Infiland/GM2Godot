@@ -611,6 +611,39 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\t\tposition.x -= superSpeed", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 
+    def test_script_supports_sprite_and_image_index(self):
+        """sprite_index and image_index should map to generated sprite runtime state."""
+        self._setup_object(
+            "o_player",
+            sprite_name="s_player",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        _create_fake_sprite_scene(self.godot_dir, "s_enemy")
+        source_path = os.path.join(self.gm_dir, "objects", "o_player", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("image_index = 2; sprite_index = s_enemy;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn('const s_enemy = "s_enemy"', content)
+        self.assertIn('const s_player = "s_player"', content)
+        self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
+        self.assertIn('"s_player": preload("res://sprites/s_player/s_player.tscn")', content)
+        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var image_index = 0.0:', content)
+        self.assertIn('func _gm_apply_sprite_index():', content)
+        self.assertIn('func _gm_apply_image_index():', content)
+        self.assertIn('if has_meta("gamemaker_image_index"):', content)
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\timage_index = 2", content)
+        self.assertIn("\tsprite_index = s_enemy", content)
+        self.assertNotIn("\n\nvar image_index\n", content)
+        self.assertNotIn("\n\nvar sprite_index\n", content)
+
     def test_script_with_begin_step(self):
         """eventType 3, eventNum 1 should produce func _physics_process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 1}])

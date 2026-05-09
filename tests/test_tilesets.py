@@ -142,6 +142,7 @@ class TestTileSetConverterBasic(unittest.TestCase):
         self.assertIn('TileSet', content)
         self.assertIn('TileSetAtlasSource', content)
         self.assertIn('Vector2i(16, 16)', content)
+        self.assertIn('0:0/0 = 0', content)
 
     def test_copies_sprite_image(self):
         converter = self._make_converter()

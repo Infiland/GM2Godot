@@ -1,5 +1,6 @@
+import copy
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
@@ -101,6 +102,7 @@ class GameMakerResourceIndex(BaseConverter):
             self._index_yyp_resources(self.yyp_data)
             self._parse_indexed_rooms()
             self._apply_yyp_room_order(self.yyp_data)
+            self._resolve_room_inheritance()
         else:
             if self.yyp_path:
                 self._safe_log(
@@ -112,6 +114,7 @@ class GameMakerResourceIndex(BaseConverter):
                 )
             self._index_disk_resources()
             self._parse_indexed_rooms()
+            self._resolve_room_inheritance()
             self.used_room_order_fallback = True
             self.room_order = sorted(self.rooms)
 
@@ -236,6 +239,193 @@ class GameMakerResourceIndex(BaseConverter):
             is_dnd=bool(data.get("isDnd", False)),
             raw_data=data,
         )
+
+    def _resolve_room_inheritance(self) -> None:
+        resolved: dict[str, IndexedRoom] = {}
+
+        def resolve(room_name: str, stack: list[str]) -> IndexedRoom:
+            if room_name in resolved:
+                return resolved[room_name]
+
+            room = self.rooms[room_name]
+            parent_name = self._room_reference_name(room.parent_room)
+            if not parent_name:
+                resolved[room_name] = room
+                return room
+
+            if parent_name in stack:
+                self._safe_log(
+                    "Warning: Room inheritance cycle detected: {cycle}; skipping inherited data for {room}.".format(
+                        cycle=" -> ".join(stack + [parent_name]),
+                        room=room_name,
+                    )
+                )
+                resolved[room_name] = room
+                return room
+
+            parent = self.rooms.get(parent_name)
+            if parent is None:
+                self._safe_log(
+                    "Warning: Missing parent room {parent} for room {room}; using child room data only.".format(
+                        parent=parent_name,
+                        room=room_name,
+                    )
+                )
+                resolved[room_name] = room
+                return room
+
+            parent = resolve(parent_name, stack + [room_name])
+            inherited_room = self._inherit_room(room, parent)
+            resolved[room_name] = inherited_room
+            return inherited_room
+
+        for room_name in list(self.rooms):
+            resolve(room_name, [])
+        self.rooms = resolved
+
+    def _inherit_room(self, child: IndexedRoom, parent: IndexedRoom) -> IndexedRoom:
+        room_settings = self._inherit_settings(
+            child.room_settings,
+            parent.room_settings,
+            "inheritRoomSettings",
+        )
+        physics_settings = self._inherit_settings(
+            child.physics_settings,
+            parent.physics_settings,
+            "inheritPhysicsSettings",
+        )
+        inherit_views = bool(child.view_settings.get("inheritViewSettings", False))
+        view_settings = self._inherit_settings(
+            child.view_settings,
+            parent.view_settings,
+            "inheritViewSettings",
+        )
+        views = copy.deepcopy(parent.views if inherit_views else child.views)
+        layers = (
+            self._merge_layers(parent.layers, child.layers)
+            if child.inherit_layers
+            else copy.deepcopy(child.layers)
+        )
+        instance_creation_order = (
+            self._merge_named_items(parent.instance_creation_order, child.instance_creation_order)
+            if child.inherit_creation_order
+            else copy.deepcopy(child.instance_creation_order)
+        )
+        creation_code_file = child.creation_code_file
+        if child.inherit_code and not creation_code_file:
+            creation_code_file = self._inherited_creation_code_file(parent)
+
+        raw_data = copy.deepcopy(child.raw_data)
+        raw_data["gm2godot_inherited_parent_room"] = parent.name
+        return replace(
+            child,
+            room_settings=room_settings,
+            physics_settings=physics_settings,
+            view_settings=view_settings,
+            views=views,
+            layers=layers,
+            instance_creation_order=instance_creation_order,
+            creation_code_file=creation_code_file,
+            raw_data=raw_data,
+        )
+
+    @staticmethod
+    def _inherit_settings(child_settings: JsonDict, parent_settings: JsonDict, flag: str) -> JsonDict:
+        if bool(child_settings.get(flag, False)):
+            inherited = copy.deepcopy(parent_settings)
+            inherited[flag] = True
+            return inherited
+        return copy.deepcopy(child_settings)
+
+    def _merge_layers(self, parent_layers: JsonList, child_layers: JsonList) -> JsonList:
+        merged = self._dict_items_copy(parent_layers)
+        by_key = {self._item_key(layer): index for index, layer in enumerate(merged)}
+        for child_layer in self._dict_items_copy(child_layers):
+            key = self._item_key(child_layer)
+            if key and key in by_key:
+                parent_layer = cast(JsonDict, merged[by_key[key]])
+                merged[by_key[key]] = self._merge_layer(parent_layer, child_layer)
+            else:
+                merged.append(child_layer)
+        return cast(JsonList, merged)
+
+    def _merge_layer(self, parent_layer: JsonDict, child_layer: JsonDict) -> JsonDict:
+        merged = copy.deepcopy(parent_layer)
+        merged.update(copy.deepcopy(child_layer))
+
+        if child_layer.get("inheritLayerDepth") is True and "depth" in parent_layer:
+            merged["depth"] = copy.deepcopy(parent_layer["depth"])
+        if child_layer.get("inheritVisibility") is True and "visible" in parent_layer:
+            merged["visible"] = copy.deepcopy(parent_layer["visible"])
+        if child_layer.get("inheritSubLayers") is True:
+            merged["layers"] = self._merge_layers(
+                cast(JsonList, parent_layer.get("layers") or []),
+                cast(JsonList, child_layer.get("layers") or []),
+            )
+        if "instances" in parent_layer or "instances" in child_layer:
+            merged["instances"] = self._merge_named_items(
+                cast(JsonList, parent_layer.get("instances") or []),
+                cast(JsonList, child_layer.get("instances") or []),
+            )
+        if "assets" in parent_layer or "assets" in child_layer:
+            merged["assets"] = self._merge_named_items(
+                cast(JsonList, parent_layer.get("assets") or []),
+                cast(JsonList, child_layer.get("assets") or []),
+            )
+        return merged
+
+    def _merge_named_items(self, parent_items: JsonList, child_items: JsonList) -> JsonList:
+        merged = self._dict_items_copy(parent_items)
+        by_key = {self._item_key(item): index for index, item in enumerate(merged)}
+        for child_item in self._dict_items_copy(child_items):
+            key = self._item_key(child_item)
+            if key and key in by_key:
+                parent_item = cast(JsonDict, merged[by_key[key]])
+                merged_item = copy.deepcopy(parent_item)
+                merged_item.update(copy.deepcopy(child_item))
+                merged[by_key[key]] = merged_item
+            else:
+                merged.append(child_item)
+        return cast(JsonList, merged)
+
+    def _inherited_creation_code_file(self, parent: IndexedRoom) -> str:
+        if not parent.creation_code_file:
+            return ""
+        normalized = parent.creation_code_file.replace("\\", "/")
+        if normalized.startswith("rooms/") or normalized.startswith("${project_dir}/"):
+            return normalized
+        if os.path.isabs(normalized):
+            return normalized
+        parent_dir = os.path.relpath(os.path.dirname(parent.yy_path), self.gm_project_path)
+        return "/".join([parent_dir.replace(os.sep, "/"), normalized])
+
+    @staticmethod
+    def _room_reference_name(reference: JsonDict | None) -> str:
+        if not isinstance(reference, dict):
+            return ""
+        name = reference.get("name")
+        if isinstance(name, str) and name:
+            return name
+        path = reference.get("path")
+        if isinstance(path, str) and path:
+            return os.path.splitext(os.path.basename(path))[0]
+        return ""
+
+    @staticmethod
+    def _dict_items_copy(value: JsonList) -> list[JsonDict]:
+        return [copy.deepcopy(cast(JsonDict, item)) for item in value if isinstance(item, dict)]
+
+    @staticmethod
+    def _item_key(item: JsonDict) -> str:
+        for key in ("inheritedItemId", "%Name", "name"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return value
+            if isinstance(value, dict):
+                name = value.get("name")
+                if isinstance(name, str) and name:
+                    return name
+        return ""
 
     def _apply_yyp_room_order(self, yyp_data: JsonDict) -> None:
         if "RoomOrderNodes" not in yyp_data:

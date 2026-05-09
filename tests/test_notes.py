@@ -17,7 +17,7 @@ class TestNoteConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         notes_dir = os.path.join(self.gm_dir, "notes")
         os.makedirs(notes_dir)
@@ -71,7 +71,7 @@ class TestNoteConverterMissingFolder(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         # Deliberately do NOT create a notes folder
 
     def tearDown(self):
@@ -96,7 +96,7 @@ class TestNoteConverterSubfolders(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create a note with a .yy file that specifies a subfolder
         note_dir = os.path.join(self.gm_dir, "notes", "my_note")

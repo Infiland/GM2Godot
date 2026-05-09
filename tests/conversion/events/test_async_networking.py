@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncNetworkingEvent(unittest.TestCase):
     def test_maps_async_networking_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 68})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_async_networking")
         self.assertEqual(mapping.params, "")

@@ -1,5 +1,7 @@
 import webbrowser
 from datetime import datetime
+from collections.abc import Mapping
+from typing import Any, cast
 
 import requests
 from PySide6.QtCore import Qt
@@ -14,13 +16,13 @@ from src.localization import get_localized
 
 
 class AboutDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(get_localized("About_Title"))
         self.resize(600, 700)
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
@@ -74,7 +76,7 @@ class AboutDialog(QDialog):
             )
             link.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             link.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            link.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
+            link.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)  # type: ignore[method-assign]
             layout.addWidget(link)
 
         # Copyright
@@ -84,7 +86,7 @@ class AboutDialog(QDialog):
         copyright_label.setStyleSheet(f"color: {THEME['fg_white']};")
         layout.addWidget(copyright_label)
 
-    def _load_contributors(self):
+    def _load_contributors(self) -> None:
         try:
             response = requests.get(
                 "https://api.github.com/repos/Infiland/GM2Godot/contributors",
@@ -92,7 +94,7 @@ class AboutDialog(QDialog):
                 timeout=10,
             )
             response.raise_for_status()
-            for contributor in response.json():
+            for contributor in cast(list[Mapping[str, Any]], response.json()):
                 self._add_contributor(contributor)
         except Exception as e:
             error_label = QLabel(
@@ -101,8 +103,8 @@ class AboutDialog(QDialog):
             error_label.setStyleSheet(f"color: {THEME['fg_white']};")
             self._contrib_layout.addWidget(error_label)
 
-    def _add_contributor(self, contributor):
-        url = contributor["html_url"]
+    def _add_contributor(self, contributor: Mapping[str, Any]) -> None:
+        url = str(contributor["html_url"])
 
         # Clickable frame wrapping the entire row
         frame = QFrame()
@@ -111,31 +113,31 @@ class AboutDialog(QDialog):
             f"QFrame:hover {{ background-color: {THEME['bg_tertiary']}; }}"
         )
         frame.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        frame.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
+        frame.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)  # type: ignore[method-assign]
 
         row = QHBoxLayout(frame)
         row.setContentsMargins(6, 6, 6, 6)
 
         # Avatar
         try:
-            resp = requests.get(contributor["avatar_url"], timeout=10)
+            resp = requests.get(str(contributor["avatar_url"]), timeout=10)
             pixmap = QPixmap()
             pixmap.loadFromData(resp.content)
             avatar = QLabel()
             avatar.setPixmap(pixmap.scaled(40, 40))
             avatar.setFixedSize(40, 40)
             avatar.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            avatar.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
+            avatar.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)  # type: ignore[method-assign]
             row.addWidget(avatar)
         except Exception:
             pass
 
         # Info
         info_layout = QVBoxLayout()
-        name = QLabel(contributor["login"])
+        name = QLabel(str(contributor["login"]))
         name.setStyleSheet(f"color: {THEME['accent_link']};")
         name.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        name.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)
+        name.mousePressEvent = lambda e, u=url: webbrowser.open_new(u)  # type: ignore[method-assign]
         info_layout.addWidget(name)
 
         contribs = QLabel(f"{contributor['contributions']} contributions")

@@ -6,7 +6,7 @@ from src.gui.main_window import MainWindow
 from src.gui.theme import generate_stylesheet
 
 
-def main():
+def main() -> None:
     app = QApplication(sys.argv)
     app.setStyleSheet(generate_stylesheet())
 

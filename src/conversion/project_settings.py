@@ -1,19 +1,21 @@
 import os
 import shutil
 import re
-import json
 from PIL import Image
-from typing import Optional, List, Callable
+from typing import Optional, List
 
 # Import localization manager
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 class ProjectSettingsConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path,
-                 log_callback=print, progress_callback=None,
-                 conversion_running=None, gm_platform='windows',
-                 max_workers=None):
+    def __init__(self, gm_project_path: str, godot_project_path: str,
+                 log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None,
+                 conversion_running: ConversionRunning | None = None,
+                 gm_platform: str = 'windows',
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path,
                          log_callback, progress_callback, conversion_running,
                          max_workers=max_workers)
@@ -254,7 +256,7 @@ class ProjectSettingsConverter(BaseConverter):
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_AudioBus_Error_GroupNotGenerated").format(error=str(e)))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_icon()
         self.update_project_name()
         self.update_project_settings()

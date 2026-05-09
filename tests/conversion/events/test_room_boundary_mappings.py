@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestRoomBoundaryMappings(unittest.TestCase):
     def test_outside_room_mapping(self):
         mapping = map_event({"eventType": 7, "eventNum": 0})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_outside_room")
         self.assertEqual(mapping.params, "")
@@ -21,6 +22,7 @@ class TestRoomBoundaryMappings(unittest.TestCase):
 
     def test_intersect_boundary_mapping(self):
         mapping = map_event({"eventType": 7, "eventNum": 1})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_intersect_boundary")
         self.assertEqual(mapping.params, "")
@@ -29,6 +31,7 @@ class TestRoomBoundaryMappings(unittest.TestCase):
 
     def test_outside_view_mapping(self):
         mapping = map_event({"eventType": 7, "eventNum": 43})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_outside_view_3")
         self.assertEqual(mapping.params, "")
@@ -37,6 +40,7 @@ class TestRoomBoundaryMappings(unittest.TestCase):
 
     def test_intersect_view_boundary_mapping(self):
         mapping = map_event({"eventType": 7, "eventNum": 56})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_intersect_view_6_boundary")
         self.assertEqual(mapping.params, "")

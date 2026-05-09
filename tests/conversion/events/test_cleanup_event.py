@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestCleanupEvent(unittest.TestCase):
     def test_maps_cleanup_event_to_exit_tree(self):
         mapping = map_event({"eventType": 12, "eventNum": 0})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_exit_tree")
         self.assertEqual(mapping.params, "")

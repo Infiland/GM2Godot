@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestBroadcastMessageEvent(unittest.TestCase):
     def test_maps_broadcast_message_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 76})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_broadcast_message")
         self.assertEqual(mapping.params, "")

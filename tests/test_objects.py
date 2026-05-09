@@ -1,17 +1,22 @@
 import os
+# pyright: reportPrivateUsage=false
 import sys
 import shutil
 import tempfile
 import unittest
+from typing import cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.objects import ObjectConverter
+from src.conversion.type_defs import JsonDict
 
 
-def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects.yy", event_list=None):
+def _make_object_yy_content(name: str, sprite_name: str | None = None,
+                            parent_path: str = "folders/Objects.yy",
+                            event_list: list[JsonDict] | None = None) -> str:
     """Build a GameMaker object .yy file string."""
     if sprite_name is not None:
         sprite_id = (
@@ -23,11 +28,11 @@ def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects
 
     if event_list is None:
         event_list = []
-    event_entries = []
+    event_entries: list[str] = []
     for evt in event_list:
         collision_id = "null"
         if evt.get("collisionObjectId") is not None:
-            col = evt["collisionObjectId"]
+            col = cast(JsonDict, evt["collisionObjectId"])
             collision_id = '{{"name": "{name}", "path": "objects/{name}/{name}.yy",}}'.format(name=col["name"])
         entry = (
             '{{"isDnD":false,"eventNum":{eventNum},"eventType":{eventType},'
@@ -66,7 +71,7 @@ def _make_object_yy_content(name, sprite_name=None, parent_path="folders/Objects
     ).format(name=name, sprite_id=sprite_id, parent_path=parent_path, event_list_str=event_list_str)
 
 
-def _create_fake_sprite_scene(godot_dir, sprite_name, subfolder=""):
+def _create_fake_sprite_scene(godot_dir: str, sprite_name: str, subfolder: str = "") -> None:
     """Create a minimal sprite .tscn file in the Godot project."""
     if subfolder:
         sprite_dir = os.path.join(godot_dir, "sprites", subfolder, sprite_name)
@@ -78,7 +83,7 @@ def _create_fake_sprite_scene(godot_dir, sprite_name, subfolder=""):
         f.write('[gd_scene format=3]\n\n[node name="{}" type="Area2D"]\n'.format(sprite_name))
 
 
-def _make_sprite_yy_content(sprite_name, parent_path="folders/Sprites.yy"):
+def _make_sprite_yy_content(sprite_name: str, parent_path: str = "folders/Sprites.yy") -> str:
     """Build a minimal sprite .yy file with parent folder info."""
     return (
         '{{\n'
@@ -93,9 +98,9 @@ class TestObjectConverterBasic(unittest.TestCase):
     """Test ObjectConverter with a minimal fake GameMaker project."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
+        self.logs: list[str] = []
 
         # Create an object with a sprite reference
         obj_dir = os.path.join(self.gm_dir, "objects", "o_player")
@@ -118,7 +123,7 @@ class TestObjectConverterBasic(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -175,9 +180,9 @@ class TestObjectConverterEmpty(unittest.TestCase):
     """Edge cases: missing objects dir and missing sprites."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -229,8 +234,8 @@ class TestParseObjectYY(unittest.TestCase):
     """Test _parse_object_yy directly."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
         self.converter = ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: None,
@@ -242,7 +247,7 @@ class TestParseObjectYY(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_object_yy(self, object_name, content):
+    def _write_object_yy(self, object_name: str, content: str) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", object_name)
         os.makedirs(obj_dir, exist_ok=True)
         with open(os.path.join(obj_dir, object_name + ".yy"), "w") as f:
@@ -254,6 +259,7 @@ class TestParseObjectYY(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_test")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(result["sprite_name"], "s_test")
 
     def test_parses_valid_object_without_sprite(self):
@@ -262,6 +268,7 @@ class TestParseObjectYY(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_empty")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertIsNone(result["sprite_name"])
 
     def test_returns_none_for_missing(self):
@@ -280,6 +287,7 @@ class TestParseObjectYY(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_tc")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(result["sprite_name"], "s_tc")
 
 
@@ -287,9 +295,9 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
     """Test that objects are filtered against the .yyp project file."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
+        self.logs: list[str] = []
 
         # Create two objects on disk
         for name in ["o_listed", "o_unlisted"]:
@@ -336,15 +344,15 @@ class TestObjectConverterSubfolders(unittest.TestCase):
     """Test that objects respect GameMaker's folder hierarchy."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -418,15 +426,15 @@ class TestScriptGeneration(unittest.TestCase):
     """Test .gd script file generation for objects."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -434,7 +442,8 @@ class TestScriptGeneration(unittest.TestCase):
             conversion_running=lambda: True,
         )
 
-    def _setup_object(self, name, sprite_name=None, event_list=None):
+    def _setup_object(self, name: str, sprite_name: str | None = None,
+                      event_list: list[JsonDict] | None = None) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
         yy_content = _make_object_yy_content(name, sprite_name=sprite_name, event_list=event_list)
@@ -844,8 +853,8 @@ class TestParseObjectYYEvents(unittest.TestCase):
     """Test that _parse_object_yy extracts event lists."""
 
     def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
+        self.gm_dir: str = tempfile.mkdtemp()
+        self.godot_dir: str = tempfile.mkdtemp()
         self.converter = ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: None,
@@ -857,7 +866,7 @@ class TestParseObjectYYEvents(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_object_yy(self, object_name, content):
+    def _write_object_yy(self, object_name: str, content: str) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", object_name)
         os.makedirs(obj_dir, exist_ok=True)
         with open(os.path.join(obj_dir, object_name + ".yy"), "w") as f:
@@ -873,6 +882,7 @@ class TestParseObjectYYEvents(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_test")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(len(result["event_list"]), 2)
         self.assertEqual(result["event_list"][0]["eventType"], 0)
         self.assertEqual(result["event_list"][1]["eventType"], 3)
@@ -884,6 +894,7 @@ class TestParseObjectYYEvents(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_test")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(result["event_list"], [])
 
     def test_event_with_collision_object(self):
@@ -895,6 +906,7 @@ class TestParseObjectYYEvents(unittest.TestCase):
 
         result = self.converter._parse_object_yy("o_test")
         self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(len(result["event_list"]), 1)
         self.assertEqual(result["event_list"][0]["collisionObjectId"]["name"], "o_enemy")
 

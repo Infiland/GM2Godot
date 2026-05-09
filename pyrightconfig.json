@@ -1,0 +1,12 @@
+{
+  "include": [
+    "main.py",
+    "src",
+    "tests"
+  ],
+  "exclude": [
+    "venv",
+    "**/__pycache__"
+  ],
+  "typeCheckingMode": "strict"
+}

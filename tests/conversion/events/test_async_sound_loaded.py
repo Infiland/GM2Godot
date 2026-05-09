@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncSoundLoadedEvent(unittest.TestCase):
     def test_maps_async_sound_loaded_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 61})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_async_sound_loaded")
         self.assertEqual(mapping.params, "")

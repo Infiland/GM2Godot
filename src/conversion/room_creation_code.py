@@ -1,5 +1,27 @@
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
+from typing import Protocol, cast
+
+from src.conversion.type_defs import JsonDict, JsonList, LogCallback
+
+
+class RoomCreationCodeRoom(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def yy_path(self) -> str: ...
+
+    @property
+    def creation_code_file(self) -> str: ...
+
+    @property
+    def inherit_code(self) -> bool: ...
+
+    @property
+    def instance_creation_order(self) -> JsonList: ...
 
 
 ROOM_EXECUTION_ORDER = [
@@ -21,7 +43,11 @@ class CreationCodeMetadata:
     execution_phase_index: int
 
 
-def resolve_room_creation_code(room, gm_project_path, warn_callback=None):
+def resolve_room_creation_code(
+    room: RoomCreationCodeRoom,
+    gm_project_path: str,
+    warn_callback: LogCallback | None = None,
+) -> CreationCodeMetadata:
     """Resolve room creation-code metadata without transpiling GML."""
     source_file = room.creation_code_file or ""
     source_path = _resolve_room_creation_code_path(room, gm_project_path, source_file)
@@ -46,7 +72,11 @@ def resolve_room_creation_code(room, gm_project_path, warn_callback=None):
     return metadata
 
 
-def resolve_instance_creation_code(room, instance, warn_callback=None):
+def resolve_instance_creation_code(
+    room: RoomCreationCodeRoom,
+    instance: JsonDict,
+    warn_callback: LogCallback | None = None,
+) -> CreationCodeMetadata:
     """Resolve per-instance creation-code metadata without transpiling GML."""
     instance_name = _instance_name(instance)
     has_code = bool(instance.get("hasCreationCode", False))
@@ -80,17 +110,22 @@ def resolve_instance_creation_code(room, instance, warn_callback=None):
     return metadata
 
 
-def instance_creation_order_names(room):
-    names = []
+def instance_creation_order_names(room: RoomCreationCodeRoom) -> list[str]:
+    names: list[str] = []
     for entry in room.instance_creation_order:
         if isinstance(entry, dict):
-            name = entry.get("%Name") or entry.get("name")
-            if name:
+            entry_dict = cast(JsonDict, entry)
+            name = entry_dict.get("%Name") or entry_dict.get("name")
+            if isinstance(name, str) and name:
                 names.append(name)
     return names
 
 
-def _resolve_room_creation_code_path(room, gm_project_path, source_file):
+def _resolve_room_creation_code_path(
+    room: RoomCreationCodeRoom,
+    gm_project_path: str,
+    source_file: str,
+) -> str:
     if not source_file:
         return ""
 
@@ -107,5 +142,6 @@ def _resolve_room_creation_code_path(room, gm_project_path, source_file):
     return os.path.normpath(os.path.join(os.path.dirname(room.yy_path), normalized))
 
 
-def _instance_name(instance):
-    return instance.get("%Name") or instance.get("name") or "Instance"
+def _instance_name(instance: JsonDict) -> str:
+    name = instance.get("%Name") or instance.get("name")
+    return name if isinstance(name, str) and name else "Instance"

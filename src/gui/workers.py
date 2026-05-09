@@ -1,6 +1,21 @@
+import threading
+from typing import Protocol, cast
+
 from PySide6.QtCore import QObject, Signal
 
 from src.conversion.converter import Converter
+from src.gui.setting_value import SettingValue
+
+
+class _ConverterProtocol(Protocol):
+    def convert(
+        self,
+        gm_path: str,
+        gm_platform: str,
+        godot_path: str,
+        settings: dict[str, SettingValue],
+    ) -> None:
+        ...
 
 
 class ConversionWorker(QObject):
@@ -10,8 +25,10 @@ class ConversionWorker(QObject):
     status_updated = Signal(str)
     conversion_finished = Signal()
 
-    def __init__(self, gm_path, gm_platform, godot_path, conversion_settings,
-                 compact_logging, conversion_running, max_workers=None):
+    def __init__(self, gm_path: str, gm_platform: str, godot_path: str,
+                 conversion_settings: dict[str, SettingValue],
+                 compact_logging: bool, conversion_running: threading.Event,
+                 max_workers: int | None = None) -> None:
         super().__init__()
         self._gm_path = gm_path
         self._gm_platform = gm_platform
@@ -21,16 +38,19 @@ class ConversionWorker(QObject):
         self._conversion_running = conversion_running
         self._max_workers = max_workers
 
-    def run(self):
+    def run(self) -> None:
         try:
-            converter = Converter(
-                self.log_message.emit,
-                self.progress_updated.emit,
-                self.status_updated.emit,
-                self._conversion_running,
-                update_log_callback=self.update_log_message.emit,
-                compact_logging=self._compact_logging,
-                max_workers=self._max_workers,
+            converter = cast(
+                _ConverterProtocol,
+                Converter(
+                    self.log_message.emit,
+                    self.progress_updated.emit,
+                    self.status_updated.emit,
+                    self._conversion_running,
+                    update_log_callback=self.update_log_message.emit,
+                    compact_logging=self._compact_logging,
+                    max_workers=self._max_workers,
+                ),
             )
             converter.convert(
                 self._gm_path,

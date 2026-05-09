@@ -5,9 +5,9 @@ import time
 import webbrowser
 import multiprocessing
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal, QObject
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QApplication
+from PySide6.QtCore import QThread, QTimer, Signal, QObject
+from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox
 
 from src.gui.icons import AppIcons
 from src.gui.setting_value import SettingValue
@@ -25,13 +25,14 @@ from src.conversion.converter import CONVERSION_CATEGORIES
 from src.version import get_version
 from src.localization import get_localized
 from src.update_checker import UpdateChecker
+from src.update_checker import UpdateInfo
 from src.gui.dialogs.update_dialog import UpdateDialog
 
 
 class UpdateCheckWorker(QObject):
     update_available = Signal(object)  # emits UpdateInfo
 
-    def run(self):
+    def run(self) -> None:
         checker = UpdateChecker()
         info = checker.check_for_update()
         if info and info.available:
@@ -39,7 +40,7 @@ class UpdateCheckWorker(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(get_localized("Menu_Title").format(version=get_version()))
         self.resize(800, 600)
@@ -50,8 +51,10 @@ class MainWindow(QMainWindow):
 
         self._setup_conversion_settings()
         self._conversion_running = threading.Event()
-        self._conversion_thread = None
-        self._worker = None
+        self._conversion_thread: QThread | None = None
+        self._worker: ConversionWorker | None = None
+        self._update_thread: QThread | None = None
+        self._update_worker: UpdateCheckWorker | None = None
         self._timer_running = False
         self._start_time = 0
 
@@ -65,9 +68,9 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._update_timer)
 
-    def _setup_conversion_settings(self):
+    def _setup_conversion_settings(self) -> None:
         all_keys = [key for keys in CONVERSION_CATEGORIES.values() for key in keys]
-        self._conversion_settings = {key: SettingValue(True) for key in all_keys}
+        self._conversion_settings: dict[str, SettingValue] = {key: SettingValue(True) for key in all_keys}
         self._conversion_settings["notes"].set(False)
         self._conversion_settings["sound_group_folders"].set(False)
         self._compact_logging = SettingValue(True)
@@ -81,7 +84,7 @@ class MainWindow(QMainWindow):
             case _:
                 self._gm_platform = "windows"
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
@@ -116,7 +119,7 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._info_bar)
 
-    def _create_menu(self):
+    def _create_menu(self) -> None:
         menu_bar = self.menuBar()
         help_menu = menu_bar.addMenu("Help")
         help_menu.addAction("About GM2Godot", self._show_about)
@@ -137,10 +140,10 @@ class MainWindow(QMainWindow):
 
     # --- Actions ---
 
-    def _show_about(self):
+    def _show_about(self) -> None:
         AboutDialog(self).exec()
 
-    def _check_for_updates_on_startup(self):
+    def _check_for_updates_on_startup(self) -> None:
         self._update_worker = UpdateCheckWorker()
         self._update_thread = QThread()
         self._update_worker.moveToThread(self._update_thread)
@@ -148,7 +151,7 @@ class MainWindow(QMainWindow):
         self._update_thread.started.connect(self._update_worker.run)
         self._update_thread.start()
 
-    def _on_update_available(self, info):
+    def _on_update_available(self, info: UpdateInfo) -> None:
         if self._update_thread:
             self._update_thread.quit()
             self._update_thread.wait()
@@ -161,7 +164,7 @@ class MainWindow(QMainWindow):
 
         UpdateDialog(info, self).exec()
 
-    def _check_for_updates(self):
+    def _check_for_updates(self) -> None:
         checker = UpdateChecker()
         info = checker.check_for_update()
         if info is None:
@@ -172,7 +175,7 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "GM2Godot", get_localized("Update_UpToDate"))
 
-    def _open_settings(self):
+    def _open_settings(self) -> None:
         dialog = SettingsDialog(
             self._conversion_settings,
             self._compact_logging,
@@ -184,16 +187,16 @@ class MainWindow(QMainWindow):
             self._gm_platform = dialog.selected_platform()
             self._max_workers = dialog.selected_max_workers()
 
-    def _open_language(self):
+    def _open_language(self) -> None:
         LanguageDialog(self).exec()
 
-    def _on_path_selected(self, key, folder):
+    def _on_path_selected(self, key: str, folder: str) -> None:
         if key == "gamemaker":
             self._check_project_file(folder, ".yyp", "GameMaker")
         else:
             self._check_project_file(folder, "project.godot", "Godot")
 
-    def _check_project_file(self, folder, file_extension, file_name):
+    def _check_project_file(self, folder: str, file_extension: str, file_name: str) -> None:
         try:
             files = [f for f in os.listdir(folder) if f.endswith(file_extension)]
         except OSError:
@@ -221,7 +224,7 @@ class MainWindow(QMainWindow):
 
     # --- Conversion ---
 
-    def _start_conversion(self):
+    def _start_conversion(self) -> None:
         gm_path = self._path_panel.gamemaker_path()
         godot_path = self._path_panel.godot_path()
 
@@ -258,7 +261,7 @@ class MainWindow(QMainWindow):
 
         self._start_timer()
 
-    def _validate_projects(self, gm_path, godot_path):
+    def _validate_projects(self, gm_path: str, godot_path: str) -> bool:
         try:
             yyp_files = [f for f in os.listdir(gm_path) if f.endswith(".yyp")]
         except OSError:
@@ -282,7 +285,7 @@ class MainWindow(QMainWindow):
             return False
         return True
 
-    def _prepare_for_conversion(self):
+    def _prepare_for_conversion(self) -> None:
         self._action_panel.convert_button.setEnabled(False)
         self._action_panel.stop_button.setEnabled(True)
         self._action_panel.settings_button.setEnabled(False)
@@ -291,13 +294,13 @@ class MainWindow(QMainWindow):
         self._progress.progress_bar.set_progress(0)
         self._console.append_log(get_localized("Console_ConversionStart"))
 
-    def _stop_conversion(self):
+    def _stop_conversion(self) -> None:
         if self._conversion_running.is_set():
             self._conversion_running.clear()
             self._console.append_log(get_localized("Console_ConversionStopping"))
             self._action_panel.stop_button.setEnabled(False)
 
-    def _conversion_complete(self):
+    def _conversion_complete(self) -> None:
         self._progress.progress_bar.set_progress(100)
         self._progress.status_label.setText(get_localized("Console_ConversionComplete"))
 
@@ -320,16 +323,16 @@ class MainWindow(QMainWindow):
 
     # --- Timer ---
 
-    def _start_timer(self):
+    def _start_timer(self) -> None:
         self._timer_running = True
         self._start_time = time.time()
         self._timer.start()
 
-    def _stop_timer(self):
+    def _stop_timer(self) -> None:
         self._timer_running = False
         self._timer.stop()
 
-    def _update_timer(self):
+    def _update_timer(self) -> None:
         elapsed = int(time.time() - self._start_time)
         h, remainder = divmod(elapsed, 3600)
         m, s = divmod(remainder, 60)
@@ -339,12 +342,12 @@ class MainWindow(QMainWindow):
 
     # --- Close ---
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         if self._conversion_thread and self._conversion_thread.isRunning():
             self._conversion_running.clear()
             self._conversion_thread.quit()
             self._conversion_thread.wait(5000)
-        if hasattr(self, '_update_thread') and self._update_thread and self._update_thread.isRunning():
+        if self._update_thread and self._update_thread.isRunning():
             self._update_thread.quit()
             self._update_thread.wait(3000)
         event.accept()

@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncAudioEvents(unittest.TestCase):
     def test_maps_async_audio_recording_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 73})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_audio_recording_async")
         self.assertEqual(mapping.params, "")
@@ -21,6 +22,7 @@ class TestAsyncAudioEvents(unittest.TestCase):
 
     def test_maps_async_audio_playback_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 74})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_audio_playback_async")
         self.assertEqual(mapping.params, "")
@@ -29,6 +31,7 @@ class TestAsyncAudioEvents(unittest.TestCase):
 
     def test_maps_async_audio_playback_ended_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 80})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_audio_playback_ended_async")
         self.assertEqual(mapping.params, "")

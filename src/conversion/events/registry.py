@@ -1,11 +1,14 @@
 import importlib
 import pkgutil
+from types import ModuleType
+from typing import Any, Iterator, cast
 
 from src.conversion.events import mappings
-from src.conversion.events.base import EventMapping
+from src.conversion.events.base import EventMapping, EventTypeHandlers, StaticMappings
+from src.conversion.type_defs import JsonDict
 
 
-_GML_EVENT_NAMES = {
+_GML_EVENT_NAMES: dict[int, str] = {
     0: "Create",
     1: "Destroy",
     2: "Alarm",
@@ -22,24 +25,25 @@ _GML_EVENT_NAMES = {
 }
 
 
-def _iter_package_modules(package):
-    modules = sorted(pkgutil.iter_modules(package.__path__), key=lambda module: module.name)
+def _iter_package_modules(package: ModuleType) -> Iterator[ModuleType]:
+    package_info = cast(Any, package)
+    modules = sorted(pkgutil.iter_modules(package_info.__path__), key=lambda module: module.name)
     for module in modules:
-        yield importlib.import_module(f"{package.__name__}.{module.name}")
+        yield importlib.import_module(f"{package_info.__name__}.{module.name}")
 
 
-def _load_mapping_registry():
-    static_map = {}
-    event_type_handlers = {}
-    input_event_types = set()
-    input_merged_mapping = None
+def _load_mapping_registry() -> tuple[StaticMappings, EventTypeHandlers, frozenset[int], EventMapping]:
+    static_map: StaticMappings = {}
+    event_type_handlers: EventTypeHandlers = {}
+    input_event_types: set[int] = set()
+    input_merged_mapping: EventMapping | None = None
 
     for module in _iter_package_modules(mappings):
-        static_map.update(getattr(module, "STATIC_MAPPINGS", {}))
-        event_type_handlers.update(getattr(module, "EVENT_TYPE_HANDLERS", {}))
-        input_event_types.update(getattr(module, "INPUT_EVENT_TYPES", set()))
+        static_map.update(cast(StaticMappings, getattr(module, "STATIC_MAPPINGS", {})))
+        event_type_handlers.update(cast(EventTypeHandlers, getattr(module, "EVENT_TYPE_HANDLERS", {})))
+        input_event_types.update(cast(set[int], getattr(module, "INPUT_EVENT_TYPES", set[int]())))
 
-        module_input_mapping = getattr(module, "INPUT_MERGED_MAPPING", None)
+        module_input_mapping = cast(EventMapping | None, getattr(module, "INPUT_MERGED_MAPPING", None))
         if module_input_mapping is not None:
             input_merged_mapping = module_input_mapping
 
@@ -52,19 +56,19 @@ def _load_mapping_registry():
 _STATIC_MAP, _EVENT_TYPE_HANDLERS, INPUT_EVENT_TYPES, INPUT_MERGED_MAPPING = _load_mapping_registry()
 
 
-def is_input_event(event):
+def is_input_event(event: JsonDict) -> bool:
     """Check whether an event dict represents a supported input event."""
     return event.get('eventType', -1) in INPUT_EVENT_TYPES
 
 
-def map_event(event):
+def map_event(event: JsonDict) -> EventMapping | None:
     """Map a GameMaker event dict to an EventMapping.
 
     Returns None for input events since they are merged into a single
     _input(event) function by the script generator.
     """
-    event_type = event.get('eventType', -1)
-    event_num = event.get('eventNum', 0)
+    event_type = cast(int, event.get('eventType', -1))
+    event_num = cast(int, event.get('eventNum', 0))
 
     if event_type in INPUT_EVENT_TYPES:
         return None

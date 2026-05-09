@@ -33,21 +33,21 @@ config/icon="res://old_icon.png"
 class TestGetGmProjectName(unittest.TestCase):
     """Test ProjectSettingsConverter.get_gm_project_name()."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Write a fake .yyp file
         self.yyp_path = os.path.join(self.gm_dir, "TestProject.yyp")
         with open(self.yyp_path, "w", encoding="utf-8") as f:
             f.write(SAMPLE_YYP)
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ProjectSettingsConverter:
         return ProjectSettingsConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -55,12 +55,12 @@ class TestGetGmProjectName(unittest.TestCase):
             conversion_running=lambda: True,
         )
 
-    def test_returns_project_name(self):
+    def test_returns_project_name(self) -> None:
         converter = self._make_converter()
         name = converter.get_gm_project_name()
         self.assertEqual(name, "TestProject")
 
-    def test_returns_none_when_no_yyp(self):
+    def test_returns_none_when_no_yyp(self) -> None:
         os.remove(self.yyp_path)
         converter = self._make_converter()
         name = converter.get_gm_project_name()
@@ -70,10 +70,10 @@ class TestGetGmProjectName(unittest.TestCase):
 class TestUpdateProjectName(unittest.TestCase):
     """Test ProjectSettingsConverter.update_project_name()."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # .yyp in GM dir
         with open(os.path.join(self.gm_dir, "MyGame.yyp"), "w", encoding="utf-8") as f:
@@ -84,11 +84,11 @@ class TestUpdateProjectName(unittest.TestCase):
         with open(self.project_godot, "w", encoding="utf-8") as f:
             f.write(SAMPLE_PROJECT_GODOT)
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ProjectSettingsConverter:
         return ProjectSettingsConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -96,7 +96,7 @@ class TestUpdateProjectName(unittest.TestCase):
             conversion_running=lambda: True,
         )
 
-    def test_updates_name_in_project_godot(self):
+    def test_updates_name_in_project_godot(self) -> None:
         converter = self._make_converter()
         converter.update_project_name()
 
@@ -106,7 +106,7 @@ class TestUpdateProjectName(unittest.TestCase):
         self.assertIn('config/name="MyGame"', content)
         self.assertNotIn("Placeholder", content)
 
-    def test_missing_project_godot_no_crash(self):
+    def test_missing_project_godot_no_crash(self) -> None:
         os.remove(self.project_godot)
         converter = self._make_converter()
         converter.update_project_name()  # should not raise
@@ -116,19 +116,19 @@ class TestUpdateProjectName(unittest.TestCase):
 class TestReadAudioGroups(unittest.TestCase):
     """Test ProjectSettingsConverter.read_audio_groups()."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         with open(os.path.join(self.gm_dir, "Game.yyp"), "w", encoding="utf-8") as f:
             f.write(SAMPLE_YYP)
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self):
+    def _make_converter(self) -> ProjectSettingsConverter:
         return ProjectSettingsConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -136,12 +136,12 @@ class TestReadAudioGroups(unittest.TestCase):
             conversion_running=lambda: True,
         )
 
-    def test_reads_audio_groups(self):
+    def test_reads_audio_groups(self) -> None:
         converter = self._make_converter()
         groups = converter.read_audio_groups()
         self.assertEqual(groups, ["audiogroup_default", "audiogroup_music"])
 
-    def test_empty_audio_groups(self):
+    def test_empty_audio_groups(self) -> None:
         # Overwrite with a .yyp that has no AudioGroups section
         with open(os.path.join(self.gm_dir, "Game.yyp"), "w", encoding="utf-8") as f:
             f.write('{ "%Name": "Game" }')
@@ -154,16 +154,16 @@ class TestReadAudioGroups(unittest.TestCase):
 class TestConvertIconFallback(unittest.TestCase):
     """Test that convert_icon falls back to other platforms when the selected platform has no icons."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, platform='linux'):
+    def _make_converter(self, platform: str = 'linux') -> ProjectSettingsConverter:
         return ProjectSettingsConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
@@ -172,7 +172,7 @@ class TestConvertIconFallback(unittest.TestCase):
             gm_platform=platform,
         )
 
-    def _create_icon(self, platform):
+    def _create_icon(self, platform: str) -> None:
         """Create a minimal .ico file under options/<platform>/icons/."""
         from PIL import Image
         icons_dir = os.path.join(self.gm_dir, 'options', platform, 'icons')
@@ -180,7 +180,7 @@ class TestConvertIconFallback(unittest.TestCase):
         img = Image.new("RGBA", (16, 16), "blue")
         img.save(os.path.join(icons_dir, "icon.ico"), "PNG")
 
-    def test_uses_fallback_platform_when_selected_missing(self):
+    def test_uses_fallback_platform_when_selected_missing(self) -> None:
         self._create_icon('windows')
         converter = self._make_converter(platform='linux')
         result = converter.convert_icon()
@@ -190,7 +190,7 @@ class TestConvertIconFallback(unittest.TestCase):
         fallback_logs = [l for l in self.logs if 'windows' in l]
         self.assertTrue(len(fallback_logs) > 0, "Should log which platform was used as fallback")
 
-    def test_uses_selected_platform_when_available(self):
+    def test_uses_selected_platform_when_available(self) -> None:
         self._create_icon('linux')
         self._create_icon('windows')
         converter = self._make_converter(platform='linux')
@@ -200,7 +200,7 @@ class TestConvertIconFallback(unittest.TestCase):
         fallback_logs = [l for l in self.logs if 'Fallback' in l or 'instead' in l]
         self.assertEqual(len(fallback_logs), 0, "Should not fall back when selected platform has icons")
 
-    def test_returns_false_when_no_platform_has_icons(self):
+    def test_returns_false_when_no_platform_has_icons(self) -> None:
         converter = self._make_converter(platform='linux')
         result = converter.convert_icon()
 

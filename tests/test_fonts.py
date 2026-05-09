@@ -1,10 +1,13 @@
+# pyright: reportPrivateUsage=false
+
 import json
 import os
 import sys
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
+from typing import TypeAlias
+from unittest.mock import Mock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -13,7 +16,10 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.fonts import FontConverter, _find_system_font
 
 
-MINIMAL_FONT_YY = {
+FontYY: TypeAlias = dict[str, object]
+
+
+MINIMAL_FONT_YY: FontYY = {
     "$GMFont": "",
     "%Name": "fnt_test",
     "AntiAlias": 1,
@@ -46,7 +52,7 @@ MINIMAL_FONT_YY = {
 }
 
 
-def _make_font_yy(base_dir, font_name, overrides=None):
+def _make_font_yy(base_dir: str, font_name: str, overrides: FontYY | None = None) -> str:
     """Create a font .yy file in the standard GM directory structure."""
     font_dir = os.path.join(base_dir, "fonts", font_name)
     os.makedirs(font_dir, exist_ok=True)
@@ -67,7 +73,7 @@ class TestFontConverterSystemFont(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         _make_font_yy(self.gm_dir, "fnt_test", {
             "fontName": "NonExistentTestFont99999", "size": 16.0,
         })
@@ -117,7 +123,7 @@ class TestFontConverterBold(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         _make_font_yy(self.gm_dir, "fnt_bold", {
             "fontName": "NonExistentTestFont99999", "bold": True,
         })
@@ -146,7 +152,7 @@ class TestFontConverterTTF(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         yy_path = _make_font_yy(self.gm_dir, "fnt_custom", {
             "fontName": "CustomFont",
             "includeTTF": True,
@@ -191,7 +197,7 @@ class TestFontConverterTTFMissing(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         _make_font_yy(self.gm_dir, "fnt_missing_ttf", {
             "fontName": "NonExistentTestFont99999",
             "includeTTF": True,
@@ -225,7 +231,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
         self.fake_font_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create a fake system font file
         self.fake_ttf = os.path.join(self.fake_font_dir, "TestFont.ttf")
@@ -240,7 +246,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
         shutil.rmtree(self.fake_font_dir)
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_copies_system_font(self, mock_dirs):
+    def test_copies_system_font(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.fake_font_dir]
         converter = FontConverter(
             self.gm_dir, self.godot_dir,
@@ -254,7 +260,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
                         f"Expected system font copied to {expected}")
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_no_tres_when_system_font_found(self, mock_dirs):
+    def test_no_tres_when_system_font_found(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.fake_font_dir]
         converter = FontConverter(
             self.gm_dir, self.godot_dir,
@@ -281,19 +287,19 @@ class TestFindSystemFont(unittest.TestCase):
         shutil.rmtree(self.font_dir)
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_exact_match(self, mock_dirs):
+    def test_finds_exact_match(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.font_dir]
         result = _find_system_font("MyFont")
         self.assertEqual(result, self.font_file)
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_case_insensitive(self, mock_dirs):
+    def test_finds_case_insensitive(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.font_dir]
         result = _find_system_font("myfont")
         self.assertEqual(result, self.font_file)
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_with_regular_suffix(self, mock_dirs):
+    def test_finds_with_regular_suffix(self, mock_dirs: Mock) -> None:
         regular_font = os.path.join(self.font_dir, "TestFont-Regular.ttf")
         with open(regular_font, "wb") as f:
             f.write(b"\x00" * 32)
@@ -302,7 +308,7 @@ class TestFindSystemFont(unittest.TestCase):
         self.assertEqual(result, regular_font)
 
     @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_returns_none_when_not_found(self, mock_dirs):
+    def test_returns_none_when_not_found(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.font_dir]
         result = _find_system_font("NoSuchFont")
         self.assertIsNone(result)
@@ -314,7 +320,7 @@ class TestFontConverterMissingFolder(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -338,7 +344,7 @@ class TestFontConverterEmptyFolder(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         os.makedirs(os.path.join(self.gm_dir, "fonts"))
 
     def tearDown(self):
@@ -363,7 +369,7 @@ class TestFontConverterSubfolders(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
         _make_font_yy(self.gm_dir, "fnt_ui", {
             "fontName": "NonExistentTestFont99999",
             "parent": {"name": "UI", "path": "folders/Fonts/UI.yy"},

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 import threading
@@ -39,10 +41,10 @@ class TestConversionCategories(unittest.TestCase):
 
 class _FakeBooleanVar:
     """Mimics tkinter BooleanVar for testing."""
-    def __init__(self, value):
+    def __init__(self, value: bool) -> None:
         self._value = value
 
-    def get(self):
+    def get(self) -> bool:
         return self._value
 
 
@@ -52,8 +54,8 @@ class TestConverterSkipsDisabled(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
-        self.statuses = []
+        self.logs: list[str] = []
+        self.statuses: list[str] = []
 
         # Create minimal GM project structure
         with open(os.path.join(self.gm_dir, "Test.yyp"), "w", encoding="utf-8") as f:
@@ -99,8 +101,8 @@ class TestConverterRespectsRunningFlag(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
-        self.statuses = []
+        self.logs: list[str] = []
+        self.statuses: list[str] = []
 
         with open(os.path.join(self.gm_dir, "Test.yyp"), "w", encoding="utf-8") as f:
             f.write('{ "%Name": "Test" }')

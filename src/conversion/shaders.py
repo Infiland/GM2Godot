@@ -1,23 +1,26 @@
+from __future__ import annotations
+
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
 
 
 class ShaderConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path,
-                 log_callback=print, progress_callback=None,
-                 conversion_running=None,
-                 update_log_callback=None, compact_logging=False,
-                 max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath,
+                 log_callback: LogCallback = print, progress_callback: ProgressCallback | None = None,
+                 conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path,
                          log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_shaders_path = os.path.join(self.godot_project_path, 'shaders')
 
-    def convert_shader(self, input_file, output_file):
+    def convert_shader(self, input_file: str, output_file: str) -> None:
         with open(input_file, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -58,7 +61,7 @@ class ShaderConverter(BaseConverter):
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
-    def _process_shader(self, input_path, subfolder=""):
+    def _process_shader(self, input_path: str, subfolder: str = "") -> tuple[str, str] | None:
         if not self.conversion_running():
             return None
         filename = os.path.basename(input_path)
@@ -72,7 +75,7 @@ class ShaderConverter(BaseConverter):
         self.convert_shader(input_path, output_path)
         return (filename, output_name)
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         gm_shaders_path = os.path.join(self.gm_project_path, 'shaders')
 
         if not os.path.exists(gm_shaders_path):
@@ -82,8 +85,8 @@ class ShaderConverter(BaseConverter):
         os.makedirs(self.godot_shaders_path, exist_ok=True)
 
         # Collect shader files with their subfolder info
-        shader_files = []
-        shader_subfolders = {}
+        shader_files: list[str] = []
+        shader_subfolders: dict[str, str] = {}
         for root, _, files in os.walk(gm_shaders_path):
             for f in files:
                 if f.endswith(('.vsh', '.fsh')):

@@ -2,7 +2,8 @@ import os
 import platform
 import requests
 from dataclasses import dataclass
-from typing import Optional
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Optional, cast
 
 from src.version import get_version
 
@@ -29,23 +30,24 @@ class UpdateChecker:
                 timeout=10,
             )
             response.raise_for_status()
-            data = response.json()
+            data = cast(Mapping[str, Any], response.json())
 
-            latest_tag = data.get("tag_name", "").lstrip("v")
+            latest_tag = str(data.get("tag_name", "")).lstrip("v")
             current = get_version()
 
             available = self._is_newer(latest_tag, current)
 
             # Find platform-appropriate asset
-            download_url, asset_name = self._find_platform_asset(data.get("assets", []))
+            assets = cast(Sequence[Mapping[str, Any]], data.get("assets", []))
+            download_url, asset_name = self._find_platform_asset(assets)
 
             return UpdateInfo(
                 available=available,
                 latest_version=latest_tag,
-                release_notes=data.get("body", ""),
+                release_notes=str(data.get("body", "")),
                 download_url=download_url,
                 asset_name=asset_name,
-                release_page_url=data.get("html_url", "https://github.com/Infiland/GM2Godot/releases"),
+                release_page_url=str(data.get("html_url", "https://github.com/Infiland/GM2Godot/releases")),
             )
         except Exception:
             return None
@@ -61,7 +63,7 @@ class UpdateChecker:
             return False
 
     @staticmethod
-    def _find_platform_asset(assets: list) -> tuple:
+    def _find_platform_asset(assets: Sequence[Mapping[str, Any]]) -> tuple[Optional[str], Optional[str]]:
         """Find the download URL for the current platform."""
         system = platform.system().lower()
         platform_keywords = {
@@ -72,14 +74,21 @@ class UpdateChecker:
         keywords = platform_keywords.get(system, [])
 
         for asset in assets:
-            name = asset.get("name", "").lower()
+            name = str(asset.get("name", "")).lower()
             if any(kw in name for kw in keywords):
-                return asset.get("browser_download_url"), asset.get("name")
+                return (
+                    cast(Optional[str], asset.get("browser_download_url")),
+                    cast(Optional[str], asset.get("name")),
+                )
 
         return None, None
 
     @staticmethod
-    def download_update(url: str, dest_path: str, progress_callback=None) -> bool:
+    def download_update(
+        url: str,
+        dest_path: str,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> bool:
         """Download the update binary with progress reporting."""
         try:
             response = requests.get(url, stream=True, timeout=60)
@@ -111,7 +120,7 @@ class UpdateChecker:
             return None
 
     @staticmethod
-    def set_skipped_version(version: str):
+    def set_skipped_version(version: str) -> None:
         """Save a version to skip."""
         config_dir = os.path.join(os.path.expanduser("~"), ".gm2godot")
         os.makedirs(config_dir, exist_ok=True)

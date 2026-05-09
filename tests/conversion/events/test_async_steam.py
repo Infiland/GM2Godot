@@ -13,6 +13,7 @@ from src.conversion.script_generator import generate_script_content
 class TestAsyncSteamEvent(unittest.TestCase):
     def test_maps_other_async_steam_event(self):
         mapping = map_event({"eventType": 7, "eventNum": 69})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_async_steam")
         self.assertEqual(mapping.params, "")

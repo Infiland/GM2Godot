@@ -17,6 +17,7 @@ class TestCollisionEvents(unittest.TestCase):
             "eventNum": 0,
             "collisionObjectId": {"name": "o_enemy"},
         })
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_collision_o_enemy")
         self.assertEqual(mapping.params, "")
@@ -25,6 +26,7 @@ class TestCollisionEvents(unittest.TestCase):
 
     def test_maps_collision_without_target_object(self):
         mapping = map_event({"eventType": 4, "eventNum": 0})
+        assert mapping is not None
 
         self.assertEqual(mapping.godot_func, "_on_collision")
         self.assertEqual(mapping.params, "")

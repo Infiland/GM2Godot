@@ -17,6 +17,8 @@ class TestEventRegistry(unittest.TestCase):
     def test_loads_static_mapping_modules(self):
         close_button = map_event({"eventType": 7, "eventNum": 30})
         legacy_lives = map_event({"eventType": 7, "eventNum": 6})
+        assert close_button is not None
+        assert legacy_lives is not None
 
         self.assertEqual(close_button.godot_func, "_notification")
         self.assertEqual(legacy_lives.godot_func, "_on_no_more_lives")
@@ -24,6 +26,8 @@ class TestEventRegistry(unittest.TestCase):
     def test_keeps_dynamic_handlers(self):
         alarm = map_event({"eventType": 2, "eventNum": 3})
         other = map_event({"eventType": 7, "eventNum": 26})
+        assert alarm is not None
+        assert other is not None
 
         self.assertEqual(alarm.godot_func, "_on_alarm_3")
         self.assertEqual(other.godot_func, "_on_other_26")

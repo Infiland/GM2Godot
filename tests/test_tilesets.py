@@ -1,21 +1,24 @@
+# pyright: reportPrivateUsage=false
+
 import os
 import sys
 import shutil
 import tempfile
 import unittest
+from typing import cast
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
-from src.conversion.tilesets import TileSetConverter
+from src.conversion.tilesets import TileSetConverter, TilesetData
 
 
-def _make_tileset_yy_content(name, sprite_name, tile_width=16, tile_height=16,
-                              tilehsep=0, tilevsep=0, tilexoff=0, tileyoff=0,
-                              tile_count=2, out_columns=1,
-                              parent_path="folders/Tilesets.yy"):
+def _make_tileset_yy_content(name: str, sprite_name: str, tile_width: int = 16, tile_height: int = 16,
+                              tilehsep: int = 0, tilevsep: int = 0, tilexoff: int = 0, tileyoff: int = 0,
+                              tile_count: int = 2, out_columns: int = 1,
+                              parent_path: str = "folders/Tilesets.yy") -> str:
     """Build a GameMaker tileset .yy file string."""
     return (
         '{{\n'
@@ -46,7 +49,7 @@ def _make_tileset_yy_content(name, sprite_name, tile_width=16, tile_height=16,
     )
 
 
-def _make_sprite_for_tileset(gm_dir, sprite_name, width=64, height=64):
+def _make_sprite_for_tileset(gm_dir: str, sprite_name: str, width: int = 64, height: int = 64) -> None:
     """Create a minimal sprite directory with a .yy and a single-frame PNG image.
 
     The structure matches what TileSetConverter._find_sprite_image expects:
@@ -92,7 +95,7 @@ class TestTileSetConverterBasic(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         # Create a tileset that references a sprite
         tileset_dir = os.path.join(self.gm_dir, "tilesets", "ts_ground")
@@ -155,7 +158,7 @@ class TestTileSetConverterEmpty(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
     def tearDown(self):
         shutil.rmtree(self.gm_dir)
@@ -171,7 +174,6 @@ class TestTileSetConverterEmpty(unittest.TestCase):
         )
         converter.convert_all()  # should not raise
 
-        joined = " ".join(self.logs)
         self.assertTrue(len(self.logs) > 0,
                         "Expected at least one log message for missing tilesets folder")
 
@@ -214,7 +216,7 @@ class TestParseTilesetYY(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_tileset_yy(self, tileset_name, content):
+    def _write_tileset_yy(self, tileset_name: str, content: str) -> None:
         tileset_dir = os.path.join(self.gm_dir, "tilesets", tileset_name)
         os.makedirs(tileset_dir, exist_ok=True)
         with open(os.path.join(tileset_dir, tileset_name + ".yy"), "w") as f:
@@ -228,6 +230,7 @@ class TestParseTilesetYY(unittest.TestCase):
 
         result = self.converter._parse_tileset_yy("ts_test")
         self.assertIsNotNone(result)
+        result = cast(TilesetData, result)
         self.assertEqual(result["sprite_name"], "s_test")
         self.assertEqual(result["tileWidth"], 32)
         self.assertEqual(result["tileHeight"], 32)
@@ -255,6 +258,7 @@ class TestParseTilesetYY(unittest.TestCase):
 
         result = self.converter._parse_tileset_yy("ts_tc")
         self.assertIsNotNone(result)
+        result = cast(TilesetData, result)
         self.assertEqual(result["sprite_name"], "s_tc")
         self.assertEqual(result["tileWidth"], 16)
 
@@ -265,7 +269,7 @@ class TestTileSetConverterSubfolders(unittest.TestCase):
     def setUp(self):
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
         tileset_dir = os.path.join(self.gm_dir, "tilesets", "ts_terrain")
         os.makedirs(tileset_dir)

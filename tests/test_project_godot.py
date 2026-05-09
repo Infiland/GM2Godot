@@ -11,25 +11,25 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.project_godot import GodotProjectFile
 
 
-def _write_file(path, content):
+def _write_file(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
 class TestGodotProjectFile(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.godot_dir = tempfile.mkdtemp()
         self.project_path = os.path.join(self.godot_dir, "project.godot")
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.godot_dir)
 
-    def _read_project(self):
+    def _read_project(self) -> str:
         with open(self.project_path, "r", encoding="utf-8") as f:
             return f.read()
 
-    def test_set_main_scene_replaces_existing_and_preserves_settings(self):
+    def test_set_main_scene_replaces_existing_and_preserves_settings(self) -> None:
         _write_file(self.project_path, (
             '[application]\n'
             'config/name="Existing"\n'
@@ -53,7 +53,7 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertIn('[rendering]', content)
         self.assertIn('renderer/rendering_method="gl_compatibility"', content)
 
-    def test_set_main_scene_adds_to_existing_application_section(self):
+    def test_set_main_scene_adds_to_existing_application_section(self) -> None:
         _write_file(self.project_path, (
             '[application]\n'
             'config/name="Existing"\n'
@@ -74,7 +74,7 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertIn('[display]', content)
         self.assertIn('window/size/viewport_width=1280', content)
 
-    def test_set_main_scene_adds_application_section_when_missing(self):
+    def test_set_main_scene_adds_application_section_when_missing(self) -> None:
         _write_file(self.project_path, (
             '[rendering]\n'
             'quality/driver="GLES3"\n'
@@ -91,7 +91,7 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertIn('[rendering]', content)
         self.assertIn('quality/driver="GLES3"', content)
 
-    def test_set_main_scene_does_not_change_other_sections(self):
+    def test_set_main_scene_does_not_change_other_sections(self) -> None:
         _write_file(self.project_path, (
             '[other]\n'
             'run/main_scene="res://other.tscn"\n'
@@ -109,7 +109,7 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertIn('[other]\nrun/main_scene="res://other.tscn"', content)
         self.assertIn('run/main_scene="res://rooms/r_a/r_a.tscn"', content)
 
-    def test_set_main_scene_returns_false_when_project_missing(self):
+    def test_set_main_scene_returns_false_when_project_missing(self) -> None:
         result = GodotProjectFile(self.project_path).set_main_scene(
             "res://rooms/r_a/r_a.tscn"
         )

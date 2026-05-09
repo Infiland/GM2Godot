@@ -3,6 +3,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from typing import Iterable
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -11,27 +12,29 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.resource_index import GameMakerResourceIndex
 
 
-def _write_file(path, content):
+def _write_file(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
 
-def _resource_entry(kind, name):
+def _resource_entry(kind: str, name: str) -> str:
     return (
         '    {{"id":{{"name":"{name}",'
         '"path":"{kind}/{name}/{name}.yy",}},}}'
     ).format(kind=kind, name=name)
 
 
-def _room_order_entry(name):
+def _room_order_entry(name: str) -> str:
     return (
         '    {{"roomId":{{"name":"{name}",'
         '"path":"rooms/{name}/{name}.yy",}},}}'
     ).format(name=name)
 
 
-def _make_yyp(resources, room_order=None):
+def _make_yyp(
+    resources: Iterable[tuple[str, str]], room_order: Iterable[str] | None = None
+) -> str:
     room_order = room_order or []
     resource_lines = ",\n".join(
         _resource_entry(kind, name) for kind, name in resources
@@ -46,7 +49,7 @@ def _make_yyp(resources, room_order=None):
     )
 
 
-def _make_room_yy(name, parent_path="folders/Rooms.yy"):
+def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy") -> str:
     return (
         '{{\n'
         '  "$GMRoom":"v1",\n'
@@ -70,7 +73,9 @@ def _make_room_yy(name, parent_path="folders/Rooms.yy"):
     ).format(name=name, parent_path=parent_path)
 
 
-def _make_minimal_yy(name, resource_type, parent_name, parent_path):
+def _make_minimal_yy(
+    name: str, resource_type: str, parent_name: str, parent_path: str
+) -> str:
     return (
         '{{\n'
         '  "name":"{name}",\n'
@@ -86,16 +91,16 @@ def _make_minimal_yy(name, resource_type, parent_name, parent_path):
 
 
 class TestGameMakerResourceIndex(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
-        self.logs = []
+        self.logs: list[str] = []
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _build_index(self):
+    def _build_index(self) -> GameMakerResourceIndex:
         index = GameMakerResourceIndex(
             self.gm_dir,
             self.godot_dir,
@@ -105,26 +110,32 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         )
         return index.build()
 
-    def _write_yyp(self, resources, room_order=None):
+    def _write_yyp(
+        self, resources: Iterable[tuple[str, str]], room_order: Iterable[str] | None = None
+    ) -> None:
         _write_file(
             os.path.join(self.gm_dir, "TestProject.yyp"),
             _make_yyp(resources, room_order),
         )
 
-    def _write_room(self, name, parent_path="folders/Rooms.yy", content=None):
+    def _write_room(
+        self, name: str, parent_path: str = "folders/Rooms.yy", content: str | None = None
+    ) -> None:
         _write_file(
             os.path.join(self.gm_dir, "rooms", name, name + ".yy"),
             content if content is not None else _make_room_yy(name, parent_path),
         )
 
-    def _write_resource(self, kind, name, parent_path, resource_type):
+    def _write_resource(
+        self, kind: str, name: str, parent_path: str, resource_type: str
+    ) -> None:
         parent_name = kind.capitalize()
         _write_file(
             os.path.join(self.gm_dir, kind, name, name + ".yy"),
             _make_minimal_yy(name, resource_type, parent_name, parent_path),
         )
 
-    def test_indexes_yyp_resources_and_preserves_room_order(self):
+    def test_indexes_yyp_resources_and_preserves_room_order(self) -> None:
         self._write_yyp(
             [("rooms", "r_second"), ("rooms", "r_first")],
             room_order=["r_first", "r_second"],
@@ -138,13 +149,15 @@ class TestGameMakerResourceIndex(unittest.TestCase):
             [room.name for room in index.ordered_rooms()],
             ["r_first", "r_second"],
         )
-        self.assertEqual(index.first_room().name, "r_first")
+        first_room = index.first_room()
+        assert first_room is not None
+        self.assertEqual(first_room.name, "r_first")
         self.assertEqual(
             index.resolve_gm_path("rooms", "r_first"),
             os.path.join(self.gm_dir, "rooms", "r_first", "r_first.yy"),
         )
 
-    def test_resolves_resource_gm_paths_for_supported_kinds(self):
+    def test_resolves_resource_gm_paths_for_supported_kinds(self) -> None:
         self._write_yyp([
             ("rooms", "r_test"),
             ("objects", "o_player"),
@@ -158,20 +171,29 @@ class TestGameMakerResourceIndex(unittest.TestCase):
 
         index = self._build_index()
 
-        self.assertTrue(index.resolve_gm_path("rooms", "r_test").endswith(
+        room_path = index.resolve_gm_path("rooms", "r_test")
+        object_path = index.resolve_gm_path("objects", "o_player")
+        sprite_path = index.resolve_gm_path("sprites", "s_player")
+        tileset_path = index.resolve_gm_path("tilesets", "ts_ground")
+
+        assert room_path is not None
+        assert object_path is not None
+        assert sprite_path is not None
+        assert tileset_path is not None
+        self.assertTrue(room_path.endswith(
             os.path.join("rooms", "r_test", "r_test.yy")
         ))
-        self.assertTrue(index.resolve_gm_path("objects", "o_player").endswith(
+        self.assertTrue(object_path.endswith(
             os.path.join("objects", "o_player", "o_player.yy")
         ))
-        self.assertTrue(index.resolve_gm_path("sprites", "s_player").endswith(
+        self.assertTrue(sprite_path.endswith(
             os.path.join("sprites", "s_player", "s_player.yy")
         ))
-        self.assertTrue(index.resolve_gm_path("tilesets", "ts_ground").endswith(
+        self.assertTrue(tileset_path.endswith(
             os.path.join("tilesets", "ts_ground", "ts_ground.yy")
         ))
 
-    def test_computes_godot_paths_with_subfolders(self):
+    def test_computes_godot_paths_with_subfolders(self) -> None:
         self._write_yyp([
             ("rooms", "r_intro"),
             ("objects", "o_player"),
@@ -208,18 +230,18 @@ class TestGameMakerResourceIndex(unittest.TestCase):
             "res://tilesets/World/ts_ground/ts_ground.tres",
         )
 
-    def test_handles_trailing_commas_in_yyp_and_room_yy(self):
+    def test_handles_trailing_commas_in_yyp_and_room_yy(self) -> None:
         self._write_yyp([("rooms", "r_trailing")], room_order=["r_trailing"])
         self._write_room("r_trailing")
 
         index = self._build_index()
         room = index.get_room("r_trailing")
 
-        self.assertIsNotNone(room)
+        assert room is not None
         self.assertEqual(room.room_settings["Width"], 640)
         self.assertEqual(room.room_settings["Height"], 480)
 
-    def test_indexes_room_creation_code_metadata(self):
+    def test_indexes_room_creation_code_metadata(self) -> None:
         content = _make_room_yy("r_code").replace(
             '"creationCodeFile":"",',
             '"creationCodeFile":"rooms/r_code/RoomCreationCode.gml",',
@@ -236,11 +258,12 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         index = self._build_index()
         room = index.get_room("r_code")
 
+        assert room is not None
         self.assertEqual(room.creation_code_file, "rooms/r_code/RoomCreationCode.gml")
         self.assertTrue(room.inherit_code)
         self.assertTrue(room.is_dnd)
 
-    def test_missing_yyp_falls_back_to_disk_scan(self):
+    def test_missing_yyp_falls_back_to_disk_scan(self) -> None:
         self._write_room("r_disk")
         self._write_resource("objects", "o_disk", "folders/Objects.yy", "GMObject")
         self._write_resource("sprites", "s_disk", "folders/Sprites.yy", "GMSprite")
@@ -254,7 +277,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertIsNotNone(index.get_resource("tilesets", "ts_disk"))
         self.assertEqual([room.name for room in index.ordered_rooms()], ["r_disk"])
 
-    def test_malformed_yyp_falls_back_to_disk_scan(self):
+    def test_malformed_yyp_falls_back_to_disk_scan(self) -> None:
         _write_file(os.path.join(self.gm_dir, "BadProject.yyp"), "not valid json {{{")
         self._write_room("r_disk")
 
@@ -263,7 +286,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertIsNotNone(index.get_room("r_disk"))
         self.assertTrue(any("falling back" in msg for msg in self.logs))
 
-    def test_missing_room_order_nodes_uses_sorted_fallback_and_logs_warning(self):
+    def test_missing_room_order_nodes_uses_sorted_fallback_and_logs_warning(self) -> None:
         _write_file(
             os.path.join(self.gm_dir, "TestProject.yyp"),
             "{\n"
@@ -280,12 +303,14 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         index = self._build_index()
 
         self.assertEqual([room.name for room in index.ordered_rooms()], ["r_a", "r_z"])
-        self.assertEqual(index.first_room().name, "r_a")
+        first_room = index.first_room()
+        assert first_room is not None
+        self.assertEqual(first_room.name, "r_a")
         self.assertTrue(index.used_room_order_fallback)
         self.assertTrue(any("RoomOrderNodes missing" in msg for msg in self.logs))
         self.assertTrue(any("fallback" in msg.lower() for msg in self.logs))
 
-    def test_malformed_room_is_skipped_and_logged(self):
+    def test_malformed_room_is_skipped_and_logged(self) -> None:
         self._write_yyp([("rooms", "r_bad")], room_order=["r_bad"])
         self._write_room("r_bad", content="not valid json {{{")
 
@@ -294,7 +319,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertIsNone(index.get_room("r_bad"))
         self.assertTrue(any("r_bad" in msg for msg in self.logs))
 
-    def test_missing_optional_room_fields_do_not_crash(self):
+    def test_missing_optional_room_fields_do_not_crash(self) -> None:
         self._write_yyp([("rooms", "r_minimal")], room_order=["r_minimal"])
         self._write_room(
             "r_minimal",
@@ -304,6 +329,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         index = self._build_index()
         room = index.get_room("r_minimal")
 
+        assert room is not None
         self.assertEqual(room.room_settings, {})
         self.assertEqual(room.physics_settings, {})
         self.assertEqual(room.view_settings, {})
@@ -313,7 +339,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertIsNone(room.parent_room)
         self.assertEqual(room.creation_code_file, "")
 
-    def test_no_scene_output_is_written(self):
+    def test_no_scene_output_is_written(self) -> None:
         self._write_yyp([("rooms", "r_empty")], room_order=["r_empty"])
         self._write_room("r_empty")
 

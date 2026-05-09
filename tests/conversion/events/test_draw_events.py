@@ -27,6 +27,7 @@ class TestDrawEvents(unittest.TestCase):
         for event_num, godot_func, sort_key, gml_filename in cases:
             with self.subTest(event_num=event_num):
                 mapping = map_event({"eventType": 8, "eventNum": event_num})
+                assert mapping is not None
 
                 self.assertEqual(mapping.godot_func, godot_func)
                 self.assertEqual(mapping.params, "")

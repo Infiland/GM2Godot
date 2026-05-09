@@ -206,7 +206,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_collects_assigned_instance_variables(self):
-        instance_variables = set()
+        instance_variables: set[str] = set()
 
         self.assertEqual(
             transpile_gml_code(

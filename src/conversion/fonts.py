@@ -1,20 +1,35 @@
+from __future__ import annotations
+
 import json
 import os
 import platform
 import re
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Literal, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 FONT_EXTENSIONS = ('.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2')
 
 
-def _get_system_font_dirs():
+class FontData(TypedDict):
+    fontName: str
+    name: str
+    size: float
+    bold: bool
+    italic: bool
+    AntiAlias: int
+    includeTTF: bool
+    TTFName: str
+
+
+def _get_system_font_dirs() -> list[str]:
     """Return a list of system font directories for the current OS."""
     system = platform.system()
-    dirs = []
+    dirs: list[str] = []
     if system == 'Windows':
         windir = os.environ.get('WINDIR', r'C:\Windows')
         dirs.append(os.path.join(windir, 'Fonts'))
@@ -37,7 +52,7 @@ def _get_system_font_dirs():
     return [d for d in dirs if os.path.isdir(d)]
 
 
-def _find_system_font(font_name):
+def _find_system_font(font_name: str) -> str | None:
     """Search system font directories for a font file matching the given name.
 
     Returns the path to the font file if found, None otherwise.
@@ -61,15 +76,17 @@ def _find_system_font(font_name):
 
 
 class FontConverter(BaseConverter):
-    def __init__(self, gm_project_path, godot_project_path, log_callback=print, progress_callback=None, conversion_running=None,
-                 update_log_callback=None, compact_logging=False, max_workers=None):
+    def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
+                 progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
+                 update_log_callback: LogCallback | None = None, compact_logging: bool = False,
+                 max_workers: int | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_fonts_path = os.path.join(self.godot_project_path, 'fonts')
 
-    def find_font_files(self):
+    def find_font_files(self) -> list[str]:
         font_folder = os.path.join(self.gm_project_path, 'fonts')
-        font_files = []
+        font_files: list[str] = []
         for root, _, files in os.walk(font_folder):
             font_files.extend(
                 os.path.join(root, file)
@@ -78,27 +95,27 @@ class FontConverter(BaseConverter):
             )
         return font_files
 
-    def _parse_font_yy(self, yy_path):
+    def _parse_font_yy(self, yy_path: str) -> FontData | None:
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
+            data = cast(JsonDict, json.loads(cleaned))
             return {
-                'fontName': data['fontName'],
-                'name': data['name'],
-                'size': data.get('size', 12.0),
-                'bold': data.get('bold', False),
-                'italic': data.get('italic', False),
-                'AntiAlias': data.get('AntiAlias', 0),
-                'includeTTF': data.get('includeTTF', False),
-                'TTFName': data.get('TTFName', ''),
+                'fontName': str(data['fontName']),
+                'name': str(data['name']),
+                'size': float(data.get('size', 12.0)),
+                'bold': bool(data.get('bold', False)),
+                'italic': bool(data.get('italic', False)),
+                'AntiAlias': int(data.get('AntiAlias', 0)),
+                'includeTTF': bool(data.get('includeTTF', False)),
+                'TTFName': str(data.get('TTFName', '')),
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             self._safe_log(get_localized("Console_Convertor_Fonts_ParseError").format(yy_path=yy_path))
             return None
 
-    def _generate_system_font_tres(self, font_data):
+    def _generate_system_font_tres(self, font_data: FontData) -> str:
         font_name = font_data['fontName']
         italic = "true" if font_data['italic'] else "false"
         weight = 700 if font_data['bold'] else 400
@@ -114,7 +131,7 @@ class FontConverter(BaseConverter):
             f'antialiasing = {antialiasing}\n'
         )
 
-    def _process_font(self, yy_path):
+    def _process_font(self, yy_path: str) -> str | Literal[False] | None:
         if not self.conversion_running():
             return None
 
@@ -124,7 +141,7 @@ class FontConverter(BaseConverter):
 
         font_name = font_data['name']
         system_font_name = font_data['fontName']
-        output_file = None
+        output_file: str | None = None
 
         subfolder = self._get_subfolder_from_yy(yy_path)
         if subfolder:
@@ -173,7 +190,7 @@ class FontConverter(BaseConverter):
 
         return font_name
 
-    def convert_fonts(self):
+    def convert_fonts(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_fonts_path, exist_ok=True)
 
@@ -193,7 +210,7 @@ class FontConverter(BaseConverter):
         processed_fonts = 0
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {executor.submit(self._process_font, ff): ff for ff in font_files}
+            futures_map: dict[Future[str | Literal[False] | None], str] = {executor.submit(self._process_font, ff): ff for ff in font_files}
             for future in as_completed(futures_map):
                 result = future.result()
                 if result is None:
@@ -210,5 +227,5 @@ class FontConverter(BaseConverter):
 
         self.log_callback(get_localized("Console_Convertor_Fonts_Complete"))
 
-    def convert_all(self):
+    def convert_all(self) -> None:
         self.convert_fonts()

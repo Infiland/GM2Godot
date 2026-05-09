@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from typing import Protocol, cast
 
 from src.conversion.room_creation_code import resolve_instance_creation_code
+from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
 
 
 KNOWN_LAYER_TYPES = {
@@ -15,44 +18,81 @@ KNOWN_LAYER_TYPES = {
 }
 
 
-def godot_string(value):
+class RoomLayerRoom(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def yy_path(self) -> str: ...
+
+    @property
+    def creation_code_file(self) -> str: ...
+
+    @property
+    def inherit_code(self) -> bool: ...
+
+    @property
+    def room_settings(self) -> JsonDict: ...
+
+    @property
+    def layers(self) -> JsonList: ...
+
+    @property
+    def instance_creation_order(self) -> JsonList: ...
+
+
+class RoomLayerResourceIndex(Protocol):
+    godot_project_path: str
+
+    def resolve_godot_path(self, kind: str, name: str) -> str | None: ...
+
+
+def godot_string(value: JsonValue) -> str:
     """Format a Python value as a quoted Godot string literal."""
     return json.dumps(str(value))
 
 
-def godot_value(value):
+def godot_value(value: JsonValue) -> str:
     """Format simple JSON-compatible values as Godot text-scene values."""
     return json.dumps(value)
 
 
-@dataclass
 class SerializedRoomLayers:
-    ext_resource_lines: list = field(default_factory=list)
-    node_lines: list = field(default_factory=list)
+    def __init__(
+        self, ext_resource_lines: list[str] | None = None, node_lines: list[str] | None = None
+    ) -> None:
+        self.ext_resource_lines = ext_resource_lines or []
+        self.node_lines = node_lines or []
 
 
 class RoomLayerSerializationContext:
-    def __init__(self, room, gm_project_path=None, resource_index=None, warn_callback=None):
+    def __init__(
+        self,
+        room: RoomLayerRoom,
+        gm_project_path: str | None = None,
+        resource_index: RoomLayerResourceIndex | None = None,
+        warn_callback: LogCallback | None = None,
+    ) -> None:
         self.room = room
         self.gm_project_path = gm_project_path
         self.resource_index = resource_index
         self.warn_callback = warn_callback
-        self.ext_resource_ids = {}
+        self.ext_resource_ids: dict[tuple[str, str], str] = {}
         self.creation_order = _instance_creation_order(room)
 
-    def ext_resource_id(self, resource_type, resource_path):
+    def ext_resource_id(self, resource_type: str, resource_path: str) -> str:
         key = (resource_type, resource_path)
         if key not in self.ext_resource_ids:
             self.ext_resource_ids[key] = str(len(self.ext_resource_ids) + 1)
         return self.ext_resource_ids[key]
 
-    def object_scene_ext_resource_id(self, object_name):
+    def object_scene_ext_resource_id(self, object_name: str | None) -> str | None:
         scene_path = self.object_scene_path(object_name)
         if scene_path is None:
             return None
         return self.ext_resource_id("PackedScene", scene_path)
 
-    def object_scene_path(self, object_name):
+    def object_scene_path(self, object_name: str | None) -> str | None:
         if not object_name or self.resource_index is None:
             return None
         scene_path = self.resource_index.resolve_godot_path("objects", object_name)
@@ -62,13 +102,13 @@ class RoomLayerSerializationContext:
             return None
         return scene_path
 
-    def sprite_scene_ext_resource_id(self, sprite_name):
+    def sprite_scene_ext_resource_id(self, sprite_name: str | None) -> str | None:
         scene_path = self.sprite_scene_path(sprite_name)
         if scene_path is None:
             return None
         return self.ext_resource_id("PackedScene", scene_path)
 
-    def sprite_scene_path(self, sprite_name):
+    def sprite_scene_path(self, sprite_name: str | None) -> str | None:
         if not sprite_name or self.resource_index is None:
             return None
         scene_path = self.resource_index.resolve_godot_path("sprites", sprite_name)
@@ -78,11 +118,11 @@ class RoomLayerSerializationContext:
             return None
         return scene_path
 
-    def warn(self, message):
+    def warn(self, message: str) -> None:
         if self.warn_callback is not None:
             self.warn_callback(message)
 
-    def ext_resource_lines(self):
+    def ext_resource_lines(self) -> list[str]:
         return [
             '[ext_resource type="{resource_type}" path={path} id="{resource_id}"]'.format(
                 resource_type=resource_type,
@@ -92,28 +132,43 @@ class RoomLayerSerializationContext:
             for (resource_type, path), resource_id in self.ext_resource_ids.items()
         ]
 
-    def _scene_path_exists(self, scene_path):
+    def _scene_path_exists(self, scene_path: str) -> bool:
         if not scene_path.startswith("res://"):
             return False
         relative_path = scene_path[len("res://"):]
+        resource_index = self.resource_index
+        if resource_index is None:
+            return False
         filesystem_path = os.path.join(
-            self.resource_index.godot_project_path,
+            resource_index.godot_project_path,
             *relative_path.split("/"),
         )
         return os.path.isfile(filesystem_path)
 
 
-def serialize_room_layers(room, gm_project_path=None, resource_index=None, warn_callback=None):
+def serialize_room_layers(
+    room: RoomLayerRoom,
+    gm_project_path: str | None = None,
+    resource_index: RoomLayerResourceIndex | None = None,
+    warn_callback: LogCallback | None = None,
+) -> SerializedRoomLayers:
     """Serialize GameMaker room layers and supported layer children."""
     context = RoomLayerSerializationContext(room, gm_project_path, resource_index, warn_callback)
-    node_lines = []
-    used_names = {}
+    node_lines: list[str] = []
+    used_names: dict[str, int] = {}
     for layer in room.layers:
-        _serialize_layer(layer, ".", used_names, node_lines, context)
+        if isinstance(layer, dict):
+            _serialize_layer(cast(JsonDict, layer), ".", used_names, node_lines, context)
     return SerializedRoomLayers(context.ext_resource_lines(), node_lines)
 
 
-def _serialize_layer(layer, parent_path, sibling_names, lines, context):
+def _serialize_layer(
+    layer: JsonDict,
+    parent_path: str,
+    sibling_names: dict[str, int],
+    lines: list[str],
+    context: RoomLayerSerializationContext,
+) -> None:
     original_name = _layer_name(layer)
     node_name = _unique_name(_sanitize_node_name(original_name), sibling_names)
     resource_type = _layer_resource_type(layer)
@@ -138,7 +193,7 @@ def _serialize_layer(layer, parent_path, sibling_names, lines, context):
     if resource_type == "GMRInstanceLayer":
         lines.extend(_instance_node_lines(layer, child_parent_path, original_name, context))
 
-    child_names = {}
+    child_names: dict[str, int] = {}
     for child_layer in _child_layers(layer):
         _serialize_layer(
             child_layer,
@@ -149,7 +204,13 @@ def _serialize_layer(layer, parent_path, sibling_names, lines, context):
         )
 
 
-def _layer_node_lines(layer, node_name, parent_path, original_name, resource_type):
+def _layer_node_lines(
+    layer: JsonDict,
+    node_name: str,
+    parent_path: str,
+    original_name: str,
+    resource_type: str,
+) -> list[str]:
     visible = bool(layer.get("visible", True))
     depth = _coerce_int(layer.get("depth", 0))
     z_index = -depth
@@ -185,25 +246,25 @@ def _layer_node_lines(layer, node_name, parent_path, original_name, resource_typ
         )
 
     if resource_type == "GMRInstanceLayer":
-        instances = layer.get("instances") or []
+        instances = _dict_items(layer.get("instances"))
         lines.append(f"metadata/gamemaker_instance_count = {len(instances)}")
         lines.append(
             f"metadata/gamemaker_instance_names = {godot_value(_item_names(instances))}"
         )
     elif resource_type == "GMRAssetLayer":
-        assets = layer.get("assets") or []
+        assets = _dict_items(layer.get("assets"))
         lines.append(f"metadata/gamemaker_asset_count = {len(assets)}")
         lines.append(f"metadata/gamemaker_asset_names = {godot_value(_item_names(assets))}")
     elif resource_type == "GMRBackgroundLayer":
-        sprite_id = layer.get("spriteId") or {}
+        sprite_id = _dict_value(layer.get("spriteId"))
         lines.append(
             f"metadata/gamemaker_background_sprite = {godot_value(sprite_id.get('name'))}"
         )
         for key in ("colour", "htiled", "vtiled", "hspeed", "vspeed", "stretch"):
             _append_optional_metadata(lines, layer, key, f"gamemaker_background_{key}")
     elif resource_type == "GMRTileLayer":
-        tileset_id = layer.get("tilesetId") or {}
-        tiles = layer.get("tiles") or {}
+        tileset_id = _dict_value(layer.get("tilesetId"))
+        tiles = _dict_value(layer.get("tiles"))
         lines.append(f"metadata/gamemaker_tileset = {godot_value(tileset_id.get('name'))}")
         _append_optional_metadata(lines, tiles, "SerialiseWidth", "gamemaker_tile_serialise_width")
         _append_optional_metadata(lines, tiles, "SerialiseHeight", "gamemaker_tile_serialise_height")
@@ -221,12 +282,19 @@ def _layer_node_lines(layer, node_name, parent_path, original_name, resource_typ
     return lines
 
 
-def _append_optional_metadata(lines, source, source_key, metadata_key):
+def _append_optional_metadata(
+    lines: list[str], source: JsonDict, source_key: str, metadata_key: str
+) -> None:
     if source_key in source:
         lines.append(f"metadata/{metadata_key} = {godot_value(source.get(source_key))}")
 
 
-def _background_visual_lines(layer, parent_path, layer_name, context):
+def _background_visual_lines(
+    layer: JsonDict,
+    parent_path: str,
+    layer_name: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
     sprite_name = _background_sprite_name(layer)
     if sprite_name:
         ext_resource_id = context.sprite_scene_ext_resource_id(sprite_name)
@@ -245,7 +313,9 @@ def _background_visual_lines(layer, parent_path, layer_name, context):
     return _background_color_lines(layer, parent_path, context)
 
 
-def _background_color_lines(layer, parent_path, context):
+def _background_color_lines(
+    layer: JsonDict, parent_path: str, context: RoomLayerSerializationContext
+) -> list[str]:
     width, height = _room_size(context)
     lines = [
         f'[node name="BackgroundVisual" type="ColorRect" parent={godot_string(parent_path)}]',
@@ -266,7 +336,13 @@ def _background_color_lines(layer, parent_path, context):
     return lines
 
 
-def _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, context):
+def _background_sprite_lines(
+    layer: JsonDict,
+    parent_path: str,
+    sprite_name: str,
+    ext_resource_id: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
     node_name = _sanitize_node_name(sprite_name) or "BackgroundSprite"
     lines = [
         '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
@@ -287,7 +363,7 @@ def _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, c
     return lines
 
 
-def _background_metadata_lines(layer, visual_type):
+def _background_metadata_lines(layer: JsonDict, visual_type: str) -> list[str]:
     colour = layer.get("colour")
     lines = [
         "metadata/gamemaker_background_visual = true",
@@ -312,7 +388,9 @@ def _background_metadata_lines(layer, visual_type):
     return lines
 
 
-def _warn_background_runtime_requirements(layer, context):
+def _warn_background_runtime_requirements(
+    layer: JsonDict, context: RoomLayerSerializationContext
+) -> None:
     if not (_truthy(layer.get("htiled")) or _truthy(layer.get("vtiled"))
             or _nonzero(layer.get("hspeed")) or _nonzero(layer.get("vspeed"))):
         return
@@ -325,17 +403,18 @@ def _warn_background_runtime_requirements(layer, context):
     )
 
 
-def _background_sprite_name(layer):
-    sprite_id = layer.get("spriteId") or {}
-    return sprite_id.get("name") if isinstance(sprite_id, dict) else None
+def _background_sprite_name(layer: JsonDict) -> str | None:
+    sprite_id = _dict_value(layer.get("spriteId"))
+    name = sprite_id.get("name")
+    return name if isinstance(name, str) else None
 
 
-def _room_size(context):
+def _room_size(context: RoomLayerSerializationContext) -> tuple[JsonValue, JsonValue]:
     settings = context.room.room_settings or {}
     return settings.get("Width", 1024), settings.get("Height", 768)
 
 
-def _godot_color(value):
+def _godot_color(value: JsonValue) -> str:
     r, g, b, a = _decode_gamemaker_colour(value)
     return "Color({r}, {g}, {b}, {a})".format(
         r=_format_color_component(r),
@@ -345,7 +424,7 @@ def _godot_color(value):
     )
 
 
-def _decode_gamemaker_colour(value):
+def _decode_gamemaker_colour(value: JsonValue) -> list[float]:
     try:
         packed = int(value)
     except (TypeError, ValueError):
@@ -359,7 +438,7 @@ def _decode_gamemaker_colour(value):
     ]
 
 
-def _format_color_component(value):
+def _format_color_component(value: float) -> str:
     if value == 0:
         return "0"
     if value == 1:
@@ -367,15 +446,21 @@ def _format_color_component(value):
     return ("{:.6f}".format(value)).rstrip("0").rstrip(".")
 
 
-def _instance_node_lines(layer, parent_path, layer_name, context):
-    lines = []
-    instances = layer.get("instances") or []
+def _instance_node_lines(
+    layer: JsonDict,
+    parent_path: str,
+    layer_name: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
+    lines: list[str] = []
+    instances = _dict_items(layer.get("instances"))
     ordered_instances = _ordered_instances(instances, context.creation_order)
-    sibling_names = {}
+    sibling_names: dict[str, int] = {}
     for instance, order_index, _original_index in ordered_instances:
         instance_name = _instance_name(instance)
-        object_id = instance.get("objectId") or {}
-        object_name = object_id.get("name")
+        object_id = _dict_value(instance.get("objectId"))
+        raw_object_name = object_id.get("name")
+        object_name = raw_object_name if isinstance(raw_object_name, str) else None
 
         if instance.get("ignore") is True:
             context.warn(
@@ -417,8 +502,16 @@ def _instance_node_lines(layer, parent_path, layer_name, context):
     return lines
 
 
-def _instance_scene_lines(instance, node_name, parent_path, instance_name, object_name,
-                          ext_resource_id, order_index, context):
+def _instance_scene_lines(
+    instance: JsonDict,
+    node_name: str,
+    parent_path: str,
+    instance_name: str,
+    object_name: str | None,
+    ext_resource_id: str | None,
+    order_index: int | None,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
     creation_code = resolve_instance_creation_code(
         context.room,
         instance,
@@ -474,8 +567,10 @@ def _instance_scene_lines(instance, node_name, parent_path, instance_name, objec
     return lines
 
 
-def _ordered_instances(instances, creation_order):
-    indexed = []
+def _ordered_instances(
+    instances: list[JsonDict], creation_order: dict[str, int]
+) -> list[tuple[JsonDict, int | None, int]]:
+    indexed: list[tuple[int, int, JsonDict, int | None]] = []
     for original_index, instance in enumerate(instances):
         order_index = creation_order.get(_instance_name(instance))
         sort_order = order_index if order_index is not None else len(creation_order) + original_index
@@ -484,26 +579,29 @@ def _ordered_instances(instances, creation_order):
     return [(instance, order_index, original_index) for _sort, original_index, instance, order_index in indexed]
 
 
-def _instance_creation_order(room):
-    order = {}
+def _instance_creation_order(room: RoomLayerRoom) -> dict[str, int]:
+    order: dict[str, int] = {}
     for index, entry in enumerate(room.instance_creation_order):
         if not isinstance(entry, dict):
             continue
-        name = entry.get("%Name") or entry.get("name")
-        if name and name not in order:
+        entry_dict = cast(JsonDict, entry)
+        name = entry_dict.get("%Name") or entry_dict.get("name")
+        if isinstance(name, str) and name and name not in order:
             order[name] = index
     return order
 
 
-def _instance_name(instance):
-    return instance.get("%Name") or instance.get("name") or "Instance"
+def _instance_name(instance: JsonDict) -> str:
+    name = instance.get("%Name") or instance.get("name")
+    return name if isinstance(name, str) and name else "Instance"
 
 
-def _layer_name(layer):
-    return layer.get("%Name") or layer.get("name") or "Layer"
+def _layer_name(layer: JsonDict) -> str:
+    name = layer.get("%Name") or layer.get("name")
+    return name if isinstance(name, str) and name else "Layer"
 
 
-def _layer_resource_type(layer):
+def _layer_resource_type(layer: JsonDict) -> str:
     resource_type = layer.get("resourceType")
     if resource_type:
         return resource_type
@@ -513,27 +611,28 @@ def _layer_resource_type(layer):
     return "UnknownLayer"
 
 
-def _child_layers(layer):
-    children = layer.get("layers") or layer.get("children") or []
-    return children if isinstance(children, list) else []
+def _child_layers(layer: JsonDict) -> list[JsonDict]:
+    children: JsonValue = layer.get("layers") or layer.get("children") or []
+    return _dict_items(children)
 
 
-def _item_names(items):
-    names = []
+def _item_names(items: list[JsonDict]) -> list[str]:
+    names: list[str] = []
     for item in items:
-        if isinstance(item, dict):
-            names.append(item.get("%Name") or item.get("name") or "")
+        name = item.get("%Name") or item.get("name") or ""
+        if isinstance(name, str):
+            names.append(name)
     return [name for name in names if name]
 
 
-def _coerce_int(value):
+def _coerce_int(value: JsonValue) -> int:
     try:
         return int(float(value))
     except (TypeError, ValueError):
         return 0
 
 
-def _format_number(value):
+def _format_number(value: JsonValue) -> str:
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -543,26 +642,37 @@ def _format_number(value):
     return str(number)
 
 
-def _truthy(value):
+def _truthy(value: JsonValue) -> bool:
     return bool(value)
 
 
-def _nonzero(value):
+def _nonzero(value: JsonValue) -> bool:
     try:
         return float(value) != 0.0
     except (TypeError, ValueError):
         return False
 
 
-def _sanitize_node_name(name):
+def _sanitize_node_name(name: JsonValue) -> str:
     sanitized = str(name).replace("/", "_").replace('"', "_").replace("\\", "_")
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     return sanitized or "Layer"
 
 
-def _unique_name(base_name, used_names):
+def _unique_name(base_name: str, used_names: dict[str, int]) -> str:
     count = used_names.get(base_name, 0) + 1
     used_names[base_name] = count
     if count == 1:
         return base_name
     return f"{base_name}_{count}"
+
+
+def _dict_value(value: JsonValue) -> JsonDict:
+    return cast(JsonDict, value) if isinstance(value, dict) else {}
+
+
+def _dict_items(value: JsonValue) -> list[JsonDict]:
+    if not isinstance(value, list):
+        return []
+    items = cast(list[JsonValue], value)
+    return [cast(JsonDict, item) for item in items if isinstance(item, dict)]

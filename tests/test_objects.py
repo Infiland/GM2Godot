@@ -510,9 +510,9 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
 
         self.assertIn("func _ready():", content)
-        self.assertIn("\tvar speed = base_speed * 2", content)
+        self.assertIn("\tvar speed = GMRuntime.gml_mul(base_speed, 2)", content)
         self.assertIn("\tif GMRuntime.is_undefined(score):\n\t\tscore = 0", content)
-        self.assertIn("\tscore += GMRuntime.gml_int_div(speed, 2)", content)
+        self.assertIn("\tscore = GMRuntime.gml_add(score, GMRuntime.gml_int_div(speed, 2))", content)
         self.assertNotIn("\tpass", content)
 
     def test_script_transpiles_infinity_runtime_support(self):
@@ -571,10 +571,26 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
 
         self.assertIn("func _process(delta):", content)
-        self.assertIn("\tif Input.is_action_pressed(\"ui_left\"):\n\t\tposition.x -= 10", content)
-        self.assertIn("\tif Input.is_action_pressed(\"ui_right\"):\n\t\tposition.x += 10", content)
-        self.assertIn("\tif Input.is_action_pressed(\"ui_up\"):\n\t\tposition.y -= 10", content)
-        self.assertIn("\tif Input.is_action_pressed(\"ui_down\"):\n\t\tposition.y += 10", content)
+        self.assertIn(
+            "\tif Input.is_action_pressed(\"ui_left\"):\n"
+            "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
+            content,
+        )
+        self.assertIn(
+            "\tif Input.is_action_pressed(\"ui_right\"):\n"
+            "\t\tposition.x = GMRuntime.gml_add(position.x, 10)",
+            content,
+        )
+        self.assertIn(
+            "\tif Input.is_action_pressed(\"ui_up\"):\n"
+            "\t\tposition.y = GMRuntime.gml_sub(position.y, 10)",
+            content,
+        )
+        self.assertIn(
+            "\tif Input.is_action_pressed(\"ui_down\"):\n"
+            "\t\tposition.y = GMRuntime.gml_add(position.y, 10)",
+            content,
+        )
 
     def test_script_declares_instance_variables_shared_across_events(self):
         """Assignments without var should become reusable object member state."""
@@ -608,7 +624,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tsuperSpeed = 0", content)
         self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
         self.assertIn("\tif faster == true:", content)
-        self.assertIn("\t\tposition.x -= superSpeed", content)
+        self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 
     def test_script_supports_sprite_and_image_index(self):

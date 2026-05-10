@@ -26,6 +26,14 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
     RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
+    RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
+    RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
+    RuntimeValueParityCase("typeof(int64(score))", "GMRuntime.gml_typeof(GMRuntime.gml_int64(score))"),
+    RuntimeValueParityCase("string(int64(score))", "GMRuntime.gml_string(GMRuntime.gml_int64(score))"),
+    RuntimeValueParityCase("bool(int64(score))", "GMRuntime.gml_bool(GMRuntime.gml_int64(score))"),
+    RuntimeValueParityCase("is_real(score)", "GMRuntime.is_real(score)"),
+    RuntimeValueParityCase("is_numeric(score)", "GMRuntime.is_numeric(score)"),
+    RuntimeValueParityCase("is_int64(score)", "GMRuntime.is_int64(score)"),
     RuntimeValueParityCase(
         "is_undefined(undefined)",
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
@@ -35,6 +43,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("1.5 / 2", "GMRuntime.gml_div(1.5, 2)"),
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
+    RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
+    RuntimeValueParityCase("a - b", "GMRuntime.gml_sub(a, b)"),
+    RuntimeValueParityCase("a * b", "GMRuntime.gml_mul(a, b)"),
+    RuntimeValueParityCase("a mod b", "GMRuntime.gml_mod(a, b)"),
     RuntimeValueParityCase("!0.5", "not GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase(
         "0.25 || 1",
@@ -54,12 +66,21 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_undefined",
             "is_bool",
             "is_number",
+            "is_real",
+            "is_numeric",
+            "is_int64",
             "is_nan_value",
             "is_infinity",
             "gml_eq",
             "gml_ne",
             "gml_div",
             "gml_int_div",
+            "gml_real",
+            "gml_int64",
+            "gml_add",
+            "gml_sub",
+            "gml_mul",
+            "gml_mod",
             "gml_typeof",
             "gml_string",
             "gml_bool",
@@ -71,6 +92,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_bool(value):", GML_RUNTIME_SCRIPT)
         self.assertNotIn("static func gml_typeof(value:", GML_RUNTIME_SCRIPT)
         self.assertNotIn("static func gml_bool(value:", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_preserves_real_operations_as_float_helpers(self):
+        self.assertIn("return _to_real(left) / _to_real(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_represents_explicit_int64_values(self):
+        self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+        self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
 
     def test_runtime_centralizes_error_reporting(self):
         self.assertIn("static func gml_error(message):", GML_RUNTIME_SCRIPT)

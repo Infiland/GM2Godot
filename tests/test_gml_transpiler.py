@@ -19,8 +19,14 @@ from src.conversion.gml_transpiler import (
 
 class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_preserves_arithmetic_precedence(self):
-        self.assertEqual(transpile_gml_expression("a + b * c"), "a + b * c")
-        self.assertEqual(transpile_gml_expression("(a + b) * c"), "(a + b) * c")
+        self.assertEqual(
+            transpile_gml_expression("a + b * c"),
+            "GMRuntime.gml_add(a, GMRuntime.gml_mul(b, c))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("(a + b) * c"),
+            "GMRuntime.gml_mul((GMRuntime.gml_add(a, b)), c)",
+        )
 
     def test_parses_numeric_real_literals(self):
         self.assertEqual(transpile_gml_expression("42"), "42")
@@ -66,7 +72,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("score div 10"),
             "GMRuntime.gml_int_div(score, 10)",
         )
-        self.assertEqual(transpile_gml_expression("score mod 3"), "score % 3")
+        self.assertEqual(
+            transpile_gml_expression("score mod 3"),
+            "GMRuntime.gml_mod(score, 3)",
+        )
 
     def test_transpiles_runtime_safe_real_division(self):
         self.assertEqual(
@@ -79,7 +88,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("a / b + c"),
-            "GMRuntime.gml_div(a, b) + c",
+            "GMRuntime.gml_add(GMRuntime.gml_div(a, b), c)",
         )
 
     def test_transpiles_integer_division_through_runtime(self):
@@ -89,8 +98,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("a div b + c"),
-            "GMRuntime.gml_int_div(a, b) + c",
+            "GMRuntime.gml_add(GMRuntime.gml_int_div(a, b), c)",
         )
+
+    def test_transpiles_dynamic_arithmetic_through_runtime(self):
+        self.assertEqual(transpile_gml_expression("a + b"), "GMRuntime.gml_add(a, b)")
+        self.assertEqual(transpile_gml_expression("a - b"), "GMRuntime.gml_sub(a, b)")
+        self.assertEqual(transpile_gml_expression("a * b"), "GMRuntime.gml_mul(a, b)")
+        self.assertEqual(transpile_gml_expression("a % b"), "GMRuntime.gml_mod(a, b)")
 
     def test_transpiles_infinity_and_nan_constants(self):
         self.assertEqual(transpile_gml_expression("infinity"), "INF")
@@ -160,6 +175,19 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_bool(true)",
         )
 
+    def test_transpiles_real_number_conversion_helpers(self):
+        self.assertEqual(transpile_gml_expression("real(score)"), "GMRuntime.gml_real(score)")
+        self.assertEqual(transpile_gml_expression("int64(score)"), "GMRuntime.gml_int64(score)")
+        self.assertEqual(transpile_gml_expression("is_real(score)"), "GMRuntime.is_real(score)")
+        self.assertEqual(
+            transpile_gml_expression("is_numeric(int64(score))"),
+            "GMRuntime.is_numeric(GMRuntime.gml_int64(score))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_int64(int64(score))"),
+            "GMRuntime.is_int64(GMRuntime.gml_int64(score))",
+        )
+
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),
@@ -182,7 +210,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_calls_indexes_and_members(self):
         self.assertEqual(
             transpile_gml_expression("choose(items[index + 1], other.value)"),
-            "choose(items[index + 1], other.value)",
+            "choose(items[GMRuntime.gml_add(index, 1)], other.value)",
         )
 
 
@@ -190,19 +218,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),
-            "var x = a + b * c",
+            "var x = GMRuntime.gml_add(a, GMRuntime.gml_mul(b, c))",
         )
 
     def test_transpiles_multiple_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = 1, y = x + 2;", indent=""),
-            "var x = 1\nvar y = x + 2",
+            "var x = 1\nvar y = GMRuntime.gml_add(x, 2)",
         )
 
     def test_transpiles_compound_assignments(self):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),
-            "position.x += position.y * 2",
+            "position.x = GMRuntime.gml_add(position.x, GMRuntime.gml_mul(position.y, 2))",
         )
 
     def test_transpiles_newline_separated_statements(self):
@@ -224,8 +252,14 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_transpiles_increment_decrement_statements(self):
-        self.assertEqual(transpile_gml_code("count++;", indent=""), "count += 1")
-        self.assertEqual(transpile_gml_code("--count;", indent=""), "count -= 1")
+        self.assertEqual(
+            transpile_gml_code("count++;", indent=""),
+            "count = GMRuntime.gml_add(count, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("--count;", indent=""),
+            "count = GMRuntime.gml_sub(count, 1)",
+        )
 
     def test_transpiles_expression_statements(self):
         self.assertEqual(
@@ -236,13 +270,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_local_vars_shadow_instance_position_builtins(self):
         self.assertEqual(
             transpile_gml_code("var x = 1, y = x + 2; x += y;", indent=""),
-            "var x = 1\nvar y = x + 2\nx += y",
+            "var x = 1\nvar y = GMRuntime.gml_add(x, 2)\nx = GMRuntime.gml_add(x, y)",
         )
 
     def test_transpiles_if_blocks(self):
         self.assertEqual(
             transpile_gml_code("if score > 0 { score -= 1; } else { score = 0; }", indent=""),
-            "if score > 0:\n\tscore -= 1\nelse:\n\tscore = 0",
+            "if score > 0:\n\tscore = GMRuntime.gml_sub(score, 1)\nelse:\n\tscore = 0",
         )
 
     def test_transpiles_if_blocks_with_single_equals_conditions(self):
@@ -290,13 +324,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code(source, indent=""),
             "if Input.is_action_pressed(\"ui_left\"):\n"
-            "\tposition.x -= 10\n"
+            "\tposition.x = GMRuntime.gml_sub(position.x, 10)\n"
             "if Input.is_action_pressed(\"ui_right\"):\n"
-            "\tposition.x += 10\n"
+            "\tposition.x = GMRuntime.gml_add(position.x, 10)\n"
             "if Input.is_action_pressed(\"ui_up\"):\n"
-            "\tposition.y -= 10\n"
+            "\tposition.y = GMRuntime.gml_sub(position.y, 10)\n"
             "if Input.is_action_pressed(\"ui_down\"):\n"
-            "\tposition.y += 10",
+            "\tposition.y = GMRuntime.gml_add(position.y, 10)",
         )
 
     def test_collects_assigned_instance_variables(self):
@@ -308,7 +342,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 indent="",
                 instance_variables=instance_variables,
             ),
-            "superSpeed = 0\nvar localSpeed = 1\nlocalSpeed += 1\nposition.x += localSpeed",
+            "superSpeed = 0\n"
+            "var localSpeed = 1\n"
+            "localSpeed = GMRuntime.gml_add(localSpeed, 1)\n"
+            "position.x = GMRuntime.gml_add(position.x, localSpeed)",
         )
         self.assertEqual(instance_variables, {"superSpeed"})
 
@@ -321,7 +358,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 indent="",
                 instance_variables=instance_variables,
             ),
-            "sprite_index = s_enemy\nimage_index = 2\nimage_index += 1",
+            "sprite_index = s_enemy\n"
+            "image_index = 2\n"
+            "image_index = GMRuntime.gml_add(image_index, 1)",
         )
         self.assertEqual(instance_variables, set())
 
@@ -362,13 +401,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "if faster == true:\n"
             "\tsuperSpeed = 20\n"
             "if Input.is_action_pressed(\"ui_left\"):\n"
-            "\tposition.x -= superSpeed\n"
+            "\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)\n"
             "if Input.is_action_pressed(\"ui_right\"):\n"
-            "\tposition.x += superSpeed\n"
+            "\tposition.x = GMRuntime.gml_add(position.x, superSpeed)\n"
             "if Input.is_action_pressed(\"ui_up\"):\n"
-            "\tposition.y -= superSpeed\n"
+            "\tposition.y = GMRuntime.gml_sub(position.y, superSpeed)\n"
             "if Input.is_action_pressed(\"ui_down\"):\n"
-            "\tposition.y += superSpeed\n"
+            "\tposition.y = GMRuntime.gml_add(position.y, superSpeed)\n"
             "superSpeed = 10",
         )
 

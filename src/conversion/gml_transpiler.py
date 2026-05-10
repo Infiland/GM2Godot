@@ -673,6 +673,12 @@ def _tokenize(source: str) -> list[_Token]:
             index = hex_end
             continue
 
+        if char == "#":
+            color_literal, color_end = _read_hash_color_literal(source, index)
+            tokens.append(_Token("NUMBER", color_literal))
+            index = color_end
+            continue
+
         if char.isalpha() or char == "_":
             start = index
             index += 1
@@ -738,6 +744,25 @@ def _read_hex_number(source: str, start: int) -> int:
         raise GMLTranspileError(f"Invalid hexadecimal literal digit: {source[index]}")
 
     return index
+
+
+def _read_hash_color_literal(source: str, start: int) -> tuple[str, int]:
+    hex_start = start + 1
+    hex_end = hex_start + 6
+    if hex_end > len(source):
+        raise GMLTranspileError("Malformed hash color literal")
+
+    value = source[hex_start:hex_end]
+    if any(char.lower() not in "0123456789abcdef" for char in value):
+        raise GMLTranspileError("Malformed hash color literal")
+
+    if hex_end < len(source) and source[hex_end].isalnum():
+        raise GMLTranspileError(f"Invalid hash color literal digit: {source[hex_end]}")
+
+    red = value[0:2]
+    green = value[2:4]
+    blue = value[4:6]
+    return f"0x{blue}{green}{red}".lower(), hex_end
 
 
 def _read_binary_number(source: str, start: int) -> int:

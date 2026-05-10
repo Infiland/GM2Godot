@@ -69,6 +69,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 with self.assertRaises(GMLTranspileError):
                     transpile_gml_expression(source)
 
+    def test_parses_hash_color_literals_with_gml_byte_order(self):
+        self.assertEqual(transpile_gml_expression("#dd8e2c"), "0x2c8edd")
+        self.assertEqual(transpile_gml_expression("#DD8E2C"), "0x2c8edd")
+        self.assertEqual(
+            transpile_gml_expression("#2c8edd != $2c8edd"),
+            "0xdd8e2c != 0x2c8edd",
+        )
+
+    def test_rejects_malformed_hash_color_literals(self):
+        for source in ("#", "#12345", "#12345g", "#1234567"):
+            with self.subTest(source=source):
+                with self.assertRaises(GMLTranspileError):
+                    transpile_gml_expression(source)
+
     def test_parses_binary_literals(self):
         self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
         self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")

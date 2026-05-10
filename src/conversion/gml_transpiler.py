@@ -43,6 +43,12 @@ class _Literal:
 
 
 @dataclass(frozen=True)
+class _NumberLiteral:
+    value: str
+    is_float_like: bool
+
+
+@dataclass(frozen=True)
 class _Unary:
     operator: str
     operand: _Expression
@@ -85,7 +91,18 @@ class _Grouped:
     expr: _Expression
 
 
-_Expression: TypeAlias = _Name | _Literal | _Unary | _Binary | _Ternary | _Call | _Index | _Member | _Grouped
+_Expression: TypeAlias = (
+    _Name
+    | _Literal
+    | _NumberLiteral
+    | _Unary
+    | _Binary
+    | _Ternary
+    | _Call
+    | _Index
+    | _Member
+    | _Grouped
+)
 
 
 _EOF = _Token("EOF", "")
@@ -347,7 +364,9 @@ class _ExpressionParser:
 
     def _parse_primary(self) -> _Expression:
         token = self._advance()
-        if token.kind == "NUMBER" or token.kind == "STRING":
+        if token.kind == "NUMBER":
+            return _NumberLiteral(token.value, _is_float_like_number(token.value))
+        if token.kind == "STRING":
             return _Literal(token.value)
         if token.kind == "IDENT":
             return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
@@ -597,16 +616,10 @@ def _tokenize(source: str) -> list[_Token]:
             index += 1
             continue
 
-        if char.isdigit():
-            start = index
-            if source[index:index + 2].lower() == "0x":
-                index += 2
-                while index < len(source) and source[index].lower() in "0123456789abcdef":
-                    index += 1
-            else:
-                while index < len(source) and (source[index].isdigit() or source[index] == "."):
-                    index += 1
-            tokens.append(_Token("NUMBER", source[start:index]))
+        if char.isdigit() or (char == "." and index + 1 < len(source) and source[index + 1].isdigit()):
+            number_end = _read_number(source, index)
+            tokens.append(_Token("NUMBER", source[index:number_end]))
+            index = number_end
             continue
 
         if char == '"' or char == "'":
@@ -647,6 +660,29 @@ def _expression_tokens(source: str) -> list[_Token]:
     return [token for token in _tokenize(source) if token.kind != "NEWLINE"]
 
 
+def _read_number(source: str, start: int) -> int:
+    index = start
+    if source.startswith(("0x", "0X"), start):
+        index += 2
+        while index < len(source) and source[index].lower() in "0123456789abcdef":
+            index += 1
+        return index
+
+    while index < len(source) and source[index].isdigit():
+        index += 1
+
+    if index < len(source) and source[index] == ".":
+        index += 1
+        while index < len(source) and source[index].isdigit():
+            index += 1
+
+    return index
+
+
+def _is_float_like_number(value: str) -> bool:
+    return "." in value
+
+
 def _read_string(source: str, start: int) -> str:
     quote = source[start]
     index = start + 1
@@ -680,7 +716,7 @@ def _emit_expression(
     local_names: Iterable[str] | None = None,
 ) -> tuple[str, int]:
     local_names = _normalize_local_names(local_names)
-    if isinstance(expr, _Literal):
+    if isinstance(expr, _Literal | _NumberLiteral):
         return expr.value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
         value = expr.value

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 import os
 import sys
 import unittest
@@ -6,13 +7,45 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.gml_transpiler import transpile_gml_code, transpile_gml_expression
+from src.conversion.gml_transpiler import (
+    GMLTranspileError,
+    _ExpressionParser,
+    _NumberLiteral,
+    _expression_tokens,
+    transpile_gml_code,
+    transpile_gml_expression,
+)
 
 
 class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_preserves_arithmetic_precedence(self):
         self.assertEqual(transpile_gml_expression("a + b * c"), "a + b * c")
         self.assertEqual(transpile_gml_expression("(a + b) * c"), "(a + b) * c")
+
+    def test_parses_numeric_real_literals(self):
+        self.assertEqual(transpile_gml_expression("42"), "42")
+        self.assertEqual(transpile_gml_expression("0.5"), "0.5")
+        self.assertEqual(transpile_gml_expression(".5"), ".5")
+        self.assertEqual(transpile_gml_expression("5."), "5.")
+        self.assertEqual(
+            transpile_gml_expression("1.5 / 2"),
+            "GMRuntime.gml_div(1.5, 2)",
+        )
+
+    def test_preserves_numeric_literal_float_metadata(self):
+        integer_literal = _ExpressionParser(_expression_tokens("42")).parse()
+        decimal_literal = _ExpressionParser(_expression_tokens("3.5")).parse()
+
+        self.assertIsInstance(integer_literal, _NumberLiteral)
+        self.assertIsInstance(decimal_literal, _NumberLiteral)
+        assert isinstance(integer_literal, _NumberLiteral)
+        assert isinstance(decimal_literal, _NumberLiteral)
+        self.assertFalse(integer_literal.is_float_like)
+        self.assertTrue(decimal_literal.is_float_like)
+
+    def test_rejects_malformed_numeric_literals(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression("1.2.3")
 
     def test_transpiles_logical_operators(self):
         self.assertEqual(

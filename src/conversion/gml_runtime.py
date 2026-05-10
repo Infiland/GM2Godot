@@ -39,6 +39,11 @@ static func is_bool(value):
 	return typeof(value) == TYPE_BOOL
 
 
+static func is_string(value):
+	var value_type = typeof(value)
+	return value_type == TYPE_STRING or value_type == TYPE_STRING_NAME
+
+
 static func is_number(value):
 	var value_type = typeof(value)
 	return value_type == TYPE_INT or value_type == TYPE_FLOAT
@@ -83,6 +88,12 @@ static func gml_int64(value):
 static func gml_add(left, right):
 	if is_numeric(left) and is_numeric(right):
 		return _to_real(left) + _to_real(right)
+	if is_string(left) and is_string(right):
+		return str(left) + str(right)
+	if is_string(right) and (is_numeric(left) or is_bool(left)):
+		return gml_string(left) + str(right)
+	if is_string(left) and (is_numeric(right) or is_bool(right)):
+		return gml_error("Invalid GML string concatenation")
 	return left + right
 
 
@@ -138,6 +149,10 @@ static func gml_typeof(value):
 static func gml_string(value):
 	if is_undefined(value):
 		return GML_TYPE_UNDEFINED
+	if is_string(value):
+		return str(value)
+	if is_bool(value):
+		return "true" if value else "false"
 	if is_int64(value):
 		return str(value.value)
 	if is_infinity(value):

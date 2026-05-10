@@ -540,6 +540,27 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tvar ratio = GMRuntime.gml_div(1, 0)", content)
         self.assertIn("\tshow_debug_message(GMRuntime.gml_string(limit))", content)
 
+    def test_script_transpiles_string_runtime_support(self):
+        """String conversion and concatenation should use the shared runtime."""
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write('var label = "Score: " + string(score); show_debug_message(label);')
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
+        self.assertIn(
+            '\tvar label = GMRuntime.gml_add("Score: ", GMRuntime.gml_string(score))',
+            content,
+        )
+        self.assertIn("\tshow_debug_message(label)", content)
+
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce func _process(delta)."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])

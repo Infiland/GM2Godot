@@ -202,10 +202,29 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "bool",
     "is_bool",
     "is_infinity",
+    "is_int64",
     "is_nan",
+    "is_numeric",
+    "is_real",
     "is_undefined",
     "keyboard_check",
 })
+
+_ARITHMETIC_RUNTIME_FUNCTIONS = {
+    "+": "gml_add",
+    "-": "gml_sub",
+    "*": "gml_mul",
+    "%": "gml_mod",
+    "mod": "gml_mod",
+}
+
+_COMPOUND_RUNTIME_FUNCTIONS: dict[_AssignmentOperator, str] = {
+    "+=": "gml_add",
+    "-=": "gml_sub",
+    "*=": "gml_mul",
+    "/=": "gml_div",
+    "%=": "gml_mod",
+}
 
 _OPERATOR_REPLACEMENTS = {
     "&&": "and",
@@ -244,10 +263,15 @@ _VIRTUAL_KEY_CONSTANTS = {
 }
 
 _RUNTIME_FUNCTIONS = {
+    "int64": "gml_int64",
     "is_bool": "is_bool",
     "is_infinity": "is_infinity",
+    "is_int64": "is_int64",
     "is_nan": "is_nan_value",
+    "is_numeric": "is_numeric",
+    "is_real": "is_real",
     "is_undefined": "is_undefined",
+    "real": "gml_real",
     "typeof": "gml_typeof",
     "string": "gml_string",
     "bool": "gml_bool",
@@ -800,6 +824,11 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         right = _emit_expression(expr.right, local_names)[0]
         return f"GMRuntime.gml_div({left}, {right})", _POSTFIX_PRECEDENCE
 
+    if expr.operator in _ARITHMETIC_RUNTIME_FUNCTIONS:
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_expression(expr.right, local_names)[0]
+        return f"GMRuntime.{_ARITHMETIC_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
+
     precedence = _BINARY_PRECEDENCE[expr.operator]
     left = _emit_child(expr.left, precedence, local_names=local_names)
     right = _emit_child(
@@ -948,7 +977,9 @@ def _transpile_statement(
     increment = _parse_increment_statement(statement)
     if increment is not None:
         target, delta = increment
-        return [f"{transpile_gml_expression(target, local_names)} {'+=' if delta > 0 else '-='} 1"]
+        helper = "gml_add" if delta > 0 else "gml_sub"
+        target = transpile_gml_expression(target, local_names)
+        return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
     assignment = _split_assignment(statement)
     if assignment is not None:
@@ -958,8 +989,8 @@ def _transpile_statement(
         value = transpile_gml_expression(value, local_names)
         if operator == "??=":
             return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
-        if operator == "/=":
-            return [f"{target} = GMRuntime.gml_div({target}, {value})"]
+        if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+            return [f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
         return [f"{target} {operator} {value}"]
 
     return [transpile_gml_expression(statement, local_names)]

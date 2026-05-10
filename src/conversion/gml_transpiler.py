@@ -752,7 +752,7 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
     if expr.operator == "div":
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
-        return f"int({left} / {right})", _PRIMARY_PRECEDENCE
+        return f"GMRuntime.gml_int_div({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator == "??":
         left = _emit_expression(expr.left, local_names)[0]

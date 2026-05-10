@@ -29,10 +29,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_transpiles_div_and_mod(self):
-        self.assertEqual(transpile_gml_expression("score div 10"), "int(score / 10)")
+        self.assertEqual(
+            transpile_gml_expression("score div 10"),
+            "GMRuntime.gml_int_div(score, 10)",
+        )
         self.assertEqual(transpile_gml_expression("score mod 3"), "score % 3")
 
     def test_transpiles_runtime_safe_real_division(self):
+        self.assertEqual(
+            transpile_gml_expression("5 / 2"),
+            "GMRuntime.gml_div(5, 2)",
+        )
         self.assertEqual(
             transpile_gml_expression("1 / 0"),
             "GMRuntime.gml_div(1, 0)",
@@ -40,6 +47,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("a / b + c"),
             "GMRuntime.gml_div(a, b) + c",
+        )
+
+    def test_transpiles_integer_division_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("5 div 2"),
+            "GMRuntime.gml_int_div(5, 2)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("a div b + c"),
+            "GMRuntime.gml_int_div(a, b) + c",
         )
 
     def test_transpiles_infinity_and_nan_constants(self):
@@ -209,6 +226,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("if 0.5 { score = 1; }", indent=""),
             "if GMRuntime.gml_bool(0.5):\n\tscore = 1",
+        )
+        self.assertEqual(
+            transpile_gml_code("if score div 2 { score = 1; }", indent=""),
+            "if GMRuntime.gml_bool(GMRuntime.gml_int_div(score, 2)):\n\tscore = 1",
         )
 
     def test_transpiles_shift_keyboard_check(self):

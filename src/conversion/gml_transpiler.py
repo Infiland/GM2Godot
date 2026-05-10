@@ -667,6 +667,12 @@ def _tokenize(source: str) -> list[_Token]:
             index += len(tokens[-1].value)
             continue
 
+        if char == "$":
+            hex_end = _read_hex_number(source, index + 1)
+            tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end]}"))
+            index = hex_end
+            continue
+
         if char.isalpha() or char == "_":
             start = index
             index += 1
@@ -706,10 +712,7 @@ def _read_number(source: str, start: int) -> int:
         return _read_binary_number(source, start)
 
     if source.startswith(("0x", "0X"), start):
-        index += 2
-        while index < len(source) and source[index].lower() in "0123456789abcdef":
-            index += 1
-        return index
+        return _read_hex_number(source, start + 2)
 
     while index < len(source) and source[index].isdigit():
         index += 1
@@ -718,6 +721,21 @@ def _read_number(source: str, start: int) -> int:
         index += 1
         while index < len(source) and source[index].isdigit():
             index += 1
+
+    return index
+
+
+def _read_hex_number(source: str, start: int) -> int:
+    index = start
+
+    while index < len(source) and source[index].lower() in "0123456789abcdef":
+        index += 1
+
+    if index == start:
+        raise GMLTranspileError("Malformed hexadecimal literal")
+
+    if index < len(source) and source[index].isalnum():
+        raise GMLTranspileError(f"Invalid hexadecimal literal digit: {source[index]}")
 
     return index
 

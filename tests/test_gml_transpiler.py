@@ -83,6 +83,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 with self.assertRaises(GMLTranspileError):
                     transpile_gml_expression(source)
 
+    def test_preserves_hex_literals_as_numeric_values(self):
+        self.assertEqual(
+            transpile_gml_expression("$2c8e + 10"),
+            "GMRuntime.gml_add(0x2c8e, 10)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("#dd8e2c == $2c8edd"),
+            "0x2c8edd == 0x2c8edd",
+        )
+        self.assertEqual(
+            transpile_gml_expression("typeof(#dd8e2c)"),
+            "GMRuntime.gml_typeof(0x2c8edd)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("real($2c8e)"),
+            "GMRuntime.gml_real(0x2c8e)",
+        )
+
     def test_parses_binary_literals(self):
         self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
         self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")

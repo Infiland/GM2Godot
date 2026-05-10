@@ -53,7 +53,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("infinity == undefined"),
-            "INF == null",
+            "INF == GMRuntime.gml_undefined()",
         )
 
     def test_transpiles_single_equals_as_expression_equality(self):
@@ -80,6 +80,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_bool(INF)",
         )
 
+    def test_transpiles_shared_value_helpers(self):
+        self.assertEqual(
+            transpile_gml_expression("undefined"),
+            "GMRuntime.gml_undefined()",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_undefined(undefined)"),
+            "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_nan(NaN)"),
+            "GMRuntime.is_nan_value(NAN)",
+        )
+
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),
@@ -90,7 +104,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_nullish_operator(self):
         self.assertEqual(
             transpile_gml_expression("value ?? fallback"),
-            "value if value != null else fallback",
+            "value if not GMRuntime.is_undefined(value) else fallback",
         )
 
     def test_transpiles_ternary_operator(self):
@@ -140,7 +154,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_nullish_assignment(self):
         self.assertEqual(
             transpile_gml_code("score ??= 10;", indent=""),
-            "if score == null:\n\tscore = 10",
+            "if GMRuntime.is_undefined(score):\n\tscore = 10",
         )
 
     def test_transpiles_increment_decrement_statements(self):
@@ -150,7 +164,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_expression_statements(self):
         self.assertEqual(
             transpile_gml_code("show_debug_message(score ?? 0);", indent=""),
-            "show_debug_message(score if score != null else 0)",
+            "show_debug_message(score if not GMRuntime.is_undefined(score) else 0)",
         )
 
     def test_local_vars_shadow_instance_position_builtins(self):

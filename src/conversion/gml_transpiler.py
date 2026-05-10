@@ -175,7 +175,7 @@ _NAME_REPLACEMENTS = {
     "infinity": "INF",
     "NaN": "NAN",
     "nan": "NAN",
-    "undefined": "null",
+    "undefined": "GMRuntime.gml_undefined()",
 }
 
 _INSTANCE_NAME_REPLACEMENTS = {
@@ -202,6 +202,8 @@ _VIRTUAL_KEY_CONSTANTS = {
 
 _RUNTIME_FUNCTIONS = {
     "is_infinity": "is_infinity",
+    "is_nan": "is_nan_value",
+    "is_undefined": "is_undefined",
     "typeof": "gml_typeof",
     "string": "gml_string",
     "bool": "gml_bool",
@@ -710,7 +712,7 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
     if expr.operator == "??":
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
-        return f"{left} if {left} != null else {right}", _TERNARY_PRECEDENCE
+        return f"{left} if not GMRuntime.is_undefined({left}) else {right}", _TERNARY_PRECEDENCE
 
     if expr.operator == "/":
         left = _emit_expression(expr.left, local_names)[0]
@@ -850,7 +852,7 @@ def _transpile_statement(
         target = transpile_gml_expression(target, local_names)
         value = transpile_gml_expression(value, local_names)
         if operator == "??=":
-            return [f"if {target} == null:", f"\t{target} = {value}"]
+            return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
         if operator == "/=":
             return [f"{target} = GMRuntime.gml_div({target}, {value})"]
         return [f"{target} {operator} {value}"]

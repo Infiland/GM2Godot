@@ -511,7 +511,7 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _ready():", content)
         self.assertIn("\tvar speed = base_speed * 2", content)
-        self.assertIn("\tif score == null:\n\t\tscore = 0", content)
+        self.assertIn("\tif GMRuntime.is_undefined(score):\n\t\tscore = 0", content)
         self.assertIn("\tscore += int(speed / 2)", content)
         self.assertNotIn("\tpass", content)
 

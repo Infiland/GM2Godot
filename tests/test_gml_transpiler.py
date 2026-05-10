@@ -17,11 +17,15 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_logical_operators(self):
         self.assertEqual(
             transpile_gml_expression("a && !b || c"),
-            "a and not b or c",
+            "GMRuntime.gml_bool(a) and not GMRuntime.gml_bool(b) or GMRuntime.gml_bool(c)",
         )
         self.assertEqual(
             transpile_gml_expression("a and not b or c"),
-            "a and not b or c",
+            "GMRuntime.gml_bool(a) and not GMRuntime.gml_bool(b) or GMRuntime.gml_bool(c)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("a ^^ b"),
+            "GMRuntime.gml_bool(a) != GMRuntime.gml_bool(b)",
         )
 
     def test_transpiles_div_and_mod(self):
@@ -94,6 +98,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_nan_value(NAN)",
         )
 
+    def test_transpiles_boolean_value_helpers(self):
+        self.assertEqual(transpile_gml_expression("true"), "true")
+        self.assertEqual(transpile_gml_expression("false"), "false")
+        self.assertEqual(
+            transpile_gml_expression("bool(0.5)"),
+            "GMRuntime.gml_bool(0.5)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_bool(true)"),
+            "GMRuntime.is_bool(true)",
+        )
+
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),
@@ -110,7 +126,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_ternary_operator(self):
         self.assertEqual(
             transpile_gml_expression("alive ? speed : 0"),
-            "speed if alive else 0",
+            "speed if GMRuntime.gml_bool(alive) else 0",
         )
 
     def test_transpiles_calls_indexes_and_members(self):
@@ -183,6 +199,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("if faster = true { superSpeed = 20 }", indent=""),
             "if faster == true:\n\tsuperSpeed = 20",
+        )
+
+    def test_transpiles_if_conditions_with_gml_numeric_truthiness(self):
+        self.assertEqual(
+            transpile_gml_code("if score { score = 1; }", indent=""),
+            "if GMRuntime.gml_bool(score):\n\tscore = 1",
+        )
+        self.assertEqual(
+            transpile_gml_code("if 0.5 { score = 1; }", indent=""),
+            "if GMRuntime.gml_bool(0.5):\n\tscore = 1",
         )
 
     def test_transpiles_shift_keyboard_check(self):

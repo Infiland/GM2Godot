@@ -57,10 +57,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_binary_literals(self):
         self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
         self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")
+        self.assertEqual(transpile_gml_expression("0b0110_1001"), "0b0110_1001")
         self.assertEqual(
             transpile_gml_expression("0b0010 | 0b0100"),
             "0b0010 | 0b0100",
         )
+
+    def test_rejects_malformed_binary_literals(self):
+        for source in ("0b", "0b2", "0b102", "0b_1010", "0b1010_", "0b10__10"):
+            with self.subTest(source=source):
+                with self.assertRaises(GMLTranspileError):
+                    transpile_gml_expression(source)
 
     def test_parses_string_literals(self):
         self.assertEqual(transpile_gml_expression('"hello"'), '"hello"')

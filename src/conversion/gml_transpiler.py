@@ -695,10 +695,7 @@ def _expression_tokens(source: str) -> list[_Token]:
 def _read_number(source: str, start: int) -> int:
     index = start
     if source.startswith(("0b", "0B"), start):
-        index += 2
-        while index < len(source) and source[index] in "01":
-            index += 1
-        return index
+        return _read_binary_number(source, start)
 
     if source.startswith(("0x", "0X"), start):
         index += 2
@@ -713,6 +710,38 @@ def _read_number(source: str, start: int) -> int:
         index += 1
         while index < len(source) and source[index].isdigit():
             index += 1
+
+    return index
+
+
+def _read_binary_number(source: str, start: int) -> int:
+    index = start + 2
+    saw_digit = False
+    previous_was_digit = False
+
+    while index < len(source):
+        char = source[index]
+        if char in "01":
+            saw_digit = True
+            previous_was_digit = True
+            index += 1
+            continue
+
+        if char == "_":
+            next_char = source[index + 1] if index + 1 < len(source) else ""
+            if not previous_was_digit or next_char == "" or next_char not in "01":
+                raise GMLTranspileError("Malformed binary literal")
+            previous_was_digit = False
+            index += 1
+            continue
+
+        if char.isalnum():
+            raise GMLTranspileError(f"Invalid binary literal digit: {char}")
+
+        break
+
+    if not saw_digit:
+        raise GMLTranspileError("Malformed binary literal")
 
     return index
 

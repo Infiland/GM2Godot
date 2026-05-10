@@ -24,6 +24,10 @@ static func is_undefined(value):
 	return value == null
 
 
+static func is_bool(value):
+	return typeof(value) == TYPE_BOOL
+
+
 static func is_number(value):
 	var value_type = typeof(value)
 	return value_type == TYPE_INT or value_type == TYPE_FLOAT

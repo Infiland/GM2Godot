@@ -101,6 +101,7 @@ _MULTI_CHAR_OPERATORS = (
     "!=",
     "&&",
     "||",
+    "^^",
     "++",
     "--",
     "+=",
@@ -134,6 +135,7 @@ _BINARY_PRECEDENCE = {
     "??": 10,
     "or": 20,
     "||": 20,
+    "^^": 20,
     "and": 30,
     "&&": 30,
     "|": 40,
@@ -163,6 +165,30 @@ _PRIMARY_PRECEDENCE = 130
 _TERNARY_PRECEDENCE = 5
 
 _RIGHT_ASSOCIATIVE = {"??"}
+
+_BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
+    "&&",
+    "||",
+    "^^",
+    "and",
+    "or",
+    "=",
+    "==",
+    "!=",
+    "<",
+    "<=",
+    ">",
+    ">=",
+})
+
+_BOOLEAN_RESULT_FUNCTIONS = frozenset({
+    "bool",
+    "is_bool",
+    "is_infinity",
+    "is_nan",
+    "is_undefined",
+    "keyboard_check",
+})
 
 _OPERATOR_REPLACEMENTS = {
     "&&": "and",
@@ -201,6 +227,7 @@ _VIRTUAL_KEY_CONSTANTS = {
 }
 
 _RUNTIME_FUNCTIONS = {
+    "is_bool": "is_bool",
     "is_infinity": "is_infinity",
     "is_nan": "is_nan_value",
     "is_undefined": "is_undefined",
@@ -215,6 +242,13 @@ def transpile_gml_expression(source: str, local_names: Iterable[str] | None = No
     parser = _ExpressionParser(_expression_tokens(source))
     expr = parser.parse()
     return _emit_expression(expr, _normalize_local_names(local_names))[0]
+
+
+def transpile_gml_condition(source: str, local_names: Iterable[str] | None = None) -> str:
+    """Transpile a GML condition using GameMaker truthiness semantics."""
+    parser = _ExpressionParser(_expression_tokens(source))
+    expr = parser.parse()
+    return _emit_truthy_expression(expr, _normalize_local_names(local_names))
 
 
 def transpile_gml_code(
@@ -412,7 +446,7 @@ class _StatementParser:
         if not condition_tokens:
             raise GMLTranspileError("Expected if condition")
 
-        condition = transpile_gml_expression(
+        condition = transpile_gml_condition(
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
         )
@@ -656,16 +690,16 @@ def _emit_expression(
     if isinstance(expr, _Grouped):
         return f"({_emit_expression(expr.expr, local_names)[0]})", _PRIMARY_PRECEDENCE
     if isinstance(expr, _Unary):
-        operand = _emit_child(expr.operand, _UNARY_PRECEDENCE, local_names=local_names)
         if expr.operator == "!":
-            return f"not {operand}", _UNARY_PRECEDENCE
+            return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
         if expr.operator == "not":
-            return f"not {operand}", _UNARY_PRECEDENCE
+            return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
+        operand = _emit_child(expr.operand, _UNARY_PRECEDENCE, local_names=local_names)
         return f"{expr.operator}{operand}", _UNARY_PRECEDENCE
     if isinstance(expr, _Binary):
         return _emit_binary(expr, local_names)
     if isinstance(expr, _Ternary):
-        condition = _emit_child(expr.condition, _TERNARY_PRECEDENCE, local_names=local_names)
+        condition = _emit_truthy_expression(expr.condition, local_names)
         true_expr = _emit_child(expr.true_expr, _TERNARY_PRECEDENCE, local_names=local_names)
         false_expr = _emit_child(expr.false_expr, _TERNARY_PRECEDENCE, local_names=local_names)
         return f"{true_expr} if {condition} else {false_expr}", _TERNARY_PRECEDENCE
@@ -704,6 +738,17 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
 def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
     operator = _OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
 
+    if expr.operator in ("&&", "and", "||", "or"):
+        operator = "and" if expr.operator in ("&&", "and") else "or"
+        left = _emit_truthy_expression(expr.left, local_names)
+        right = _emit_truthy_expression(expr.right, local_names)
+        return f"{left} {operator} {right}", _BINARY_PRECEDENCE[expr.operator]
+
+    if expr.operator == "^^":
+        left = _emit_truthy_expression(expr.left, local_names)
+        right = _emit_truthy_expression(expr.right, local_names)
+        return f"{left} != {right}", _BINARY_PRECEDENCE[expr.operator]
+
     if expr.operator == "div":
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -729,6 +774,30 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         local_names=local_names,
     )
     return f"{left} {operator} {right}", precedence
+
+
+def _emit_truthy_expression(expr: _Expression, local_names: Iterable[str]) -> str:
+    if _emits_boolean_result(expr):
+        return _emit_expression(expr, local_names)[0]
+    return _gml_bool_call(_emit_expression(expr, local_names)[0])
+
+
+def _emits_boolean_result(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value in ("true", "false")
+    if isinstance(expr, _Grouped):
+        return _emits_boolean_result(expr.expr)
+    if isinstance(expr, _Unary):
+        return expr.operator in ("!", "not")
+    if isinstance(expr, _Binary):
+        return expr.operator in _BOOLEAN_RESULT_BINARY_OPERATORS
+    if isinstance(expr, _Call) and isinstance(expr.callee, _Name):
+        return expr.callee.value in _BOOLEAN_RESULT_FUNCTIONS
+    return False
+
+
+def _gml_bool_call(expression: str) -> str:
+    return f"GMRuntime.gml_bool({expression})"
 
 
 def _emit_child(

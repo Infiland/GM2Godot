@@ -23,11 +23,19 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
     RuntimeValueParityCase("string(undefined)", "GMRuntime.gml_string(GMRuntime.gml_undefined())"),
     RuntimeValueParityCase("bool(undefined)", "GMRuntime.gml_bool(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
+    RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
+    RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
     RuntimeValueParityCase(
         "is_undefined(undefined)",
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
     ),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
+    RuntimeValueParityCase("!0.5", "not GMRuntime.gml_bool(0.5)"),
+    RuntimeValueParityCase(
+        "0.25 || 1",
+        "GMRuntime.gml_bool(0.25) or GMRuntime.gml_bool(1)",
+    ),
     RuntimeValueParityCase(
         "score ?? fallback",
         "score if not GMRuntime.is_undefined(score) else fallback",
@@ -40,6 +48,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         for helper_name in (
             "gml_undefined",
             "is_undefined",
+            "is_bool",
             "is_number",
             "is_nan_value",
             "is_infinity",

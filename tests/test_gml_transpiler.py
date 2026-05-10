@@ -101,6 +101,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_real(0x2c8e)",
         )
 
+    def test_hash_color_literal_parity_examples(self):
+        cases = (
+            ("#dd8e2c == $2c8edd", "0x2c8edd == 0x2c8edd"),
+            ("#2c8edd != $2c8edd", "0xdd8e2c != 0x2c8edd"),
+            ("#0000ff == $ff0000", "0xff0000 == 0xff0000"),
+            ("#ff0000 == $0000ff", "0x0000ff == 0x0000ff"),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_parses_binary_literals(self):
         self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
         self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")

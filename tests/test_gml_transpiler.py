@@ -54,6 +54,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_expression("1.2.3")
 
+    def test_parses_binary_literals(self):
+        self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
+        self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")
+        self.assertEqual(
+            transpile_gml_expression("0b0010 | 0b0100"),
+            "0b0010 | 0b0100",
+        )
+
     def test_parses_string_literals(self):
         self.assertEqual(transpile_gml_expression('"hello"'), '"hello"')
         self.assertEqual(transpile_gml_expression("'hello'"), "'hello'")

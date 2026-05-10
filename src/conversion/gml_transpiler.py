@@ -694,6 +694,12 @@ def _expression_tokens(source: str) -> list[_Token]:
 
 def _read_number(source: str, start: int) -> int:
     index = start
+    if source.startswith(("0b", "0B"), start):
+        index += 2
+        while index < len(source) and source[index] in "01":
+            index += 1
+        return index
+
     if source.startswith(("0x", "0X"), start):
         index += 2
         while index < len(source) and source[index].lower() in "0123456789abcdef":

@@ -46,6 +46,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("1.5 / 2", "GMRuntime.gml_div(1.5, 2)"),
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
+    RuntimeValueParityCase("0b0010 | 0b0100", "0b0010 | 0b0100"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),

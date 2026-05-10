@@ -31,6 +31,8 @@ RUNTIME_VALUE_PARITY_CASES = (
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
     ),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
+    RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
+    RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
     RuntimeValueParityCase("!0.5", "not GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase(
         "0.25 || 1",
@@ -54,6 +56,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_infinity",
             "gml_eq",
             "gml_ne",
+            "gml_div",
+            "gml_int_div",
             "gml_typeof",
             "gml_string",
             "gml_bool",

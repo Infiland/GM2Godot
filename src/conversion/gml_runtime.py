@@ -45,6 +45,10 @@ static func gml_div(left, right):
 	return float(left) / float(right)
 
 
+static func gml_int_div(left, right):
+	return int(float(left) / float(right))
+
+
 static func gml_eq(left, right):
 	if is_undefined(left) or is_undefined(right):
 		return is_undefined(left) and is_undefined(right)

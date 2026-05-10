@@ -22,6 +22,7 @@ class TilesetData(TypedDict):
     tilexoff: int
     tileyoff: int
     tile_count: int
+    out_columns: int
 
 
 class TilesetSuccess(TypedDict):
@@ -104,6 +105,7 @@ class TileSetConverter(BaseConverter):
                 "tilexoff": int(data.get('tilexoff', 0)),
                 "tileyoff": int(data.get('tileyoff', 0)),
                 "tile_count": int(data.get('tile_count', 0)),
+                "out_columns": int(data.get('out_columns', 0)),
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
@@ -189,6 +191,9 @@ class TileSetConverter(BaseConverter):
         if tilexoff or tileyoff:
             lines.append(f'margins = Vector2i({tilexoff}, {tileyoff})')
 
+        for atlas_x, atlas_y in self._tileset_atlas_coordinates(tileset_data):
+            lines.append(f'{atlas_x}:{atlas_y}/0 = 0')
+
         lines.append('')
         lines.append('[resource]')
         lines.append(f'tile_size = Vector2i({tile_w}, {tile_h})')
@@ -196,6 +201,12 @@ class TileSetConverter(BaseConverter):
         lines.append('')
 
         return '\n'.join(lines)
+
+    def _tileset_atlas_coordinates(self, tileset_data: TilesetData) -> list[tuple[int, int]]:
+        tile_count = max(0, tileset_data["tile_count"])
+        columns = tileset_data["out_columns"] if tileset_data["out_columns"] > 0 else tile_count
+        columns = max(1, columns)
+        return [(index % columns, index // columns) for index in range(tile_count)]
 
     def _process_tileset(self, tileset_name: str, subfolder: str = "") -> TilesetResult | None:
         """Process a single tileset: parse, copy image, generate .tres.

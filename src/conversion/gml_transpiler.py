@@ -183,6 +183,12 @@ _INSTANCE_NAME_REPLACEMENTS = {
     "y": "position.y",
 }
 
+_BUILTIN_INSTANCE_VARIABLES = frozenset({
+    *_INSTANCE_NAME_REPLACEMENTS,
+    "sprite_index",
+    "image_index",
+})
+
 _VIRTUAL_KEY_ACTIONS = {
     "vk_left": "ui_left",
     "vk_right": "ui_right",
@@ -865,7 +871,7 @@ def _record_instance_assignment(
         return
 
     name = tokens[0].value
-    if name in local_names or name in _INSTANCE_NAME_REPLACEMENTS:
+    if name in local_names or name in _BUILTIN_INSTANCE_VARIABLES:
         return
     instance_variables.add(name)
 

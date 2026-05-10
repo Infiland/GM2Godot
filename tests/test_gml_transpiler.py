@@ -218,6 +218,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(instance_variables, {"superSpeed"})
 
+    def test_sprite_builtins_are_not_collected_instance_variables(self):
+        instance_variables: set[str] = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                "sprite_index = s_enemy; image_index = 2; image_index += 1;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "sprite_index = s_enemy\nimage_index = 2\nimage_index += 1",
+        )
+        self.assertEqual(instance_variables, set())
+
     def test_transpiles_current_simple_topdown_step_body(self):
         source = """
         if keyboard_check(vk_shift) {

@@ -109,6 +109,30 @@ static func gml_mod(left, right):
 	return fmod(_to_real(left), _to_real(right))
 
 
+static func gml_bit_and(left, right):
+	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
+
+
+static func gml_bit_or(left, right):
+	return GMLInt64.new(_to_int64_value(left) | _to_int64_value(right))
+
+
+static func gml_bit_xor(left, right):
+	return GMLInt64.new(_to_int64_value(left) ^ _to_int64_value(right))
+
+
+static func gml_bit_not(value):
+	return GMLInt64.new(~_to_int64_value(value))
+
+
+static func gml_shift_left(left, right):
+	return GMLInt64.new(_to_int64_value(left) << _to_int64_value(right))
+
+
+static func gml_shift_right(left, right):
+	return GMLInt64.new(_to_int64_value(left) >> _to_int64_value(right))
+
+
 static func gml_eq(left, right):
 	if is_undefined(left) or is_undefined(right):
 		return is_undefined(left) and is_undefined(right)
@@ -176,6 +200,12 @@ static func _to_real(value):
 	if is_int64(value):
 		return float(value.value)
 	return float(value)
+
+
+static func _to_int64_value(value):
+	if is_int64(value):
+		return int(value.value)
+	return int(value)
 
 
 static func gml_error(message):

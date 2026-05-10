@@ -46,7 +46,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("1.5 / 2", "GMRuntime.gml_div(1.5, 2)"),
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
-    RuntimeValueParityCase("0b0010 | 0b0100", "0b0010 | 0b0100"),
+    RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -89,6 +89,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_sub",
             "gml_mul",
             "gml_mod",
+            "gml_bit_and",
+            "gml_bit_or",
+            "gml_bit_xor",
+            "gml_bit_not",
+            "gml_shift_left",
+            "gml_shift_right",
             "gml_typeof",
             "gml_string",
             "gml_bool",
@@ -113,6 +119,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_bitwise_helpers_return_int64_values(self):
+        self.assertIn("static func gml_bit_or(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(_to_int64_value(left) | _to_int64_value(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(~_to_int64_value(value))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _to_int64_value(value):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_handles_string_conversion_and_concat_deliberately(self):
         self.assertIn("static func is_string(value):", GML_RUNTIME_SCRIPT)

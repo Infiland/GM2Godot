@@ -225,6 +225,14 @@ _ARITHMETIC_RUNTIME_FUNCTIONS = {
     "mod": "gml_mod",
 }
 
+_BITWISE_RUNTIME_FUNCTIONS = {
+    "&": "gml_bit_and",
+    "|": "gml_bit_or",
+    "^": "gml_bit_xor",
+    "<<": "gml_shift_left",
+    ">>": "gml_shift_right",
+}
+
 _COMPOUND_RUNTIME_FUNCTIONS: dict[_AssignmentOperator, str] = {
     "+=": "gml_add",
     "-=": "gml_sub",
@@ -797,6 +805,9 @@ def _emit_expression(
             return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
         if expr.operator == "not":
             return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
+        if expr.operator == "~":
+            operand = _emit_expression(expr.operand, local_names)[0]
+            return f"GMRuntime.gml_bit_not({operand})", _POSTFIX_PRECEDENCE
         operand = _emit_child(expr.operand, _UNARY_PRECEDENCE, local_names=local_names)
         return f"{expr.operator}{operand}", _UNARY_PRECEDENCE
     if isinstance(expr, _Binary):
@@ -871,6 +882,11 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
         return f"GMRuntime.{_ARITHMETIC_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
+
+    if expr.operator in _BITWISE_RUNTIME_FUNCTIONS:
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_expression(expr.right, local_names)[0]
+        return f"GMRuntime.{_BITWISE_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
 
     precedence = _BINARY_PRECEDENCE[expr.operator]
     left = _emit_child(expr.left, precedence, local_names=local_names)

@@ -60,7 +60,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("0b0110_1001"), "0b0110_1001")
         self.assertEqual(
             transpile_gml_expression("0b0010 | 0b0100"),
-            "0b0010 | 0b0100",
+            "GMRuntime.gml_bit_or(0b0010, 0b0100)",
         )
 
     def test_rejects_malformed_binary_literals(self):
@@ -244,9 +244,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),
-            "flags & mask | 4",
+            "GMRuntime.gml_bit_or(GMRuntime.gml_bit_and(flags, mask), 4)",
         )
-        self.assertEqual(transpile_gml_expression("value << 2"), "value << 2")
+        self.assertEqual(
+            transpile_gml_expression("value ^ mask"),
+            "GMRuntime.gml_bit_xor(value, mask)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("value << 2"),
+            "GMRuntime.gml_shift_left(value, 2)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("value >> 1"),
+            "GMRuntime.gml_shift_right(value, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("~0b0011"),
+            "GMRuntime.gml_bit_not(0b0011)",
+        )
 
     def test_transpiles_nullish_operator(self):
         self.assertEqual(

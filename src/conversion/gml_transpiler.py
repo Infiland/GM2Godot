@@ -43,6 +43,11 @@ class _Literal:
 
 
 @dataclass(frozen=True)
+class _StringLiteral:
+    value: str
+
+
+@dataclass(frozen=True)
 class _NumberLiteral:
     value: str
     is_float_like: bool
@@ -94,6 +99,7 @@ class _Grouped:
 _Expression: TypeAlias = (
     _Name
     | _Literal
+    | _StringLiteral
     | _NumberLiteral
     | _Unary
     | _Binary
@@ -206,6 +212,7 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "is_nan",
     "is_numeric",
     "is_real",
+    "is_string",
     "is_undefined",
     "keyboard_check",
 })
@@ -270,6 +277,7 @@ _RUNTIME_FUNCTIONS = {
     "is_nan": "is_nan_value",
     "is_numeric": "is_numeric",
     "is_real": "is_real",
+    "is_string": "is_string",
     "is_undefined": "is_undefined",
     "real": "gml_real",
     "typeof": "gml_typeof",
@@ -391,7 +399,7 @@ class _ExpressionParser:
         if token.kind == "NUMBER":
             return _NumberLiteral(token.value, _is_float_like_number(token.value))
         if token.kind == "STRING":
-            return _Literal(token.value)
+            return _StringLiteral(token.value)
         if token.kind == "IDENT":
             return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
         if token.value == "(":
@@ -740,7 +748,7 @@ def _emit_expression(
     local_names: Iterable[str] | None = None,
 ) -> tuple[str, int]:
     local_names = _normalize_local_names(local_names)
-    if isinstance(expr, _Literal | _NumberLiteral):
+    if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
         return expr.value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
         value = expr.value

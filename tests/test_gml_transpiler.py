@@ -11,6 +11,7 @@ from src.conversion.gml_transpiler import (
     GMLTranspileError,
     _ExpressionParser,
     _NumberLiteral,
+    _StringLiteral,
     _expression_tokens,
     transpile_gml_code,
     transpile_gml_expression,
@@ -52,6 +53,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_rejects_malformed_numeric_literals(self):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_expression("1.2.3")
+
+    def test_parses_string_literals(self):
+        self.assertEqual(transpile_gml_expression('"hello"'), '"hello"')
+        self.assertEqual(transpile_gml_expression("'hello'"), "'hello'")
+        self.assertEqual(transpile_gml_expression(r'"Hello\"World\""'), r'"Hello\"World\""')
+        self.assertEqual(transpile_gml_expression(r'"line\nnext"'), r'"line\nnext"')
+        self.assertEqual(transpile_gml_expression(r'"C:\\tmp"'), r'"C:\\tmp"')
+
+    def test_preserves_string_literal_metadata(self):
+        literal = _ExpressionParser(_expression_tokens('"hello"')).parse()
+
+        self.assertIsInstance(literal, _StringLiteral)
+        assert isinstance(literal, _StringLiteral)
+        self.assertEqual(literal.value, '"hello"')
+
+    def test_rejects_unterminated_string_literals(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression('"unterminated')
 
     def test_transpiles_logical_operators(self):
         self.assertEqual(
@@ -106,6 +125,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("a - b"), "GMRuntime.gml_sub(a, b)")
         self.assertEqual(transpile_gml_expression("a * b"), "GMRuntime.gml_mul(a, b)")
         self.assertEqual(transpile_gml_expression("a % b"), "GMRuntime.gml_mod(a, b)")
+
+    def test_transpiles_string_concatenation_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression('"hello" + " world"'),
+            'GMRuntime.gml_add("hello", " world")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('score + " pts"'),
+            'GMRuntime.gml_add(score, " pts")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('"Score: " + string(score)'),
+            'GMRuntime.gml_add("Score: ", GMRuntime.gml_string(score))',
+        )
 
     def test_transpiles_infinity_and_nan_constants(self):
         self.assertEqual(transpile_gml_expression("infinity"), "INF")
@@ -187,6 +220,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("is_int64(int64(score))"),
             "GMRuntime.is_int64(GMRuntime.gml_int64(score))",
         )
+
+    def test_transpiles_string_value_helpers(self):
+        self.assertEqual(transpile_gml_expression('string("abc")'), 'GMRuntime.gml_string("abc")')
+        self.assertEqual(transpile_gml_expression('typeof("abc")'), 'GMRuntime.gml_typeof("abc")')
+        self.assertEqual(transpile_gml_expression('is_string("abc")'), 'GMRuntime.is_string("abc")')
 
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(

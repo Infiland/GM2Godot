@@ -26,6 +26,9 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
     RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
+    RuntimeValueParityCase('string("abc")', 'GMRuntime.gml_string("abc")'),
+    RuntimeValueParityCase('typeof("abc")', 'GMRuntime.gml_typeof("abc")'),
+    RuntimeValueParityCase('is_string("abc")', 'GMRuntime.is_string("abc")'),
     RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
     RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
     RuntimeValueParityCase("typeof(int64(score))", "GMRuntime.gml_typeof(GMRuntime.gml_int64(score))"),
@@ -44,6 +47,9 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
+    RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
+    RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
+    RuntimeValueParityCase('true + "!"', 'GMRuntime.gml_add(true, "!")'),
     RuntimeValueParityCase("a - b", "GMRuntime.gml_sub(a, b)"),
     RuntimeValueParityCase("a * b", "GMRuntime.gml_mul(a, b)"),
     RuntimeValueParityCase("a mod b", "GMRuntime.gml_mod(a, b)"),
@@ -65,6 +71,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_undefined",
             "is_undefined",
             "is_bool",
+            "is_string",
             "is_number",
             "is_real",
             "is_numeric",
@@ -105,6 +112,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_handles_string_conversion_and_concat_deliberately(self):
+        self.assertIn("static func is_string(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value_type == TYPE_STRING or value_type == TYPE_STRING_NAME", GML_RUNTIME_SCRIPT)
+        self.assertIn("return str(left) + str(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_string(left) + str(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("Invalid GML string concatenation", GML_RUNTIME_SCRIPT)
+        self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_centralizes_error_reporting(self):
         self.assertIn("static func gml_error(message):", GML_RUNTIME_SCRIPT)

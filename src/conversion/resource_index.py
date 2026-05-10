@@ -343,7 +343,7 @@ class GameMakerResourceIndex(BaseConverter):
         for child_layer in self._dict_items_copy(child_layers):
             key = self._item_key(child_layer)
             if key and key in by_key:
-                parent_layer = cast(JsonDict, merged[by_key[key]])
+                parent_layer = merged[by_key[key]]
                 merged[by_key[key]] = self._merge_layer(parent_layer, child_layer)
             else:
                 merged.append(child_layer)
@@ -380,7 +380,7 @@ class GameMakerResourceIndex(BaseConverter):
         for child_item in self._dict_items_copy(child_items):
             key = self._item_key(child_item)
             if key and key in by_key:
-                parent_item = cast(JsonDict, merged[by_key[key]])
+                parent_item = merged[by_key[key]]
                 merged_item = copy.deepcopy(parent_item)
                 merged_item.update(copy.deepcopy(child_item))
                 merged[by_key[key]] = merged_item
@@ -422,7 +422,8 @@ class GameMakerResourceIndex(BaseConverter):
             if isinstance(value, str) and value:
                 return value
             if isinstance(value, dict):
-                name = value.get("name")
+                nested_value = cast(JsonDict, value)
+                name = nested_value.get("name")
                 if isinstance(name, str) and name:
                     return name
         return ""

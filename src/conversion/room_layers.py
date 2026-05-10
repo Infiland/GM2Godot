@@ -440,8 +440,10 @@ def _tile_map_layer_lines(
     width = _coerce_int(tiles.get("SerialiseWidth", 0))
     height = _coerce_int(tiles.get("SerialiseHeight", 0))
     tile_data_format = _coerce_int(tiles.get("TileDataFormat", 1))
-    compressed_data_value = tiles.get("TileCompressedData") or []
-    compressed_data = cast(list[JsonValue], compressed_data_value) if isinstance(compressed_data_value, list) else []
+    raw_compressed_data = tiles.get("TileCompressedData")
+    compressed_data: list[JsonValue] = []
+    if isinstance(raw_compressed_data, list):
+        compressed_data = cast(list[JsonValue], raw_compressed_data)
 
     try:
         decoded_tiles = decode_tile_compressed_data(

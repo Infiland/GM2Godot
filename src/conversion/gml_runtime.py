@@ -27,13 +27,18 @@ const GML_DS_MAP_HANDLE_KIND = "ds_map"
 
 
 class GMLInt64:
-	var value = 0
+	var _value = 0
+	var value:
+		get:
+			return _value
+		set(_new_value):
+			push_error("GML int64 values are immutable")
 
 	func _init(initial_value = 0):
 		if initial_value is GMLInt64:
-			value = initial_value.value
+			_value = int(initial_value.value)
 		else:
-			value = int(initial_value)
+			_value = int(initial_value)
 
 
 class GMLPointer:

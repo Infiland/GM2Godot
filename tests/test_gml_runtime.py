@@ -558,6 +558,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)
+        self.assertIn("var _value = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("get:\n\t\t\treturn _value", GML_RUNTIME_SCRIPT)
+        self.assertIn('push_error("GML int64 values are immutable")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

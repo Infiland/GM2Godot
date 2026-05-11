@@ -396,9 +396,25 @@ _BUILTIN_ARRAY_VARIABLES = frozenset({
     "view_yview",
 })
 
+_READ_ONLY_BUILTIN_VARIABLES = frozenset({
+    "bbox_bottom",
+    "bbox_left",
+    "bbox_right",
+    "bbox_top",
+    "current_time",
+    "fps",
+    "id",
+    "image_number",
+    "object_index",
+    "room",
+    "room_height",
+    "room_width",
+})
+
 _BUILTIN_INSTANCE_VARIABLES = frozenset({
     *_INSTANCE_NAME_REPLACEMENTS,
     *_BUILTIN_ARRAY_VARIABLES,
+    *_READ_ONLY_BUILTIN_VARIABLES,
     "sprite_index",
     "image_index",
 })
@@ -1739,6 +1755,18 @@ def _reject_enum_assignment_target(
         raise GMLTranspileError("Cannot assign to enum member")
 
 
+def _reject_readonly_builtin_assignment_target(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+) -> None:
+    local_name_set = _normalize_local_names(local_names)
+    unwrapped_target = _unwrap_grouped_expression(target_expr)
+    if isinstance(unwrapped_target, _Name):
+        name = unwrapped_target.value
+        if name not in local_name_set and name in _READ_ONLY_BUILTIN_VARIABLES:
+            raise GMLTranspileError(f"Cannot assign to read-only built-in variable {name}")
+
+
 def _reject_enum_mutation_expression(
     expr: _Expression,
     enum_names: Iterable[str] | None,
@@ -2409,6 +2437,7 @@ def _transpile_statement(
         target_source = statement[7:].strip()
         target_expr = _parse_gml_expression(target_source, enum_values, enum_names)
         _reject_enum_assignment_target(target_expr, enum_names)
+        _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if not isinstance(target_expr, _Name):
             raise GMLTranspileError("delete can only be used with variables")
         target = _emit_expression(target_expr, local_names)[0]
@@ -2423,6 +2452,7 @@ def _transpile_statement(
         helper = "gml_add" if delta > 0 else "gml_sub"
         target_expr = _parse_gml_expression(target, enum_values, enum_names)
         _reject_enum_assignment_target(target_expr, enum_names)
+        _reject_readonly_builtin_assignment_target(target_expr, local_names)
         struct_target = _struct_assignment_parts(target_expr, local_names)
         if struct_target is not None:
             container, key = struct_target
@@ -2449,6 +2479,7 @@ def _transpile_statement(
             raise GMLTranspileError("Chained assignments are not supported")
         target_expr = _parse_gml_expression(target, enum_values, enum_names)
         _reject_enum_assignment_target(target_expr, enum_names)
+        _reject_readonly_builtin_assignment_target(target_expr, local_names)
         _record_instance_assignment(target, local_names, instance_variables)
         target = _emit_expression(target_expr, local_names)[0]
         value = transpile_gml_expression(value, local_names, enum_values, enum_names)

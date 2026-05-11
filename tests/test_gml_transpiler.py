@@ -1128,6 +1128,26 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "var view_xview = [1]\nvalue = GMRuntime.gml_array_get(view_xview, 0)",
         )
 
+    def test_rejects_writes_to_read_only_builtin_variables(self):
+        for source in (
+            "bbox_left = 0",
+            "image_number += 1",
+            "room++",
+            "delete object_index",
+        ):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "read-only built-in"):
+                    transpile_gml_code(source, indent="")
+
+    def test_allows_mutable_builtin_writes_and_local_readonly_name_shadowing(self):
+        self.assertEqual(transpile_gml_code("x = 10", indent=""), "position.x = 10")
+        self.assertEqual(transpile_gml_code("image_index += 1", indent=""), "image_index = GMRuntime.gml_add(image_index, 1)")
+        self.assertEqual(
+            transpile_gml_code("view_xview[0] = x", indent=""),
+            'GMRuntime.gml_array_set(GMRuntime.gml_builtin_array("view_xview"), 0, position.x)',
+        )
+        self.assertEqual(transpile_gml_code("var bbox_left = 1; bbox_left += 1", indent=""), "var bbox_left = 1\nbbox_left = GMRuntime.gml_add(bbox_left, 1)")
+
     def test_transpiles_multidimensional_array_access(self):
         self.assertEqual(
             transpile_gml_expression("grid[x][y]"),

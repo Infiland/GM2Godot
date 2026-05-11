@@ -166,6 +166,8 @@ static func gml_sqrt(value):
 
 
 static func gml_add(left, right):
+	if is_ptr(left) or is_ptr(right):
+		return gml_error("GML pointer arithmetic is not supported")
 	if is_numeric(left) and is_numeric(right):
 		return _to_real(left) + _to_real(right)
 	if is_string(left) and is_string(right):
@@ -178,14 +180,20 @@ static func gml_add(left, right):
 
 
 static func gml_sub(left, right):
+	if is_ptr(left) or is_ptr(right):
+		return gml_error("GML pointer arithmetic is not supported")
 	return _to_real(left) - _to_real(right)
 
 
 static func gml_mul(left, right):
+	if is_ptr(left) or is_ptr(right):
+		return gml_error("GML pointer arithmetic is not supported")
 	return _to_real(left) * _to_real(right)
 
 
 static func gml_mod(left, right):
+	if is_ptr(left) or is_ptr(right):
+		return gml_error("GML pointer arithmetic is not supported")
 	return fmod(_to_real(left), _to_real(right))
 
 
@@ -388,12 +396,16 @@ static func gml_is_nullish(value):
 
 
 static func _to_real(value):
+	if is_ptr(value):
+		return gml_error("GML pointer numeric conversion is not supported")
 	if is_int64(value):
 		return float(value.value)
 	return float(value)
 
 
 static func _to_int64_value(value):
+	if is_ptr(value):
+		return gml_error("GML pointer bitwise conversion is not supported")
 	if is_int64(value):
 		return int(value.value)
 	return int(value)

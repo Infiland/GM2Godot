@@ -400,6 +400,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_ne(GMRuntime.gml_pointer_invalid(), GMRuntime.gml_pointer_null())",
         )
 
+    def test_pointer_operations_stay_on_runtime_checked_paths(self):
+        self.assertEqual(
+            transpile_gml_expression("pointer_null + 1"),
+            "GMRuntime.gml_add(GMRuntime.gml_pointer_null(), 1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("pointer_null & 1"),
+            "GMRuntime.gml_bit_and(GMRuntime.gml_pointer_null(), 1)",
+        )
+
     def test_undefined_conditions_use_gml_truthiness(self):
         self.assertEqual(
             transpile_gml_code("if undefined begin score = 1; end", indent=""),

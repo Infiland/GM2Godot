@@ -202,6 +202,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_is_nullish(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_undefined(value) or (is_ptr(value) and value.value == 0)", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_rejects_pointer_numeric_operations(self):
+        self.assertIn('return gml_error("GML pointer arithmetic is not supported")', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML pointer numeric conversion is not supported")', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML pointer bitwise conversion is not supported")', GML_RUNTIME_SCRIPT)
+
     def test_runtime_undefined_truthiness_and_conversions(self):
         self.assertIn(
             "static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",

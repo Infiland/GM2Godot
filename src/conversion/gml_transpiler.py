@@ -719,28 +719,36 @@ class _StatementParser:
         self._skip_newlines()
         self._consume("{")
 
-        members: list[str] = []
+        members: list[tuple[str, str]] = []
+        next_value = "0"
+        next_integer_value: int | None = 0
         while not self._at_end() and not self._check("}"):
             if self._match(",") or self._match(";") or self._match("\n"):
                 continue
-            member_name = _sanitize_gdscript_identifier(self._consume_identifier_name())
+            member_name = self._consume_identifier_name()
             if self._match("="):
                 value_tokens = self._read_enum_value_tokens()
-                members.append(f"{member_name} = {_enum_value_tokens_to_source(value_tokens)}")
+                value = _enum_value_tokens_to_source(value_tokens)
+                literal_value = _enum_literal_int(value_tokens)
+                if literal_value is None:
+                    next_value = f"GMRuntime.gml_add({value}, 1)"
+                    next_integer_value = None
+                else:
+                    next_integer_value = literal_value + 1
+                    next_value = str(next_integer_value)
             else:
-                members.append(member_name)
+                value = next_value
+                if next_integer_value is None:
+                    next_value = f"GMRuntime.gml_add({value}, 1)"
+                else:
+                    next_integer_value += 1
+                    next_value = str(next_integer_value)
+            members.append((member_name, value))
 
         self._consume("}")
 
-        if not members:
-            return [f"enum {enum_name} {{}}"]
-
-        lines = [f"enum {enum_name} {{"]
-        for index, member in enumerate(members):
-            suffix = "," if index < len(members) - 1 else ""
-            lines.append(f"\t{member}{suffix}")
-        lines.append("}")
-        return lines
+        fields = ", ".join(f"{json.dumps(member_name)}: {value}" for member_name, value in members)
+        return [f"var {enum_name} = GMRuntime.gml_enum({{{fields}}})"]
 
     def _parse_if_statement(self) -> list[str]:
         self._consume_identifier("if")
@@ -1438,7 +1446,21 @@ def _tokens_to_source(tokens: Iterable[_Token]) -> str:
 
 
 def _enum_value_tokens_to_source(tokens: Iterable[_Token]) -> str:
-    return _tokens_to_source(tokens).replace(" . ", ".")
+    return transpile_gml_expression(_tokens_to_source(tokens))
+
+
+def _enum_literal_int(tokens: Iterable[_Token]) -> int | None:
+    value_tokens = [token for token in tokens if token.kind not in ("EOF", "NEWLINE")]
+    sign = 1
+    if value_tokens and value_tokens[0].value == "-":
+        sign = -1
+        value_tokens = value_tokens[1:]
+    if len(value_tokens) != 1 or value_tokens[0].kind != "NUMBER":
+        return None
+    try:
+        return sign * int(value_tokens[0].value, 0)
+    except ValueError:
+        return None
 
 
 def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:

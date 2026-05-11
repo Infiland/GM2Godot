@@ -372,6 +372,15 @@ static func gml_struct(fields = {}):
 	return fields
 
 
+static func gml_enum(fields = {}):
+	if typeof(fields) != TYPE_DICTIONARY:
+		return gml_error("GML enum declaration requires a dictionary")
+	var enum_fields = {}
+	for key in fields.keys():
+		enum_fields[key] = gml_int64(fields[key])
+	return enum_fields
+
+
 static func gml_struct_get(struct_value, member_name):
 	var key = str(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:

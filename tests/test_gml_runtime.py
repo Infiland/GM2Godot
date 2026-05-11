@@ -183,6 +183,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_array_get",
             "gml_array_set",
             "gml_struct",
+            "gml_enum",
             "gml_struct_exists",
             "gml_struct_get",
             "gml_struct_get_names",
@@ -425,6 +426,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('return gml_error("GML struct literal requires a dictionary")', GML_RUNTIME_SCRIPT)
         self.assertIn("return fields", GML_RUNTIME_SCRIPT)
         self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_enum_helper_wraps_members_as_int64_values(self):
+        self.assertIn("static func gml_enum(fields = {}):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML enum declaration requires a dictionary")', GML_RUNTIME_SCRIPT)
+        self.assertIn("var enum_fields = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("for key in fields.keys():", GML_RUNTIME_SCRIPT)
+        self.assertIn("enum_fields[key] = gml_int64(fields[key])", GML_RUNTIME_SCRIPT)
+        self.assertIn("return enum_fields", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_access_helpers_preserve_gml_missing_member_behavior(self):
         self.assertIn("static func gml_struct_get(struct_value, member_name):", GML_RUNTIME_SCRIPT)

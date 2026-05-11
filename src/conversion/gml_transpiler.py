@@ -658,7 +658,7 @@ def _tokenize(source: str) -> list[_Token]:
 
         if char.isdigit() or (char == "." and index + 1 < len(source) and source[index + 1].isdigit()):
             number_end = _read_number(source, index)
-            tokens.append(_Token("NUMBER", source[index:number_end]))
+            tokens.append(_Token("NUMBER", source[index:number_end].replace("_", "")))
             index = number_end
             continue
 
@@ -669,7 +669,7 @@ def _tokenize(source: str) -> list[_Token]:
 
         if char == "$":
             hex_end = _read_hex_number(source, index + 1)
-            tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end]}"))
+            tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end].replace('_', '')}"))
             index = hex_end
             continue
 
@@ -713,31 +713,58 @@ def _expression_tokens(source: str) -> list[_Token]:
 
 
 def _read_number(source: str, start: int) -> int:
-    index = start
     if source.startswith(("0b", "0B"), start):
         return _read_binary_number(source, start)
 
     if source.startswith(("0x", "0X"), start):
         return _read_hex_number(source, start + 2)
 
-    while index < len(source) and source[index].isdigit():
-        index += 1
+    return _read_decimal_number(source, start)
 
+
+def _read_decimal_number(source: str, start: int) -> int:
+    index = start
+    if source[index] == ".":
+        index += 1
+        index, saw_fraction_digit = _read_separated_digits(
+            source,
+            index,
+            "0123456789",
+            "numeric",
+        )
+        if not saw_fraction_digit:
+            raise GMLTranspileError("Malformed numeric literal")
+        return index
+
+    index, _saw_integer_digit = _read_separated_digits(
+        source,
+        index,
+        "0123456789",
+        "numeric",
+    )
     if index < len(source) and source[index] == ".":
         index += 1
-        while index < len(source) and source[index].isdigit():
-            index += 1
+        if index < len(source) and source[index] == "_":
+            raise GMLTranspileError("Malformed numeric literal")
+        index, _saw_fraction_digit = _read_separated_digits(
+            source,
+            index,
+            "0123456789",
+            "numeric",
+        )
 
     return index
 
 
 def _read_hex_number(source: str, start: int) -> int:
-    index = start
+    index, saw_digit = _read_separated_digits(
+        source,
+        start,
+        "0123456789abcdef",
+        "hexadecimal",
+    )
 
-    while index < len(source) and source[index].lower() in "0123456789abcdef":
-        index += 1
-
-    if index == start:
+    if not saw_digit:
         raise GMLTranspileError("Malformed hexadecimal literal")
 
     if index < len(source) and source[index].isalnum():
@@ -766,13 +793,35 @@ def _read_hash_color_literal(source: str, start: int) -> tuple[str, int]:
 
 
 def _read_binary_number(source: str, start: int) -> int:
-    index = start + 2
+    index, saw_digit = _read_separated_digits(
+        source,
+        start + 2,
+        "01",
+        "binary",
+    )
+
+    if not saw_digit:
+        raise GMLTranspileError("Malformed binary literal")
+
+    if index < len(source) and source[index].isalnum():
+        raise GMLTranspileError(f"Invalid binary literal digit: {source[index]}")
+
+    return index
+
+
+def _read_separated_digits(
+    source: str,
+    start: int,
+    valid_digits: str,
+    literal_name: str,
+) -> tuple[int, bool]:
+    index = start
     saw_digit = False
     previous_was_digit = False
 
     while index < len(source):
         char = source[index]
-        if char in "01":
+        if char.lower() in valid_digits:
             saw_digit = True
             previous_was_digit = True
             index += 1
@@ -780,21 +829,19 @@ def _read_binary_number(source: str, start: int) -> int:
 
         if char == "_":
             next_char = source[index + 1] if index + 1 < len(source) else ""
-            if not previous_was_digit or next_char == "" or next_char not in "01":
-                raise GMLTranspileError("Malformed binary literal")
+            if (
+                not previous_was_digit
+                or next_char == ""
+                or next_char.lower() not in valid_digits
+            ):
+                raise GMLTranspileError(f"Malformed {literal_name} literal")
             previous_was_digit = False
             index += 1
             continue
 
-        if char.isalnum():
-            raise GMLTranspileError(f"Invalid binary literal digit: {char}")
-
         break
 
-    if not saw_digit:
-        raise GMLTranspileError("Malformed binary literal")
-
-    return index
+    return index, saw_digit
 
 
 def _is_float_like_number(value: str) -> bool:

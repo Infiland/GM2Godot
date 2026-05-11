@@ -39,6 +39,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_div(1.5, 2)",
         )
 
+    def test_strips_numeric_literal_separators(self):
+        self.assertEqual(transpile_gml_expression("100_000_000"), "100000000")
+        self.assertEqual(transpile_gml_expression("3_141.59"), "3141.59")
+        self.assertEqual(transpile_gml_expression("3.141_59"), "3.14159")
+        self.assertEqual(transpile_gml_expression("0xDEAD_BEEF"), "0xDEADBEEF")
+        self.assertEqual(transpile_gml_expression("$DEAD_BEEF"), "0xDEADBEEF")
+        self.assertEqual(
+            transpile_gml_expression("0b01101000_01101001"),
+            "0b0110100001101001",
+        )
+
     def test_preserves_numeric_literal_float_metadata(self):
         integer_literal = _ExpressionParser(_expression_tokens("42")).parse()
         decimal_literal = _ExpressionParser(_expression_tokens("3.5")).parse()
@@ -116,7 +127,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_binary_literals(self):
         self.assertEqual(transpile_gml_expression("0b0010"), "0b0010")
         self.assertEqual(transpile_gml_expression("0B0100"), "0B0100")
-        self.assertEqual(transpile_gml_expression("0b0110_1001"), "0b0110_1001")
+        self.assertEqual(transpile_gml_expression("0b0110_1001"), "0b01101001")
         self.assertEqual(
             transpile_gml_expression("0b0010 | 0b0100"),
             "GMRuntime.gml_bit_or(0b0010, 0b0100)",

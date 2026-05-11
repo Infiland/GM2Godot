@@ -37,6 +37,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_real(score)", "GMRuntime.is_real(score)"),
     RuntimeValueParityCase("is_numeric(score)", "GMRuntime.is_numeric(score)"),
     RuntimeValueParityCase("is_int64(score)", "GMRuntime.is_int64(score)"),
+    RuntimeValueParityCase("is_array(items)", "GMRuntime.is_array(items)"),
+    RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
+    RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
+    RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
     RuntimeValueParityCase(
         "is_undefined(undefined)",
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
@@ -106,6 +110,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_real",
             "is_numeric",
             "is_int64",
+            "is_array",
+            "is_struct",
+            "is_method",
+            "is_callable",
             "is_nan_value",
             "is_infinity",
             "gml_eq",
@@ -174,6 +182,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_bool(value):", GML_RUNTIME_SCRIPT)
         self.assertNotIn("static func gml_typeof(value:", GML_RUNTIME_SCRIPT)
         self.assertNotIn("static func gml_bool(value:", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_primitive_type_predicates_cover_gml_value_categories(self):
+        self.assertIn("static func is_array(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_ARRAY", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_struct(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_method(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_callable(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return is_method(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_real_operations_as_float_helpers(self):
         self.assertIn("return NAN", GML_RUNTIME_SCRIPT)

@@ -70,6 +70,22 @@ static func is_numeric(value):
 	return is_real(value) or is_int64(value)
 
 
+static func is_array(value):
+	return typeof(value) == TYPE_ARRAY
+
+
+static func is_struct(value):
+	return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT
+
+
+static func is_method(value):
+	return typeof(value) == TYPE_CALLABLE
+
+
+static func is_callable(value):
+	return is_method(value)
+
+
 static func is_nan_value(value):
 	return is_number(value) and is_nan(float(value))
 

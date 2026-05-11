@@ -421,6 +421,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression('typeof("abc")'), 'GMRuntime.gml_typeof("abc")')
         self.assertEqual(transpile_gml_expression('is_string("abc")'), 'GMRuntime.is_string("abc")')
 
+    def test_transpiles_primitive_type_predicates(self):
+        self.assertEqual(transpile_gml_expression("is_array(items)"), "GMRuntime.is_array(items)")
+        self.assertEqual(transpile_gml_expression("is_struct(mystruct)"), "GMRuntime.is_struct(mystruct)")
+        self.assertEqual(transpile_gml_expression("is_method(callback)"), "GMRuntime.is_method(callback)")
+        self.assertEqual(transpile_gml_expression("is_callable(callback)"), "GMRuntime.is_callable(callback)")
+
     def test_transpiles_bitwise_operators(self):
         self.assertEqual(
             transpile_gml_expression("flags & mask | 4"),

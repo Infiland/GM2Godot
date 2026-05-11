@@ -10,6 +10,7 @@ const GML_TYPE_UNDEFINED = "undefined"
 const GML_TYPE_BOOL = "bool"
 const GML_TYPE_NUMBER = "number"
 const GML_TYPE_INT64 = "int64"
+const GML_TYPE_POINTER = "ptr"
 const GML_TYPE_STRING = "string"
 const GML_TYPE_ARRAY = "array"
 const GML_TYPE_STRUCT = "struct"
@@ -29,15 +30,34 @@ class GMLInt64:
 			value = int(initial_value)
 
 
+class GMLPointer:
+	var value = 0
+	var invalid = false
+
+	func _init(initial_value = 0, is_invalid = false):
+		value = initial_value
+		invalid = is_invalid
+
+
 class GMLUndefined:
 	pass
 
 
 static var _gml_undefined = GMLUndefined.new()
+static var _gml_pointer_null = GMLPointer.new(0)
+static var _gml_pointer_invalid = GMLPointer.new(-1, true)
 
 
 static func gml_undefined():
 	return _gml_undefined
+
+
+static func gml_pointer_null():
+	return _gml_pointer_null
+
+
+static func gml_pointer_invalid():
+	return _gml_pointer_invalid
 
 
 static func is_undefined(value):
@@ -70,6 +90,10 @@ static func is_int64(value):
 	return value is GMLInt64
 
 
+static func is_ptr(value):
+	return value is GMLPointer
+
+
 static func is_numeric(value):
 	return is_real(value) or is_int64(value)
 
@@ -96,6 +120,16 @@ static func is_nan_value(value):
 
 static func is_infinity(value):
 	return is_number(value) and is_inf(float(value))
+
+
+static func gml_ptr(value):
+	if is_ptr(value):
+		return value
+	if is_int64(value):
+		return GMLPointer.new(value.value)
+	if is_number(value) or is_string(value):
+		return GMLPointer.new(value)
+	return gml_error("GML ptr conversion requires a real, string, int64, int32, or pointer")
 
 
 static func gml_div(left, right):
@@ -273,6 +307,8 @@ static func gml_shift_right(left, right):
 static func gml_eq(left, right):
 	if is_undefined(left) or is_undefined(right):
 		return is_undefined(left) and is_undefined(right)
+	if is_ptr(left) or is_ptr(right):
+		return is_ptr(left) and is_ptr(right) and left.value == right.value and left.invalid == right.invalid
 	if is_nan_value(left) or is_nan_value(right):
 		return false
 	if is_numeric(left) and is_numeric(right):
@@ -289,6 +325,8 @@ static func gml_typeof(value):
 		return GML_TYPE_UNDEFINED
 	if is_int64(value):
 		return GML_TYPE_INT64
+	if is_ptr(value):
+		return GML_TYPE_POINTER
 	var value_type = typeof(value)
 	if value_type == TYPE_BOOL:
 		return GML_TYPE_BOOL
@@ -320,6 +358,12 @@ static func gml_string(value):
 		return "-infinity" if float(value) < 0.0 else "infinity"
 	if is_nan_value(value):
 		return "NaN"
+	if is_ptr(value):
+		if value.invalid:
+			return "pointer_invalid"
+		if value.value == 0:
+			return "pointer_null"
+		return str(value.value)
 	if typeof(value) == TYPE_DICTIONARY:
 		if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:
 			return gml_string(value["toString"].call())
@@ -330,11 +374,17 @@ static func gml_string(value):
 static func gml_bool(value):
 	if is_undefined(value):
 		return false
+	if is_ptr(value):
+		return not value.invalid and value.value != 0
 	if is_int64(value):
 		return float(value.value) > 0.5
 	if is_number(value):
 		return float(value) > 0.5
 	return bool(value)
+
+
+static func gml_is_nullish(value):
+	return is_undefined(value) or (is_ptr(value) and value.value == 0)
 
 
 static func _to_real(value):

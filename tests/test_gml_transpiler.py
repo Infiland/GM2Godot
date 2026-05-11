@@ -371,6 +371,35 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_nan_value(NAN)",
         )
 
+    def test_transpiles_pointer_values_and_helpers(self):
+        self.assertEqual(
+            transpile_gml_expression("pointer_null"),
+            "GMRuntime.gml_pointer_null()",
+        )
+        self.assertEqual(
+            transpile_gml_expression("pointer_invalid"),
+            "GMRuntime.gml_pointer_invalid()",
+        )
+        self.assertEqual(transpile_gml_expression("ptr(0)"), "GMRuntime.gml_ptr(0)")
+        self.assertEqual(
+            transpile_gml_expression("is_ptr(pointer_null)"),
+            "GMRuntime.is_ptr(GMRuntime.gml_pointer_null())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("typeof(pointer_null)"),
+            "GMRuntime.gml_typeof(GMRuntime.gml_pointer_null())",
+        )
+
+    def test_pointer_equality_uses_runtime_type_table(self):
+        self.assertEqual(
+            transpile_gml_expression("pointer_null == pointer_null"),
+            "GMRuntime.gml_eq(GMRuntime.gml_pointer_null(), GMRuntime.gml_pointer_null())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("pointer_invalid != pointer_null"),
+            "GMRuntime.gml_ne(GMRuntime.gml_pointer_invalid(), GMRuntime.gml_pointer_null())",
+        )
+
     def test_undefined_conditions_use_gml_truthiness(self):
         self.assertEqual(
             transpile_gml_code("if undefined begin score = 1; end", indent=""),
@@ -453,7 +482,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_nullish_operator(self):
         self.assertEqual(
             transpile_gml_expression("value ?? fallback"),
-            "value if not GMRuntime.is_undefined(value) else fallback",
+            "value if not GMRuntime.gml_is_nullish(value) else fallback",
         )
 
     def test_transpiles_ternary_operator(self):
@@ -1048,7 +1077,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_code("mystruct.a ??= 1;", indent=""),
-            'if GMRuntime.is_undefined(GMRuntime.gml_struct_get(mystruct, "a")):\n'
+            'if GMRuntime.gml_is_nullish(GMRuntime.gml_struct_get(mystruct, "a")):\n'
             '\tGMRuntime.gml_struct_set(mystruct, "a", 1)',
         )
         self.assertEqual(
@@ -1103,7 +1132,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_nullish_assignment(self):
         self.assertEqual(
             transpile_gml_code("score ??= 10;", indent=""),
-            "if GMRuntime.is_undefined(score):\n\tscore = 10",
+            "if GMRuntime.gml_is_nullish(score):\n\tscore = 10",
         )
 
     def test_transpiles_increment_decrement_statements(self):
@@ -1119,7 +1148,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_expression_statements(self):
         self.assertEqual(
             transpile_gml_code("show_debug_message(score ?? 0);", indent=""),
-            "show_debug_message(score if not GMRuntime.is_undefined(score) else 0)",
+            "show_debug_message(score if not GMRuntime.gml_is_nullish(score) else 0)",
         )
 
     def test_local_vars_shadow_instance_position_builtins(self):

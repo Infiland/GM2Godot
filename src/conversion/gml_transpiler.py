@@ -293,6 +293,7 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "is_method",
     "is_nan",
     "is_numeric",
+    "is_ptr",
     "is_real",
     "is_string",
     "is_struct",
@@ -336,6 +337,8 @@ _NAME_REPLACEMENTS = {
     "infinity": "INF",
     "NaN": "NAN",
     "nan": "NAN",
+    "pointer_invalid": "GMRuntime.gml_pointer_invalid()",
+    "pointer_null": "GMRuntime.gml_pointer_null()",
     "undefined": "GMRuntime.gml_undefined()",
 }
 
@@ -377,11 +380,13 @@ _RUNTIME_FUNCTIONS = {
     "is_method": "is_method",
     "is_nan": "is_nan_value",
     "is_numeric": "is_numeric",
+    "is_ptr": "is_ptr",
     "is_real": "is_real",
     "is_string": "is_string",
     "is_struct": "is_struct",
     "is_undefined": "is_undefined",
     "real": "gml_real",
+    "ptr": "gml_ptr",
     "sqrt": "gml_sqrt",
     "typeof": "gml_typeof",
     "string": "gml_string",
@@ -1540,13 +1545,15 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
     if expr.operator == "??":
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
-        return f"{left} if not GMRuntime.is_undefined({left}) else {right}", _TERNARY_PRECEDENCE
+        return f"{left} if not GMRuntime.gml_is_nullish({left}) else {right}", _TERNARY_PRECEDENCE
 
     if expr.operator in ("=", "==", "!=") and (
         _contains_gml_undefined(expr.left)
         or _contains_gml_undefined(expr.right)
         or _contains_gml_nan(expr.left)
         or _contains_gml_nan(expr.right)
+        or _contains_gml_pointer(expr.left)
+        or _contains_gml_pointer(expr.right)
     ):
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -1643,6 +1650,41 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_nan(expr.target)
+    return False
+
+
+def _contains_gml_pointer(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value in ("GMRuntime.gml_pointer_null()", "GMRuntime.gml_pointer_invalid()")
+    if isinstance(expr, _Grouped):
+        return _contains_gml_pointer(expr.expr)
+    if isinstance(expr, _Unary):
+        return _contains_gml_pointer(expr.operand)
+    if isinstance(expr, _Binary):
+        return _contains_gml_pointer(expr.left) or _contains_gml_pointer(expr.right)
+    if isinstance(expr, _Ternary):
+        return (
+            _contains_gml_pointer(expr.condition)
+            or _contains_gml_pointer(expr.true_expr)
+            or _contains_gml_pointer(expr.false_expr)
+        )
+    if isinstance(expr, _Call):
+        return (
+            isinstance(expr.callee, _Name)
+            and expr.callee.value == "ptr"
+        ) or any(_contains_gml_pointer(arg) for arg in expr.args)
+    if isinstance(expr, _ArrayLiteral):
+        return any(_contains_gml_pointer(element) for element in expr.elements)
+    if isinstance(expr, _FunctionLiteral):
+        return False
+    if isinstance(expr, _StructLiteral):
+        return any(_contains_gml_pointer(field_value) for _field_name, field_value in expr.fields)
+    if isinstance(expr, _Index):
+        return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.index)
+    if isinstance(expr, _StructAccess):
+        return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
+    if isinstance(expr, _Member):
+        return _contains_gml_pointer(expr.target)
     return False
 
 
@@ -1849,7 +1891,7 @@ def _transpile_statement(
             if operator == "??=":
                 current_value = f"GMRuntime.gml_struct_get({container}, {key})"
                 return [
-                    f"if GMRuntime.is_undefined({current_value}):",
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
                     f"\tGMRuntime.gml_struct_set({container}, {key}, {value})",
                 ]
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
@@ -1861,7 +1903,7 @@ def _transpile_statement(
                 ]
             raise GMLTranspileError("Unsupported struct member assignment operator")
         if operator == "??=":
-            return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
+            return [f"if GMRuntime.gml_is_nullish({target}):", f"\t{target} = {value}"]
         if operator in _COMPOUND_RUNTIME_FUNCTIONS:
             return [f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
         if operator == ":=":

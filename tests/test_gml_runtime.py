@@ -20,9 +20,14 @@ class RuntimeValueParityCase:
 
 RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
+    RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
+    RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase("typeof(pointer_null)", "GMRuntime.gml_typeof(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("string(undefined)", "GMRuntime.gml_string(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase("string(pointer_invalid)", "GMRuntime.gml_string(GMRuntime.gml_pointer_invalid())"),
     RuntimeValueParityCase("bool(undefined)", "GMRuntime.gml_bool(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase("bool(pointer_null)", "GMRuntime.gml_bool(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
     RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
@@ -42,6 +47,16 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
+    RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
+    RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
+    RuntimeValueParityCase(
+        "pointer_null == pointer_null",
+        "GMRuntime.gml_eq(GMRuntime.gml_pointer_null(), GMRuntime.gml_pointer_null())",
+    ),
+    RuntimeValueParityCase(
+        "pointer_invalid != pointer_null",
+        "GMRuntime.gml_ne(GMRuntime.gml_pointer_invalid(), GMRuntime.gml_pointer_null())",
+    ),
     RuntimeValueParityCase(
         "is_undefined(undefined)",
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
@@ -95,7 +110,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase(
         "score ?? fallback",
-        "score if not GMRuntime.is_undefined(score) else fallback",
+        "score if not GMRuntime.gml_is_nullish(score) else fallback",
     ),
 )
 
@@ -104,6 +119,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_defines_shared_value_helpers(self):
         for helper_name in (
             "gml_undefined",
+            "gml_pointer_null",
+            "gml_pointer_invalid",
             "is_undefined",
             "is_bool",
             "is_string",
@@ -112,6 +129,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_numeric",
             "is_int32",
             "is_int64",
+            "is_ptr",
             "is_array",
             "is_struct",
             "is_method",
@@ -124,6 +142,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_int_div",
             "gml_real",
             "gml_int64",
+            "gml_ptr",
             "gml_repeat_count",
             "gml_sqrt",
             "gml_add",
@@ -149,6 +168,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_typeof",
             "gml_string",
             "gml_bool",
+            "gml_is_nullish",
         ):
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
@@ -158,12 +178,29 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_undefined(value):\n\treturn value is GMLUndefined", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_represents_pointer_values(self):
+        self.assertIn('const GML_TYPE_POINTER = "ptr"', GML_RUNTIME_SCRIPT)
+        self.assertIn("class GMLPointer:", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_pointer_null = GMLPointer.new(0)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_pointer_invalid = GMLPointer.new(-1, true)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_pointer_null():\n\treturn _gml_pointer_null", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_pointer_invalid():\n\treturn _gml_pointer_invalid", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_ptr(value):\n\treturn value is GMLPointer", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_ptr(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLPointer.new(value)", GML_RUNTIME_SCRIPT)
+
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_undefined(left) or is_undefined(right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ne(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return not gml_eq(left, right)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_pointer_equality_and_nullish_are_special_cased(self):
+        self.assertIn("if is_ptr(left) or is_ptr(right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return is_ptr(left) and is_ptr(right) and left.value == right.value and left.invalid == right.invalid", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_is_nullish(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return is_undefined(value) or (is_ptr(value) and value.value == 0)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_truthiness_and_conversions(self):
         self.assertIn(
@@ -178,6 +215,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false",
             GML_RUNTIME_SCRIPT,
         )
+        self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_variant_backed_parameters(self):
         self.assertIn("static func gml_typeof(value):", GML_RUNTIME_SCRIPT)

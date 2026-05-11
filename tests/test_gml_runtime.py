@@ -24,6 +24,12 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase("typeof(null)", "GMRuntime.gml_typeof(null)"),
+    RuntimeValueParityCase("typeof(true)", "GMRuntime.gml_typeof(true)"),
+    RuntimeValueParityCase("typeof(1)", "GMRuntime.gml_typeof(1)"),
+    RuntimeValueParityCase("typeof(1.5)", "GMRuntime.gml_typeof(1.5)"),
+    RuntimeValueParityCase("typeof([1])", "GMRuntime.gml_typeof([1])"),
+    RuntimeValueParityCase("typeof({a: 1})", 'GMRuntime.gml_typeof(GMRuntime.gml_struct({"a": 1}))'),
     RuntimeValueParityCase("typeof(pointer_null)", "GMRuntime.gml_typeof(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("string(undefined)", "GMRuntime.gml_string(GMRuntime.gml_undefined())"),
     RuntimeValueParityCase("string(pointer_invalid)", "GMRuntime.gml_string(GMRuntime.gml_pointer_invalid())"),
@@ -95,6 +101,7 @@ RUNTIME_VALUE_PARITY_CASES = (
         'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
     ),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
+    RuntimeValueParityCase("typeof(ptr(0))", "GMRuntime.gml_typeof(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
     RuntimeValueParityCase('ptr(int64("42"))', 'GMRuntime.gml_ptr(GMRuntime.gml_int64("42"))'),
     RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
@@ -669,8 +676,28 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func is_numeric(value):\n\treturn is_real(value) or is_int64(value) or is_bool(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_typeof_agrees_with_specific_predicate_categories(self):
-        self.assertIn('const GML_TYPE_INT32 = "int32"', GML_RUNTIME_SCRIPT)
-        self.assertIn('const GML_TYPE_HANDLE = "ref"', GML_RUNTIME_SCRIPT)
+        for constant in (
+            'const GML_TYPE_UNDEFINED = "undefined"',
+            'const GML_TYPE_NULL = "null"',
+            'const GML_TYPE_BOOL = "bool"',
+            'const GML_TYPE_NUMBER = "number"',
+            'const GML_TYPE_INT32 = "int32"',
+            'const GML_TYPE_INT64 = "int64"',
+            'const GML_TYPE_POINTER = "ptr"',
+            'const GML_TYPE_STRING = "string"',
+            'const GML_TYPE_ARRAY = "array"',
+            'const GML_TYPE_STRUCT = "struct"',
+            'const GML_TYPE_METHOD = "method"',
+            'const GML_TYPE_HANDLE = "ref"',
+            'const GML_TYPE_UNKNOWN = "unknown"',
+        ):
+            with self.subTest(constant=constant):
+                self.assertIn(constant, GML_RUNTIME_SCRIPT)
+        self.assertIn("if value == null:\n\t\treturn GML_TYPE_NULL", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED\n\tif value == null:\n\t\treturn GML_TYPE_NULL\n\tif is_handle(value):",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE\n\tif is_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if value_type == TYPE_ARRAY:\n\t\treturn GML_TYPE_ARRAY\n\tif is_method(value):", GML_RUNTIME_SCRIPT)

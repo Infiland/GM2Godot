@@ -589,6 +589,29 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression('typeof("abc")'), 'GMRuntime.gml_typeof("abc")')
         self.assertEqual(transpile_gml_expression('is_string("abc")'), 'GMRuntime.is_string("abc")')
 
+    def test_transpiles_typeof_return_string_categories(self):
+        cases = (
+            ("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
+            ("typeof(null)", "GMRuntime.gml_typeof(null)"),
+            ("typeof(true)", "GMRuntime.gml_typeof(true)"),
+            ("typeof(1)", "GMRuntime.gml_typeof(1)"),
+            ("typeof(1.5)", "GMRuntime.gml_typeof(1.5)"),
+            ('typeof("abc")', 'GMRuntime.gml_typeof("abc")'),
+            ("typeof([1])", "GMRuntime.gml_typeof([1])"),
+            ("typeof({a: 1})", 'GMRuntime.gml_typeof(GMRuntime.gml_struct({"a": 1}))'),
+            ("typeof(ptr(0))", "GMRuntime.gml_typeof(GMRuntime.gml_ptr(0))"),
+            ("typeof(int64(score))", "GMRuntime.gml_typeof(GMRuntime.gml_int64(score))"),
+            ("typeof(method(player, callback))", "GMRuntime.gml_typeof(GMRuntime.gml_method(player, callback))"),
+            (
+                'typeof(handle_parse("ref script 1"))',
+                'GMRuntime.gml_typeof(GMRuntime.gml_handle_parse("ref script 1"))',
+            ),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_transpiles_primitive_type_predicates(self):
         self.assertEqual(transpile_gml_expression("is_array(items)"), "GMRuntime.is_array(items)")
         self.assertEqual(transpile_gml_expression("is_struct(mystruct)"), "GMRuntime.is_struct(mystruct)")

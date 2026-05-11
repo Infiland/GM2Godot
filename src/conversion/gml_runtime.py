@@ -7,6 +7,7 @@ GML_RUNTIME_RESOURCE_PATH = "res://gm2godot/gml_runtime.gd"
 GML_RUNTIME_SCRIPT = """extends RefCounted
 
 const GML_TYPE_UNDEFINED = "undefined"
+const GML_TYPE_NULL = "null"
 const GML_TYPE_BOOL = "bool"
 const GML_TYPE_NUMBER = "number"
 const GML_TYPE_INT32 = "int32"
@@ -734,6 +735,8 @@ static func _gml_values_equal_for_array(left, right):
 static func gml_typeof(value):
 	if is_undefined(value):
 		return GML_TYPE_UNDEFINED
+	if value == null:
+		return GML_TYPE_NULL
 	if is_handle(value):
 		return GML_TYPE_HANDLE
 	if is_int64(value):

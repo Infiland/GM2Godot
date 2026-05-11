@@ -170,6 +170,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_instance_noone",
             "gml_handle_is_valid",
             "gml_handle_parse",
+            "gml_handle_from_value",
+            "gml_handle_resolve_for_kind",
             "gml_handle_resolve",
             "gml_handle_invalidate",
             "gml_repeat_count",
@@ -312,6 +314,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_string_is_int(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("var start = 1 if text.begins_with(\"-\") else 0", GML_RUNTIME_SCRIPT)
         self.assertIn("var code = text.unicode_at(index)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_accepts_legacy_numeric_handle_ids_at_api_boundary(self):
+        self.assertIn("static func gml_handle_from_value(kind, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var handle_kind = str(kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\tif value.kind == handle_kind:\n\t\t\treturn value", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(value):\n\t\tvar parsed = gml_handle_parse(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(parsed) and parsed.kind == handle_kind:\n\t\t\treturn parsed", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_numeric(value):\n\t\treturn gml_handle_get(handle_kind, _to_int64_value(value))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_invalid(handle_kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_resolve_for_kind(kind, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_resolve(gml_handle_from_value(kind, value))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

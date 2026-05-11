@@ -215,6 +215,26 @@ static func gml_handle_parse(value):
 	return _gml_handle_get_by_name(kind, identifier)
 
 
+static func gml_handle_from_value(kind, value):
+	var handle_kind = str(kind)
+	if is_handle(value):
+		if value.kind == handle_kind:
+			return value
+		return gml_handle_invalid(handle_kind)
+	if is_string(value):
+		var parsed = gml_handle_parse(value)
+		if is_handle(parsed) and parsed.kind == handle_kind:
+			return parsed
+		return gml_handle_invalid(handle_kind)
+	if is_numeric(value):
+		return gml_handle_get(handle_kind, _to_int64_value(value))
+	return gml_handle_invalid(handle_kind)
+
+
+static func gml_handle_resolve_for_kind(kind, value):
+	return gml_handle_resolve(gml_handle_from_value(kind, value))
+
+
 static func gml_handle_resolve(handle):
 	if gml_handle_is_valid(handle):
 		return handle.reference

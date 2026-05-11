@@ -624,6 +624,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\ti = GMRuntime.gml_add(i, 1)",
         )
 
+    def test_for_continue_runs_operation_clause(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "for (i = 0; i < 3; i++) begin if skip begin continue; end score += i; end",
+                indent="",
+            ),
+            "i = 0\n"
+            "while i < 3:\n"
+            "\tif GMRuntime.gml_bool(skip):\n"
+            "\t\ti = GMRuntime.gml_add(i, 1)\n"
+            "\t\tcontinue\n"
+            "\tscore = GMRuntime.gml_add(score, i)\n"
+            "\ti = GMRuntime.gml_add(i, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

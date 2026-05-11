@@ -623,23 +623,29 @@ class _StatementParser:
             if condition_source
             else "true"
         )
+        operation_lines = (
+            _transpile_statement(
+                operation,
+                self.local_names,
+                self.instance_variables,
+                loop_depth=self.loop_depth,
+                continue_depth=self.continue_depth,
+            )
+            if operation
+            else []
+        )
 
         self.loop_depth += 1
+        self.continue_depth += 1
         try:
             body_lines = self._parse_body()
         finally:
             self.loop_depth -= 1
+            self.continue_depth -= 1
 
-        if operation:
-            body_lines.extend(
-                _transpile_statement(
-                    operation,
-                    self.local_names,
-                    self.instance_variables,
-                    loop_depth=self.loop_depth,
-                    continue_depth=self.continue_depth,
-                )
-            )
+        if operation_lines:
+            body_lines = _insert_lines_before_continue(body_lines, operation_lines)
+            body_lines.extend(operation_lines)
 
         lines.append(f"while {condition}:")
         lines.extend(_indent_lines(body_lines or ["pass"]))
@@ -1071,6 +1077,18 @@ def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[li
 
 def _indent_lines(lines: Iterable[str]) -> list[str]:
     return [f"\t{line}" if line else "" for line in lines]
+
+
+def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable[str]) -> list[str]:
+    inserted = list(inserted_lines)
+    result: list[str] = []
+    for line in lines:
+        stripped = line.lstrip("\t")
+        if stripped == "continue":
+            indentation = line[: len(line) - len(stripped)]
+            result.extend(f"{indentation}{inserted_line}" for inserted_line in inserted)
+        result.append(line)
+    return result
 
 
 def _emit_expression(

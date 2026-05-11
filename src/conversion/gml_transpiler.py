@@ -423,6 +423,7 @@ _STRUCT_RUNTIME_FUNCTIONS = {
 
 _VARIABLE_RUNTIME_FUNCTIONS = {
     "method_call": "gml_method_call",
+    "method": "gml_method",
     "ref_create": "gml_ref_create",
     "variable_clone": "gml_variable_clone",
     "variable_instance_get": "gml_variable_instance_get",
@@ -1900,6 +1901,12 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
             return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
             return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
+    if isinstance(expr.callee, _Name) and expr.callee.value == "method" and len(expr.args) == 2:
+        scope = _emit_expression(expr.args[0], local_names)[0]
+        if scope == _NAME_REPLACEMENTS["undefined"]:
+            scope = "self"
+        function_value = _emit_expression(expr.args[1], local_names)[0]
+        return f"GMRuntime.gml_method({scope}, {function_value})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"

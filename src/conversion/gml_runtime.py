@@ -72,6 +72,22 @@ class GMLHandle:
 		value = int(encoded_value)
 
 
+class GMLMethod:
+	var bound_self = null
+	var function_value = null
+
+	func _init(method_self = null, method_function = null):
+		bound_self = method_self
+		function_value = method_function
+
+	func callv(args):
+		if bound_self is Object and is_method(function_value):
+			var method_name = function_value.get_method()
+			if str(method_name) != "":
+				return Callable(bound_self, method_name).callv(args)
+		return function_value.callv(args)
+
+
 class GMLUndefined:
 	pass
 
@@ -148,7 +164,7 @@ static func is_struct(value):
 
 
 static func is_method(value):
-	return typeof(value) == TYPE_CALLABLE
+	return value is GMLMethod or typeof(value) == TYPE_CALLABLE
 
 
 static func is_callable(value):
@@ -285,9 +301,22 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	return method.callv(call_args)
 
 
+static func gml_method(scope, func_or_method):
+	if not is_method(func_or_method):
+		return gml_unsupported_type_error("GML method", func_or_method)
+	var function_value = gml_method_get_index(func_or_method)
+	if is_undefined(function_value):
+		return function_value
+	return GMLMethod.new(scope, function_value)
+
+
 static func gml_method_get_self(method):
 	if not is_method(method):
 		return gml_unsupported_type_error("GML method_get_self", method)
+	if method is GMLMethod:
+		if is_undefined(method.bound_self):
+			return gml_undefined()
+		return method.bound_self
 	var bound_self = method.get_object()
 	if bound_self == null:
 		return gml_undefined()
@@ -297,6 +326,8 @@ static func gml_method_get_self(method):
 static func gml_method_get_index(method):
 	if not is_method(method):
 		return gml_unsupported_type_error("GML method_get_index", method)
+	if method is GMLMethod:
+		return method.function_value
 	return method
 
 
@@ -717,10 +748,10 @@ static func gml_typeof(value):
 		return GML_TYPE_STRING
 	if value_type == TYPE_ARRAY:
 		return GML_TYPE_ARRAY
+	if is_method(value):
+		return GML_TYPE_METHOD
 	if value_type == TYPE_DICTIONARY:
 		return GML_TYPE_STRUCT
-	if value_type == TYPE_CALLABLE:
-		return GML_TYPE_METHOD
 	if value_type == TYPE_OBJECT:
 		return GML_TYPE_STRUCT
 	return GML_TYPE_UNKNOWN

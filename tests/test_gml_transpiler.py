@@ -595,6 +595,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("is_method(callback)"), "GMRuntime.is_method(callback)")
         self.assertEqual(transpile_gml_expression("is_callable(callback)"), "GMRuntime.is_callable(callback)")
         self.assertEqual(
+            transpile_gml_expression("method(player, callback)"),
+            "GMRuntime.gml_method(player, callback)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("method(undefined, callback)"),
+            "GMRuntime.gml_method(self, callback)",
+        )
+        self.assertEqual(
             transpile_gml_expression("method_get_self(callback)"),
             "GMRuntime.gml_method_get_self(callback)",
         )

@@ -62,6 +62,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
+    RuntimeValueParityCase("method(player, callback)", "GMRuntime.gml_method(player, callback)"),
+    RuntimeValueParityCase("method(undefined, callback)", "GMRuntime.gml_method(self, callback)"),
     RuntimeValueParityCase("method_get_self(callback)", "GMRuntime.gml_method_get_self(callback)"),
     RuntimeValueParityCase("method_get_index(callback)", "GMRuntime.gml_method_get_index(callback)"),
     RuntimeValueParityCase("method_call(callback)", "GMRuntime.gml_method_call(callback)"),
@@ -333,6 +335,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_resolve_for_kind",
             "gml_handle_resolve",
             "gml_handle_invalidate",
+            "gml_method",
             "gml_method_call",
             "gml_method_get_self",
             "gml_method_get_index",
@@ -543,13 +546,25 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return gml_error(\"GML method_call argument range out of bounds\")", GML_RUNTIME_SCRIPT)
 
     def test_runtime_method_accessors_expose_bound_self_and_index(self):
+        self.assertIn("class GMLMethod:", GML_RUNTIME_SCRIPT)
+        self.assertIn("var bound_self = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("var function_value = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("func callv(args):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return function_value.callv(args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_method(scope, func_or_method):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML method", func_or_method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("var function_value = gml_method_get_index(func_or_method)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLMethod.new(scope, function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_method_get_self(method):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_get_self", method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("if method is GMLMethod:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return method.bound_self", GML_RUNTIME_SCRIPT)
         self.assertIn("var bound_self = method.get_object()", GML_RUNTIME_SCRIPT)
         self.assertIn("if bound_self == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn("return bound_self", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_method_get_index(method):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_get_index", method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("return method.function_value", GML_RUNTIME_SCRIPT)
         self.assertIn("return method", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
@@ -632,7 +647,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func is_struct(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_method(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value is GMLMethod or typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_callable(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_method(value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_numeric(value):\n\treturn is_real(value) or is_int64(value) or is_bool(value)", GML_RUNTIME_SCRIPT)

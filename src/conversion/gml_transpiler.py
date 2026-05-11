@@ -255,6 +255,11 @@ _NAME_REPLACEMENTS = {
     "undefined": "GMRuntime.gml_undefined()",
 }
 
+_BLOCK_DELIMITER_REPLACEMENTS = {
+    "begin": "{",
+    "end": "}",
+}
+
 _INSTANCE_NAME_REPLACEMENTS = {
     "x": "position.x",
     "y": "position.y",
@@ -685,7 +690,12 @@ def _tokenize(source: str) -> list[_Token]:
             index += 1
             while index < len(source) and (source[index].isalnum() or source[index] == "_"):
                 index += 1
-            tokens.append(_Token("IDENT", source[start:index]))
+            identifier = source[start:index]
+            block_delimiter = _BLOCK_DELIMITER_REPLACEMENTS.get(identifier)
+            if block_delimiter is not None:
+                tokens.append(_Token("OP", block_delimiter))
+            else:
+                tokens.append(_Token("IDENT", identifier))
             continue
 
         matched_operator = None

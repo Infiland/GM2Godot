@@ -13,6 +13,7 @@ from src.conversion.gml_transpiler import (
     _NumberLiteral,
     _StringLiteral,
     _expression_tokens,
+    _tokenize,
     transpile_gml_code,
     transpile_gml_expression,
 )
@@ -430,6 +431,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
 
 class TestGMLStatementTranspiler(unittest.TestCase):
+    def test_tokenizes_begin_end_as_block_delimiters(self):
+        tokens = _tokenize("if ready begin score = 1; end")
+        values = [token.value for token in tokens]
+        kinds = [token.kind for token in tokens]
+
+        self.assertIn("{", values)
+        self.assertIn("}", values)
+        self.assertNotIn("begin", values)
+        self.assertNotIn("end", values)
+        self.assertEqual(kinds[values.index("{")], "OP")
+        self.assertEqual(kinds[values.index("}")], "OP")
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

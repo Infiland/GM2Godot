@@ -426,6 +426,8 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_set": "gml_struct_set",
     "struct_remove": "gml_struct_remove",
     "struct_foreach": "gml_struct_foreach",
+    "static_get": "gml_static_get",
+    "static_set": "gml_static_set",
 }
 
 _VARIABLE_RUNTIME_FUNCTIONS = {

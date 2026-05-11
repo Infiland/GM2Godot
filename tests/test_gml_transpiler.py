@@ -981,6 +981,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_struct_foreach(mystruct, GMRuntime.gml_method(self, callback))",
         )
 
+    def test_transpiles_static_struct_helpers_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("static_get(counter)"),
+            "GMRuntime.gml_static_get(counter)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("static_get(method(player, callback))"),
+            "GMRuntime.gml_static_get(GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("static_set(mystruct, static_get(counter))"),
+            "GMRuntime.gml_static_set(mystruct, GMRuntime.gml_static_get(counter))",
+        )
+
     def test_transpiles_variable_clone_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("variable_clone(mystruct)"),

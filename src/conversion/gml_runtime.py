@@ -100,6 +100,8 @@ static var _gml_handle_registry = {}
 static var _gml_handle_next_indices = {}
 static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
+static var _gml_static_root = {}
+static var _gml_static_registry = []
 
 
 static func gml_undefined():
@@ -668,6 +670,34 @@ static func gml_struct_foreach(struct_value, callback):
 	return null
 
 
+static func gml_static_get(value):
+	if value is GMLMethod:
+		return gml_static_get(value.function_value)
+	if is_method(value):
+		return _gml_static_ensure(value)
+	if not is_struct(value):
+		return gml_unsupported_type_error("GML static_get", value)
+	if is_same(value, _gml_static_root):
+		return gml_undefined()
+	var static_struct = _gml_static_lookup(value)
+	if static_struct != null:
+		return static_struct
+	return _gml_static_root
+
+
+static func gml_static_set(struct_value, static_struct):
+	if struct_value is GMLMethod:
+		return null
+	if is_method(struct_value):
+		return gml_unsupported_type_error("GML static_set", struct_value)
+	if not is_struct(struct_value):
+		return gml_unsupported_type_error("GML static_set", struct_value)
+	if not is_struct(static_struct):
+		return gml_unsupported_type_error("GML static_set static struct", static_struct)
+	_gml_static_set_parent(struct_value, static_struct)
+	return null
+
+
 static func gml_variable_clone(value, depth = 128):
 	return _gml_clone_value(value, max(0, int(_to_real(depth))))
 
@@ -1029,6 +1059,37 @@ static func _object_has_property(object_value, property_name):
 		if property.get("name") == property_name:
 			return true
 	return false
+
+
+static func _gml_static_ensure(value):
+	var static_struct = _gml_static_lookup(value)
+	if static_struct != null:
+		return static_struct
+	static_struct = {}
+	_gml_static_set_parent(value, static_struct)
+	_gml_static_set_parent(static_struct, _gml_static_root)
+	return static_struct
+
+
+static func _gml_static_lookup(value):
+	for entry in _gml_static_registry:
+		if _gml_static_same(entry["target"], value):
+			return entry["static"]
+	return null
+
+
+static func _gml_static_set_parent(value, static_struct):
+	for entry in _gml_static_registry:
+		if _gml_static_same(entry["target"], value):
+			entry["static"] = static_struct
+			return
+	_gml_static_registry.append({"target": value, "static": static_struct})
+
+
+static func _gml_static_same(left, right):
+	if _is_gml_reference_value(left) or _is_gml_reference_value(right):
+		return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)
+	return left == right
 
 
 static func _gml_clone_value(value, depth):

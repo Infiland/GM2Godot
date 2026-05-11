@@ -520,6 +520,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
             'GMRuntime.gml_struct({"apply": func(a, b): return GMRuntime.gml_add(a, b)})',
         )
+        self.assertEqual(
+            transpile_gml_expression('string({toString: function() { return "ok"; }})'),
+            'GMRuntime.gml_string(GMRuntime.gml_struct({"toString": func(): return "ok"}))',
+        )
 
     def test_rejects_invalid_struct_field_names(self):
         with self.assertRaises(GMLTranspileError):

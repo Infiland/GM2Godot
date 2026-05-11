@@ -296,6 +296,10 @@ static func gml_string(value):
 		return "-infinity" if float(value) < 0.0 else "infinity"
 	if is_nan_value(value):
 		return "NaN"
+	if typeof(value) == TYPE_DICTIONARY:
+		if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:
+			return gml_string(value["toString"].call())
+		return str(value)
 	return str(value)
 
 

@@ -73,6 +73,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('struct_remove(mystruct, "x")', 'GMRuntime.gml_struct_remove(mystruct, "x")'),
     RuntimeValueParityCase("struct_get_names(mystruct)", "GMRuntime.gml_struct_get_names(mystruct)"),
     RuntimeValueParityCase("struct_names_count(mystruct)", "GMRuntime.gml_struct_names_count(mystruct)"),
+    RuntimeValueParityCase('string({a: 1})', 'GMRuntime.gml_string(GMRuntime.gml_struct({"a": 1}))'),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -241,6 +242,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
         self.assertIn("return -1", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_struct_string_output_uses_to_string_convention(self):
+        self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if typeof(value) == TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
+        self.assertIn('if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_string(value["toString"].call())', GML_RUNTIME_SCRIPT)
+        self.assertIn("return str(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

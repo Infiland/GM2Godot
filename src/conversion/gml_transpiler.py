@@ -499,6 +499,8 @@ class _StatementParser:
             return self._parse_if_statement()
         if self._check_identifier("while"):
             return self._parse_while_statement()
+        if self._check_identifier("repeat"):
+            return self._parse_repeat_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -558,6 +560,26 @@ class _StatementParser:
         finally:
             self.loop_depth -= 1
         lines = [f"while {condition}:"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
+        return lines
+
+    def _parse_repeat_statement(self) -> list[str]:
+        self._consume_identifier("repeat")
+        count_tokens = self._read_condition_tokens()
+        if not count_tokens:
+            raise GMLTranspileError("Expected repeat count")
+
+        count = transpile_gml_expression(
+            _tokens_to_source(count_tokens),
+            local_names=self.local_names,
+        )
+        self.loop_depth += 1
+        try:
+            body_lines = self._parse_body()
+        finally:
+            self.loop_depth -= 1
+
+        lines = [f"for _gml_repeat_index in range(GMRuntime.gml_repeat_count({count})):"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 

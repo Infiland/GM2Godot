@@ -100,6 +100,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_int_div",
             "gml_real",
             "gml_int64",
+            "gml_repeat_count",
             "gml_sqrt",
             "gml_add",
             "gml_sub",

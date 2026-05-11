@@ -525,6 +525,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code("continue;", indent="")
 
+    def test_transpiles_repeat_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("repeat (3) begin score += 1; end", indent=""),
+            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(3)):\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("repeat (count + 1) score += 1;", indent=""),
+            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(GMRuntime.gml_add(count, 1))):\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

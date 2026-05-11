@@ -91,6 +91,10 @@ static func gml_int64(value):
 	return GMLInt64.new(value)
 
 
+static func gml_repeat_count(value):
+	return max(0, int(round(_to_real(value))))
+
+
 static func gml_sqrt(value):
 	var real_value = _to_real(value)
 	if real_value < 0.0:

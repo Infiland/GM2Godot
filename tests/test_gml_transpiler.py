@@ -50,6 +50,25 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "0b0110100001101001",
         )
 
+    def test_preserves_separated_numeric_literal_values_exactly(self):
+        cases = (
+            ("100_000_000", "100000000", "100000000 == 100000000"),
+            ("3_141.59", "3141.59", "3141.59 == 3141.59"),
+            ("0xDEAD_BEEF", "0xDEADBEEF", "0xDEADBEEF == 0xDEADBEEF"),
+            (
+                "0b01101000_01101001",
+                "0b0110100001101001",
+                "0b0110100001101001 == 0b0110100001101001",
+            ),
+        )
+
+        for separated, plain, expected in cases:
+            with self.subTest(separated=separated):
+                self.assertEqual(
+                    transpile_gml_expression(f"{separated} == {plain}"),
+                    expected,
+                )
+
     def test_preserves_numeric_literal_float_metadata(self):
         integer_literal = _ExpressionParser(_expression_tokens("42")).parse()
         decimal_literal = _ExpressionParser(_expression_tokens("3.5")).parse()

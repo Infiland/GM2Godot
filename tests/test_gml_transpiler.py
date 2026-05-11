@@ -583,6 +583,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\t\tbreak",
         )
 
+    def test_do_until_continue_checks_condition_first(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "do begin if should_skip begin continue; end score += 1; end until score >= 3;",
+                indent="",
+            ),
+            "while true:\n"
+            "\tif GMRuntime.gml_bool(should_skip):\n"
+            "\t\tif score >= 3:\n"
+            "\t\t\tbreak\n"
+            "\t\tcontinue\n"
+            "\tscore = GMRuntime.gml_add(score, 1)\n"
+            "\tif score >= 3:\n"
+            "\t\tbreak",
+        )
+
     def test_transpiles_for_loop_clauses(self):
         self.assertEqual(
             transpile_gml_code("for (i = 0; i < 3; i++) begin score += i; end", indent=""),

@@ -654,10 +654,12 @@ class _StatementParser:
     def _parse_do_until_statement(self) -> list[str]:
         self._consume_identifier("do")
         self.loop_depth += 1
+        self.continue_depth += 1
         try:
             body_lines = self._parse_do_until_body()
         finally:
             self.loop_depth -= 1
+            self.continue_depth -= 1
 
         self._skip_newlines()
         self._consume_identifier("until")
@@ -669,6 +671,7 @@ class _StatementParser:
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
         )
+        body_lines = _insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         lines.append(f"\tif {condition}:")
@@ -1087,6 +1090,18 @@ def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable
         if stripped == "continue":
             indentation = line[: len(line) - len(stripped)]
             result.extend(f"{indentation}{inserted_line}" for inserted_line in inserted)
+        result.append(line)
+    return result
+
+
+def _insert_until_check_before_continue(lines: Iterable[str], condition: str) -> list[str]:
+    result: list[str] = []
+    for line in lines:
+        stripped = line.lstrip("\t")
+        if stripped == "continue":
+            indentation = line[: len(line) - len(stripped)]
+            result.append(f"{indentation}if {condition}:")
+            result.append(f"{indentation}\tbreak")
         result.append(line)
     return result
 

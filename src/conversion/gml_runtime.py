@@ -20,6 +20,9 @@ const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
 const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
 const GML_HANDLE_TYPE_SHIFT = 32
 const GML_HANDLE_INDEX_MASK = 0xffffffff
+const GML_HANDLE_INVALID_INDEX = -1
+const GML_INSTANCE_INVALID_INDEX = -4
+const GML_INSTANCE_HANDLE_KIND = "instance"
 
 
 class GMLInt64:
@@ -164,9 +167,7 @@ static func gml_ptr(value):
 static func gml_handle_register(kind, reference, name = ""):
 	var handle_kind = str(kind)
 	var handle_index = _gml_next_handle_index(handle_kind)
-	var handle_type_id = _gml_handle_type_id(handle_kind)
-	var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)
-	var handle = GMLHandle.new(handle_kind, handle_index, reference, str(name), true, handle_type_id, encoded_value)
+	var handle = _gml_make_handle(handle_kind, handle_index, reference, str(name), true)
 	_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle
 	return handle
 
@@ -174,25 +175,50 @@ static func gml_handle_register(kind, reference, name = ""):
 static func gml_handle_get(kind, index):
 	var handle_kind = str(kind)
 	var handle_index = _to_int64_value(index)
+	if _gml_is_invalid_handle_index(handle_kind, handle_index):
+		return _gml_make_handle(handle_kind, handle_index, null, "", false)
 	var key = _gml_handle_key(handle_kind, handle_index)
 	if _gml_handle_registry.has(key):
 		return _gml_handle_registry[key]
-	var handle_type_id = _gml_handle_type_id(handle_kind)
-	var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)
-	return GMLHandle.new(handle_kind, handle_index, null, "", false, handle_type_id, encoded_value)
+	return _gml_make_handle(handle_kind, handle_index, null, "", false)
+
+
+static func gml_handle_invalid(kind = "", invalid_index = GML_HANDLE_INVALID_INDEX):
+	return _gml_make_handle(str(kind), int(invalid_index), null, "", false)
+
+
+static func gml_instance_noone():
+	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)
+
+
+static func gml_handle_is_valid(handle):
+	if not is_handle(handle):
+		return false
+	if _gml_is_invalid_handle_index(handle.kind, handle.index):
+		return false
+	if not handle.valid:
+		return false
+	if handle.reference is Object and not is_instance_valid(handle.reference):
+		gml_handle_invalidate(handle)
+		return false
+	return true
 
 
 static func gml_handle_resolve(handle):
-	if handle is GMLHandle and handle.valid:
+	if gml_handle_is_valid(handle):
 		return handle.reference
 	return null
 
 
 static func gml_handle_invalidate(handle):
 	if handle is GMLHandle:
+		var old_key = _gml_handle_key(handle.kind, handle.index)
 		handle.valid = false
-		_gml_handle_registry.erase(_gml_handle_key(handle.kind, handle.index))
-	return gml_undefined()
+		handle.reference = null
+		handle.index = _gml_invalid_handle_index(handle.kind)
+		handle.value = _gml_encode_handle_value(handle.type_id, handle.index)
+		_gml_handle_registry.erase(old_key)
+	return handle
 
 
 static func gml_div(left, right):
@@ -408,6 +434,8 @@ static func gml_eq(left, right):
 		return is_undefined(left) and is_undefined(right)
 	if is_ptr(left) or is_ptr(right):
 		return is_ptr(left) and is_ptr(right) and left.value == right.value and left.invalid == right.invalid
+	if is_handle(left) or is_handle(right):
+		return _gml_handle_eq(left, right)
 	if is_nan_value(left) or is_nan_value(right):
 		return false
 	if is_numeric(left) and is_numeric(right):
@@ -475,6 +503,8 @@ static func gml_bool(value):
 		return false
 	if is_ptr(value):
 		return not value.invalid and value.value != 0
+	if is_handle(value):
+		return gml_handle_is_valid(value)
 	if is_int64(value):
 		return float(value.value) > 0.5
 	if is_number(value):
@@ -521,6 +551,32 @@ static func _gml_next_handle_index(kind):
 
 static func _gml_handle_key(kind, index):
 	return str(kind) + ":" + str(int(index))
+
+
+static func _gml_make_handle(kind, index, reference, name, is_valid):
+	var handle_kind = str(kind)
+	var handle_index = int(index)
+	var handle_type_id = _gml_handle_type_id(handle_kind)
+	var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)
+	return GMLHandle.new(handle_kind, handle_index, reference, str(name), bool(is_valid), handle_type_id, encoded_value)
+
+
+static func _gml_invalid_handle_index(kind):
+	return GML_INSTANCE_INVALID_INDEX if str(kind) == GML_INSTANCE_HANDLE_KIND else GML_HANDLE_INVALID_INDEX
+
+
+static func _gml_is_invalid_handle_index(kind, index):
+	return int(index) == _gml_invalid_handle_index(kind)
+
+
+static func _gml_handle_eq(left, right):
+	if is_handle(left) and is_handle(right):
+		return left.kind == right.kind and left.index == right.index
+	if is_handle(left) and is_numeric(right):
+		return left.index == _to_int64_value(right)
+	if is_handle(right) and is_numeric(left):
+		return _to_int64_value(left) == right.index
+	return false
 
 
 static func _gml_handle_type_id(kind):

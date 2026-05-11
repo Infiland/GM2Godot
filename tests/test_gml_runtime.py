@@ -20,6 +20,7 @@ class RuntimeValueParityCase:
 
 RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
+    RuntimeValueParityCase("noone", "GMRuntime.gml_instance_noone()"),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
@@ -62,6 +63,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase(
         "pointer_invalid != pointer_null",
         "GMRuntime.gml_ne(GMRuntime.gml_pointer_invalid(), GMRuntime.gml_pointer_null())",
+    ),
+    RuntimeValueParityCase(
+        "instance_id != noone",
+        "GMRuntime.gml_ne(instance_id, GMRuntime.gml_instance_noone())",
     ),
     RuntimeValueParityCase(
         "is_undefined(undefined)",
@@ -160,6 +165,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_ptr",
             "gml_handle_register",
             "gml_handle_get",
+            "gml_handle_invalid",
+            "gml_instance_noone",
+            "gml_handle_is_valid",
             "gml_handle_resolve",
             "gml_handle_invalidate",
             "gml_repeat_count",
@@ -221,19 +229,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_handle_next_indices = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_register(kind, reference, name = \"\"):", GML_RUNTIME_SCRIPT)
         self.assertIn("var handle_index = _gml_next_handle_index(handle_kind)", GML_RUNTIME_SCRIPT)
-        self.assertIn("GMLHandle.new(handle_kind, handle_index, reference, str(name), true, handle_type_id, encoded_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var handle = _gml_make_handle(handle_kind, handle_index, reference, str(name), true)", GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_get(kind, index):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_handle_registry.has(key):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLHandle.new(handle_kind, handle_index, null, \"\", false, handle_type_id, encoded_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_make_handle(handle_kind, handle_index, null, \"\", false)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_resolve(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if handle is GMLHandle and handle.valid:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("return handle.reference", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_invalidate(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.valid = false", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_handle_registry.erase(_gml_handle_key(handle.kind, handle.index))", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_handle_registry.erase(old_key)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_next_handle_index(kind):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_handle_key(kind, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_make_handle(kind, index, reference, name, is_valid):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_encodes_typed_handle_values(self):
         self.assertIn("const GML_HANDLE_TYPE_SHIFT = 32", GML_RUNTIME_SCRIPT)
@@ -257,6 +266,29 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if is_handle(value):\n\t\treturn GMLInt64.new(value.index)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn float(value.index)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn int(value.value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_normalizes_invalid_handle_values(self):
+        self.assertIn("const GML_HANDLE_INVALID_INDEX = -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INSTANCE_INVALID_INDEX = -4", GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_INSTANCE_HANDLE_KIND = "instance"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_invalid(kind = \"\", invalid_index = GML_HANDLE_INVALID_INDEX):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_make_handle(str(kind), int(invalid_index), null, \"\", false)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_noone():", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle.reference is Object and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_handle_invalidate(handle)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_is_invalid_handle_index(handle_kind, handle_index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("handle.reference = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("handle.index = _gml_invalid_handle_index(handle.kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("handle.value = _gml_encode_handle_value(handle.type_id, handle.index)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_invalid_handle_index(kind):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_is_invalid_handle_index(kind, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_handle_eq(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return left.kind == right.kind and left.index == right.index", GML_RUNTIME_SCRIPT)
+        self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn gml_handle_is_valid(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

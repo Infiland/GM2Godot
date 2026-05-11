@@ -337,6 +337,7 @@ _NAME_REPLACEMENTS = {
     "infinity": "INF",
     "NaN": "NAN",
     "nan": "NAN",
+    "noone": "GMRuntime.gml_instance_noone()",
     "pointer_invalid": "GMRuntime.gml_pointer_invalid()",
     "pointer_null": "GMRuntime.gml_pointer_null()",
     "undefined": "GMRuntime.gml_undefined()",
@@ -1554,6 +1555,8 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         or _contains_gml_nan(expr.right)
         or _contains_gml_pointer(expr.left)
         or _contains_gml_pointer(expr.right)
+        or _contains_gml_handle(expr.left)
+        or _contains_gml_handle(expr.right)
     ):
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -1685,6 +1688,38 @@ def _contains_gml_pointer(expr: _Expression) -> bool:
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_pointer(expr.target)
+    return False
+
+
+def _contains_gml_handle(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value == "GMRuntime.gml_instance_noone()"
+    if isinstance(expr, _Grouped):
+        return _contains_gml_handle(expr.expr)
+    if isinstance(expr, _Unary):
+        return _contains_gml_handle(expr.operand)
+    if isinstance(expr, _Binary):
+        return _contains_gml_handle(expr.left) or _contains_gml_handle(expr.right)
+    if isinstance(expr, _Ternary):
+        return (
+            _contains_gml_handle(expr.condition)
+            or _contains_gml_handle(expr.true_expr)
+            or _contains_gml_handle(expr.false_expr)
+        )
+    if isinstance(expr, _Call):
+        return any(_contains_gml_handle(arg) for arg in expr.args)
+    if isinstance(expr, _ArrayLiteral):
+        return any(_contains_gml_handle(element) for element in expr.elements)
+    if isinstance(expr, _FunctionLiteral):
+        return False
+    if isinstance(expr, _StructLiteral):
+        return any(_contains_gml_handle(field_value) for _field_name, field_value in expr.fields)
+    if isinstance(expr, _Index):
+        return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.index)
+    if isinstance(expr, _StructAccess):
+        return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
+    if isinstance(expr, _Member):
+        return _contains_gml_handle(expr.target)
     return False
 
 

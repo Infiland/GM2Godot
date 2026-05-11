@@ -381,6 +381,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
     def test_transpiles_pointer_values_and_helpers(self):
         self.assertEqual(
+            transpile_gml_expression("noone"),
+            "GMRuntime.gml_instance_noone()",
+        )
+        self.assertEqual(
             transpile_gml_expression("pointer_null"),
             "GMRuntime.gml_pointer_null()",
         )
@@ -406,6 +410,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("pointer_invalid != pointer_null"),
             "GMRuntime.gml_ne(GMRuntime.gml_pointer_invalid(), GMRuntime.gml_pointer_null())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_id != noone"),
+            "GMRuntime.gml_ne(instance_id, GMRuntime.gml_instance_noone())",
         )
 
     def test_pointer_operations_stay_on_runtime_checked_paths(self):

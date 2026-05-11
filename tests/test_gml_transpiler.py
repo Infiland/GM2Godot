@@ -744,6 +744,26 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tbreak",
         )
 
+    def test_switch_break_exits_switch_not_outer_loop(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "while running begin switch (state) { case 1: score = 1; break; } ticks += 1; end",
+                indent="",
+            ),
+            "while GMRuntime.gml_bool(running):\n"
+            "\tvar _gml_switch_value_0 = state\n"
+            "\tvar _gml_switch_matched_1 = false\n"
+            "\tvar _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, 1)\n"
+            "\twhile true:\n"
+            "\t\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 1):\n"
+            "\t\t\t_gml_switch_matched_1 = true\n"
+            "\t\tif _gml_switch_matched_1:\n"
+            "\t\t\tscore = 1\n"
+            "\t\t\tbreak\n"
+            "\t\tbreak\n"
+            "\tticks = GMRuntime.gml_add(ticks, 1)",
+        )
+
     def test_for_loop_preserves_execution_order(self):
         self.assertEqual(
             transpile_gml_code(

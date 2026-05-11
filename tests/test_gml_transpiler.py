@@ -859,6 +859,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code("a = b = c;", indent="")
 
+    def test_rejects_invalid_local_var_names(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("var 6fish;", indent="")
+
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("var foo bar;", indent="")
+
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code(f"var {'a' * 65};", indent="")
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

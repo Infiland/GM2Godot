@@ -192,6 +192,7 @@ _UNARY_PRECEDENCE = 110
 _POSTFIX_PRECEDENCE = 120
 _PRIMARY_PRECEDENCE = 130
 _TERNARY_PRECEDENCE = 5
+_GML_IDENTIFIER_MAX_LENGTH = 64
 
 _RIGHT_ASSOCIATIVE = {"??"}
 
@@ -1022,6 +1023,7 @@ def _tokenize(source: str) -> list[_Token]:
             while index < len(source) and (source[index].isalnum() or source[index] == "_"):
                 index += 1
             identifier = source[start:index]
+            _validate_gml_identifier(identifier)
             block_delimiter = _BLOCK_DELIMITER_REPLACEMENTS.get(identifier)
             if block_delimiter is not None:
                 tokens.append(_Token("OP", block_delimiter))
@@ -1638,6 +1640,7 @@ def _transpile_var_statement(
         assignment = _split_assignment(declaration)
         if assignment is None:
             name = declaration.strip()
+            _validate_gml_identifier(name)
             lines.append(f"var {name} = GMRuntime.gml_undefined()")
             local_names.add(name)
             continue
@@ -1645,9 +1648,21 @@ def _transpile_var_statement(
         if operator != "=":
             raise GMLTranspileError("Variable declarations only support '=' assignments")
         name = name.strip()
+        _validate_gml_identifier(name)
         lines.append(f"var {name} = {transpile_gml_expression(value, local_names)}")
         local_names.add(name)
     return lines
+
+
+def _validate_gml_identifier(name: str) -> None:
+    if not name:
+        raise GMLTranspileError("Expected identifier name")
+    if len(name) > _GML_IDENTIFIER_MAX_LENGTH:
+        raise GMLTranspileError("GML identifier exceeds 64 characters")
+    if not (name[0].isalpha() or name[0] == "_"):
+        raise GMLTranspileError("GML identifier must start with a letter or underscore")
+    if not all(char.isalnum() or char == "_" for char in name):
+        raise GMLTranspileError("GML identifier can only contain letters, numbers, and underscores")
 
 
 def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | None:

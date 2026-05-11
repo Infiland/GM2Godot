@@ -43,6 +43,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("string(int64(score))", "GMRuntime.gml_string(GMRuntime.gml_int64(score))"),
     RuntimeValueParityCase("bool(int64(score))", "GMRuntime.gml_bool(GMRuntime.gml_int64(score))"),
     RuntimeValueParityCase(
+        'bool(handle_parse("ref ds_list 1"))',
+        'GMRuntime.gml_bool(GMRuntime.gml_handle_parse("ref ds_list 1"))',
+    ),
+    RuntimeValueParityCase(
         "int64(score) + int64(delta)",
         "GMRuntime.gml_add(GMRuntime.gml_int64(score), GMRuntime.gml_int64(delta))",
     ),
@@ -61,6 +65,8 @@ RUNTIME_VALUE_PARITY_CASES = (
         'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
     ),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
+    RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
+    RuntimeValueParityCase('ptr(int64("42"))', 'GMRuntime.gml_ptr(GMRuntime.gml_int64("42"))'),
     RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase(
         "pointer_null == pointer_null",
@@ -80,6 +86,11 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("nan", "NAN"),
     RuntimeValueParityCase("real(NaN)", "GMRuntime.gml_real(NAN)"),
+    RuntimeValueParityCase('real("0x00F")', 'GMRuntime.gml_real("0x00F")'),
+    RuntimeValueParityCase(
+        'real(handle_parse("ref ds_list 1"))',
+        'GMRuntime.gml_real(GMRuntime.gml_handle_parse("ref ds_list 1"))',
+    ),
     RuntimeValueParityCase("typeof(NaN)", "GMRuntime.gml_typeof(NAN)"),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
     RuntimeValueParityCase("0.5", "0.5"),
@@ -372,7 +383,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_pointer_invalid():\n\treturn _gml_pointer_invalid", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_ptr(value):\n\treturn value is GMLPointer", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ptr(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLPointer.new(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(value):\n\t\tvar pointer_value = _gml_string_to_int64(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_undefined(pointer_value):\n\t\t\treturn pointer_value", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLPointer.new(pointer_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_number(value):\n\t\treturn GMLPointer.new(int(value))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_defines_shared_handle_registry(self):
         self.assertIn("class GMLHandle:", GML_RUNTIME_SCRIPT)
@@ -528,6 +542,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
             'return gml_unsupported_type_error("GML bitwise conversion", value)',
             GML_RUNTIME_SCRIPT,
         )
+
+    def test_runtime_converts_real_int64_and_ptr_strings_strictly(self):
+        self.assertIn("static func _gml_string_to_real(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_string_to_int64(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var text = str(value).strip_edges()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.to_lower().is_valid_hex_number(true):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return float(_gml_hex_string_to_int(text))", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.is_valid_float():\n\t\treturn text.to_float()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.is_valid_float():\n\t\treturn int(text.to_float())", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML real conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML int64 conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_hex_string_to_int(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_hex_digit_value(code):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_truthiness_and_conversions(self):
         self.assertIn(
@@ -723,7 +750,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_int64(value):\n\t\treturn GMLInt64.new(value.value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_ptr(value):\n\t\treturn GMLInt64.new(value.value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_number(value) or is_string(value):\n\t\treturn GMLInt64.new(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(value):\n\t\tvar int64_value = _gml_string_to_int64(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_undefined(int64_value):\n\t\t\treturn int64_value", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(int64_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_number(value):\n\t\treturn GMLInt64.new(value)", GML_RUNTIME_SCRIPT)
         self.assertIn(
             'return gml_unsupported_type_error("GML int64 conversion", value)',
             GML_RUNTIME_SCRIPT,

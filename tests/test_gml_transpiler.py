@@ -516,12 +516,21 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_bool(0.5)",
         )
         self.assertEqual(
+            transpile_gml_expression('bool(handle_parse("ref ds_list 1"))'),
+            'GMRuntime.gml_bool(GMRuntime.gml_handle_parse("ref ds_list 1"))',
+        )
+        self.assertEqual(
             transpile_gml_expression("is_bool(true)"),
             "GMRuntime.is_bool(true)",
         )
 
     def test_transpiles_real_number_conversion_helpers(self):
         self.assertEqual(transpile_gml_expression("real(score)"), "GMRuntime.gml_real(score)")
+        self.assertEqual(transpile_gml_expression('real("0x00F")'), 'GMRuntime.gml_real("0x00F")')
+        self.assertEqual(
+            transpile_gml_expression('real(handle_parse("ref ds_list 1"))'),
+            'GMRuntime.gml_real(GMRuntime.gml_handle_parse("ref ds_list 1"))',
+        )
         self.assertEqual(transpile_gml_expression("int64(score)"), "GMRuntime.gml_int64(score)")
         self.assertEqual(transpile_gml_expression('int64("42")'), 'GMRuntime.gml_int64("42")')
         self.assertEqual(
@@ -541,6 +550,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("int64(score) + int64(delta)"),
             "GMRuntime.gml_add(GMRuntime.gml_int64(score), GMRuntime.gml_int64(delta))",
+        )
+        self.assertEqual(transpile_gml_expression('ptr("42")'), 'GMRuntime.gml_ptr("42")')
+        self.assertEqual(
+            transpile_gml_expression('ptr(int64("42"))'),
+            'GMRuntime.gml_ptr(GMRuntime.gml_int64("42"))',
         )
 
     def test_transpiles_string_value_helpers(self):

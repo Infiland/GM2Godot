@@ -168,8 +168,13 @@ static func gml_ptr(value):
 		return value
 	if is_int64(value):
 		return GMLPointer.new(value.value)
-	if is_number(value) or is_string(value):
-		return GMLPointer.new(value)
+	if is_string(value):
+		var pointer_value = _gml_string_to_int64(value)
+		if is_undefined(pointer_value):
+			return pointer_value
+		return GMLPointer.new(pointer_value)
+	if is_number(value):
+		return GMLPointer.new(int(value))
 	return gml_unsupported_type_error("GML ptr conversion", value)
 
 
@@ -322,7 +327,12 @@ static func gml_int64(value):
 		return GMLInt64.new(value.value)
 	if is_ptr(value):
 		return GMLInt64.new(value.value)
-	if is_number(value) or is_string(value):
+	if is_string(value):
+		var int64_value = _gml_string_to_int64(value)
+		if is_undefined(int64_value):
+			return int64_value
+		return GMLInt64.new(int64_value)
+	if is_number(value):
 		return GMLInt64.new(value)
 	return gml_unsupported_type_error("GML int64 conversion", value)
 
@@ -752,6 +762,8 @@ static func _to_real(value):
 		return float(value.index)
 	if is_int64(value):
 		return float(value.value)
+	if is_string(value):
+		return _gml_string_to_real(value)
 	if _is_real_convertible(value):
 		return float(value)
 	return gml_unsupported_type_error("GML numeric conversion", value)
@@ -764,6 +776,8 @@ static func _to_int64_value(value):
 		return int(value.value)
 	if is_int64(value):
 		return int(value.value)
+	if is_string(value):
+		return _gml_string_to_int64(value)
 	if _is_int64_convertible(value):
 		return int(value)
 	return gml_unsupported_type_error("GML bitwise conversion", value)
@@ -858,6 +872,50 @@ static func _gml_string_is_int(value):
 		if code < 48 or code > 57:
 			return false
 	return true
+
+
+static func _gml_string_to_real(value):
+	var text = str(value).strip_edges()
+	if text.to_lower().is_valid_hex_number(true):
+		return float(_gml_hex_string_to_int(text))
+	if text.is_valid_float():
+		return text.to_float()
+	return gml_error("GML real conversion does not support string " + text)
+
+
+static func _gml_string_to_int64(value):
+	var text = str(value).strip_edges()
+	if text.to_lower().is_valid_hex_number(true):
+		return _gml_hex_string_to_int(text)
+	if text.is_valid_float():
+		return int(text.to_float())
+	return gml_error("GML int64 conversion does not support string " + text)
+
+
+static func _gml_hex_string_to_int(value):
+	var text = str(value).strip_edges()
+	var sign = 1
+	if text.begins_with("-"):
+		sign = -1
+		text = text.substr(1)
+	elif text.begins_with("+"):
+		text = text.substr(1)
+	if text.to_lower().begins_with("0x"):
+		text = text.substr(2)
+	var result = 0
+	for index in range(text.length()):
+		result = result * 16 + _gml_hex_digit_value(text.unicode_at(index))
+	return sign * result
+
+
+static func _gml_hex_digit_value(code):
+	if code >= 48 and code <= 57:
+		return code - 48
+	if code >= 65 and code <= 70:
+		return code - 55
+	if code >= 97 and code <= 102:
+		return code - 87
+	return 0
 
 
 static func _to_array_index(value):

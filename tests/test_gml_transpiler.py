@@ -398,6 +398,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_ptr(GMRuntime.gml_pointer_null())",
         )
         self.assertEqual(
+            transpile_gml_expression('handle_parse("ref ds_list 1")'),
+            'GMRuntime.gml_handle_parse("ref ds_list 1")',
+        )
+        self.assertEqual(
             transpile_gml_expression("typeof(pointer_null)"),
             "GMRuntime.gml_typeof(GMRuntime.gml_pointer_null())",
         )

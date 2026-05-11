@@ -204,6 +204,17 @@ static func gml_handle_is_valid(handle):
 	return true
 
 
+static func gml_handle_parse(value):
+	var parts = str(value).split(" ", false)
+	if parts.size() != 3 or parts[0] != "ref":
+		return gml_handle_invalid()
+	var kind = parts[1]
+	var identifier = parts[2]
+	if _gml_string_is_int(identifier):
+		return gml_handle_get(kind, int(identifier))
+	return _gml_handle_get_by_name(kind, identifier)
+
+
 static func gml_handle_resolve(handle):
 	if gml_handle_is_valid(handle):
 		return handle.reference
@@ -479,6 +490,8 @@ static func gml_string(value):
 		return str(value)
 	if is_bool(value):
 		return "true" if value else "false"
+	if is_handle(value):
+		return _gml_handle_to_string(value)
 	if is_int64(value):
 		return str(value.value)
 	if is_infinity(value):
@@ -553,6 +566,20 @@ static func _gml_handle_key(kind, index):
 	return str(kind) + ":" + str(int(index))
 
 
+static func _gml_handle_to_string(handle):
+	var label = handle.name if str(handle.name) != "" else str(handle.index)
+	return "ref " + str(handle.kind) + " " + str(label)
+
+
+static func _gml_handle_get_by_name(kind, name):
+	var handle_kind = str(kind)
+	var handle_name = str(name)
+	for handle in _gml_handle_registry.values():
+		if handle.kind == handle_kind and handle.name == handle_name:
+			return handle
+	return gml_handle_invalid(handle_kind)
+
+
 static func _gml_make_handle(kind, index, reference, name, is_valid):
 	var handle_kind = str(kind)
 	var handle_index = int(index)
@@ -589,6 +616,20 @@ static func _gml_handle_type_id(kind):
 
 static func _gml_encode_handle_value(type_id, index):
 	return (int(type_id) << GML_HANDLE_TYPE_SHIFT) | (int(index) & GML_HANDLE_INDEX_MASK)
+
+
+static func _gml_string_is_int(value):
+	var text = str(value)
+	if text == "":
+		return false
+	var start = 1 if text.begins_with("-") else 0
+	if start >= text.length():
+		return false
+	for index in range(start, text.length()):
+		var code = text.unicode_at(index)
+		if code < 48 or code > 57:
+			return false
+	return true
 
 
 static func _to_array_index(value):

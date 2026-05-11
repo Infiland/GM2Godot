@@ -386,6 +386,7 @@ _RUNTIME_FUNCTIONS = {
     "is_string": "is_string",
     "is_struct": "is_struct",
     "is_undefined": "is_undefined",
+    "handle_parse": "gml_handle_parse",
     "real": "gml_real",
     "ptr": "gml_ptr",
     "sqrt": "gml_sqrt",

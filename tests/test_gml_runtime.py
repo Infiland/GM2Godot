@@ -54,6 +54,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
+    RuntimeValueParityCase('handle_parse("ref ds_list 1")', 'GMRuntime.gml_handle_parse("ref ds_list 1")'),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
     RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase(
@@ -168,6 +169,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_invalid",
             "gml_instance_noone",
             "gml_handle_is_valid",
+            "gml_handle_parse",
             "gml_handle_resolve",
             "gml_handle_invalidate",
             "gml_repeat_count",
@@ -289,6 +291,27 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return left.kind == right.kind and left.index == right.index", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn gml_handle_is_valid(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_converts_and_parses_handle_strings(self):
+        self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn _gml_handle_to_string(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_handle_to_string(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var label = handle.name if str(handle.name) != \"\" else str(handle.index)", GML_RUNTIME_SCRIPT)
+        self.assertIn('return "ref " + str(handle.kind) + " " + str(label)', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_parse(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var parts = str(value).split(\" \", false)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if parts.size() != 3 or parts[0] != \"ref\":", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_invalid()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_string_is_int(identifier):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_get(kind, int(identifier))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_handle_get_by_name(kind, identifier)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_handle_get_by_name(kind, name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("for handle in _gml_handle_registry.values():", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle.kind == handle_kind and handle.name == handle_name:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_invalid(handle_kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_string_is_int(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var start = 1 if text.begins_with(\"-\") else 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("var code = text.unicode_at(index)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

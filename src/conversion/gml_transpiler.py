@@ -495,6 +495,8 @@ class _StatementParser:
     def _parse_statement(self) -> list[str]:
         if self._check_identifier("if"):
             return self._parse_if_statement()
+        if self._check_identifier("while"):
+            return self._parse_while_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -535,6 +537,21 @@ class _StatementParser:
                 lines.append("else:")
                 lines.extend(_indent_lines(else_body_lines or ["pass"]))
 
+        return lines
+
+    def _parse_while_statement(self) -> list[str]:
+        self._consume_identifier("while")
+        condition_tokens = self._read_condition_tokens()
+        if not condition_tokens:
+            raise GMLTranspileError("Expected while condition")
+
+        condition = transpile_gml_condition(
+            _tokens_to_source(condition_tokens),
+            local_names=self.local_names,
+        )
+        body_lines = self._parse_body()
+        lines = [f"while {condition}:"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_body(self) -> list[str]:

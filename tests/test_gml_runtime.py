@@ -106,6 +106,8 @@ RUNTIME_VALUE_PARITY_CASES = (
         "static_set(mystruct, static_get(counter))",
         "GMRuntime.gml_static_set(mystruct, GMRuntime.gml_static_get(counter))",
     ),
+    RuntimeValueParityCase("is_instanceof(mystruct, counter)", "GMRuntime.gml_is_instanceof(mystruct, counter)"),
+    RuntimeValueParityCase("instanceof(mystruct)", "GMRuntime.gml_instanceof(mystruct)"),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
     RuntimeValueParityCase("typeof(ptr(0))", "GMRuntime.gml_typeof(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
@@ -386,6 +388,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct_foreach",
             "gml_static_get",
             "gml_static_set",
+            "gml_is_instanceof",
+            "gml_instanceof",
             "gml_variable_struct_get",
             "gml_variable_instance_get",
             "gml_ds_map_find_value",
@@ -871,10 +875,30 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('return gml_unsupported_type_error("GML static_set static struct", static_struct)', GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_static_set_parent(struct_value, static_struct)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_ensure(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_static_set_parent(static_struct, _gml_static_root)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_set_parent(static_struct, _gml_static_root, constructor_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_lookup(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_same(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left == right", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_constructor_identity_uses_static_chain(self):
+        self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not is_struct(struct_value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not is_method(constructor):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var current_static = gml_static_get(struct_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("while not is_undefined(current_static):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_static_same(current_static, constructor_static):\n\t\t\treturn true", GML_RUNTIME_SCRIPT)
+        self.assertIn("current_static = gml_static_get(current_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instanceof(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn('if typeof(struct_value) == TYPE_OBJECT:\n\t\treturn "instance"', GML_RUNTIME_SCRIPT)
+        self.assertIn('return "struct"', GML_RUNTIME_SCRIPT)
+        self.assertIn("var constructor_name = _gml_static_name(static_struct)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if constructor_name != \"\":\n\t\treturn constructor_name", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_name(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn('entry.has("constructor_name")', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_string_output_uses_to_string_convention(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)

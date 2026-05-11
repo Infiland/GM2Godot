@@ -698,6 +698,36 @@ static func gml_static_set(struct_value, static_struct):
 	return null
 
 
+static func gml_is_instanceof(struct_value, constructor):
+	if not is_struct(struct_value):
+		return false
+	if not is_method(constructor):
+		return false
+	var constructor_static = gml_static_get(constructor)
+	if is_undefined(constructor_static):
+		return false
+	var current_static = gml_static_get(struct_value)
+	while not is_undefined(current_static):
+		if _gml_static_same(current_static, constructor_static):
+			return true
+		current_static = gml_static_get(current_static)
+	return false
+
+
+static func gml_instanceof(struct_value):
+	if not is_struct(struct_value):
+		return gml_undefined()
+	if typeof(struct_value) == TYPE_OBJECT:
+		return "instance"
+	var static_struct = gml_static_get(struct_value)
+	if is_undefined(static_struct) or _gml_static_same(static_struct, _gml_static_root):
+		return "struct"
+	var constructor_name = _gml_static_name(static_struct)
+	if constructor_name != "":
+		return constructor_name
+	return gml_undefined()
+
+
 static func gml_variable_clone(value, depth = 128):
 	return _gml_clone_value(value, max(0, int(_to_real(depth))))
 
@@ -1066,8 +1096,9 @@ static func _gml_static_ensure(value):
 	if static_struct != null:
 		return static_struct
 	static_struct = {}
-	_gml_static_set_parent(value, static_struct)
-	_gml_static_set_parent(static_struct, _gml_static_root)
+	var constructor_name = _gml_static_constructor_name(value)
+	_gml_static_set_parent(value, static_struct, constructor_name)
+	_gml_static_set_parent(static_struct, _gml_static_root, constructor_name)
 	return static_struct
 
 
@@ -1078,12 +1109,34 @@ static func _gml_static_lookup(value):
 	return null
 
 
-static func _gml_static_set_parent(value, static_struct):
+static func _gml_static_set_parent(value, static_struct, constructor_name = ""):
 	for entry in _gml_static_registry:
 		if _gml_static_same(entry["target"], value):
 			entry["static"] = static_struct
+			if constructor_name != "":
+				entry["constructor_name"] = constructor_name
 			return
-	_gml_static_registry.append({"target": value, "static": static_struct})
+	var entry = {"target": value, "static": static_struct}
+	if constructor_name != "":
+		entry["constructor_name"] = constructor_name
+	_gml_static_registry.append(entry)
+
+
+static func _gml_static_name(value):
+	for entry in _gml_static_registry:
+		if _gml_static_same(entry["target"], value) and entry.has("constructor_name"):
+			return entry["constructor_name"]
+	return ""
+
+
+static func _gml_static_constructor_name(value):
+	if value is GMLMethod:
+		return _gml_static_constructor_name(value.function_value)
+	if typeof(value) == TYPE_CALLABLE:
+		var method_name = str(value.get_method())
+		if method_name != "":
+			return method_name
+	return ""
 
 
 static func _gml_static_same(left, right):

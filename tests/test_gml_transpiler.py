@@ -995,6 +995,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_static_set(mystruct, GMRuntime.gml_static_get(counter))",
         )
 
+    def test_transpiles_constructor_identity_helpers_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("is_instanceof(mystruct, counter)"),
+            "GMRuntime.gml_is_instanceof(mystruct, counter)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_instanceof(mystruct, method(player, callback))"),
+            "GMRuntime.gml_is_instanceof(mystruct, GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("instanceof(mystruct)"),
+            "GMRuntime.gml_instanceof(mystruct)",
+        )
+
     def test_transpiles_variable_clone_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("variable_clone(mystruct)"),

@@ -428,6 +428,8 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_foreach": "gml_struct_foreach",
     "static_get": "gml_static_get",
     "static_set": "gml_static_set",
+    "is_instanceof": "gml_is_instanceof",
+    "instanceof": "gml_instanceof",
 }
 
 _VARIABLE_RUNTIME_FUNCTIONS = {

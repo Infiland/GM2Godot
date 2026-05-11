@@ -555,6 +555,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "mystruct = GMRuntime.gml_undefined()",
         )
 
+    def test_delete_rejects_non_variable_expressions(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("delete make_struct();", indent="")
+
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("delete mystruct.child;", indent="")
+
     def test_transpiles_while_blocks(self):
         self.assertEqual(
             transpile_gml_code("while score > 0 begin score -= 1; end", indent=""),

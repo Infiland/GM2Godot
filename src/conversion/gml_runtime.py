@@ -23,6 +23,7 @@ const GML_HANDLE_INDEX_MASK = 0xffffffff
 const GML_HANDLE_INVALID_INDEX = -1
 const GML_INSTANCE_INVALID_INDEX = -4
 const GML_INSTANCE_HANDLE_KIND = "instance"
+const GML_DS_MAP_HANDLE_KIND = "ds_map"
 
 
 class GMLInt64:
@@ -394,6 +395,41 @@ static func gml_struct_get(struct_value, member_name):
 	return gml_error("GML struct access requires a struct")
 
 
+static func gml_variable_struct_get(struct_value, member_name):
+	return gml_struct_get(struct_value, member_name)
+
+
+static func gml_variable_instance_get(instance_value, member_name):
+	var resolved_instance = _gml_resolve_instance(instance_value)
+	if resolved_instance == null:
+		return gml_undefined()
+	return gml_struct_get(resolved_instance, member_name)
+
+
+static func gml_ds_map_find_value(map_value, key):
+	var resolved_map = _gml_resolve_ds_map(map_value)
+	if typeof(resolved_map) == TYPE_DICTIONARY:
+		if resolved_map.has(key):
+			return resolved_map[key]
+		return gml_undefined()
+	return gml_error("GML ds_map access requires a map")
+
+
+static func gml_ds_map_exists(map_value, key):
+	var resolved_map = _gml_resolve_ds_map(map_value)
+	if typeof(resolved_map) == TYPE_DICTIONARY:
+		return resolved_map.has(key)
+	return false
+
+
+static func gml_ds_map_set(map_value, key, value):
+	var resolved_map = _gml_resolve_ds_map(map_value)
+	if typeof(resolved_map) == TYPE_DICTIONARY:
+		resolved_map[key] = value
+		return value
+	return gml_error("GML ds_map access requires a map")
+
+
 static func gml_struct_exists(struct_value, member_name):
 	var key = str(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
@@ -443,6 +479,20 @@ static func gml_struct_names_count(struct_value):
 
 static func gml_variable_clone(value, depth = 128):
 	return _gml_clone_value(value, max(0, int(_to_real(depth))))
+
+
+static func _gml_resolve_instance(instance_value):
+	if is_handle(instance_value) or is_numeric(instance_value) or is_string(instance_value):
+		return gml_handle_resolve_for_kind(GML_INSTANCE_HANDLE_KIND, instance_value)
+	return instance_value
+
+
+static func _gml_resolve_ds_map(map_value):
+	if is_handle(map_value) or is_numeric(map_value) or is_string(map_value):
+		var resolved_map = gml_handle_resolve_for_kind(GML_DS_MAP_HANDLE_KIND, map_value)
+		if resolved_map != null:
+			return resolved_map
+	return map_value
 
 
 static func gml_bit_and(left, right):

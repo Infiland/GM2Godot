@@ -111,6 +111,12 @@ class _StructAccess:
 
 
 @dataclass(frozen=True)
+class _DSMapAccess:
+    target: _Expression
+    key: _Expression
+
+
+@dataclass(frozen=True)
 class _Member:
     target: _Expression
     member: str
@@ -135,6 +141,7 @@ _Expression: TypeAlias = (
     | _StructLiteral
     | _Index
     | _StructAccess
+    | _DSMapAccess
     | _Member
     | _Grouped
 )
@@ -406,6 +413,13 @@ _STRUCT_RUNTIME_FUNCTIONS = {
 
 _VARIABLE_RUNTIME_FUNCTIONS = {
     "variable_clone": "gml_variable_clone",
+    "variable_instance_get": "gml_variable_instance_get",
+    "variable_struct_get": "gml_variable_struct_get",
+}
+
+_DS_MAP_RUNTIME_FUNCTIONS = {
+    "ds_map_exists": "gml_ds_map_exists",
+    "ds_map_find_value": "gml_ds_map_find_value",
 }
 
 
@@ -549,6 +563,11 @@ class _ExpressionParser:
                     key = self._parse_expression()
                     self._consume("]")
                     expr = _StructAccess(expr, key)
+                    continue
+                if self._match("?"):
+                    key = self._parse_expression()
+                    self._consume("]")
+                    expr = _DSMapAccess(expr, key)
                     continue
                 index = self._parse_expression()
                 self._consume("]")
@@ -1676,6 +1695,10 @@ def _reject_enum_mutation_expression(
         _reject_enum_mutation_expression(expr.target, enum_name_set)
         _reject_enum_mutation_expression(expr.key, enum_name_set)
         return
+    if isinstance(expr, _DSMapAccess):
+        _reject_enum_mutation_expression(expr.target, enum_name_set)
+        _reject_enum_mutation_expression(expr.key, enum_name_set)
+        return
     if isinstance(expr, _Member):
         _reject_enum_mutation_expression(expr.target, enum_name_set)
 
@@ -1693,7 +1716,7 @@ def _is_enum_reference(expr: _Expression, enum_names: Iterable[str]) -> bool:
 
 def _target_chain_starts_with_enum(expr: _Expression, enum_names: Iterable[str]) -> bool:
     unwrapped_expr = _unwrap_grouped_expression(expr)
-    if isinstance(unwrapped_expr, _Member | _StructAccess | _Index):
+    if isinstance(unwrapped_expr, _Member | _StructAccess | _DSMapAccess | _Index):
         return _is_enum_reference(unwrapped_expr.target, enum_names) or _target_chain_starts_with_enum(
             unwrapped_expr.target,
             enum_names,
@@ -1809,6 +1832,10 @@ def _emit_expression(
         target = _emit_expression(expr.target, local_names)[0]
         key = _emit_expression(expr.key, local_names)[0]
         return f"GMRuntime.gml_struct_get({target}, {key})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _DSMapAccess):
+        target = _emit_expression(expr.target, local_names)[0]
+        key = _emit_expression(expr.key, local_names)[0]
+        return f"GMRuntime.gml_ds_map_find_value({target}, {key})", _POSTFIX_PRECEDENCE
     if _uses_direct_member_access(expr):
         target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
         return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
@@ -1833,6 +1860,9 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     if isinstance(expr.callee, _Name) and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
+    if isinstance(expr.callee, _Name) and expr.callee.value in _DS_MAP_RUNTIME_FUNCTIONS:
+        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        return f"GMRuntime.{_DS_MAP_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS
@@ -1938,6 +1968,8 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
     if isinstance(expr, _StructAccess):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
+    if isinstance(expr, _DSMapAccess):
+        return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_undefined(expr.target)
     return False
@@ -1969,6 +2001,8 @@ def _contains_gml_nan(expr: _Expression) -> bool:
     if isinstance(expr, _Index):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
     if isinstance(expr, _StructAccess):
+        return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
+    if isinstance(expr, _DSMapAccess):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_nan(expr.target)
@@ -2005,6 +2039,8 @@ def _contains_gml_pointer(expr: _Expression) -> bool:
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.index)
     if isinstance(expr, _StructAccess):
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
+    if isinstance(expr, _DSMapAccess):
+        return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_pointer(expr.target)
     return False
@@ -2036,6 +2072,8 @@ def _contains_gml_handle(expr: _Expression) -> bool:
     if isinstance(expr, _Index):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.index)
     if isinstance(expr, _StructAccess):
+        return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
+    if isinstance(expr, _DSMapAccess):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_handle(expr.target)
@@ -2220,6 +2258,14 @@ def _transpile_statement(
                 f"GMRuntime.gml_struct_set({container}, {key}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
             ]
+        ds_map_target = _ds_map_assignment_parts(target_expr, local_names)
+        if ds_map_target is not None:
+            container, key = ds_map_target
+            current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
+            return [
+                f"GMRuntime.gml_ds_map_set({container}, {key}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
         target = _emit_expression(target_expr, local_names)[0]
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
@@ -2245,6 +2291,25 @@ def _transpile_statement(
                     f"GMRuntime.gml_array_set({container}, {index}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
+        ds_map_target = _ds_map_assignment_parts(target_expr, local_names)
+        if ds_map_target is not None:
+            container, key = ds_map_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
+            if operator == "??=":
+                current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
+                return [
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    f"\tGMRuntime.gml_ds_map_set({container}, {key}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
+                return [
+                    f"GMRuntime.gml_ds_map_set({container}, {key}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported DS map accessor assignment operator")
         struct_target = _struct_assignment_parts(target_expr, local_names)
         if struct_target is not None:
             container, key = struct_target
@@ -2286,6 +2351,17 @@ def _struct_assignment_parts(
     if isinstance(target_expr, _Member) and not _uses_direct_member_access(target_expr):
         container = _emit_expression(target_expr.target, local_names)[0]
         return container, json.dumps(target_expr.member)
+    return None
+
+
+def _ds_map_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+) -> tuple[str, str] | None:
+    if isinstance(target_expr, _DSMapAccess):
+        container = _emit_expression(target_expr.target, local_names)[0]
+        key = _emit_expression(target_expr.key, local_names)[0]
+        return container, key
     return None
 
 

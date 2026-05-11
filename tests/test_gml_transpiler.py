@@ -686,6 +686,32 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression('struct_remove(mystruct, "x")'),
             'GMRuntime.gml_struct_remove(mystruct, "x")',
         )
+        self.assertEqual(
+            transpile_gml_expression('variable_struct_get(mystruct, "x")'),
+            'GMRuntime.gml_variable_struct_get(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_get(enemy, "hp")'),
+            'GMRuntime.gml_variable_instance_get(enemy, "hp")',
+        )
+
+    def test_transpiles_ds_map_missing_value_apis_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression('ds_map_find_value(inventory, "food")'),
+            'GMRuntime.gml_ds_map_find_value(inventory, "food")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('ds_map_exists(inventory, "food")'),
+            'GMRuntime.gml_ds_map_exists(inventory, "food")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('inventory[? "food"]'),
+            'GMRuntime.gml_ds_map_find_value(inventory, "food")',
+        )
+        self.assertEqual(
+            transpile_gml_code('inventory[? "food"] = amount;', indent=""),
+            'GMRuntime.gml_ds_map_set(inventory, "food", amount)',
+        )
 
     def test_transpiles_struct_name_enumeration_functions_through_runtime(self):
         self.assertEqual(

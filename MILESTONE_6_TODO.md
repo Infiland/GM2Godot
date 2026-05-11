@@ -9,6 +9,7 @@ Current branch work to remember before redoing an issue:
 - `106712e` adds with-target helpers for `all` and `noone` and references #299.
 - `1212f46` adds legacy numeric with target keyword handling and references #300.
 - `01245de` tightens invalid numeric `NaN` runtime coverage and references #425.
+- `7d7551a` adds self/other with-target coverage and references #298.
 
 ## Working Order
 
@@ -171,7 +172,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #301 Variables: with() Scope Switching + Instance Keywords - Lower with target execution counts (open, parent #181, subissues 0/0)
 - [ ] #300 Variables: with() Scope Switching + Instance Keywords - Support legacy numeric keyword values (open, parent #181, subissues 0/0) - branch-covered by `1212f46`
 - [ ] #299 Variables: with() Scope Switching + Instance Keywords - Resolve all and noone keywords (open, parent #181, subissues 0/0) - branch-covered by `106712e`
-- [ ] #298 Variables: with() Scope Switching + Instance Keywords - Resolve self and other keywords (open, parent #181, subissues 0/0)
+- [ ] #298 Variables: with() Scope Switching + Instance Keywords - Resolve self and other keywords (open, parent #181, subissues 0/0) - branch-covered by `7d7551a`
 - [ ] #297 Variables: Constants (enum, #macro, built-ins) - Map built-in constants (open, parent #180, subissues 0/0)
 - [ ] #296 Variables: Constants (enum, #macro, built-ins) - Prevent writes to constants (open, parent #180, subissues 0/0)
 - [ ] #295 Variables: Constants (enum, #macro, built-ins) - Support configuration-specific macro overrides (open, parent #180, subissues 0/0)

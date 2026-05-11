@@ -136,9 +136,13 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
+    RuntimeValueParityCase('1.5 + "px"', 'GMRuntime.gml_add(1.5, "px")'),
     RuntimeValueParityCase('true + "!"', 'GMRuntime.gml_add(true, "!")'),
+    RuntimeValueParityCase('"px" + 1.5', 'GMRuntime.gml_add("px", 1.5)'),
     RuntimeValueParityCase("true + true", "GMRuntime.gml_add(true, true)"),
     RuntimeValueParityCase('3 * "ha"', 'GMRuntime.gml_mul(3, "ha")'),
+    RuntimeValueParityCase('2.5 * "ha"', 'GMRuntime.gml_mul(2.5, "ha")'),
+    RuntimeValueParityCase('"ha" * 2', 'GMRuntime.gml_mul("ha", 2)'),
     RuntimeValueParityCase("a - b", "GMRuntime.gml_sub(a, b)"),
     RuntimeValueParityCase("a * b", "GMRuntime.gml_mul(a, b)"),
     RuntimeValueParityCase("a mod b", "GMRuntime.gml_mod(a, b)"),
@@ -650,8 +654,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_handles_string_conversion_and_concat_deliberately(self):
         self.assertIn("static func is_string(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value_type == TYPE_STRING or value_type == TYPE_STRING_NAME", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(right):\n\t\tif is_string(left):", GML_RUNTIME_SCRIPT)
         self.assertIn("return str(left) + str(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_string(left) + str(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn('if is_string(left):\n\t\treturn gml_error("Invalid GML string concatenation")', GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(right):\n\t\tif is_number(left):", GML_RUNTIME_SCRIPT)
         self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
         self.assertIn("Invalid GML string concatenation", GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)

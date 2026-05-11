@@ -55,6 +55,11 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
     RuntimeValueParityCase('handle_parse("ref ds_list 1")', 'GMRuntime.gml_handle_parse("ref ds_list 1")'),
+    RuntimeValueParityCase('ref_create(self, "text")', 'GMRuntime.gml_ref_create(self, "text")'),
+    RuntimeValueParityCase(
+        'handle_parse(string(ref_create(self, "text")))',
+        'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
+    ),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
     RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase(
@@ -289,6 +294,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_instance_noone",
             "gml_handle_is_valid",
             "gml_handle_parse",
+            "gml_ref_create",
             "gml_handle_from_value",
             "gml_handle_resolve_for_kind",
             "gml_handle_resolve",
@@ -427,6 +433,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return _gml_make_handle(str(kind), int(invalid_index), null, \"\", false)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_noone():", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)", GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_REFERENCE_HANDLE_KIND = "dbgref"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)
         self.assertIn("if handle.reference is Object and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
@@ -462,6 +469,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_string_is_int(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("var start = 1 if text.begins_with(\"-\") else 0", GML_RUNTIME_SCRIPT)
         self.assertIn("var code = text.unicode_at(index)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_creates_debug_reference_handles_for_round_trip(self):
+        self.assertIn("static func gml_ref_create(target, member_or_index, array_index = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn('"target": target,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"member_or_index": member_or_index,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"has_array_index": array_index != null,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"array_index": array_index', GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_register(GML_REFERENCE_HANDLE_KIND, descriptor)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_accepts_legacy_numeric_handle_ids_at_api_boundary(self):
         self.assertIn("static func gml_handle_from_value(kind, value):", GML_RUNTIME_SCRIPT)

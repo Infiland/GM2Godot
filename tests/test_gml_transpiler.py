@@ -448,6 +448,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_handle_parse("ref ds_list 1")',
         )
         self.assertEqual(
+            transpile_gml_expression('ref_create(self, "text")'),
+            'GMRuntime.gml_ref_create(self, "text")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('ref_create(self, "array", 2)'),
+            'GMRuntime.gml_ref_create(self, "array", 2)',
+        )
+        self.assertEqual(
+            transpile_gml_expression('handle_parse(string(ref_create(self, "text")))'),
+            'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
+        )
+        self.assertEqual(
             transpile_gml_expression("typeof(pointer_null)"),
             "GMRuntime.gml_typeof(GMRuntime.gml_pointer_null())",
         )

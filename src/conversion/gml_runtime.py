@@ -26,6 +26,7 @@ const GML_HANDLE_INVALID_INDEX = -1
 const GML_INSTANCE_INVALID_INDEX = -4
 const GML_INSTANCE_HANDLE_KIND = "instance"
 const GML_DS_MAP_HANDLE_KIND = "ds_map"
+const GML_REFERENCE_HANDLE_KIND = "dbgref"
 
 
 class GMLInt64:
@@ -221,6 +222,16 @@ static func gml_handle_parse(value):
 	if _gml_string_is_int(identifier):
 		return gml_handle_get(kind, int(identifier))
 	return _gml_handle_get_by_name(kind, identifier)
+
+
+static func gml_ref_create(target, member_or_index, array_index = null):
+	var descriptor = {
+		"target": target,
+		"member_or_index": member_or_index,
+		"has_array_index": array_index != null,
+		"array_index": array_index
+	}
+	return gml_handle_register(GML_REFERENCE_HANDLE_KIND, descriptor)
 
 
 static func gml_handle_from_value(kind, value):

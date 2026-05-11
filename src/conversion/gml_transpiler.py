@@ -412,6 +412,7 @@ _STRUCT_RUNTIME_FUNCTIONS = {
 }
 
 _VARIABLE_RUNTIME_FUNCTIONS = {
+    "ref_create": "gml_ref_create",
     "variable_clone": "gml_variable_clone",
     "variable_instance_get": "gml_variable_instance_get",
     "variable_struct_get": "gml_variable_struct_get",

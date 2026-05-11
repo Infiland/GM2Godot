@@ -657,9 +657,25 @@ class _ExpressionParser:
 
     def _parse_nameof_expression(self) -> _Expression:
         self._consume("(")
-        argument = self._parse_expression()
+        name = self._parse_nameof_argument_name()
         self._consume(")")
-        return _NameOf(_nameof_argument_name(argument))
+        return _NameOf(name)
+
+    def _parse_nameof_argument_name(self) -> str:
+        token = self._advance()
+        if token.kind != "IDENT":
+            raise GMLTranspileError("nameof requires an identifier")
+
+        name = token.value
+        while self._match("."):
+            name = self._consume_identifier()
+
+        if self._match("("):
+            self._read_balanced_tokens("(", ")")
+
+        if not self._check(")"):
+            raise GMLTranspileError("nameof requires an identifier, enum member, or function-call syntax")
+        return name
 
     def _parse_function_literal(self) -> _Expression:
         name = None
@@ -1745,17 +1761,6 @@ def _unwrap_grouped_expression(expr: _Expression) -> _Expression:
     while isinstance(expr, _Grouped):
         expr = expr.expr
     return expr
-
-
-def _nameof_argument_name(expr: _Expression) -> str:
-    unwrapped_expr = _unwrap_grouped_expression(expr)
-    if not isinstance(unwrapped_expr, _Call):
-        raise GMLTranspileError("nameof requires function-call syntax")
-
-    callee = _unwrap_grouped_expression(unwrapped_expr.callee)
-    if isinstance(callee, _Name):
-        return callee.value
-    raise GMLTranspileError("nameof function-call syntax requires a named callee")
 
 
 def _is_enum_reference(expr: _Expression, enum_names: Iterable[str]) -> bool:

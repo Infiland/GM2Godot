@@ -613,6 +613,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 self.assertEqual(transpile_gml_expression(source), expected)
 
     def test_transpiles_nameof_function_call_syntax_without_emitting_call(self):
+        self.assertEqual(transpile_gml_expression("nameof(ds_list_create)"), '"ds_list_create"')
         self.assertEqual(transpile_gml_expression("nameof(ds_list_create())"), '"ds_list_create"')
         self.assertEqual(
             transpile_gml_expression("nameof(ds_list_create(expensive()))"),
@@ -623,10 +624,33 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'name = "ds_list_create"',
         )
 
-    def test_rejects_nameof_without_named_function_call_syntax(self):
-        with self.assertRaisesRegex(GMLTranspileError, "function-call syntax"):
-            transpile_gml_expression("nameof(score)")
-        with self.assertRaisesRegex(GMLTranspileError, "named callee"):
+    def test_transpiles_nameof_compile_time_identifiers(self):
+        cases = (
+            ("nameof(score)", '"score"'),
+            ("nameof(obj_enemy)", '"obj_enemy"'),
+            ("nameof(MY_MACRO)", '"MY_MACRO"'),
+            ("nameof(pi)", '"pi"'),
+            ("nameof(undefined)", '"undefined"'),
+            ("nameof(RAINBOW.GREEN)", '"GREEN"'),
+            ("nameof(global.factory)", '"factory"'),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
+    def test_transpiles_nameof_enum_member_after_declaration(self):
+        self.assertEqual(
+            transpile_gml_code("enum RAINBOW { GREEN }\nlabel = nameof(RAINBOW.GREEN)", indent=""),
+            'var RAINBOW = GMRuntime.gml_enum({"GREEN": 0})\nlabel = "GREEN"',
+        )
+
+    def test_rejects_nameof_non_name_expressions(self):
+        with self.assertRaisesRegex(GMLTranspileError, "identifier"):
+            transpile_gml_expression("nameof([score])")
+        with self.assertRaisesRegex(GMLTranspileError, "identifier, enum member"):
+            transpile_gml_expression("nameof(score + 1)")
+        with self.assertRaisesRegex(GMLTranspileError, "identifier, enum member"):
             transpile_gml_expression("nameof(factory()())")
 
     def test_transpiles_primitive_type_predicates(self):

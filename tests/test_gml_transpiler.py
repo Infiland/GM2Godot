@@ -271,6 +271,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("infinity"), "INF")
         self.assertEqual(transpile_gml_expression("NaN"), "NAN")
 
+    def test_transpiles_nan_as_numeric_runtime_value(self):
+        self.assertEqual(transpile_gml_expression("nan"), "NAN")
+        self.assertEqual(
+            transpile_gml_expression("NaN + 1"),
+            "GMRuntime.gml_add(NAN, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("real(NaN)"),
+            "GMRuntime.gml_real(NAN)",
+        )
+
     def test_preserves_infinity_equality_cases(self):
         self.assertEqual(
             transpile_gml_expression("infinity == infinity"),

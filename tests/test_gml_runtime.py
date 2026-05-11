@@ -41,6 +41,8 @@ RUNTIME_VALUE_PARITY_CASES = (
         "is_undefined(undefined)",
         "GMRuntime.is_undefined(GMRuntime.gml_undefined())",
     ),
+    RuntimeValueParityCase("nan", "NAN"),
+    RuntimeValueParityCase("real(NaN)", "GMRuntime.gml_real(NAN)"),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
     RuntimeValueParityCase("0.5", "0.5"),
     RuntimeValueParityCase("100_000_000", "100000000"),

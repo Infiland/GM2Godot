@@ -144,6 +144,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_int32",
             "is_int64",
             "is_ptr",
+            "is_handle",
             "is_array",
             "is_struct",
             "is_method",
@@ -214,15 +215,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var reference = null", GML_RUNTIME_SCRIPT)
         self.assertIn("var valid = false", GML_RUNTIME_SCRIPT)
         self.assertIn("var name = \"\"", GML_RUNTIME_SCRIPT)
+        self.assertIn("var type_id = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("var value = 0", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_handle_registry = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_handle_next_indices = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_register(kind, reference, name = \"\"):", GML_RUNTIME_SCRIPT)
         self.assertIn("var handle_index = _gml_next_handle_index(handle_kind)", GML_RUNTIME_SCRIPT)
-        self.assertIn("GMLHandle.new(handle_kind, handle_index, reference, str(name), true)", GML_RUNTIME_SCRIPT)
+        self.assertIn("GMLHandle.new(handle_kind, handle_index, reference, str(name), true, handle_type_id, encoded_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_get(kind, index):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_handle_registry.has(key):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLHandle.new(handle_kind, handle_index, null, \"\", false)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLHandle.new(handle_kind, handle_index, null, \"\", false, handle_type_id, encoded_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_resolve(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("if handle is GMLHandle and handle.valid:", GML_RUNTIME_SCRIPT)
         self.assertIn("return handle.reference", GML_RUNTIME_SCRIPT)
@@ -231,6 +234,29 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("_gml_handle_registry.erase(_gml_handle_key(handle.kind, handle.index))", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_next_handle_index(kind):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_handle_key(kind, index):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_encodes_typed_handle_values(self):
+        self.assertIn("const GML_HANDLE_TYPE_SHIFT = 32", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_HANDLE_INDEX_MASK = 0xffffffff", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_handle_type_ids = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_handle_next_type_id = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_handle(value):\n\treturn value is GMLHandle", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value is GMLInt64 or is_handle(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var handle_type_id = _gml_handle_type_id(handle_kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)", GML_RUNTIME_SCRIPT)
+        self.assertIn("type_id = int(handle_type_id)", GML_RUNTIME_SCRIPT)
+        self.assertIn("value = int(encoded_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_handle_type_id(kind):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_handle_type_ids[handle_kind] = _gml_handle_next_type_id", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_handle_next_type_id += 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_encode_handle_value(type_id, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "return (int(type_id) << GML_HANDLE_TYPE_SHIFT) | (int(index) & GML_HANDLE_INDEX_MASK)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("if is_handle(value):\n\t\treturn GMLInt64.new(value.index)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn float(value.index)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn int(value.value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

@@ -18,6 +18,8 @@ const GML_TYPE_METHOD = "method"
 const GML_TYPE_UNKNOWN = "unknown"
 const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
 const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
+const GML_HANDLE_TYPE_SHIFT = 32
+const GML_HANDLE_INDEX_MASK = 0xffffffff
 
 
 class GMLInt64:
@@ -45,13 +47,17 @@ class GMLHandle:
 	var reference = null
 	var valid = false
 	var name = ""
+	var type_id = 0
+	var value = 0
 
-	func _init(handle_kind = "", handle_index = -1, handle_reference = null, handle_name = "", is_valid = false):
+	func _init(handle_kind = "", handle_index = -1, handle_reference = null, handle_name = "", is_valid = false, handle_type_id = 0, encoded_value = 0):
 		kind = str(handle_kind)
 		index = int(handle_index)
 		reference = handle_reference
 		name = str(handle_name)
 		valid = bool(is_valid)
+		type_id = int(handle_type_id)
+		value = int(encoded_value)
 
 
 class GMLUndefined:
@@ -63,6 +69,8 @@ static var _gml_pointer_null = GMLPointer.new(0)
 static var _gml_pointer_invalid = GMLPointer.new(-1, true)
 static var _gml_handle_registry = {}
 static var _gml_handle_next_indices = {}
+static var _gml_handle_type_ids = {}
+static var _gml_handle_next_type_id = 1
 
 
 static func gml_undefined():
@@ -104,11 +112,15 @@ static func is_int32(value):
 
 
 static func is_int64(value):
-	return value is GMLInt64
+	return value is GMLInt64 or is_handle(value)
 
 
 static func is_ptr(value):
 	return value is GMLPointer
+
+
+static func is_handle(value):
+	return value is GMLHandle
 
 
 static func is_numeric(value):
@@ -152,7 +164,9 @@ static func gml_ptr(value):
 static func gml_handle_register(kind, reference, name = ""):
 	var handle_kind = str(kind)
 	var handle_index = _gml_next_handle_index(handle_kind)
-	var handle = GMLHandle.new(handle_kind, handle_index, reference, str(name), true)
+	var handle_type_id = _gml_handle_type_id(handle_kind)
+	var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)
+	var handle = GMLHandle.new(handle_kind, handle_index, reference, str(name), true, handle_type_id, encoded_value)
 	_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle
 	return handle
 
@@ -163,7 +177,9 @@ static func gml_handle_get(kind, index):
 	var key = _gml_handle_key(handle_kind, handle_index)
 	if _gml_handle_registry.has(key):
 		return _gml_handle_registry[key]
-	return GMLHandle.new(handle_kind, handle_index, null, "", false)
+	var handle_type_id = _gml_handle_type_id(handle_kind)
+	var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)
+	return GMLHandle.new(handle_kind, handle_index, null, "", false, handle_type_id, encoded_value)
 
 
 static func gml_handle_resolve(handle):
@@ -210,6 +226,8 @@ static func gml_real(value):
 
 
 static func gml_int64(value):
+	if is_handle(value):
+		return GMLInt64.new(value.index)
 	if is_int64(value):
 		return GMLInt64.new(value.value)
 	if is_ptr(value):
@@ -471,6 +489,8 @@ static func gml_is_nullish(value):
 static func _to_real(value):
 	if is_ptr(value):
 		return gml_error("GML pointer numeric conversion is not supported")
+	if is_handle(value):
+		return float(value.index)
 	if is_int64(value):
 		return float(value.value)
 	return float(value)
@@ -479,6 +499,8 @@ static func _to_real(value):
 static func _to_int64_value(value):
 	if is_ptr(value):
 		return gml_error("GML pointer bitwise conversion is not supported")
+	if is_handle(value):
+		return int(value.value)
 	if is_int64(value):
 		return int(value.value)
 	return int(value)
@@ -499,6 +521,18 @@ static func _gml_next_handle_index(kind):
 
 static func _gml_handle_key(kind, index):
 	return str(kind) + ":" + str(int(index))
+
+
+static func _gml_handle_type_id(kind):
+	var handle_kind = str(kind)
+	if not _gml_handle_type_ids.has(handle_kind):
+		_gml_handle_type_ids[handle_kind] = _gml_handle_next_type_id
+		_gml_handle_next_type_id += 1
+	return int(_gml_handle_type_ids[handle_kind])
+
+
+static func _gml_encode_handle_value(type_id, index):
+	return (int(type_id) << GML_HANDLE_TYPE_SHIFT) | (int(index) & GML_HANDLE_INDEX_MASK)
 
 
 static func _to_array_index(value):

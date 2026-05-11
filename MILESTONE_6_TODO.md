@@ -12,6 +12,7 @@ Current branch work to remember before redoing an issue:
 - `7d7551a` adds self/other with-target coverage and references #298.
 - `9ed26ee` parses and lowers `with` statements through target loops and references #227, #301, and #303.
 - `cb7a2a3` adds statement-level coverage for single with-target forms and references #228.
+- `8a8c358` adds focused NaN numeric type/equality coverage and references #422, #423, and #424.
 
 ## Working Order
 
@@ -48,9 +49,9 @@ Current branch work to remember before redoing an issue:
 - [x] #427 Data Types: Infinity - Preserve infinity equality (closed, parent #352, subissues 0/0)
 - [x] #426 Data Types: Infinity - Map infinity constant (closed, parent #352, subissues 0/0)
 - [ ] #425 Data Types: NaN - Produce NaN from invalid numeric results (open, parent #351, subissues 0/0) - branch-covered by `01245de`
-- [ ] #424 Data Types: NaN - Implement is_nan and typeof behavior (open, parent #351, subissues 0/0)
-- [ ] #423 Data Types: NaN - Preserve NaN inequality (open, parent #351, subissues 0/0)
-- [ ] #422 Data Types: NaN - Map NaN to numeric runtime value (open, parent #351, subissues 0/0)
+- [ ] #424 Data Types: NaN - Implement is_nan and typeof behavior (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
+- [ ] #423 Data Types: NaN - Preserve NaN inequality (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
+- [ ] #422 Data Types: NaN - Map NaN to numeric runtime value (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
 - [ ] #421 Data Types: Undefined - Avoid conflating undefined with uninitialized errors (open, parent #350, subissues 0/0)
 - [ ] #420 Data Types: Undefined - Implement undefined truthiness and conversion (open, parent #350, subissues 0/0)
 - [ ] #419 Data Types: Undefined - Implement undefined equality (open, parent #350, subissues 0/0)

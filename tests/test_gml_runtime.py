@@ -50,6 +50,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("3_141.59", "3141.59"),
     RuntimeValueParityCase("1.5 / 2", "GMRuntime.gml_div(1.5, 2)"),
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
+    RuntimeValueParityCase("0 / 0", "GMRuntime.gml_div(0, 0)"),
+    RuntimeValueParityCase("sqrt(-1)", "GMRuntime.gml_sqrt(-1)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
     RuntimeValueParityCase("0xDEAD_BEEF", "0xDEADBEEF"),
     RuntimeValueParityCase("$2c8e", "0x2c8e"),
@@ -98,6 +100,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_int_div",
             "gml_real",
             "gml_int64",
+            "gml_sqrt",
             "gml_add",
             "gml_sub",
             "gml_mul",
@@ -121,7 +124,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertNotIn("static func gml_bool(value:", GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_real_operations_as_float_helpers(self):
-        self.assertIn("return _to_real(left) / _to_real(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return NAN", GML_RUNTIME_SCRIPT)
+        self.assertIn("return INF if left_value > 0.0 else -INF", GML_RUNTIME_SCRIPT)
+        self.assertIn("return left_value / right_value", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sqrt(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)

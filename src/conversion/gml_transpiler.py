@@ -288,6 +288,7 @@ _RUNTIME_FUNCTIONS = {
     "is_string": "is_string",
     "is_undefined": "is_undefined",
     "real": "gml_real",
+    "sqrt": "gml_sqrt",
     "typeof": "gml_typeof",
     "string": "gml_string",
     "bool": "gml_bool",

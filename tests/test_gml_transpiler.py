@@ -237,6 +237,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_add(GMRuntime.gml_div(a, b), c)",
         )
 
+    def test_transpiles_invalid_numeric_results_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("0 / 0"),
+            "GMRuntime.gml_div(0, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("sqrt(-1)"),
+            "GMRuntime.gml_sqrt(-1)",
+        )
+
     def test_transpiles_integer_division_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("5 div 2"),

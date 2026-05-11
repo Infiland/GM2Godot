@@ -70,7 +70,13 @@ static func is_infinity(value):
 
 
 static func gml_div(left, right):
-	return _to_real(left) / _to_real(right)
+	var left_value = _to_real(left)
+	var right_value = _to_real(right)
+	if right_value == 0.0:
+		if left_value == 0.0:
+			return NAN
+		return INF if left_value > 0.0 else -INF
+	return left_value / right_value
 
 
 static func gml_int_div(left, right):
@@ -83,6 +89,13 @@ static func gml_real(value):
 
 static func gml_int64(value):
 	return GMLInt64.new(value)
+
+
+static func gml_sqrt(value):
+	var real_value = _to_real(value)
+	if real_value < 0.0:
+		return NAN
+	return sqrt(real_value)
 
 
 static func gml_add(left, right):

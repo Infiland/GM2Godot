@@ -595,6 +595,20 @@ static func gml_variable_instance_get(instance_value, member_name):
 	return gml_struct_get(resolved_instance, member_name)
 
 
+static func gml_variable_instance_exists(instance_value, member_name):
+	var resolved_instance = _gml_resolve_instance(instance_value)
+	if resolved_instance == null:
+		return false
+	return gml_struct_exists(resolved_instance, member_name)
+
+
+static func gml_variable_instance_set(instance_value, member_name, value):
+	var resolved_instance = _gml_resolve_instance(instance_value)
+	if resolved_instance == null:
+		return gml_undefined()
+	return gml_struct_set(resolved_instance, member_name, value)
+
+
 static func gml_variable_instance_get_names(instance_value):
 	var resolved_instance = _gml_resolve_instance(instance_value)
 	if resolved_instance == null:

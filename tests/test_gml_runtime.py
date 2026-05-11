@@ -215,6 +215,18 @@ RUNTIME_VALUE_PARITY_CASES = (
         'variable_instance_get(enemy, "hp")',
         'GMRuntime.gml_variable_instance_get(enemy, "hp")',
     ),
+    RuntimeValueParityCase(
+        'variable_instance_exists(enemy, "hp")',
+        'GMRuntime.gml_variable_instance_exists(enemy, "hp")',
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_set(enemy, "hp", 10)',
+        'GMRuntime.gml_variable_instance_set(enemy, "hp", 10)',
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_set(noone, "hp", 10)',
+        'GMRuntime.gml_variable_instance_set(GMRuntime.gml_instance_noone(), "hp", 10)',
+    ),
     RuntimeValueParityCase("global", "GMRuntime.gml_global_scope()"),
     RuntimeValueParityCase("global.score", 'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")'),
     RuntimeValueParityCase(
@@ -459,7 +471,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct_remove_from_hash",
             "gml_global_scope",
             "gml_variable_struct_get",
+            "gml_variable_instance_exists",
             "gml_variable_instance_get",
+            "gml_variable_instance_set",
             "gml_variable_instance_get_names",
             "gml_variable_instance_names_count",
             "gml_variable_global_exists",
@@ -907,6 +921,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_ds_map_set(map_value, key, value):", GML_RUNTIME_SCRIPT)
         self.assertIn("resolved_map[key] = value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("resolved_map.get(", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_instance_variable_helpers_resolve_instances_and_invalid_ids(self):
+        self.assertIn("static func gml_variable_instance_exists(instance_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_exists(resolved_instance, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_instance_set(instance_value, member_name, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_set(resolved_instance, member_name, value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if resolved_instance == null:\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_scope_is_a_shared_struct_for_instance_apis(self):
         self.assertIn("static var _gml_global_scope = {}", GML_RUNTIME_SCRIPT)

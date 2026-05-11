@@ -931,6 +931,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression('variable_instance_get(enemy, "hp")'),
             'GMRuntime.gml_variable_instance_get(enemy, "hp")',
         )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_exists(enemy, "hp")'),
+            'GMRuntime.gml_variable_instance_exists(enemy, "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_set(enemy, "hp", score + 1)'),
+            'GMRuntime.gml_variable_instance_set(enemy, "hp", GMRuntime.gml_add(score, 1))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_set(noone, "hp", 10)'),
+            'GMRuntime.gml_variable_instance_set(GMRuntime.gml_instance_noone(), "hp", 10)',
+        )
 
     def test_transpiles_global_keyword_to_shared_runtime_scope(self):
         self.assertEqual(transpile_gml_expression("global"), "GMRuntime.gml_global_scope()")

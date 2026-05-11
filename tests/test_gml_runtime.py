@@ -641,17 +641,31 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)
         self.assertIn("if handle.reference is Object and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_resolves_all_and_noone_as_with_targets(self):
-        self.assertIn("static func gml_with_targets(target):", GML_RUNTIME_SCRIPT)
+    def test_runtime_resolves_instance_keywords_as_with_targets(self):
+        self.assertIn("static func gml_with_targets(target, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_undefined(target):\n\t\treturn []", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:", GML_RUNTIME_SCRIPT)
-        self.assertIn("return _gml_instance_keyword_targets(target)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if keyword_index == GML_INSTANCE_ALL_INDEX:\n\t\t\treturn _gml_all_instance_targets()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if keyword_index == GML_INSTANCE_INVALID_INDEX:\n\t\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_keyword_targets(target, current_self, current_other)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, current_self, current_other)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("if keyword_targets != null:\n\t\t\treturn keyword_targets", GML_RUNTIME_SCRIPT)
         self.assertIn("return [resolved_instance]", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_instance_keyword_targets(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if handle.index == GML_INSTANCE_ALL_INDEX:\n\t\treturn _gml_all_instance_targets()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if handle.index == GML_INSTANCE_INVALID_INDEX:\n\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func _gml_instance_keyword_targets(handle, current_self = null, current_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "var keyword_targets = _gml_legacy_instance_keyword_targets(handle.index, current_self, current_other)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("static func _gml_legacy_instance_keyword_targets(keyword_index, current_self, current_other):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_SELF_INDEX:\n\t\treturn [] if current_self == null else [current_self]", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_OTHER_INDEX:\n\t\treturn [] if current_other == null else [current_other]", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_ALL_INDEX:\n\t\treturn _gml_all_instance_targets()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_INVALID_INDEX:\n\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("return null", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_all_instance_targets():", GML_RUNTIME_SCRIPT)
         self.assertIn("for handle in _gml_handle_registry.values():", GML_RUNTIME_SCRIPT)
         self.assertIn("if handle.kind == GML_INSTANCE_HANDLE_KIND and gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)

@@ -267,17 +267,16 @@ static func gml_instance_all():
 	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)
 
 
-static func gml_with_targets(target):
+static func gml_with_targets(target, current_self = null, current_other = null):
 	if is_undefined(target):
 		return []
 	if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:
-		return _gml_instance_keyword_targets(target)
+		return _gml_instance_keyword_targets(target, current_self, current_other)
 	if is_numeric(target):
 		var keyword_index = _to_int64_value(target)
-		if keyword_index == GML_INSTANCE_ALL_INDEX:
-			return _gml_all_instance_targets()
-		if keyword_index == GML_INSTANCE_INVALID_INDEX:
-			return []
+		var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, current_self, current_other)
+		if keyword_targets != null:
+			return keyword_targets
 	var resolved_instance = _gml_resolve_instance(target)
 	if resolved_instance == null:
 		return []
@@ -1127,15 +1126,26 @@ static func _gml_invalid_handle_index(kind):
 	return GML_INSTANCE_INVALID_INDEX if str(kind) == GML_INSTANCE_HANDLE_KIND else GML_HANDLE_INVALID_INDEX
 
 
-static func _gml_instance_keyword_targets(handle):
-	if handle.index == GML_INSTANCE_ALL_INDEX:
-		return _gml_all_instance_targets()
-	if handle.index == GML_INSTANCE_INVALID_INDEX:
-		return []
+static func _gml_instance_keyword_targets(handle, current_self = null, current_other = null):
+	var keyword_targets = _gml_legacy_instance_keyword_targets(handle.index, current_self, current_other)
+	if keyword_targets != null:
+		return keyword_targets
 	var resolved_instance = gml_handle_resolve(handle)
 	if resolved_instance == null:
 		return []
 	return [resolved_instance]
+
+
+static func _gml_legacy_instance_keyword_targets(keyword_index, current_self, current_other):
+	if keyword_index == GML_INSTANCE_SELF_INDEX:
+		return [] if current_self == null else [current_self]
+	if keyword_index == GML_INSTANCE_OTHER_INDEX:
+		return [] if current_other == null else [current_other]
+	if keyword_index == GML_INSTANCE_ALL_INDEX:
+		return _gml_all_instance_targets()
+	if keyword_index == GML_INSTANCE_INVALID_INDEX:
+		return []
+	return null
 
 
 static func _gml_all_instance_targets():

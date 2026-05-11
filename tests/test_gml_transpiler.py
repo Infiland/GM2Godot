@@ -1325,6 +1325,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = 1",
         )
 
+    def test_with_lowers_single_targets_through_runtime(self):
+        cases = (
+            (
+                "with (self) score = 1;",
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(self, self, other):\n"
+                "\tscore = 1",
+            ),
+            (
+                "with (other) score = 1;",
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(other, self, other):\n"
+                "\tscore = 1",
+            ),
+            (
+                "with (global) score = 1;",
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_global_scope(), self, other):\n"
+                "\tscore = 1",
+            ),
+            (
+                "with ({hp: 10}) score = 1;",
+                'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_struct({"hp": 10}), self, other):\n'
+                "\tscore = 1",
+            ),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
     def test_with_allows_break_and_continue_as_loop_control(self):
         self.assertEqual(
             transpile_gml_code(

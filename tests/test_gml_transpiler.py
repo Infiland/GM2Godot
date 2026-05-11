@@ -544,6 +544,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
 
+    def test_transpiles_break_and_continue_inside_repeat(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "repeat (count) begin if should_skip begin continue; end if done begin break; end score += 1; end",
+                indent="",
+            ),
+            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(count)):\n"
+            "\tif GMRuntime.gml_bool(should_skip):\n"
+            "\t\tcontinue\n"
+            "\tif GMRuntime.gml_bool(done):\n"
+            "\t\tbreak\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

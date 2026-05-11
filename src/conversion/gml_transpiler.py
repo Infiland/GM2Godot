@@ -1170,6 +1170,8 @@ def _transpile_statement(
             raise GMLTranspileError("break used outside a loop")
         return ["break"]
     if statement == "continue":
+        if loop_depth <= 0:
+            raise GMLTranspileError("continue used outside a loop")
         return ["continue"]
     if statement == "exit":
         return ["return"]

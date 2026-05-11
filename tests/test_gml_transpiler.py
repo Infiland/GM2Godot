@@ -521,6 +521,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code("break;", indent="")
 
+    def test_rejects_continue_outside_loop(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("continue;", indent="")
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

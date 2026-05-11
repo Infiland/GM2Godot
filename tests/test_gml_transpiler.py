@@ -729,6 +729,14 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(GMRuntime.gml_array_get(grid, position.x), position.y, value)",
         )
 
+    def test_array_assignment_aliases_preserve_reference_mutation(self):
+        self.assertEqual(
+            transpile_gml_code("items = [1, 2]; alias = items; alias[0] = 9;", indent=""),
+            "items = [1, 2]\n"
+            "alias = items\n"
+            "GMRuntime.gml_array_set(alias, 0, 9)",
+        )
+
     def test_transpiles_newline_separated_statements(self):
         self.assertEqual(
             transpile_gml_code("superSpeed = 0\nfaster = false;", indent=""),

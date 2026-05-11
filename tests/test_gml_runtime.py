@@ -154,6 +154,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if resolved_index >= array_value.size():", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML array index out of bounds")', GML_RUNTIME_SCRIPT)
 
+    def test_runtime_array_set_mutates_reference_without_copying(self):
+        self.assertIn("array_value[resolved_index] = value", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
+
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)

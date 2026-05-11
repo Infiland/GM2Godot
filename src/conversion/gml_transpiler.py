@@ -354,6 +354,7 @@ _OPERATOR_REPLACEMENTS = {
 }
 
 _NAME_REPLACEMENTS = {
+    "global": "GMRuntime.gml_global_scope()",
     "infinity": "INF",
     "NaN": "NAN",
     "nan": "NAN",
@@ -443,6 +444,8 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
     "ref_create": "gml_ref_create",
     "variable_clone": "gml_variable_clone",
     "variable_instance_get": "gml_variable_instance_get",
+    "variable_instance_get_names": "gml_variable_instance_get_names",
+    "variable_instance_names_count": "gml_variable_instance_names_count",
     "variable_struct_get": "gml_variable_struct_get",
 }
 

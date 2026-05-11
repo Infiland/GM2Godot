@@ -932,6 +932,29 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_instance_get(enemy, "hp")',
         )
 
+    def test_transpiles_global_keyword_to_shared_runtime_scope(self):
+        self.assertEqual(transpile_gml_expression("global"), "GMRuntime.gml_global_scope()")
+        self.assertEqual(
+            transpile_gml_expression("global.score"),
+            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")',
+        )
+        self.assertEqual(
+            transpile_gml_code("global.score = 10", indent=""),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "score", 10)',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_get(global, "score")'),
+            'GMRuntime.gml_variable_instance_get(GMRuntime.gml_global_scope(), "score")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_instance_get_names(global)"),
+            "GMRuntime.gml_variable_instance_get_names(GMRuntime.gml_global_scope())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_instance_names_count(global)"),
+            "GMRuntime.gml_variable_instance_names_count(GMRuntime.gml_global_scope())",
+        )
+
     def test_transpiles_ds_map_missing_value_apis_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression('ds_map_find_value(inventory, "food")'),

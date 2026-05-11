@@ -104,6 +104,7 @@ static var _gml_handle_next_type_id = 1
 static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_variable_hash_names = {}
+static var _gml_global_scope = {}
 
 
 static func gml_undefined():
@@ -116,6 +117,10 @@ static func gml_pointer_null():
 
 static func gml_pointer_invalid():
 	return _gml_pointer_invalid
+
+
+static func gml_global_scope():
+	return _gml_global_scope
 
 
 static func is_undefined(value):
@@ -588,6 +593,20 @@ static func gml_variable_instance_get(instance_value, member_name):
 	if resolved_instance == null:
 		return gml_undefined()
 	return gml_struct_get(resolved_instance, member_name)
+
+
+static func gml_variable_instance_get_names(instance_value):
+	var resolved_instance = _gml_resolve_instance(instance_value)
+	if resolved_instance == null:
+		return []
+	return gml_struct_get_names(resolved_instance)
+
+
+static func gml_variable_instance_names_count(instance_value):
+	var resolved_instance = _gml_resolve_instance(instance_value)
+	if resolved_instance == null:
+		return -1
+	return gml_struct_names_count(resolved_instance)
 
 
 static func gml_ds_map_find_value(map_value, key):

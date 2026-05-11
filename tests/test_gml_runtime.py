@@ -165,6 +165,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("nan", "NAN"),
     RuntimeValueParityCase("real(NaN)", "GMRuntime.gml_real(NAN)"),
+    RuntimeValueParityCase("is_numeric(NaN)", "GMRuntime.is_numeric(NAN)"),
+    RuntimeValueParityCase("is_real(NaN)", "GMRuntime.is_real(NAN)"),
     RuntimeValueParityCase('real("0x00F")', 'GMRuntime.gml_real("0x00F")'),
     RuntimeValueParityCase(
         'real(handle_parse("ref ds_list 1"))',
@@ -931,6 +933,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("for index in range(left.size()):", GML_RUNTIME_SCRIPT)
         self.assertIn("if not _gml_values_equal_for_array(left[index], right[index]):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_values_equal_for_array(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_eq(left, right)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_preserves_nan_numeric_type_and_inequality(self):
+        self.assertIn("static func is_nan_value(value):\n\treturn is_number(value) and is_nan(float(value))", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value_type == TYPE_INT or value_type == TYPE_FLOAT:\n\t\treturn GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not _gml_values_equal_for_array(left[index], right[index]):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_array_deletion_uses_undefined_without_registries(self):

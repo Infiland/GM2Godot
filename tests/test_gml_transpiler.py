@@ -316,6 +316,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_add(NAN, 1)",
         )
         self.assertEqual(
+            transpile_gml_expression("is_numeric(NaN)"),
+            "GMRuntime.is_numeric(NAN)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_real(NaN)"),
+            "GMRuntime.is_real(NAN)",
+        )
+        self.assertEqual(
             transpile_gml_expression("real(NaN)"),
             "GMRuntime.gml_real(NAN)",
         )

@@ -399,6 +399,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_infinity(INF)",
         )
         self.assertEqual(
+            transpile_gml_expression("is_infinity(-infinity)"),
+            "GMRuntime.is_infinity(-INF)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_infinity(1)"),
+            "GMRuntime.is_infinity(1)",
+        )
+        self.assertEqual(
             transpile_gml_expression("typeof(infinity)"),
             "GMRuntime.gml_typeof(INF)",
         )
@@ -515,6 +523,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("is_nan(0)"),
             "GMRuntime.is_nan_value(0)",
         )
+        self.assertEqual(
+            transpile_gml_expression("is_nan(int64(0))"),
+            "GMRuntime.is_nan_value(GMRuntime.gml_int64(0))",
+        )
 
     def test_transpiles_boolean_value_helpers(self):
         self.assertEqual(transpile_gml_expression("true"), "true")
@@ -547,6 +559,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(transpile_gml_expression("is_real(score)"), "GMRuntime.is_real(score)")
         self.assertEqual(transpile_gml_expression("is_int32(score)"), "GMRuntime.is_int32(score)")
+        self.assertEqual(transpile_gml_expression("is_int32(2147483647)"), "GMRuntime.is_int32(2147483647)")
+        self.assertEqual(transpile_gml_expression("is_int32(2147483648)"), "GMRuntime.is_int32(2147483648)")
         self.assertEqual(
             transpile_gml_expression("is_numeric(int64(score))"),
             "GMRuntime.is_numeric(GMRuntime.gml_int64(score))",
@@ -554,6 +568,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("is_int64(int64(score))"),
             "GMRuntime.is_int64(GMRuntime.gml_int64(score))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_int64(int64(2147483648))"),
+            "GMRuntime.is_int64(GMRuntime.gml_int64(2147483648))",
         )
         self.assertEqual(
             transpile_gml_expression("int64(score) + int64(delta)"),

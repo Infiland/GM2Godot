@@ -53,7 +53,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_real(score)", "GMRuntime.is_real(score)"),
     RuntimeValueParityCase("is_numeric(score)", "GMRuntime.is_numeric(score)"),
     RuntimeValueParityCase("is_int32(score)", "GMRuntime.is_int32(score)"),
+    RuntimeValueParityCase("is_int32(2147483647)", "GMRuntime.is_int32(2147483647)"),
+    RuntimeValueParityCase("is_int32(2147483648)", "GMRuntime.is_int32(2147483648)"),
     RuntimeValueParityCase("is_int64(score)", "GMRuntime.is_int64(score)"),
+    RuntimeValueParityCase("is_int64(int64(2147483648))", "GMRuntime.is_int64(GMRuntime.gml_int64(2147483648))"),
     RuntimeValueParityCase("is_array(items)", "GMRuntime.is_array(items)"),
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
@@ -98,6 +101,9 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("typeof(NaN)", "GMRuntime.gml_typeof(NAN)"),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
+    RuntimeValueParityCase("is_nan(int64(0))", "GMRuntime.is_nan_value(GMRuntime.gml_int64(0))"),
+    RuntimeValueParityCase("is_infinity(-infinity)", "GMRuntime.is_infinity(-INF)"),
+    RuntimeValueParityCase("is_infinity(1)", "GMRuntime.is_infinity(1)"),
     RuntimeValueParityCase("0.5", "0.5"),
     RuntimeValueParityCase("100_000_000", "100000000"),
     RuntimeValueParityCase("3_141.59", "3141.59"),
@@ -798,6 +804,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "return typeof(value) == TYPE_INT and int(value) >= -2147483648 and int(value) <= 2147483647",
             GML_RUNTIME_SCRIPT,
         )
+
+    def test_runtime_special_numeric_predicates_only_accept_real_numbers(self):
+        self.assertIn("static func is_nan_value(value):\n\treturn is_number(value) and is_nan(float(value))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_infinity(value):\n\treturn is_number(value) and is_inf(float(value))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_bitwise_helpers_return_int64_values(self):
         self.assertIn("static func gml_bit_or(left, right):", GML_RUNTIME_SCRIPT)

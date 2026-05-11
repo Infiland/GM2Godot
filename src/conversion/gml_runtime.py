@@ -107,6 +107,16 @@ static var _gml_static_registry = []
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {}
 static var _gml_builtin_arrays = {}
+static var _gml_builtin_globals = {
+	"argument": [],
+	"argument_count": 0,
+	"async_load": {},
+	"event_data": {},
+	"instance_count": 0,
+	"room": _gml_undefined,
+	"room_height": 0,
+	"room_width": 0
+}
 
 
 static func gml_undefined():
@@ -133,6 +143,13 @@ static func gml_builtin_array(name):
 			values.append(gml_undefined())
 		_gml_builtin_arrays[key] = values
 	return _gml_builtin_arrays[key]
+
+
+static func gml_builtin_global(name):
+	var key = str(name)
+	if _gml_builtin_globals.has(key):
+		return _gml_builtin_globals[key]
+	return gml_undefined()
 
 
 static func is_undefined(value):

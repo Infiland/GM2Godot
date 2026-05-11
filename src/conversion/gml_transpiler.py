@@ -364,6 +364,17 @@ _NAME_REPLACEMENTS = {
     "undefined": "GMRuntime.gml_undefined()",
 }
 
+_BUILTIN_GLOBAL_VARIABLES = frozenset({
+    "argument",
+    "argument_count",
+    "async_load",
+    "event_data",
+    "instance_count",
+    "room",
+    "room_height",
+    "room_width",
+})
+
 _BLOCK_DELIMITER_REPLACEMENTS = {
     "begin": "{",
     "end": "}",
@@ -414,6 +425,7 @@ _READ_ONLY_BUILTIN_VARIABLES = frozenset({
 _BUILTIN_INSTANCE_VARIABLES = frozenset({
     *_INSTANCE_NAME_REPLACEMENTS,
     *_BUILTIN_ARRAY_VARIABLES,
+    *_BUILTIN_GLOBAL_VARIABLES,
     *_READ_ONLY_BUILTIN_VARIABLES,
     "sprite_index",
     "image_index",
@@ -1910,6 +1922,8 @@ def _emit_expression(
             value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
             if value in _BUILTIN_ARRAY_VARIABLES:
                 return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
+            if value in _BUILTIN_GLOBAL_VARIABLES:
+                return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
         value = _sanitize_gdscript_identifier(value)
         return value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Grouped):

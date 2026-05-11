@@ -1128,6 +1128,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "var view_xview = [1]\nvalue = GMRuntime.gml_array_get(view_xview, 0)",
         )
 
+    def test_transpiles_builtin_room_and_global_variables_through_runtime(self):
+        cases = (
+            ("room", 'GMRuntime.gml_builtin_global("room")'),
+            ("room_width", 'GMRuntime.gml_builtin_global("room_width")'),
+            ("room_height", 'GMRuntime.gml_builtin_global("room_height")'),
+            ("instance_count", 'GMRuntime.gml_builtin_global("instance_count")'),
+            ("async_load", 'GMRuntime.gml_builtin_global("async_load")'),
+            ("event_data", 'GMRuntime.gml_builtin_global("event_data")'),
+            ("argument", 'GMRuntime.gml_builtin_global("argument")'),
+            ("argument_count", 'GMRuntime.gml_builtin_global("argument_count")'),
+            ("view_xport[1]", 'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xport"), 1)'),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+        self.assertEqual(transpile_gml_code("var room = 1; value = room", indent=""), "var room = 1\nvalue = room")
+
     def test_rejects_writes_to_read_only_builtin_variables(self):
         for source in (
             "bbox_left = 0",

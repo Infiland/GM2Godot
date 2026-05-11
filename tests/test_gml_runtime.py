@@ -197,6 +197,14 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
+    RuntimeValueParityCase("room", 'GMRuntime.gml_builtin_global("room")'),
+    RuntimeValueParityCase("room_width", 'GMRuntime.gml_builtin_global("room_width")'),
+    RuntimeValueParityCase("room_height", 'GMRuntime.gml_builtin_global("room_height")'),
+    RuntimeValueParityCase("instance_count", 'GMRuntime.gml_builtin_global("instance_count")'),
+    RuntimeValueParityCase("async_load", 'GMRuntime.gml_builtin_global("async_load")'),
+    RuntimeValueParityCase("event_data", 'GMRuntime.gml_builtin_global("event_data")'),
+    RuntimeValueParityCase("argument", 'GMRuntime.gml_builtin_global("argument")'),
+    RuntimeValueParityCase("argument_count", 'GMRuntime.gml_builtin_global("argument_count")'),
     RuntimeValueParityCase(
         "view_xview[0]",
         'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xview"), 0)',
@@ -408,6 +416,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_pointer_null",
             "gml_pointer_invalid",
             "gml_builtin_array",
+            "gml_builtin_global",
             "is_undefined",
             "is_bool",
             "is_string",
@@ -951,6 +960,21 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("values.append(gml_undefined())", GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_builtin_arrays[key] = values", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_builtin_arrays[key]", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_builtin_globals_have_shared_defaults(self):
+        self.assertIn("static var _gml_builtin_globals = {", GML_RUNTIME_SCRIPT)
+        self.assertIn('"room": _gml_undefined,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"room_width": 0', GML_RUNTIME_SCRIPT)
+        self.assertIn('"room_height": 0,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"instance_count": 0,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"async_load": {},', GML_RUNTIME_SCRIPT)
+        self.assertIn('"event_data": {},', GML_RUNTIME_SCRIPT)
+        self.assertIn('"argument": [],', GML_RUNTIME_SCRIPT)
+        self.assertIn('"argument_count": 0,', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_builtin_global(name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_builtin_globals.has(key):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_builtin_globals[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)

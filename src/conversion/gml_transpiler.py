@@ -40,6 +40,11 @@ class _Name:
 
 
 @dataclass(frozen=True)
+class _NameOf:
+    value: str
+
+
+@dataclass(frozen=True)
 class _Literal:
     value: str
 
@@ -135,6 +140,7 @@ class _Grouped:
 
 _Expression: TypeAlias = (
     _Name
+    | _NameOf
     | _Literal
     | _StringLiteral
     | _NumberLiteral
@@ -610,6 +616,8 @@ class _ExpressionParser:
             return _NumberLiteral(token.value, _is_float_like_number(token.value))
         if token.kind == "STRING":
             return _StringLiteral(token.value)
+        if token.kind == "IDENT" and token.value == "nameof":
+            return self._parse_nameof_expression()
         if token.kind == "IDENT" and token.value == "function":
             return self._parse_function_literal()
         if token.kind == "IDENT":
@@ -646,6 +654,12 @@ class _ExpressionParser:
             self._consume(")")
             return _Grouped(expr)
         raise GMLTranspileError(f"Expected expression, got: {token.value}")
+
+    def _parse_nameof_expression(self) -> _Expression:
+        self._consume("(")
+        argument = self._parse_expression()
+        self._consume(")")
+        return _NameOf(_nameof_argument_name(argument))
 
     def _parse_function_literal(self) -> _Expression:
         name = None
@@ -1733,6 +1747,17 @@ def _unwrap_grouped_expression(expr: _Expression) -> _Expression:
     return expr
 
 
+def _nameof_argument_name(expr: _Expression) -> str:
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    if not isinstance(unwrapped_expr, _Call):
+        raise GMLTranspileError("nameof requires function-call syntax")
+
+    callee = _unwrap_grouped_expression(unwrapped_expr.callee)
+    if isinstance(callee, _Name):
+        return callee.value
+    raise GMLTranspileError("nameof function-call syntax requires a named callee")
+
+
 def _is_enum_reference(expr: _Expression, enum_names: Iterable[str]) -> bool:
     unwrapped_expr = _unwrap_grouped_expression(expr)
     return isinstance(unwrapped_expr, _Name) and unwrapped_expr.value in enum_names
@@ -1800,6 +1825,8 @@ def _emit_expression(
     local_names = _normalize_local_names(local_names)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
         return expr.value, _PRIMARY_PRECEDENCE
+    if isinstance(expr, _NameOf):
+        return json.dumps(expr.value), _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
         value = expr.value
         is_local = value in local_names

@@ -612,6 +612,23 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertEqual(transpile_gml_expression(source), expected)
 
+    def test_transpiles_nameof_function_call_syntax_without_emitting_call(self):
+        self.assertEqual(transpile_gml_expression("nameof(ds_list_create())"), '"ds_list_create"')
+        self.assertEqual(
+            transpile_gml_expression("nameof(ds_list_create(expensive()))"),
+            '"ds_list_create"',
+        )
+        self.assertEqual(
+            transpile_gml_code("name = nameof(ds_list_create(expensive()));", indent=""),
+            'name = "ds_list_create"',
+        )
+
+    def test_rejects_nameof_without_named_function_call_syntax(self):
+        with self.assertRaisesRegex(GMLTranspileError, "function-call syntax"):
+            transpile_gml_expression("nameof(score)")
+        with self.assertRaisesRegex(GMLTranspileError, "named callee"):
+            transpile_gml_expression("nameof(factory()())")
+
     def test_transpiles_primitive_type_predicates(self):
         self.assertEqual(transpile_gml_expression("is_array(items)"), "GMRuntime.is_array(items)")
         self.assertEqual(transpile_gml_expression("is_struct(mystruct)"), "GMRuntime.is_struct(mystruct)")

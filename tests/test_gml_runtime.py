@@ -62,6 +62,15 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
+    RuntimeValueParityCase("method_call(callback)", "GMRuntime.gml_method_call(callback)"),
+    RuntimeValueParityCase(
+        "method_call(callback, [1, 2, 3], 1, 2)",
+        "GMRuntime.gml_method_call(callback, [1, 2, 3], 1, 2)",
+    ),
+    RuntimeValueParityCase(
+        "method_call(callback, [1, 2, 3], -1, -2)",
+        "GMRuntime.gml_method_call(callback, [1, 2, 3], -1, -2)",
+    ),
     RuntimeValueParityCase('handle_parse("ref ds_list 1")', 'GMRuntime.gml_handle_parse("ref ds_list 1")'),
     RuntimeValueParityCase('ref_create(self, "text")', 'GMRuntime.gml_ref_create(self, "text")'),
     RuntimeValueParityCase(
@@ -322,6 +331,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_resolve_for_kind",
             "gml_handle_resolve",
             "gml_handle_invalidate",
+            "gml_method_call",
             "gml_repeat_count",
             "gml_sqrt",
             "gml_add",
@@ -514,6 +524,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return gml_handle_invalid(handle_kind)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_resolve_for_kind(kind, value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_handle_resolve(gml_handle_from_value(kind, value))", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_method_call_slices_array_arguments(self):
+        self.assertIn("static func gml_method_call(method, array_args = null, offset = 0, num_args = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML method_call", method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("var call_args = _gml_method_call_args(array_args, offset, num_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return method.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_method_call_args(array_args, offset, num_args):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var source = [] if array_args == null else array_args", GML_RUNTIME_SCRIPT)
+        self.assertIn("if typeof(source) != TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if start < 0:\n\t\tstart = source_size + start", GML_RUNTIME_SCRIPT)
+        self.assertIn("var count = source_size - start if num_args == null else int(_to_real(num_args))", GML_RUNTIME_SCRIPT)
+        self.assertIn("var step = -1 if count < 0 else 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_error(\"GML method_call argument range out of bounds\")", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

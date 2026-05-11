@@ -276,6 +276,41 @@ static func gml_handle_invalidate(handle):
 	return handle
 
 
+static func gml_method_call(method, array_args = null, offset = 0, num_args = null):
+	if not is_method(method):
+		return gml_unsupported_type_error("GML method_call", method)
+	var call_args = _gml_method_call_args(array_args, offset, num_args)
+	if is_undefined(call_args):
+		return call_args
+	return method.callv(call_args)
+
+
+static func _gml_method_call_args(array_args, offset, num_args):
+	var source = [] if array_args == null else array_args
+	if typeof(source) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML method_call arguments", source)
+	var source_size = source.size()
+	var start = int(_to_real(offset))
+	if start < 0:
+		start = source_size + start
+	var count = source_size - start if num_args == null else int(_to_real(num_args))
+	if count == 0:
+		return []
+	if source_size == 0 or start < 0 or start >= source_size:
+		return gml_error("GML method_call offset out of range")
+	var step = -1 if count < 0 else 1
+	var remaining = abs(count)
+	var args = []
+	var index = start
+	while remaining > 0:
+		if index < 0 or index >= source_size:
+			return gml_error("GML method_call argument range out of bounds")
+		args.append(source[index])
+		index += step
+		remaining -= 1
+	return args
+
+
 static func gml_div(left, right):
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)

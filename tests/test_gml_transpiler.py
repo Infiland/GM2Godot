@@ -453,6 +453,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_real_number_conversion_helpers(self):
         self.assertEqual(transpile_gml_expression("real(score)"), "GMRuntime.gml_real(score)")
         self.assertEqual(transpile_gml_expression("int64(score)"), "GMRuntime.gml_int64(score)")
+        self.assertEqual(transpile_gml_expression('int64("42")'), 'GMRuntime.gml_int64("42")')
+        self.assertEqual(
+            transpile_gml_expression("int64(pointer_null)"),
+            "GMRuntime.gml_int64(GMRuntime.gml_pointer_null())",
+        )
         self.assertEqual(transpile_gml_expression("is_real(score)"), "GMRuntime.is_real(score)")
         self.assertEqual(transpile_gml_expression("is_int32(score)"), "GMRuntime.is_int32(score)")
         self.assertEqual(

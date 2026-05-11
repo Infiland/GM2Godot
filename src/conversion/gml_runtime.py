@@ -163,7 +163,13 @@ static func gml_real(value):
 
 
 static func gml_int64(value):
-	return GMLInt64.new(value)
+	if is_int64(value):
+		return GMLInt64.new(value.value)
+	if is_ptr(value):
+		return GMLInt64.new(value.value)
+	if is_number(value) or is_string(value):
+		return GMLInt64.new(value)
+	return gml_error("GML int64 conversion requires a real, string, int64, int32, or pointer")
 
 
 static func gml_repeat_count(value):

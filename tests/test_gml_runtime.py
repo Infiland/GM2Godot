@@ -36,6 +36,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('is_string("abc")', 'GMRuntime.is_string("abc")'),
     RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
     RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
+    RuntimeValueParityCase('int64("42")', 'GMRuntime.gml_int64("42")'),
+    RuntimeValueParityCase("int64(pointer_null)", "GMRuntime.gml_int64(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("typeof(int64(score))", "GMRuntime.gml_typeof(GMRuntime.gml_int64(score))"),
     RuntimeValueParityCase("string(int64(score))", "GMRuntime.gml_string(GMRuntime.gml_int64(score))"),
     RuntimeValueParityCase("bool(int64(score))", "GMRuntime.gml_bool(GMRuntime.gml_int64(score))"),
@@ -344,6 +346,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_converts_supported_int64_inputs(self):
+        self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_int64(value):\n\t\treturn GMLInt64.new(value.value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_ptr(value):\n\t\treturn GMLInt64.new(value.value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_number(value) or is_string(value):\n\t\treturn GMLInt64.new(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_error("GML int64 conversion requires a real, string, int64, int32, or pointer")',
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_preserves_int64_arithmetic_results(self):
         self.assertIn("static func _returns_int64_arithmetic_result(left, right):", GML_RUNTIME_SCRIPT)

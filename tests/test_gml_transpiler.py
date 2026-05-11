@@ -717,6 +717,19 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_ds_map_set(inventory, "food", amount)',
         )
 
+    def test_any_values_pass_through_calls_without_lossy_conversion(self):
+        self.assertEqual(
+            transpile_gml_expression('callback([1, "x"], {value: undefined})'),
+            'callback([1, "x"], GMRuntime.gml_struct({"value": GMRuntime.gml_undefined()}))',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                'callback(ds_map_find_value(inventory, "food"), variable_struct_get(mystruct, "item"))'
+            ),
+            'callback(GMRuntime.gml_ds_map_find_value(inventory, "food"), '
+            'GMRuntime.gml_variable_struct_get(mystruct, "item"))',
+        )
+
     def test_transpiles_struct_name_enumeration_functions_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("struct_get_names(mystruct)"),

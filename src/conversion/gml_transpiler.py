@@ -1558,6 +1558,14 @@ def _transpile_statement(
     if statement == "exit":
         return ["return"]
 
+    if statement.startswith("delete "):
+        target_source = statement[7:].strip()
+        target_expr = _parse_gml_expression(target_source)
+        if not isinstance(target_expr, _Name):
+            raise GMLTranspileError("delete can only be used with variables")
+        target = _emit_expression(target_expr, local_names)[0]
+        return [f"{target} = GMRuntime.gml_undefined()"]
+
     if statement.startswith("var "):
         return _transpile_var_statement(statement[4:].strip(), local_names)
 

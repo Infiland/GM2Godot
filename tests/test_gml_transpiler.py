@@ -541,6 +541,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 1\nreturn\nscore = 2",
         )
 
+    def test_transpiles_delete_variable_operator(self):
+        self.assertEqual(
+            transpile_gml_code("delete mystruct;", indent=""),
+            "mystruct = GMRuntime.gml_undefined()",
+        )
+
     def test_transpiles_while_blocks(self):
         self.assertEqual(
             transpile_gml_code("while score > 0 begin score -= 1; end", indent=""),

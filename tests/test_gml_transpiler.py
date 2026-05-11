@@ -1044,6 +1044,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(alias, 0, 9)",
         )
 
+    def test_struct_assignment_aliases_preserve_reference_mutation(self):
+        self.assertEqual(
+            transpile_gml_code("mystruct = {a: 1}; alias = mystruct; alias.a = 2; value = mystruct.a;", indent=""),
+            'mystruct = GMRuntime.gml_struct({"a": 1})\n'
+            "alias = mystruct\n"
+            'GMRuntime.gml_struct_set(alias, "a", 2)\n'
+            'value = GMRuntime.gml_struct_get(mystruct, "a")',
+        )
+
+    def test_struct_function_arguments_pass_reference_without_clone(self):
+        self.assertEqual(
+            transpile_gml_code("mystruct = {a: 1}; mutate_struct(mystruct); value = mystruct.a;", indent=""),
+            'mystruct = GMRuntime.gml_struct({"a": 1})\n'
+            "mutate_struct(mystruct)\n"
+            'value = GMRuntime.gml_struct_get(mystruct, "a")',
+        )
+
     def test_array_assignment_to_undefined_releases_reference(self):
         self.assertEqual(
             transpile_gml_code("items = [1, 2]; items = undefined;", indent=""),

@@ -517,6 +517,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tcount = GMRuntime.gml_add(count, 1)",
         )
 
+    def test_rejects_break_outside_loop(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("break;", indent="")
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

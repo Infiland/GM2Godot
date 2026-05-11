@@ -478,11 +478,13 @@ class _StatementParser:
         tokens: list[_Token],
         local_names: Iterable[str] | None = None,
         instance_variables: MutableSet[str] | None = None,
+        loop_depth: int = 0,
     ) -> None:
         self.tokens = tokens
         self.position = 0
         self.local_names = set(local_names or [])
         self.instance_variables = instance_variables
+        self.loop_depth = loop_depth
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -510,6 +512,7 @@ class _StatementParser:
             _tokens_to_source(statement_tokens),
             self.local_names,
             self.instance_variables,
+            loop_depth=self.loop_depth,
         )
 
     def _parse_if_statement(self) -> list[str]:
@@ -549,7 +552,11 @@ class _StatementParser:
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
         )
-        body_lines = self._parse_body()
+        self.loop_depth += 1
+        try:
+            body_lines = self._parse_body()
+        finally:
+            self.loop_depth -= 1
         lines = [f"while {condition}:"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
@@ -1146,6 +1153,7 @@ def _transpile_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
     instance_variables: MutableSet[str] | None = None,
+    loop_depth: int = 0,
 ) -> list[str]:
     if not statement:
         return []
@@ -1158,6 +1166,8 @@ def _transpile_statement(
     if statement.startswith("return "):
         return [f"return {transpile_gml_expression(statement[7:].strip(), local_names)}"]
     if statement == "break":
+        if loop_depth <= 0:
+            raise GMLTranspileError("break used outside a loop")
         return ["break"]
     if statement == "continue":
         return ["continue"]

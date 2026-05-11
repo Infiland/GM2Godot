@@ -1795,6 +1795,7 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
+    bind_function_literals: bool = True,
 ) -> tuple[str, int]:
     local_names = _normalize_local_names(local_names)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
@@ -1838,18 +1839,13 @@ def _emit_expression(
         elements = ", ".join(_emit_expression(element, local_names)[0] for element in expr.elements)
         return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _FunctionLiteral):
-        name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
-        parameter_names = [parameter.name for parameter in expr.parameters]
-        parameters = ", ".join(
-            f"{_sanitize_gdscript_identifier(parameter.name)} = null"
-            for parameter in expr.parameters
-        )
-        default_lines = _emit_function_parameter_default_lines(expr.parameters, parameter_names)
-        body = "; ".join([*default_lines, *expr.body_lines])
-        return f"func{name}({parameters}): {body}", _PRIMARY_PRECEDENCE
+        function_literal = _emit_function_literal(expr, local_names)
+        if bind_function_literals:
+            return f"GMRuntime.gml_method(self, {function_literal})", _POSTFIX_PRECEDENCE
+        return function_literal, _PRIMARY_PRECEDENCE
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
-            f"{json.dumps(field_name)}: {_emit_expression(field_value, local_names)[0]}"
+            _emit_struct_field(field_name, field_value, local_names)
             for field_name, field_value in expr.fields
         )
         return f"GMRuntime.gml_struct({{{fields}}})", _POSTFIX_PRECEDENCE
@@ -1874,6 +1870,28 @@ def _emit_expression(
 
 def _uses_direct_member_access(expr: _Member) -> bool:
     return isinstance(expr.target, _Name) and expr.target.value in _DIRECT_MEMBER_TARGETS
+
+
+def _emit_function_literal(expr: _FunctionLiteral, local_names: Iterable[str]) -> str:
+    name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
+    parameter_names = [parameter.name for parameter in expr.parameters]
+    parameters = ", ".join(
+        f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+        for parameter in expr.parameters
+    )
+    default_lines = _emit_function_parameter_default_lines(expr.parameters, parameter_names)
+    body = "; ".join([*default_lines, *expr.body_lines])
+    return f"func{name}({parameters}): {body}"
+
+
+def _emit_struct_field(
+    field_name: str,
+    field_value: _Expression,
+    local_names: Iterable[str],
+) -> str:
+    bind_function_literal = not isinstance(_unwrap_grouped_expression(field_value), _FunctionLiteral)
+    field_text = _emit_expression(field_value, local_names, bind_function_literal)[0]
+    return f"{json.dumps(field_name)}: {field_text}"
 
 
 def _emit_function_parameter_default_lines(

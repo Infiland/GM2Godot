@@ -776,17 +776,21 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_function_literals_preserve_optional_defaults(self):
         self.assertEqual(
             transpile_gml_expression("function(a, b = 90) { return b; }"),
-            "func(a = null, b = null): "
+            "GMRuntime.gml_method(self, func(a = null, b = null): "
             "if a == null: a = GMRuntime.gml_undefined(); "
             "if b == null or GMRuntime.is_undefined(b): b = 90; "
-            "return b",
+            "return b)",
         )
         self.assertEqual(
             transpile_gml_expression("function(a, b = a + 1) { return b; }"),
-            "func(a = null, b = null): "
+            "GMRuntime.gml_method(self, func(a = null, b = null): "
             "if a == null: a = GMRuntime.gml_undefined(); "
             "if b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1); "
-            "return b",
+            "return b)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("[function() { return 1; }]"),
+            "[GMRuntime.gml_method(self, func(): return 1)]",
         )
 
     def test_omitted_call_arguments_emit_gml_undefined(self):
@@ -1405,8 +1409,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "value = 1; try_to_modify_value(value); result = value;",
                 indent="",
             ),
-            "var try_to_modify_value = func(argument0 = null): "
-            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); argument0 = 2\n"
+            "var try_to_modify_value = GMRuntime.gml_method(self, func(argument0 = null): "
+            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); argument0 = 2)\n"
             "value = 1\n"
             "try_to_modify_value(value)\n"
             "result = value",
@@ -1419,9 +1423,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "items = [1]; try_to_modify_array(items); value = items[1];",
                 indent="",
             ),
-            "var try_to_modify_array = func(argument0 = null): "
+            "var try_to_modify_array = GMRuntime.gml_method(self, func(argument0 = null): "
             "if argument0 == null: argument0 = GMRuntime.gml_undefined(); "
-            "GMRuntime.gml_array_push(argument0, 2)\n"
+            "GMRuntime.gml_array_push(argument0, 2))\n"
             "items = [1]\n"
             "try_to_modify_array(items)\n"
             "value = GMRuntime.gml_array_get(items, 1)",

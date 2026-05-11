@@ -732,6 +732,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             'return gml_unsupported_type_error("GML struct literal", fields)',
             GML_RUNTIME_SCRIPT,
         )
+        self.assertIn("if typeof(fields[key]) == TYPE_CALLABLE:", GML_RUNTIME_SCRIPT)
+        self.assertIn("fields[key] = gml_method(fields, fields[key])", GML_RUNTIME_SCRIPT)
         self.assertIn("return fields", GML_RUNTIME_SCRIPT)
         self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
 
@@ -785,8 +787,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_struct_string_output_uses_to_string_convention(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if typeof(value) == TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
-        self.assertIn('if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_string(value["toString"].call())', GML_RUNTIME_SCRIPT)
+        self.assertIn('if value.has("toString") and is_method(value["toString"]):', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_string(gml_method_call(value["toString"]))', GML_RUNTIME_SCRIPT)
         self.assertIn("return str(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_variable_clone_preserves_documented_depth_behavior(self):

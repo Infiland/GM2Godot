@@ -546,6 +546,9 @@ static func gml_array_equals(left, right):
 static func gml_struct(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML struct literal", fields)
+	for key in fields.keys():
+		if typeof(fields[key]) == TYPE_CALLABLE:
+			fields[key] = gml_method(fields, fields[key])
 	return fields
 
 
@@ -779,8 +782,8 @@ static func gml_string(value):
 			return "pointer_null"
 		return str(value.value)
 	if typeof(value) == TYPE_DICTIONARY:
-		if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:
-			return gml_string(value["toString"].call())
+		if value.has("toString") and is_method(value["toString"]):
+			return gml_string(gml_method_call(value["toString"]))
 		return str(value)
 	return str(value)
 

@@ -224,6 +224,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         ):
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_helpers_keep_any_values_untyped(self):
+        self.assertNotRegex(GML_RUNTIME_SCRIPT, r"static func \w+\([^)]*:\s")
+        self.assertNotIn("Array[", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("Dictionary[", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("->", GML_RUNTIME_SCRIPT)
+
     def test_runtime_uses_distinct_undefined_sentinel(self):
         self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)

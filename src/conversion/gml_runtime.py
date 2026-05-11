@@ -384,6 +384,18 @@ static func gml_array_set(array_value, index, value):
 	return value
 
 
+static func gml_array_push(array_value, ...values):
+	if GML_ARRAY_COPY_ON_WRITE_ENABLED:
+		return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_push", array_value)
+	if values.size() == 0:
+		return gml_error("GML array_push requires at least one value")
+	for value in values:
+		array_value.append(value)
+	return null
+
+
 static func gml_array_equals(left, right):
 	if typeof(left) != TYPE_ARRAY or typeof(right) != TYPE_ARRAY:
 		return false

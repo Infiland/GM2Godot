@@ -105,6 +105,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
     RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
+    RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, 2, 3)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
     RuntimeValueParityCase('mystruct[$ "x"]', 'GMRuntime.gml_struct_get(mystruct, "x")'),
@@ -196,6 +197,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mod",
             "gml_array_get",
             "gml_array_set",
+            "gml_array_push",
             "gml_array_equals",
             "gml_struct",
             "gml_enum",
@@ -458,6 +460,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_array_set_mutates_reference_without_copying(self):
         self.assertIn("array_value[resolved_index] = value", GML_RUNTIME_SCRIPT)
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_array_push_mutates_reference_without_copying(self):
+        self.assertIn("static func gml_array_push(array_value, ...values):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML array_push", array_value)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML array_push requires at least one value")', GML_RUNTIME_SCRIPT)
+        self.assertIn("for value in values:", GML_RUNTIME_SCRIPT)
+        self.assertIn("array_value.append(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return null", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
 
     def test_runtime_array_equals_uses_gml_element_equality(self):

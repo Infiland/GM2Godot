@@ -330,6 +330,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("array_equals([NaN], [NaN])"),
             "GMRuntime.gml_array_equals([NAN], [NAN])",
         )
+        self.assertEqual(
+            transpile_gml_expression("array_push(items, 2, 3)"),
+            "GMRuntime.gml_array_push(items, 2, 3)",
+        )
 
     def test_undefined_equality_uses_runtime_type_table(self):
         self.assertEqual(
@@ -1247,6 +1251,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'mystruct = GMRuntime.gml_struct({"a": 1})\n'
             "mutate_struct(mystruct)\n"
             'value = GMRuntime.gml_struct_get(mystruct, "a")',
+        )
+
+    def test_function_argument_reassignment_does_not_mutate_caller_value(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var try_to_modify_value = function(argument0) { argument0 = 2; }; "
+                "value = 1; try_to_modify_value(value); result = value;",
+                indent="",
+            ),
+            "var try_to_modify_value = func(argument0): argument0 = 2\n"
+            "value = 1\n"
+            "try_to_modify_value(value)\n"
+            "result = value",
+        )
+
+    def test_array_function_arguments_pass_reference_without_clone(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var try_to_modify_array = function(argument0) { array_push(argument0, 2); }; "
+                "items = [1]; try_to_modify_array(items); value = items[1];",
+                indent="",
+            ),
+            "var try_to_modify_array = func(argument0): GMRuntime.gml_array_push(argument0, 2)\n"
+            "items = [1]\n"
+            "try_to_modify_array(items)\n"
+            "value = GMRuntime.gml_array_get(items, 1)",
         )
 
     def test_array_assignment_to_undefined_releases_reference(self):

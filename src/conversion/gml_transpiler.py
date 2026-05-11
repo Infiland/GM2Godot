@@ -424,6 +424,7 @@ _DS_MAP_RUNTIME_FUNCTIONS = {
 
 _ARRAY_RUNTIME_FUNCTIONS = {
     "array_equals": "gml_array_equals",
+    "array_push": "gml_array_push",
 }
 
 

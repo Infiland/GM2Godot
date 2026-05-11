@@ -15,6 +15,8 @@ const GML_TYPE_ARRAY = "array"
 const GML_TYPE_STRUCT = "struct"
 const GML_TYPE_METHOD = "method"
 const GML_TYPE_UNKNOWN = "unknown"
+const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
+const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
 
 
 class GMLInt64:
@@ -138,6 +140,8 @@ static func gml_array_get(array_value, index):
 
 
 static func gml_array_set(array_value, index, value):
+	if GML_ARRAY_COPY_ON_WRITE_ENABLED:
+		return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)
 	var resolved_index = _to_array_index(index)
 	if resolved_index < 0:
 		return gml_undefined()

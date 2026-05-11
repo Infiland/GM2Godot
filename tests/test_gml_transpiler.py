@@ -980,6 +980,32 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(transpile_gml_expression("all"), "GMRuntime.gml_instance_all()")
 
+    def test_transpiles_with_targets_instance_keywords(self):
+        self.assertEqual(
+            transpile_gml_expression("with_targets(all)"),
+            "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(noone)"),
+            "GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(-1)"),
+            "GMRuntime.gml_with_targets(self)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(-2)"),
+            "GMRuntime.gml_with_targets(other)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(-3)"),
+            "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(-4)"),
+            "GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone())",
+        )
+
     def test_transpiles_global_keyword_to_shared_runtime_scope(self):
         self.assertEqual(transpile_gml_expression("global"), "GMRuntime.gml_global_scope()")
         self.assertEqual(

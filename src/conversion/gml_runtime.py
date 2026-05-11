@@ -267,6 +267,23 @@ static func gml_instance_all():
 	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)
 
 
+static func gml_with_targets(target):
+	if is_undefined(target):
+		return []
+	if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:
+		return _gml_instance_keyword_targets(target)
+	if is_numeric(target):
+		var keyword_index = _to_int64_value(target)
+		if keyword_index == GML_INSTANCE_ALL_INDEX:
+			return _gml_all_instance_targets()
+		if keyword_index == GML_INSTANCE_INVALID_INDEX:
+			return []
+	var resolved_instance = _gml_resolve_instance(target)
+	if resolved_instance == null:
+		return []
+	return [resolved_instance]
+
+
 static func gml_handle_is_valid(handle):
 	if not is_handle(handle):
 		return false
@@ -1108,6 +1125,25 @@ static func _gml_make_handle(kind, index, reference, name, is_valid):
 
 static func _gml_invalid_handle_index(kind):
 	return GML_INSTANCE_INVALID_INDEX if str(kind) == GML_INSTANCE_HANDLE_KIND else GML_HANDLE_INVALID_INDEX
+
+
+static func _gml_instance_keyword_targets(handle):
+	if handle.index == GML_INSTANCE_ALL_INDEX:
+		return _gml_all_instance_targets()
+	if handle.index == GML_INSTANCE_INVALID_INDEX:
+		return []
+	var resolved_instance = gml_handle_resolve(handle)
+	if resolved_instance == null:
+		return []
+	return [resolved_instance]
+
+
+static func _gml_all_instance_targets():
+	var targets = []
+	for handle in _gml_handle_registry.values():
+		if handle.kind == GML_INSTANCE_HANDLE_KIND and gml_handle_is_valid(handle):
+			targets.append(handle.reference)
+	return targets
 
 
 static func _gml_is_invalid_handle_index(kind, index):

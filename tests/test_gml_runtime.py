@@ -29,6 +29,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
     RuntimeValueParityCase("all", "GMRuntime.gml_instance_all()"),
     RuntimeValueParityCase("noone", "GMRuntime.gml_instance_noone()"),
+    RuntimeValueParityCase("with_targets(all)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())"),
+    RuntimeValueParityCase("with_targets(noone)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone())"),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
@@ -462,6 +464,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_invalid",
             "gml_instance_noone",
             "gml_instance_all",
+            "gml_with_targets",
             "gml_handle_is_valid",
             "gml_handle_parse",
             "gml_ref_create",
@@ -637,6 +640,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)
         self.assertIn("if handle.reference is Object and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_resolves_all_and_noone_as_with_targets(self):
+        self.assertIn("static func gml_with_targets(target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_undefined(target):\n\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_keyword_targets(target)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_ALL_INDEX:\n\t\t\treturn _gml_all_instance_targets()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if keyword_index == GML_INSTANCE_INVALID_INDEX:\n\t\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("return [resolved_instance]", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_instance_keyword_targets(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle.index == GML_INSTANCE_ALL_INDEX:\n\t\treturn _gml_all_instance_targets()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle.index == GML_INSTANCE_INVALID_INDEX:\n\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_all_instance_targets():", GML_RUNTIME_SCRIPT)
+        self.assertIn("for handle in _gml_handle_registry.values():", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle.kind == GML_INSTANCE_HANDLE_KIND and gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("targets.append(handle.reference)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_handle_invalidate(handle)", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle_kind, handle_index):", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.reference = null", GML_RUNTIME_SCRIPT)

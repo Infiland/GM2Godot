@@ -256,6 +256,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_int_div(5, 2)",
         )
         self.assertEqual(
+            transpile_gml_expression("int64(5) / int64(2)"),
+            "GMRuntime.gml_div(GMRuntime.gml_int64(5), GMRuntime.gml_int64(2))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("int64(5) div int64(2)"),
+            "GMRuntime.gml_int_div(GMRuntime.gml_int64(5), GMRuntime.gml_int64(2))",
+        )
+        self.assertEqual(
             transpile_gml_expression("a div b + c"),
             "GMRuntime.gml_add(GMRuntime.gml_int_div(a, b), c)",
         )

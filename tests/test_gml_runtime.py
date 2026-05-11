@@ -74,6 +74,14 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("3_141.59", "3141.59"),
     RuntimeValueParityCase("1.5 / 2", "GMRuntime.gml_div(1.5, 2)"),
     RuntimeValueParityCase("5 / 2", "GMRuntime.gml_div(5, 2)"),
+    RuntimeValueParityCase(
+        "int64(5) / int64(2)",
+        "GMRuntime.gml_div(GMRuntime.gml_int64(5), GMRuntime.gml_int64(2))",
+    ),
+    RuntimeValueParityCase(
+        "int64(5) div int64(2)",
+        "GMRuntime.gml_int_div(GMRuntime.gml_int64(5), GMRuntime.gml_int64(2))",
+    ),
     RuntimeValueParityCase("0 / 0", "GMRuntime.gml_div(0, 0)"),
     RuntimeValueParityCase("sqrt(-1)", "GMRuntime.gml_sqrt(-1)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
@@ -345,6 +353,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return GMLInt64.new(_to_int64_value(left) % _to_int64_value(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("(is_int64(left) and (is_int64(right) or is_int32(right)))", GML_RUNTIME_SCRIPT)
         self.assertIn("or (is_int64(right) and is_int32(left))", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_preserves_int64_division_behavior(self):
+        self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_int_div(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(int(_to_int64_value(left) / right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML int64 division by zero")', GML_RUNTIME_SCRIPT)
 
     def test_runtime_checks_int32_range_over_godot_ints(self):
         self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)

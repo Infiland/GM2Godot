@@ -133,6 +133,13 @@ static func gml_ptr(value):
 
 
 static func gml_div(left, right):
+	if is_ptr(left) or is_ptr(right):
+		return gml_error("GML pointer arithmetic is not supported")
+	if _returns_int64_arithmetic_result(left, right):
+		var right_int = _to_int64_value(right)
+		if right_int == 0:
+			return gml_error("GML int64 division by zero")
+		return GMLInt64.new(int(_to_int64_value(left) / right_int))
 	var left_value = _to_real(left)
 	var right_value = _to_real(right)
 	if right_value == 0.0:
@@ -143,6 +150,11 @@ static func gml_div(left, right):
 
 
 static func gml_int_div(left, right):
+	if _returns_int64_arithmetic_result(left, right):
+		var right_int = _to_int64_value(right)
+		if right_int == 0:
+			return gml_error("GML int64 division by zero")
+		return GMLInt64.new(int(_to_int64_value(left) / right_int))
 	return int(_to_real(left) / _to_real(right))
 
 

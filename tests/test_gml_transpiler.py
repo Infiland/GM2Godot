@@ -444,8 +444,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_ptr(GMRuntime.gml_pointer_null())",
         )
         self.assertEqual(
+            transpile_gml_expression("is_ptr(pointer_invalid)"),
+            "GMRuntime.is_ptr(GMRuntime.gml_pointer_invalid())",
+        )
+        self.assertEqual(
             transpile_gml_expression('handle_parse("ref ds_list 1")'),
             'GMRuntime.gml_handle_parse("ref ds_list 1")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('is_handle(handle_parse("ref ds_list 1"))'),
+            'GMRuntime.is_handle(GMRuntime.gml_handle_parse("ref ds_list 1"))',
         )
         self.assertEqual(
             transpile_gml_expression('ref_create(self, "text")'),
@@ -1417,6 +1425,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("if score div 2 { score = 1; }", indent=""),
             "if GMRuntime.gml_bool(GMRuntime.gml_int_div(score, 2)):\n\tscore = 1",
+        )
+        self.assertEqual(
+            transpile_gml_code('if is_handle(handle_parse("ref ds_list 1")) { score = 1; }', indent=""),
+            'if GMRuntime.is_handle(GMRuntime.gml_handle_parse("ref ds_list 1")):\n\tscore = 1',
         )
 
     def test_transpiles_shift_keyboard_check(self):

@@ -68,6 +68,11 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
     RuntimeValueParityCase('ptr(int64("42"))', 'GMRuntime.gml_ptr(GMRuntime.gml_int64("42"))'),
     RuntimeValueParityCase("is_ptr(ptr(0))", "GMRuntime.is_ptr(GMRuntime.gml_ptr(0))"),
+    RuntimeValueParityCase("is_ptr(pointer_invalid)", "GMRuntime.is_ptr(GMRuntime.gml_pointer_invalid())"),
+    RuntimeValueParityCase(
+        'is_handle(handle_parse("ref ds_list 1"))',
+        'GMRuntime.is_handle(GMRuntime.gml_handle_parse("ref ds_list 1"))',
+    ),
     RuntimeValueParityCase(
         "pointer_null == pointer_null",
         "GMRuntime.gml_eq(GMRuntime.gml_pointer_null(), GMRuntime.gml_pointer_null())",

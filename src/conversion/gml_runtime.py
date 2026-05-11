@@ -266,7 +266,12 @@ static func gml_div(left, right):
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
-	if not _is_real_convertible(left) or not _is_real_convertible(right):
+	if _returns_int32_arithmetic_result(left, right):
+		var right_int = _to_int32_value(right)
+		if right_int == 0:
+			return gml_error("GML int32 division by zero")
+		return int(_to_int32_value(left) / right_int)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML divide", left, right)
 	var left_value = _to_real(left)
 	var right_value = _to_real(right)
@@ -283,7 +288,12 @@ static func gml_int_div(left, right):
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
-	if not _is_real_convertible(left) or not _is_real_convertible(right):
+	if _returns_int32_arithmetic_result(left, right):
+		var right_int = _to_int32_value(right)
+		if right_int == 0:
+			return gml_error("GML int32 division by zero")
+		return int(_to_int32_value(left) / right_int)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML integer divide", left, right)
 	return int(_to_real(left) / _to_real(right))
 
@@ -322,14 +332,18 @@ static func gml_add(left, right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) + _to_int64_value(right))
-	if is_numeric(left) and is_numeric(right):
-		return _to_real(left) + _to_real(right)
-	if is_string(left) and is_string(right):
-		return str(left) + str(right)
-	if is_string(right) and (is_numeric(left) or is_bool(left)):
-		return gml_string(left) + str(right)
-	if is_string(left) and (is_numeric(right) or is_bool(right)):
+	if _returns_int32_arithmetic_result(left, right):
+		return _to_int32_value(left) + _to_int32_value(right)
+	if is_string(right):
+		if is_string(left):
+			return str(left) + str(right)
+		if _is_arithmetic_real_operand(left):
+			return gml_string(left) + str(right)
+		return gml_unsupported_binary_type_error("GML add", left, right)
+	if is_string(left):
 		return gml_error("Invalid GML string concatenation")
+	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
+		return _to_real(left) + _to_real(right)
 	return gml_unsupported_binary_type_error("GML add", left, right)
 
 
@@ -338,7 +352,9 @@ static func gml_sub(left, right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) - _to_int64_value(right))
-	if not _is_real_convertible(left) or not _is_real_convertible(right):
+	if _returns_int32_arithmetic_result(left, right):
+		return _to_int32_value(left) - _to_int32_value(right)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML subtract", left, right)
 	return _to_real(left) - _to_real(right)
 
@@ -346,9 +362,17 @@ static func gml_sub(left, right):
 static func gml_mul(left, right):
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
+	if is_string(right):
+		if is_number(left):
+			return str(right).repeat(max(0, int(_to_real(left))))
+		return gml_unsupported_binary_type_error("GML multiply", left, right)
+	if is_string(left):
+		return gml_unsupported_binary_type_error("GML multiply", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) * _to_int64_value(right))
-	if not _is_real_convertible(left) or not _is_real_convertible(right):
+	if _returns_int32_arithmetic_result(left, right):
+		return _to_int32_value(left) * _to_int32_value(right)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML multiply", left, right)
 	return _to_real(left) * _to_real(right)
 
@@ -357,8 +381,16 @@ static func gml_mod(left, right):
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
-		return GMLInt64.new(_to_int64_value(left) % _to_int64_value(right))
-	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		var right_int = _to_int64_value(right)
+		if right_int == 0:
+			return gml_error("GML int64 modulo by zero")
+		return GMLInt64.new(_to_int64_value(left) % right_int)
+	if _returns_int32_arithmetic_result(left, right):
+		var right_int = _to_int32_value(right)
+		if right_int == 0:
+			return gml_error("GML int32 modulo by zero")
+		return _to_int32_value(left) % right_int
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML modulo", left, right)
 	return fmod(_to_real(left), _to_real(right))
 
@@ -692,6 +724,10 @@ static func _is_int64_convertible(value):
 	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value) or is_string(value)
 
 
+static func _is_arithmetic_real_operand(value):
+	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value)
+
+
 static func _to_real(value):
 	if is_ptr(value):
 		return gml_unsupported_type_error("GML numeric conversion", value)
@@ -721,6 +757,14 @@ static func _returns_int64_arithmetic_result(left, right):
 		(is_int64(left) and (is_int64(right) or is_int32(right)))
 		or (is_int64(right) and is_int32(left))
 	)
+
+
+static func _returns_int32_arithmetic_result(left, right):
+	return is_int32(left) and is_int32(right)
+
+
+static func _to_int32_value(value):
+	return int(value)
 
 
 static func _gml_next_handle_index(kind):

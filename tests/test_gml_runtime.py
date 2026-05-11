@@ -137,6 +137,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
     RuntimeValueParityCase('true + "!"', 'GMRuntime.gml_add(true, "!")'),
+    RuntimeValueParityCase("true + true", "GMRuntime.gml_add(true, true)"),
+    RuntimeValueParityCase('3 * "ha"', 'GMRuntime.gml_mul(3, "ha")'),
     RuntimeValueParityCase("a - b", "GMRuntime.gml_sub(a, b)"),
     RuntimeValueParityCase("a * b", "GMRuntime.gml_mul(a, b)"),
     RuntimeValueParityCase("a mod b", "GMRuntime.gml_mod(a, b)"),
@@ -449,6 +451,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return left_value / right_value", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_sqrt(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
@@ -608,9 +611,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return GMLInt64.new(_to_int64_value(left) + _to_int64_value(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLInt64.new(_to_int64_value(left) - _to_int64_value(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLInt64.new(_to_int64_value(left) * _to_int64_value(right))", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLInt64.new(_to_int64_value(left) % _to_int64_value(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(_to_int64_value(left) % right_int)", GML_RUNTIME_SCRIPT)
         self.assertIn("(is_int64(left) and (is_int64(right) or is_int32(right)))", GML_RUNTIME_SCRIPT)
         self.assertIn("or (is_int64(right) and is_int32(left))", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML int64 modulo by zero")', GML_RUNTIME_SCRIPT)
+
+    def test_runtime_preserves_int32_arithmetic_results(self):
+        self.assertIn("static func _returns_int32_arithmetic_result(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return is_int32(left) and is_int32(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _to_int32_value(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _to_int32_value(left) + _to_int32_value(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _to_int32_value(left) - _to_int32_value(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _to_int32_value(left) * _to_int32_value(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return int(_to_int32_value(left) / right_int)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _to_int32_value(left) % right_int", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML int32 division by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML int32 modulo by zero")', GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)
@@ -636,6 +652,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return value_type == TYPE_STRING or value_type == TYPE_STRING_NAME", GML_RUNTIME_SCRIPT)
         self.assertIn("return str(left) + str(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_string(left) + str(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
         self.assertIn("Invalid GML string concatenation", GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
 

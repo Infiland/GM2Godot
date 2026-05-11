@@ -455,6 +455,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("is_int64(int64(score))"),
             "GMRuntime.is_int64(GMRuntime.gml_int64(score))",
         )
+        self.assertEqual(
+            transpile_gml_expression("int64(score) + int64(delta)"),
+            "GMRuntime.gml_add(GMRuntime.gml_int64(score), GMRuntime.gml_int64(delta))",
+        )
 
     def test_transpiles_string_value_helpers(self):
         self.assertEqual(transpile_gml_expression('string("abc")'), 'GMRuntime.gml_string("abc")')

@@ -925,6 +925,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("var x = 1, y = x + 2; x += y;", indent=""),
             "var x = 1\nvar y = GMRuntime.gml_add(x, 2)\nx = GMRuntime.gml_add(x, y)",
         )
+        self.assertEqual(
+            transpile_gml_code("var x = 1; self.x += x;", indent=""),
+            "var x = 1\nself.x = GMRuntime.gml_add(self.x, x)",
+        )
 
     def test_transpiles_if_blocks(self):
         self.assertEqual(

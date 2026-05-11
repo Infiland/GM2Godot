@@ -876,10 +876,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_real_operations_as_float_helpers(self):
-        self.assertIn("return NAN", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if right_value == 0.0:\n\t\tif left_value == 0.0:\n\t\t\treturn NAN",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return INF if left_value > 0.0 else -INF", GML_RUNTIME_SCRIPT)
         self.assertIn("return left_value / right_value", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_sqrt(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if real_value < 0.0:\n\t\treturn NAN", GML_RUNTIME_SCRIPT)
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)

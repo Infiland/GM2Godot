@@ -827,6 +827,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("var x = a + b * c;", indent=""),
             "var x = GMRuntime.gml_add(a, GMRuntime.gml_mul(b, c))",
         )
+        self.assertEqual(
+            transpile_gml_code("var x := 1;", indent=""),
+            "var x = 1",
+        )
 
     def test_transpiles_multiple_var_assignments(self):
         self.assertEqual(
@@ -853,6 +857,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),
             "position.x = GMRuntime.gml_add(position.x, GMRuntime.gml_mul(position.y, 2))",
+        )
+        self.assertEqual(
+            transpile_gml_code("score := 10;", indent=""),
+            "score = 10",
         )
 
     def test_rejects_chained_assignments(self):

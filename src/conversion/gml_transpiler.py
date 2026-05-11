@@ -8,6 +8,7 @@ _AssignmentOperator: TypeAlias = Literal[
     "??=",
     "<<=",
     ">>=",
+    ":=",
     "+=",
     "-=",
     "*=",
@@ -123,6 +124,7 @@ _MULTI_CHAR_OPERATORS = (
     "??=",
     "<<=",
     ">>=",
+    ":=",
     "??",
     "<=",
     ">=",
@@ -149,6 +151,7 @@ _ASSIGNMENT_OPERATORS: tuple[_AssignmentOperator, ...] = (
     "??=",
     "<<=",
     ">>=",
+    ":=",
     "+=",
     "-=",
     "*=",
@@ -1590,7 +1593,7 @@ def _transpile_statement(
         if isinstance(target_expr, _Index):
             container = _emit_expression(target_expr.target, local_names)[0]
             index = _emit_expression(target_expr.index, local_names)[0]
-            if operator == "=":
+            if operator in ("=", ":="):
                 return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
@@ -1603,6 +1606,8 @@ def _transpile_statement(
             return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
         if operator in _COMPOUND_RUNTIME_FUNCTIONS:
             return [f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
+        if operator == ":=":
+            return [f"{target} = {value}"]
         return [f"{target} {operator} {value}"]
 
     return [transpile_gml_expression(statement, local_names)]
@@ -1645,8 +1650,8 @@ def _transpile_var_statement(
             local_names.add(name)
             continue
         name, operator, value = assignment
-        if operator != "=":
-            raise GMLTranspileError("Variable declarations only support '=' assignments")
+        if operator not in ("=", ":="):
+            raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
         _validate_gml_identifier(name)
         lines.append(f"var {name} = {transpile_gml_expression(value, local_names)}")

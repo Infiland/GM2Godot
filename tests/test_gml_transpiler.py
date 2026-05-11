@@ -458,6 +458,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 1\nscore = GMRuntime.gml_add(score, 2)",
         )
 
+    def test_transpiles_return_statements(self):
+        self.assertEqual(transpile_gml_code("return;", indent=""), "return")
+        self.assertEqual(
+            transpile_gml_code("return score + bonus;", indent=""),
+            "return GMRuntime.gml_add(score, bonus)",
+        )
+        self.assertEqual(
+            transpile_gml_code("if ready begin return (score + 1); end", indent=""),
+            "if GMRuntime.gml_bool(ready):\n\treturn (GMRuntime.gml_add(score, 1))",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

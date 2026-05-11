@@ -1136,6 +1136,11 @@ def _transpile_statement(
     if local_names is None:
         local_names = set()
 
+    if statement == "return":
+        return ["return"]
+    if statement.startswith("return "):
+        return [f"return {transpile_gml_expression(statement[7:].strip(), local_names)}"]
+
     if statement.startswith("var "):
         return _transpile_var_statement(statement[4:].strip(), local_names)
 

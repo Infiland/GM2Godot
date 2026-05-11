@@ -525,10 +525,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'colour = GMRuntime.gml_struct_get(RAINBOW, "GREEN")',
         )
         self.assertEqual(
-            transpile_gml_code("enum RAINBOW { RED = 5, GREEN = 20, VIOLET = ENUM_TEST.VAL }", indent=""),
-            'var RAINBOW = GMRuntime.gml_enum({"RED": 5, "GREEN": 20, '
-            '"VIOLET": GMRuntime.gml_struct_get(ENUM_TEST, "VAL")})',
+            transpile_gml_code(
+                "enum ENUM_TEST { VAL = 10 }\n"
+                "enum RAINBOW { RED = 5, ORANGE = 5 * 2, VIOLET = 35 * ENUM_TEST.VAL }",
+                indent="",
+            ),
+            'var ENUM_TEST = GMRuntime.gml_enum({"VAL": 10})\n'
+            'var RAINBOW = GMRuntime.gml_enum({"RED": 5, "ORANGE": 10, "VIOLET": 350})',
         )
+
+    def test_rejects_runtime_enum_value_expressions(self):
+        with self.assertRaisesRegex(GMLTranspileError, "Enum values must be integer compile-time constants"):
+            transpile_gml_code("enum BAD { VALUE = score + 1 }", indent="")
 
     def test_transpiles_nullish_operator(self):
         self.assertEqual(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Iterable, Literal, MutableSet, TypeAlias
+from typing import Iterable, Literal, Mapping, MutableSet, TypeAlias
 
 
 _AssignmentOperator: TypeAlias = Literal[
@@ -672,6 +672,7 @@ class _StatementParser:
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
         self.generated_counter = generated_counter if generated_counter is not None else [0]
+        self.enum_values: dict[str, dict[str, int]] = {}
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -720,32 +721,29 @@ class _StatementParser:
         self._consume("{")
 
         members: list[tuple[str, str]] = []
-        next_value = "0"
-        next_integer_value: int | None = 0
+        current_enum_values: dict[str, int] = {}
+        next_integer_value = 0
         while not self._at_end() and not self._check("}"):
             if self._match(",") or self._match(";") or self._match("\n"):
                 continue
             member_name = self._consume_identifier_name()
             if self._match("="):
                 value_tokens = self._read_enum_value_tokens()
-                value = _enum_value_tokens_to_source(value_tokens)
-                literal_value = _enum_literal_int(value_tokens)
-                if literal_value is None:
-                    next_value = f"GMRuntime.gml_add({value}, 1)"
-                    next_integer_value = None
-                else:
-                    next_integer_value = literal_value + 1
-                    next_value = str(next_integer_value)
+                enum_value = _evaluate_enum_value_tokens(
+                    value_tokens,
+                    self.enum_values,
+                    current_enum_values,
+                )
+                next_integer_value = enum_value + 1
             else:
-                value = next_value
-                if next_integer_value is None:
-                    next_value = f"GMRuntime.gml_add({value}, 1)"
-                else:
-                    next_integer_value += 1
-                    next_value = str(next_integer_value)
+                enum_value = next_integer_value
+                next_integer_value += 1
+            value = str(enum_value)
+            current_enum_values[member_name] = enum_value
             members.append((member_name, value))
 
         self._consume("}")
+        self.enum_values[enum_name] = current_enum_values
 
         fields = ", ".join(f"{json.dumps(member_name)}: {value}" for member_name, value in members)
         return [f"var {enum_name} = GMRuntime.gml_enum({{{fields}}})"]
@@ -1445,22 +1443,93 @@ def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
 
 
-def _enum_value_tokens_to_source(tokens: Iterable[_Token]) -> str:
-    return transpile_gml_expression(_tokens_to_source(tokens))
+def _evaluate_enum_value_tokens(
+    tokens: Iterable[_Token],
+    enum_values: Mapping[str, Mapping[str, int]],
+    current_enum_values: Mapping[str, int],
+) -> int:
+    source = _tokens_to_source(tokens)
+    value = _evaluate_enum_expression(
+        _parse_gml_expression(source),
+        enum_values,
+        current_enum_values,
+    )
+    if value is None:
+        raise GMLTranspileError("Enum values must be integer compile-time constants")
+    return value
 
 
-def _enum_literal_int(tokens: Iterable[_Token]) -> int | None:
-    value_tokens = [token for token in tokens if token.kind not in ("EOF", "NEWLINE")]
-    sign = 1
-    if value_tokens and value_tokens[0].value == "-":
-        sign = -1
-        value_tokens = value_tokens[1:]
-    if len(value_tokens) != 1 or value_tokens[0].kind != "NUMBER":
+def _evaluate_enum_expression(
+    expr: _Expression,
+    enum_values: Mapping[str, Mapping[str, int]],
+    current_enum_values: Mapping[str, int],
+) -> int | None:
+    if isinstance(expr, _NumberLiteral):
+        return _parse_enum_int_literal(expr)
+    if isinstance(expr, _Grouped):
+        return _evaluate_enum_expression(expr.expr, enum_values, current_enum_values)
+    if isinstance(expr, _Name):
+        return current_enum_values.get(expr.value)
+    if isinstance(expr, _Member) and isinstance(expr.target, _Name):
+        enum_members = enum_values.get(expr.target.value)
+        if enum_members is None:
+            return None
+        return enum_members.get(expr.member)
+    if isinstance(expr, _Unary):
+        operand = _evaluate_enum_expression(expr.operand, enum_values, current_enum_values)
+        if operand is None:
+            return None
+        if expr.operator == "+":
+            return operand
+        if expr.operator == "-":
+            return -operand
+        if expr.operator == "~":
+            return ~operand
+        return None
+    if isinstance(expr, _Binary):
+        left = _evaluate_enum_expression(expr.left, enum_values, current_enum_values)
+        right = _evaluate_enum_expression(expr.right, enum_values, current_enum_values)
+        if left is None or right is None:
+            return None
+        return _evaluate_enum_binary(expr.operator, left, right)
+    return None
+
+
+def _parse_enum_int_literal(expr: _NumberLiteral) -> int | None:
+    if expr.is_float_like:
         return None
     try:
-        return sign * int(value_tokens[0].value, 0)
+        return int(expr.value, 0)
     except ValueError:
         return None
+
+
+def _evaluate_enum_binary(operator: str, left: int, right: int) -> int | None:
+    if operator == "+":
+        return left + right
+    if operator == "-":
+        return left - right
+    if operator == "*":
+        return left * right
+    if operator in ("div", "/"):
+        if right == 0:
+            return None
+        return int(left / right)
+    if operator in ("mod", "%"):
+        if right == 0:
+            return None
+        return left % right
+    if operator == "<<":
+        return left << right
+    if operator == ">>":
+        return left >> right
+    if operator == "&":
+        return left & right
+    if operator == "|":
+        return left | right
+    if operator == "^":
+        return left ^ right
+    return None
 
 
 def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:

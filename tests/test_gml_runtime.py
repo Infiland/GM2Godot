@@ -29,6 +29,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
     RuntimeValueParityCase("all", "GMRuntime.gml_instance_all()"),
     RuntimeValueParityCase("noone", "GMRuntime.gml_instance_noone()"),
+    RuntimeValueParityCase("with_targets(self)", "GMRuntime.gml_with_targets(self)"),
+    RuntimeValueParityCase("with_targets(other)", "GMRuntime.gml_with_targets(other)"),
     RuntimeValueParityCase("with_targets(all)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())"),
     RuntimeValueParityCase("with_targets(noone)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone())"),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),

@@ -982,6 +982,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
     def test_transpiles_with_targets_instance_keywords(self):
         self.assertEqual(
+            transpile_gml_expression("with_targets(self)"),
+            "GMRuntime.gml_with_targets(self)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("with_targets(other)"),
+            "GMRuntime.gml_with_targets(other)",
+        )
+        self.assertEqual(
             transpile_gml_expression("with_targets(all)"),
             "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())",
         )

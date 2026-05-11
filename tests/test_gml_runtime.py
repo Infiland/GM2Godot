@@ -160,6 +160,100 @@ RUNTIME_VALUE_PARITY_CASES = (
 )
 
 
+TYPE_TABLE_VALUES = (
+    ("Real", "1.5"),
+    ("Bool", "true"),
+    ("String", '"s"'),
+    ("Int32", "1"),
+    ("Int64", "int64(1)"),
+    ("Ptr", "pointer_null"),
+    ("undefined", "undefined"),
+    ("Array", "[1]"),
+)
+
+TYPE_TABLE_COLUMNS = tuple(label for label, _source in TYPE_TABLE_VALUES)
+
+_TYPE_TABLE_ALL_ERRORS = {
+    column: "Error"
+    for column in TYPE_TABLE_COLUMNS
+}
+
+_TYPE_TABLE_NUMERIC_ROWS = {
+    "Real": {
+        "Real": "Real",
+        "Bool": "Real",
+        "String": "Error",
+        "Int32": "Real",
+        "Int64": "Real",
+        "Ptr": "Error",
+        "undefined": "Error",
+        "Array": "Error",
+    },
+    "Bool": {
+        "Real": "Real",
+        "Bool": "Real",
+        "String": "Error",
+        "Int32": "Real",
+        "Int64": "Real",
+        "Ptr": "Error",
+        "undefined": "Error",
+        "Array": "Error",
+    },
+    "String": _TYPE_TABLE_ALL_ERRORS,
+    "Int32": {
+        "Real": "Real",
+        "Bool": "Real",
+        "String": "Error",
+        "Int32": "Int32",
+        "Int64": "Int64",
+        "Ptr": "Error",
+        "undefined": "Error",
+        "Array": "Error",
+    },
+    "Int64": {
+        "Real": "Real",
+        "Bool": "Real",
+        "String": "Error",
+        "Int32": "Int64",
+        "Int64": "Int64",
+        "Ptr": "Error",
+        "undefined": "Error",
+        "Array": "Error",
+    },
+    "Ptr": _TYPE_TABLE_ALL_ERRORS,
+    "undefined": _TYPE_TABLE_ALL_ERRORS,
+    "Array": _TYPE_TABLE_ALL_ERRORS,
+}
+
+TYPE_TABLE_OPERATORS = (
+    (
+        "+",
+        "gml_add",
+        {
+            **_TYPE_TABLE_NUMERIC_ROWS,
+            "Real": {**_TYPE_TABLE_NUMERIC_ROWS["Real"], "String": "String"},
+            "Bool": {**_TYPE_TABLE_NUMERIC_ROWS["Bool"], "String": "String"},
+            "String": {**_TYPE_TABLE_ALL_ERRORS, "String": "String"},
+            "Int32": {**_TYPE_TABLE_NUMERIC_ROWS["Int32"], "String": "String"},
+            "Int64": {**_TYPE_TABLE_NUMERIC_ROWS["Int64"], "String": "String"},
+        },
+    ),
+    ("-", "gml_sub", _TYPE_TABLE_NUMERIC_ROWS),
+    (
+        "*",
+        "gml_mul",
+        {
+            **_TYPE_TABLE_NUMERIC_ROWS,
+            "Real": {**_TYPE_TABLE_NUMERIC_ROWS["Real"], "String": "String"},
+            "Int32": {**_TYPE_TABLE_NUMERIC_ROWS["Int32"], "String": "String"},
+        },
+    ),
+    ("/", "gml_div", _TYPE_TABLE_NUMERIC_ROWS),
+    ("div", "gml_int_div", _TYPE_TABLE_NUMERIC_ROWS),
+    ("mod", "gml_mod", _TYPE_TABLE_NUMERIC_ROWS),
+)
+
+
 class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_defines_shared_value_helpers(self):
         for helper_name in (
@@ -700,6 +794,37 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
                     transpile_gml_expression(parity_case.gml_expression),
                     parity_case.gdscript_expression,
                 )
+
+
+class TestGMLRuntimeTypeTableFixtures(unittest.TestCase):
+    def test_documented_arithmetic_type_tables_cover_every_cell(self):
+        expected_columns = set(TYPE_TABLE_COLUMNS)
+
+        for operator, _helper_name, table in TYPE_TABLE_OPERATORS:
+            with self.subTest(operator=operator):
+                self.assertEqual(set(table), expected_columns)
+                for row_name, row in table.items():
+                    self.assertEqual(set(row), expected_columns, row_name)
+
+    def test_arithmetic_type_table_cells_lower_to_runtime_helpers(self):
+        source_values = dict(TYPE_TABLE_VALUES)
+        gd_values = {
+            label: transpile_gml_expression(source)
+            for label, source in TYPE_TABLE_VALUES
+        }
+
+        for operator, helper_name, table in TYPE_TABLE_OPERATORS:
+            for left_type, row in table.items():
+                for right_type, expected_result in row.items():
+                    with self.subTest(
+                        operator=operator,
+                        left_type=left_type,
+                        right_type=right_type,
+                        expected_result=expected_result,
+                    ):
+                        source = f"{source_values[left_type]} {operator} {source_values[right_type]}"
+                        expected = f"GMRuntime.{helper_name}({gd_values[left_type]}, {gd_values[right_type]})"
+                        self.assertEqual(transpile_gml_expression(source), expected)
 
 
 if __name__ == "__main__":

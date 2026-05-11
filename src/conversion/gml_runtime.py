@@ -62,6 +62,10 @@ static func is_real(value):
 	return is_number(value)
 
 
+static func is_int32(value):
+	return typeof(value) == TYPE_INT and int(value) >= -2147483648 and int(value) <= 2147483647
+
+
 static func is_int64(value):
 	return value is GMLInt64
 

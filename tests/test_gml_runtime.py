@@ -36,6 +36,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("bool(int64(score))", "GMRuntime.gml_bool(GMRuntime.gml_int64(score))"),
     RuntimeValueParityCase("is_real(score)", "GMRuntime.is_real(score)"),
     RuntimeValueParityCase("is_numeric(score)", "GMRuntime.is_numeric(score)"),
+    RuntimeValueParityCase("is_int32(score)", "GMRuntime.is_int32(score)"),
     RuntimeValueParityCase("is_int64(score)", "GMRuntime.is_int64(score)"),
     RuntimeValueParityCase("is_array(items)", "GMRuntime.is_array(items)"),
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
@@ -109,6 +110,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_number",
             "is_real",
             "is_numeric",
+            "is_int32",
             "is_int64",
             "is_array",
             "is_struct",
@@ -287,6 +289,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_checks_int32_range_over_godot_ints(self):
+        self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "return typeof(value) == TYPE_INT and int(value) >= -2147483648 and int(value) <= 2147483647",
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_bitwise_helpers_return_int64_values(self):
         self.assertIn("static func gml_bit_or(left, right):", GML_RUNTIME_SCRIPT)

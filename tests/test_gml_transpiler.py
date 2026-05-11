@@ -602,6 +602,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
 
+    def test_for_loop_preserves_execution_order(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "for (setup(); should_run(); advance()) begin body(); end",
+                indent="",
+            ),
+            "setup()\n"
+            "while GMRuntime.gml_bool(should_run()):\n"
+            "\tbody()\n"
+            "\tadvance()",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

@@ -682,6 +682,8 @@ class _StatementParser:
         return lines
 
     def _parse_statement(self) -> list[str]:
+        if self._check_identifier("enum"):
+            return self._parse_enum_statement()
         if self._check_identifier("if"):
             return self._parse_if_statement()
         if self._check_identifier("while"):
@@ -710,6 +712,35 @@ class _StatementParser:
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
         )
+
+    def _parse_enum_statement(self) -> list[str]:
+        self._consume_identifier("enum")
+        enum_name = _sanitize_gdscript_identifier(self._consume_identifier_name())
+        self._skip_newlines()
+        self._consume("{")
+
+        members: list[str] = []
+        while not self._at_end() and not self._check("}"):
+            if self._match(",") or self._match(";") or self._match("\n"):
+                continue
+            member_name = _sanitize_gdscript_identifier(self._consume_identifier_name())
+            if self._match("="):
+                value_tokens = self._read_enum_value_tokens()
+                members.append(f"{member_name} = {_enum_value_tokens_to_source(value_tokens)}")
+            else:
+                members.append(member_name)
+
+        self._consume("}")
+
+        if not members:
+            return [f"enum {enum_name} {{}}"]
+
+        lines = [f"enum {enum_name} {{"]
+        for index, member in enumerate(members):
+            suffix = "," if index < len(members) - 1 else ""
+            lines.append(f"\t{member}{suffix}")
+        lines.append("}")
+        return lines
 
     def _parse_if_statement(self) -> list[str]:
         self._consume_identifier("if")
@@ -1051,6 +1082,22 @@ class _StatementParser:
 
         return tokens
 
+    def _read_enum_value_tokens(self) -> list[_Token]:
+        tokens: list[_Token] = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.value in (",", "}", "\n"):
+                break
+            if token.value in "([":
+                depth += 1
+            elif token.value in ")]" and depth > 0:
+                depth -= 1
+            tokens.append(self._advance())
+        if not tokens:
+            raise GMLTranspileError("Expected enum value")
+        return tokens
+
     def _skip_newlines(self) -> None:
         while self._match("\n"):
             pass
@@ -1109,6 +1156,13 @@ class _StatementParser:
     def _consume_identifier(self, value: str) -> None:
         if not self._match_identifier(value):
             raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+
+    def _consume_identifier_name(self) -> str:
+        token = self._advance()
+        if token.kind != "IDENT":
+            raise GMLTranspileError(f"Expected identifier, got: {token.value}")
+        _validate_gml_identifier(token.value)
+        return token.value
 
     def _check(self, value: str | None) -> bool:
         if value is None:
@@ -1381,6 +1435,10 @@ def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
 
 def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
+
+
+def _enum_value_tokens_to_source(tokens: Iterable[_Token]) -> str:
+    return _tokens_to_source(tokens).replace(" . ", ".")
 
 
 def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:

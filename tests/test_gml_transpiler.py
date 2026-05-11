@@ -518,6 +518,25 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_bit_not(0b0011)",
         )
 
+    def test_transpiles_enum_declarations_and_member_access(self):
+        self.assertEqual(
+            transpile_gml_code("enum RAINBOW { RED, ORANGE, GREEN }\ncolour = RAINBOW.GREEN", indent=""),
+            'enum RAINBOW {\n'
+            '\tRED,\n'
+            '\tORANGE,\n'
+            '\tGREEN\n'
+            '}\n'
+            'colour = GMRuntime.gml_struct_get(RAINBOW, "GREEN")',
+        )
+        self.assertEqual(
+            transpile_gml_code("enum RAINBOW { RED = 5, GREEN = 20, VIOLET = ENUM_TEST.VAL }", indent=""),
+            "enum RAINBOW {\n"
+            "\tRED = 5,\n"
+            "\tGREEN = 20,\n"
+            "\tVIOLET = ENUM_TEST.VAL\n"
+            "}",
+        )
+
     def test_transpiles_nullish_operator(self):
         self.assertEqual(
             transpile_gml_expression("value ?? fallback"),

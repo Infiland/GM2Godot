@@ -10,6 +10,7 @@ Current branch work to remember before redoing an issue:
 - `1212f46` adds legacy numeric with target keyword handling and references #300.
 - `01245de` tightens invalid numeric `NaN` runtime coverage and references #425.
 - `7d7551a` adds self/other with-target coverage and references #298.
+- `9ed26ee` parses and lowers `with` statements through target loops and references #227, #301, and #303.
 
 ## Working Order
 
@@ -167,9 +168,9 @@ Current branch work to remember before redoing an issue:
 - [ ] #306 Variables: Built-in Variables - Map built-in room and global variables (open, parent #255, subissues 0/0)
 - [x] #305 Variables: Built-in Variables - Map built-in instance variables to object runtime state (closed, parent #255, subissues 0/0)
 - [ ] #304 Variables: Built-in Variables - Build a built-in variable registry (open, parent #255, subissues 0/0)
-- [ ] #303 Variables: with() Scope Switching + Instance Keywords - Support break and continue in with (open, parent #181, subissues 0/0)
+- [ ] #303 Variables: with() Scope Switching + Instance Keywords - Support break and continue in with (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #302 Variables: with() Scope Switching + Instance Keywords - Preserve locals and caller scope inside with (open, parent #181, subissues 0/0)
-- [ ] #301 Variables: with() Scope Switching + Instance Keywords - Lower with target execution counts (open, parent #181, subissues 0/0)
+- [ ] #301 Variables: with() Scope Switching + Instance Keywords - Lower with target execution counts (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #300 Variables: with() Scope Switching + Instance Keywords - Support legacy numeric keyword values (open, parent #181, subissues 0/0) - branch-covered by `1212f46`
 - [ ] #299 Variables: with() Scope Switching + Instance Keywords - Resolve all and noone keywords (open, parent #181, subissues 0/0) - branch-covered by `106712e`
 - [ ] #298 Variables: with() Scope Switching + Instance Keywords - Resolve self and other keywords (open, parent #181, subissues 0/0) - branch-covered by `7d7551a`
@@ -243,7 +244,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #230 with: Share enclosing local variables (open, parent #192, subissues 0/0)
 - [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0)
 - [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0)
-- [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0)
+- [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)
 - [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0)
 - [ ] #224 exit: Return early from functions and methods (open, parent #191, subissues 0/0)

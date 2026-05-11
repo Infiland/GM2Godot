@@ -425,6 +425,7 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_names_count": "gml_struct_names_count",
     "struct_set": "gml_struct_set",
     "struct_remove": "gml_struct_remove",
+    "struct_foreach": "gml_struct_foreach",
 }
 
 _VARIABLE_RUNTIME_FUNCTIONS = {

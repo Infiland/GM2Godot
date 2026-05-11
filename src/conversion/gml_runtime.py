@@ -657,6 +657,17 @@ static func gml_struct_names_count(struct_value):
 	return -1
 
 
+static func gml_struct_foreach(struct_value, callback):
+	if not is_struct(struct_value):
+		return gml_unsupported_type_error("GML struct_foreach", struct_value)
+	if not is_method(callback):
+		return gml_unsupported_type_error("GML struct_foreach callback", callback)
+	for member_name in gml_struct_get_names(struct_value):
+		var member_value = gml_struct_get(struct_value, member_name)
+		gml_method_call(callback, [member_name, member_value])
+	return null
+
+
 static func gml_variable_clone(value, depth = 128):
 	return _gml_clone_value(value, max(0, int(_to_real(depth))))
 

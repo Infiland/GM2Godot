@@ -972,6 +972,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("struct_names_count(mystruct)"),
             "GMRuntime.gml_struct_names_count(mystruct)",
         )
+        self.assertEqual(
+            transpile_gml_expression("struct_foreach(mystruct, callback)"),
+            "GMRuntime.gml_struct_foreach(mystruct, callback)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("struct_foreach(mystruct, method(self, callback))"),
+            "GMRuntime.gml_struct_foreach(mystruct, GMRuntime.gml_method(self, callback))",
+        )
 
     def test_transpiles_variable_clone_through_runtime(self):
         self.assertEqual(

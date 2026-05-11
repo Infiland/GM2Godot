@@ -100,6 +100,7 @@ RUNTIME_VALUE_PARITY_CASES = (
         'handle_parse(string(ref_create(self, "text")))',
         'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
     ),
+    RuntimeValueParityCase("struct_foreach(mystruct, callback)", "GMRuntime.gml_struct_foreach(mystruct, callback)"),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
     RuntimeValueParityCase("typeof(ptr(0))", "GMRuntime.gml_typeof(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
@@ -377,6 +378,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct_names_count",
             "gml_struct_set",
             "gml_struct_remove",
+            "gml_struct_foreach",
             "gml_variable_struct_get",
             "gml_variable_instance_get",
             "gml_ds_map_find_value",
@@ -828,6 +830,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
         self.assertIn("return -1", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_struct_foreach_invokes_callback_for_visible_members(self):
+        self.assertIn("static func gml_struct_foreach(struct_value, callback):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not is_struct(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML struct_foreach", struct_value)', GML_RUNTIME_SCRIPT)
+        self.assertIn("if not is_method(callback):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_type_error("GML struct_foreach callback", callback)',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("for member_name in gml_struct_get_names(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var member_value = gml_struct_get(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_method_call(callback, [member_name, member_value])", GML_RUNTIME_SCRIPT)
+        self.assertIn("return null", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_string_output_uses_to_string_convention(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)

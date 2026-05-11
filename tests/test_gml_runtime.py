@@ -143,6 +143,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('3 * "ha"', 'GMRuntime.gml_mul(3, "ha")'),
     RuntimeValueParityCase('2.5 * "ha"', 'GMRuntime.gml_mul(2.5, "ha")'),
     RuntimeValueParityCase('"ha" * 2', 'GMRuntime.gml_mul("ha", 2)'),
+    RuntimeValueParityCase("undefined + 1", "GMRuntime.gml_add(GMRuntime.gml_undefined(), 1)"),
+    RuntimeValueParityCase("[1] - 1", "GMRuntime.gml_sub([1], 1)"),
     RuntimeValueParityCase("a - b", "GMRuntime.gml_sub(a, b)"),
     RuntimeValueParityCase("a * b", "GMRuntime.gml_mul(a, b)"),
     RuntimeValueParityCase("a mod b", "GMRuntime.gml_mod(a, b)"),
@@ -657,11 +659,24 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if is_string(right):\n\t\tif is_string(left):", GML_RUNTIME_SCRIPT)
         self.assertIn("return str(left) + str(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_string(left) + str(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn('if is_string(left):\n\t\treturn gml_error("Invalid GML string concatenation")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'if is_string(left):\n\t\treturn gml_unsupported_binary_type_error("GML add", left, right)',
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if is_string(right):\n\t\tif is_number(left):", GML_RUNTIME_SCRIPT)
         self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
-        self.assertIn("Invalid GML string concatenation", GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
+
+    def test_runtime_type_table_errors_are_centralized(self):
+        self.assertIn('return gml_unsupported_binary_type_error("GML add", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML subtract", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML multiply", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML divide", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML integer divide", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML modulo", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_unsupported_binary_type_error(api_name, left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_error(", GML_RUNTIME_SCRIPT)
 
     def test_runtime_centralizes_error_reporting(self):
         self.assertIn("static func gml_error(message):", GML_RUNTIME_SCRIPT)

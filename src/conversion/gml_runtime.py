@@ -341,7 +341,7 @@ static func gml_add(left, right):
 			return gml_string(left) + str(right)
 		return gml_unsupported_binary_type_error("GML add", left, right)
 	if is_string(left):
-		return gml_error("Invalid GML string concatenation")
+		return gml_unsupported_binary_type_error("GML add", left, right)
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
 		return _to_real(left) + _to_real(right)
 	return gml_unsupported_binary_type_error("GML add", left, right)

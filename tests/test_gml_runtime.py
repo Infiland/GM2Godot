@@ -135,6 +135,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_ne(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return not gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_undefined_truthiness_and_conversions(self):
+        self.assertIn(
+            "static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false",
+            GML_RUNTIME_SCRIPT,
+        )
+
     def test_runtime_helpers_keep_variant_backed_parameters(self):
         self.assertIn("static func gml_typeof(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_bool(value):", GML_RUNTIME_SCRIPT)

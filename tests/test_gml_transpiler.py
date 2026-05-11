@@ -360,6 +360,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_nan_value(NAN)",
         )
 
+    def test_undefined_conditions_use_gml_truthiness(self):
+        self.assertEqual(
+            transpile_gml_code("if undefined begin score = 1; end", indent=""),
+            "if GMRuntime.gml_bool(GMRuntime.gml_undefined()):\n\tscore = 1",
+        )
+
     def test_transpiles_nan_type_helpers(self):
         self.assertEqual(
             transpile_gml_expression("typeof(NaN)"),

@@ -603,6 +603,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_method(self, callback)",
         )
         self.assertEqual(
+            transpile_gml_expression("typeof(method(player, callback))"),
+            "GMRuntime.gml_typeof(GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("method_get_self(method(player, callback))"),
+            "GMRuntime.gml_method_get_self(GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("method_get_index(method(player, callback))"),
+            "GMRuntime.gml_method_get_index(GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
             transpile_gml_expression("method_get_self(callback)"),
             "GMRuntime.gml_method_get_self(callback)",
         )

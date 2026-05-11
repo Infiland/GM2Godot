@@ -834,6 +834,14 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var x = 1\nvar y = GMRuntime.gml_add(x, 2)",
         )
 
+    def test_unassigned_local_vars_initialize_to_gml_undefined(self):
+        self.assertEqual(
+            transpile_gml_code("var _i, _num = 24.5, _str;", indent=""),
+            "var _i = GMRuntime.gml_undefined()\n"
+            "var _num = 24.5\n"
+            "var _str = GMRuntime.gml_undefined()",
+        )
+
     def test_transpiles_compound_assignments(self):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),

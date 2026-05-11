@@ -1636,7 +1636,7 @@ def _transpile_var_statement(
         assignment = _split_assignment(declaration)
         if assignment is None:
             name = declaration.strip()
-            lines.append(f"var {name}")
+            lines.append(f"var {name} = GMRuntime.gml_undefined()")
             local_names.add(name)
             continue
         name, operator, value = assignment

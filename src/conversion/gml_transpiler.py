@@ -80,6 +80,11 @@ class _Call:
 
 
 @dataclass(frozen=True)
+class _ArrayLiteral:
+    elements: tuple[_Expression, ...]
+
+
+@dataclass(frozen=True)
 class _Index:
     target: _Expression
     index: _Expression
@@ -105,6 +110,7 @@ _Expression: TypeAlias = (
     | _Binary
     | _Ternary
     | _Call
+    | _ArrayLiteral
     | _Index
     | _Member
     | _Grouped
@@ -416,6 +422,15 @@ class _ExpressionParser:
             return _StringLiteral(token.value)
         if token.kind == "IDENT":
             return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
+        if token.value == "[":
+            elements: list[_Expression] = []
+            if not self._check("]"):
+                while True:
+                    elements.append(self._parse_expression())
+                    if not self._match(","):
+                        break
+            self._consume("]")
+            return _ArrayLiteral(tuple(elements))
         if token.value == "(":
             expr = self._parse_expression()
             self._consume(")")
@@ -1144,6 +1159,9 @@ def _emit_expression(
         callee = _emit_child(expr.callee, _POSTFIX_PRECEDENCE, local_names=local_names)
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"{callee}({args})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _ArrayLiteral):
+        elements = ", ".join(_emit_expression(element, local_names)[0] for element in expr.elements)
+        return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _Index):
         target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
         index = _emit_expression(expr.index, local_names)[0]

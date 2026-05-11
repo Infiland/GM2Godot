@@ -62,6 +62,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("real($2c8e)", "GMRuntime.gml_real(0x2c8e)"),
     RuntimeValueParityCase("0b01101000_01101001", "0b0110100001101001"),
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
+    RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),

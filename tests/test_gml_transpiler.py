@@ -8,6 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.gml_transpiler import (
+    _ArrayLiteral,
     GMLTranspileError,
     _ExpressionParser,
     _NumberLiteral,
@@ -428,6 +429,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("choose(items[index + 1], other.value)"),
             "choose(items[GMRuntime.gml_add(index, 1)], other.value)",
         )
+
+    def test_parses_array_literals(self):
+        self.assertEqual(transpile_gml_expression("[]"), "[]")
+        self.assertEqual(
+            transpile_gml_expression('[1, score + 1, "ready"]'),
+            '[1, GMRuntime.gml_add(score, 1), "ready"]',
+        )
+        self.assertEqual(
+            transpile_gml_expression("[[1, 2], [3, 4]]"),
+            "[[1, 2], [3, 4]]",
+        )
+
+    def test_preserves_array_literal_metadata(self):
+        literal = _ExpressionParser(_expression_tokens("[1, [2]]")).parse()
+
+        self.assertIsInstance(literal, _ArrayLiteral)
+        assert isinstance(literal, _ArrayLiteral)
+        self.assertEqual(len(literal.elements), 2)
 
 
 class TestGMLStatementTranspiler(unittest.TestCase):

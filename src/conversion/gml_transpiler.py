@@ -892,6 +892,8 @@ class _StatementParser:
             return self._parse_enum_statement()
         if self._check_identifier("if"):
             return self._parse_if_statement()
+        if self._check_identifier("with"):
+            return self._parse_with_statement()
         if self._check_identifier("while"):
             return self._parse_while_statement()
         if self._check_identifier("repeat"):
@@ -985,6 +987,31 @@ class _StatementParser:
                 lines.append("else:")
                 lines.extend(_indent_lines(else_body_lines or ["pass"]))
 
+        return lines
+
+    def _parse_with_statement(self) -> list[str]:
+        self._consume_identifier("with")
+        target_tokens = self._read_condition_tokens()
+        if not target_tokens:
+            raise GMLTranspileError("Expected with target")
+
+        target = transpile_gml_expression(
+            _tokens_to_source(target_tokens),
+            local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
+        )
+        with_target = self._next_generated_name("_gml_with_target")
+        self.loop_depth += 1
+        self.continue_depth += 1
+        try:
+            body_lines = self._parse_body()
+        finally:
+            self.loop_depth -= 1
+            self.continue_depth -= 1
+
+        lines = [f"for {with_target} in GMRuntime.gml_with_targets({target}, self, other):"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_while_statement(self) -> list[str]:

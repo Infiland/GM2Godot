@@ -1306,6 +1306,39 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "mystruct = GMRuntime.gml_undefined()",
         )
 
+    def test_transpiles_with_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("with (all) begin score += 1; end", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("with (enemy) score += 1;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(enemy, self, other):\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
+    def test_with_noone_lowers_to_zero_target_runtime_loop(self):
+        self.assertEqual(
+            transpile_gml_code("with (noone) score = 1;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone(), self, other):\n"
+            "\tscore = 1",
+        )
+
+    def test_with_allows_break_and_continue_as_loop_control(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "with (all) begin if skip begin continue; end if done begin break; end score += 1; end",
+                indent="",
+            ),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            "\tif GMRuntime.gml_bool(skip):\n"
+            "\t\tcontinue\n"
+            "\tif GMRuntime.gml_bool(done):\n"
+            "\t\tbreak\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_delete_clears_only_named_struct_reference(self):
         self.assertEqual(
             transpile_gml_code("mystruct = make_struct(); alias = mystruct; delete mystruct;", indent=""),

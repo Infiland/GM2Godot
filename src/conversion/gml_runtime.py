@@ -162,6 +162,47 @@ static func gml_struct(fields = {}):
 	return fields
 
 
+static func gml_struct_get(struct_value, member_name):
+	var key = str(member_name)
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		if struct_value.has(key):
+			return struct_value[key]
+		return gml_undefined()
+	if typeof(struct_value) == TYPE_OBJECT:
+		if _object_has_property(struct_value, key):
+			return struct_value.get(key)
+		return gml_undefined()
+	return gml_error("GML struct access requires a struct")
+
+
+static func gml_struct_exists(struct_value, member_name):
+	var key = str(member_name)
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		return struct_value.has(key)
+	if typeof(struct_value) == TYPE_OBJECT:
+		return _object_has_property(struct_value, key)
+	return false
+
+
+static func gml_struct_set(struct_value, member_name, value):
+	var key = str(member_name)
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		struct_value[key] = value
+		return value
+	if typeof(struct_value) == TYPE_OBJECT:
+		struct_value.set(key, value)
+		return value
+	return gml_error("GML struct access requires a struct")
+
+
+static func gml_struct_remove(struct_value, member_name):
+	var key = str(member_name)
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		struct_value.erase(key)
+		return gml_undefined()
+	return gml_error("GML struct access requires a mutable struct")
+
+
 static func gml_bit_and(left, right):
 	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
 
@@ -267,6 +308,13 @@ static func _to_array_index(value):
 		gml_error("Negative GML array index")
 		return -1
 	return resolved_index
+
+
+static func _object_has_property(object_value, property_name):
+	for property in object_value.get_property_list():
+		if property.get("name") == property_name:
+			return true
+	return false
 
 
 static func gml_error(message):

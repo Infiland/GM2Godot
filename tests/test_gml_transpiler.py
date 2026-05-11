@@ -525,6 +525,43 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_expression("{6fish: value}")
 
+    def test_transpiles_struct_member_access_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("mystruct.a"),
+            'GMRuntime.gml_struct_get(mystruct, "a")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{a: 1}.a"),
+            'GMRuntime.gml_struct_get(GMRuntime.gml_struct({"a": 1}), "a")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('mystruct[$ "x"]'),
+            'GMRuntime.gml_struct_get(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("mystruct[$ key_name]"),
+            "GMRuntime.gml_struct_get(mystruct, key_name)",
+        )
+        self.assertEqual(transpile_gml_expression("other.value"), "other.value")
+
+    def test_transpiles_struct_variable_functions_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression('struct_exists(mystruct, "x")'),
+            'GMRuntime.gml_struct_exists(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_get(mystruct, "x")'),
+            'GMRuntime.gml_struct_get(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_set(mystruct, "x", score + 1)'),
+            'GMRuntime.gml_struct_set(mystruct, "x", GMRuntime.gml_add(score, 1))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_remove(mystruct, "x")'),
+            'GMRuntime.gml_struct_remove(mystruct, "x")',
+        )
+
     def test_transpiles_array_indexing_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("items[0]"),
@@ -962,6 +999,31 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("grid[x][y] = value;", indent=""),
             "GMRuntime.gml_array_set(GMRuntime.gml_array_get(grid, position.x), position.y, value)",
+        )
+
+    def test_transpiles_struct_member_assignments_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_code("mystruct.a = 20;", indent=""),
+            'GMRuntime.gml_struct_set(mystruct, "a", 20)',
+        )
+        self.assertEqual(
+            transpile_gml_code('mystruct[$ "x"] = score + 1;', indent=""),
+            'GMRuntime.gml_struct_set(mystruct, "x", GMRuntime.gml_add(score, 1))',
+        )
+        self.assertEqual(
+            transpile_gml_code("mystruct.a += 1;", indent=""),
+            'GMRuntime.gml_struct_set(mystruct, "a", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(mystruct, "a"), 1))',
+        )
+        self.assertEqual(
+            transpile_gml_code("mystruct.a ??= 1;", indent=""),
+            'if GMRuntime.is_undefined(GMRuntime.gml_struct_get(mystruct, "a")):\n'
+            '\tGMRuntime.gml_struct_set(mystruct, "a", 1)',
+        )
+        self.assertEqual(
+            transpile_gml_code("mystruct.a++;", indent=""),
+            'GMRuntime.gml_struct_set(mystruct, "a", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(mystruct, "a"), 1))',
         )
 
     def test_array_assignment_aliases_preserve_reference_mutation(self):

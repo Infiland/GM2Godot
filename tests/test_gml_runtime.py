@@ -65,6 +65,12 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
+    RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
+    RuntimeValueParityCase('mystruct[$ "x"]', 'GMRuntime.gml_struct_get(mystruct, "x")'),
+    RuntimeValueParityCase('struct_exists(mystruct, "x")', 'GMRuntime.gml_struct_exists(mystruct, "x")'),
+    RuntimeValueParityCase('struct_get(mystruct, "x")', 'GMRuntime.gml_struct_get(mystruct, "x")'),
+    RuntimeValueParityCase('struct_set(mystruct, "x", 1)', 'GMRuntime.gml_struct_set(mystruct, "x", 1)'),
+    RuntimeValueParityCase('struct_remove(mystruct, "x")', 'GMRuntime.gml_struct_remove(mystruct, "x")'),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -112,6 +118,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_array_get",
             "gml_array_set",
             "gml_struct",
+            "gml_struct_exists",
+            "gml_struct_get",
+            "gml_struct_set",
+            "gml_struct_remove",
             "gml_bit_and",
             "gml_bit_or",
             "gml_bit_xor",
@@ -207,6 +217,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('return gml_error("GML struct literal requires a dictionary")', GML_RUNTIME_SCRIPT)
         self.assertIn("return fields", GML_RUNTIME_SCRIPT)
         self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_struct_access_helpers_preserve_gml_missing_member_behavior(self):
+        self.assertIn("static func gml_struct_get(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_exists(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_set(struct_value, member_name, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_remove(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if typeof(struct_value) == TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if struct_value.has(key):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("struct_value[key] = value", GML_RUNTIME_SCRIPT)
+        self.assertIn("struct_value.erase(key)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _object_has_property(object_value, property_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML struct access requires a struct")', GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

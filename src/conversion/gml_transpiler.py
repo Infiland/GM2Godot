@@ -105,6 +105,12 @@ class _Index:
 
 
 @dataclass(frozen=True)
+class _StructAccess:
+    target: _Expression
+    key: _Expression
+
+
+@dataclass(frozen=True)
 class _Member:
     target: _Expression
     member: str
@@ -128,6 +134,7 @@ _Expression: TypeAlias = (
     | _FunctionLiteral
     | _StructLiteral
     | _Index
+    | _StructAccess
     | _Member
     | _Grouped
 )
@@ -253,6 +260,12 @@ _GML_LITERAL_IDENTIFIERS = frozenset({
     "super",
     "true",
 })
+_DIRECT_MEMBER_TARGETS = frozenset({
+    "global",
+    "other",
+    "self",
+    "super",
+})
 
 _BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
     "&&",
@@ -278,6 +291,7 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "is_numeric",
     "is_real",
     "is_string",
+    "struct_exists",
     "is_undefined",
     "keyboard_check",
 })
@@ -362,6 +376,13 @@ _RUNTIME_FUNCTIONS = {
     "typeof": "gml_typeof",
     "string": "gml_string",
     "bool": "gml_bool",
+}
+
+_STRUCT_RUNTIME_FUNCTIONS = {
+    "struct_exists": "gml_struct_exists",
+    "struct_get": "gml_struct_get",
+    "struct_set": "gml_struct_set",
+    "struct_remove": "gml_struct_remove",
 }
 
 
@@ -464,6 +485,11 @@ class _ExpressionParser:
                 continue
 
             if self._match("["):
+                if self._match("$"):
+                    key = self._parse_expression()
+                    self._consume("]")
+                    expr = _StructAccess(expr, key)
+                    continue
                 index = self._parse_expression()
                 self._consume("]")
                 expr = _Index(expr, index)
@@ -1119,9 +1145,14 @@ def _tokenize(source: str) -> list[_Token]:
             continue
 
         if char == "$":
-            hex_end = _read_hex_number(source, index + 1)
-            tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end].replace('_', '')}"))
-            index = hex_end
+            next_char = source[index + 1] if index + 1 < len(source) else ""
+            if next_char.lower() in "0123456789abcdef" or next_char == "_":
+                hex_end = _read_hex_number(source, index + 1)
+                tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end].replace('_', '')}"))
+                index = hex_end
+            else:
+                tokens.append(_Token("OP", char))
+                index += 1
             continue
 
         if char == "#":
@@ -1433,8 +1464,19 @@ def _emit_expression(
         target = _emit_expression(expr.target, local_names)[0]
         index = _emit_expression(expr.index, local_names)[0]
         return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _StructAccess):
+        target = _emit_expression(expr.target, local_names)[0]
+        key = _emit_expression(expr.key, local_names)[0]
+        return f"GMRuntime.gml_struct_get({target}, {key})", _POSTFIX_PRECEDENCE
+    if _uses_direct_member_access(expr):
+        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+        return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
     target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
-    return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
+    return f"GMRuntime.gml_struct_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
+
+
+def _uses_direct_member_access(expr: _Member) -> bool:
+    return isinstance(expr.target, _Name) and expr.target.value in _DIRECT_MEMBER_TARGETS
 
 
 def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
@@ -1444,6 +1486,9 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
             return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
             return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
+    if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
+        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS
@@ -1543,6 +1588,8 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return any(_contains_gml_undefined(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
+    if isinstance(expr, _StructAccess):
+        return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_undefined(expr.target)
     return False
@@ -1573,6 +1620,8 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return any(_contains_gml_nan(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
+    if isinstance(expr, _StructAccess):
+        return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_nan(expr.target)
     return False
@@ -1740,7 +1789,16 @@ def _transpile_statement(
     if increment is not None:
         target, delta = increment
         helper = "gml_add" if delta > 0 else "gml_sub"
-        target = transpile_gml_expression(target, local_names)
+        target_expr = _parse_gml_expression(target)
+        struct_target = _struct_assignment_parts(target_expr, local_names)
+        if struct_target is not None:
+            container, key = struct_target
+            current_value = f"GMRuntime.gml_struct_get({container}, {key})"
+            return [
+                f"GMRuntime.gml_struct_set({container}, {key}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
+        target = _emit_expression(target_expr, local_names)[0]
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
     assignment = _split_assignment(statement)
@@ -1764,6 +1822,25 @@ def _transpile_statement(
                     f"GMRuntime.gml_array_set({container}, {index}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
+        struct_target = _struct_assignment_parts(target_expr, local_names)
+        if struct_target is not None:
+            container, key = struct_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
+            if operator == "??=":
+                current_value = f"GMRuntime.gml_struct_get({container}, {key})"
+                return [
+                    f"if GMRuntime.is_undefined({current_value}):",
+                    f"\tGMRuntime.gml_struct_set({container}, {key}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = f"GMRuntime.gml_struct_get({container}, {key})"
+                return [
+                    f"GMRuntime.gml_struct_set({container}, {key}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported struct member assignment operator")
         if operator == "??=":
             return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
         if operator in _COMPOUND_RUNTIME_FUNCTIONS:
@@ -1773,6 +1850,20 @@ def _transpile_statement(
         return [f"{target} {operator} {value}"]
 
     return [transpile_gml_expression(statement, local_names)]
+
+
+def _struct_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+) -> tuple[str, str] | None:
+    if isinstance(target_expr, _StructAccess):
+        container = _emit_expression(target_expr.target, local_names)[0]
+        key = _emit_expression(target_expr.key, local_names)[0]
+        return container, key
+    if isinstance(target_expr, _Member) and not _uses_direct_member_access(target_expr):
+        container = _emit_expression(target_expr.target, local_names)[0]
+        return container, json.dumps(target_expr.member)
+    return None
 
 
 def _record_instance_assignment(

@@ -157,6 +157,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_real",
             "gml_int64",
             "gml_ptr",
+            "gml_handle_register",
+            "gml_handle_get",
+            "gml_handle_resolve",
+            "gml_handle_invalidate",
             "gml_repeat_count",
             "gml_sqrt",
             "gml_add",
@@ -202,6 +206,31 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func is_ptr(value):\n\treturn value is GMLPointer", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ptr(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLPointer.new(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_defines_shared_handle_registry(self):
+        self.assertIn("class GMLHandle:", GML_RUNTIME_SCRIPT)
+        self.assertIn("var kind = \"\"", GML_RUNTIME_SCRIPT)
+        self.assertIn("var index = -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("var reference = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("var valid = false", GML_RUNTIME_SCRIPT)
+        self.assertIn("var name = \"\"", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_handle_registry = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_handle_next_indices = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_register(kind, reference, name = \"\"):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var handle_index = _gml_next_handle_index(handle_kind)", GML_RUNTIME_SCRIPT)
+        self.assertIn("GMLHandle.new(handle_kind, handle_index, reference, str(name), true)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_get(kind, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_handle_registry.has(key):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLHandle.new(handle_kind, handle_index, null, \"\", false)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_resolve(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if handle is GMLHandle and handle.valid:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return handle.reference", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_handle_invalidate(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("handle.valid = false", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_handle_registry.erase(_gml_handle_key(handle.kind, handle.index))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_next_handle_index(kind):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_handle_key(kind, index):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

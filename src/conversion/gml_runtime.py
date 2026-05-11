@@ -39,6 +39,21 @@ class GMLPointer:
 		invalid = is_invalid
 
 
+class GMLHandle:
+	var kind = ""
+	var index = -1
+	var reference = null
+	var valid = false
+	var name = ""
+
+	func _init(handle_kind = "", handle_index = -1, handle_reference = null, handle_name = "", is_valid = false):
+		kind = str(handle_kind)
+		index = int(handle_index)
+		reference = handle_reference
+		name = str(handle_name)
+		valid = bool(is_valid)
+
+
 class GMLUndefined:
 	pass
 
@@ -46,6 +61,8 @@ class GMLUndefined:
 static var _gml_undefined = GMLUndefined.new()
 static var _gml_pointer_null = GMLPointer.new(0)
 static var _gml_pointer_invalid = GMLPointer.new(-1, true)
+static var _gml_handle_registry = {}
+static var _gml_handle_next_indices = {}
 
 
 static func gml_undefined():
@@ -130,6 +147,36 @@ static func gml_ptr(value):
 	if is_number(value) or is_string(value):
 		return GMLPointer.new(value)
 	return gml_error("GML ptr conversion requires a real, string, int64, int32, or pointer")
+
+
+static func gml_handle_register(kind, reference, name = ""):
+	var handle_kind = str(kind)
+	var handle_index = _gml_next_handle_index(handle_kind)
+	var handle = GMLHandle.new(handle_kind, handle_index, reference, str(name), true)
+	_gml_handle_registry[_gml_handle_key(handle_kind, handle_index)] = handle
+	return handle
+
+
+static func gml_handle_get(kind, index):
+	var handle_kind = str(kind)
+	var handle_index = _to_int64_value(index)
+	var key = _gml_handle_key(handle_kind, handle_index)
+	if _gml_handle_registry.has(key):
+		return _gml_handle_registry[key]
+	return GMLHandle.new(handle_kind, handle_index, null, "", false)
+
+
+static func gml_handle_resolve(handle):
+	if handle is GMLHandle and handle.valid:
+		return handle.reference
+	return null
+
+
+static func gml_handle_invalidate(handle):
+	if handle is GMLHandle:
+		handle.valid = false
+		_gml_handle_registry.erase(_gml_handle_key(handle.kind, handle.index))
+	return gml_undefined()
 
 
 static func gml_div(left, right):
@@ -442,6 +489,16 @@ static func _returns_int64_arithmetic_result(left, right):
 		(is_int64(left) and (is_int64(right) or is_int32(right)))
 		or (is_int64(right) and is_int32(left))
 	)
+
+
+static func _gml_next_handle_index(kind):
+	var next_index = int(_gml_handle_next_indices.get(kind, 0))
+	_gml_handle_next_indices[kind] = next_index + 1
+	return next_index
+
+
+static func _gml_handle_key(kind, index):
+	return str(kind) + ":" + str(int(index))
 
 
 static func _to_array_index(value):

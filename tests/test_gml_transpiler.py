@@ -1111,6 +1111,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var _str = GMRuntime.gml_undefined()",
         )
 
+    def test_unknown_reads_remain_runtime_or_compile_errors(self):
+        self.assertEqual(
+            transpile_gml_expression("missing_value"),
+            "missing_value",
+        )
+        self.assertEqual(
+            transpile_gml_code("var explicit; value = missing_value;", indent=""),
+            "var explicit = GMRuntime.gml_undefined()\nvalue = missing_value",
+        )
+
     def test_local_var_lifetime_does_not_leak_between_transpiler_calls(self):
         self.assertEqual(transpile_gml_code("var x = 1;", indent=""), "var x = 1")
         self.assertEqual(

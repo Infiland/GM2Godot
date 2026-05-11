@@ -301,11 +301,21 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("infinity == NaN"),
-            "INF == NAN",
+            "GMRuntime.gml_eq(INF, NAN)",
         )
         self.assertEqual(
             transpile_gml_expression("infinity == undefined"),
             "GMRuntime.gml_eq(INF, GMRuntime.gml_undefined())",
+        )
+
+    def test_nan_equality_uses_runtime_type_table(self):
+        self.assertEqual(
+            transpile_gml_expression("NaN == NaN"),
+            "GMRuntime.gml_eq(NAN, NAN)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("NaN != NaN"),
+            "GMRuntime.gml_ne(NAN, NAN)",
         )
 
     def test_undefined_equality_uses_runtime_type_table(self):

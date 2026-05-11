@@ -1398,7 +1398,10 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         return f"{left} if not GMRuntime.is_undefined({left}) else {right}", _TERNARY_PRECEDENCE
 
     if expr.operator in ("=", "==", "!=") and (
-        _contains_gml_undefined(expr.left) or _contains_gml_undefined(expr.right)
+        _contains_gml_undefined(expr.left)
+        or _contains_gml_undefined(expr.right)
+        or _contains_gml_nan(expr.left)
+        or _contains_gml_nan(expr.right)
     ):
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -1457,6 +1460,32 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
     if isinstance(expr, _Member):
         return _contains_gml_undefined(expr.target)
+    return False
+
+
+def _contains_gml_nan(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value == "NAN"
+    if isinstance(expr, _Grouped):
+        return _contains_gml_nan(expr.expr)
+    if isinstance(expr, _Unary):
+        return _contains_gml_nan(expr.operand)
+    if isinstance(expr, _Binary):
+        return _contains_gml_nan(expr.left) or _contains_gml_nan(expr.right)
+    if isinstance(expr, _Ternary):
+        return (
+            _contains_gml_nan(expr.condition)
+            or _contains_gml_nan(expr.true_expr)
+            or _contains_gml_nan(expr.false_expr)
+        )
+    if isinstance(expr, _Call):
+        return _contains_gml_nan(expr.callee) or any(_contains_gml_nan(arg) for arg in expr.args)
+    if isinstance(expr, _ArrayLiteral):
+        return any(_contains_gml_nan(element) for element in expr.elements)
+    if isinstance(expr, _Index):
+        return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
+    if isinstance(expr, _Member):
+        return _contains_gml_nan(expr.target)
     return False
 
 

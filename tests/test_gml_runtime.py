@@ -134,6 +134,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_repeat_count_preserves_gml_rounding(self):
+        self.assertIn("static func gml_repeat_count(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return max(0, int(round(_to_real(value))))", GML_RUNTIME_SCRIPT)
+
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)

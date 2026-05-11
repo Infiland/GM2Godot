@@ -537,6 +537,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
 
+    def test_repeat_count_expression_uses_runtime_rounding_once(self):
+        self.assertEqual(
+            transpile_gml_code("repeat (next_count()) score += 1;", indent=""),
+            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(next_count())):\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

@@ -29,12 +29,19 @@ class GMLInt64:
 			value = int(initial_value)
 
 
+class GMLUndefined:
+	pass
+
+
+static var _gml_undefined = GMLUndefined.new()
+
+
 static func gml_undefined():
-	return null
+	return _gml_undefined
 
 
 static func is_undefined(value):
-	return value == null
+	return value is GMLUndefined
 
 
 static func is_bool(value):

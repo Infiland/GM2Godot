@@ -122,6 +122,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         ):
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_uses_distinct_undefined_sentinel(self):
+        self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_undefined(value):\n\treturn value is GMLUndefined", GML_RUNTIME_SCRIPT)
+
     def test_runtime_helpers_keep_variant_backed_parameters(self):
         self.assertIn("static func gml_typeof(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_bool(value):", GML_RUNTIME_SCRIPT)
@@ -159,8 +165,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_array_deletion_uses_plain_undefined_without_registries(self):
-        self.assertIn("static func gml_undefined():\n\treturn null", GML_RUNTIME_SCRIPT)
+    def test_runtime_array_deletion_uses_undefined_without_registries(self):
+        self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_registry", GML_RUNTIME_SCRIPT)
 
     def test_runtime_array_copy_on_write_flag_emits_diagnostic(self):

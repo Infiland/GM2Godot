@@ -9,12 +9,14 @@ GML_RUNTIME_SCRIPT = """extends RefCounted
 const GML_TYPE_UNDEFINED = "undefined"
 const GML_TYPE_BOOL = "bool"
 const GML_TYPE_NUMBER = "number"
+const GML_TYPE_INT32 = "int32"
 const GML_TYPE_INT64 = "int64"
 const GML_TYPE_POINTER = "ptr"
 const GML_TYPE_STRING = "string"
 const GML_TYPE_ARRAY = "array"
 const GML_TYPE_STRUCT = "struct"
 const GML_TYPE_METHOD = "method"
+const GML_TYPE_HANDLE = "ref"
 const GML_TYPE_UNKNOWN = "unknown"
 const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
 const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
@@ -121,7 +123,7 @@ static func is_int32(value):
 
 
 static func is_int64(value):
-	return value is GMLInt64 or is_handle(value)
+	return value is GMLInt64
 
 
 static func is_ptr(value):
@@ -627,6 +629,8 @@ static func _gml_values_equal_for_array(left, right):
 static func gml_typeof(value):
 	if is_undefined(value):
 		return GML_TYPE_UNDEFINED
+	if is_handle(value):
+		return GML_TYPE_HANDLE
 	if is_int64(value):
 		return GML_TYPE_INT64
 	if is_ptr(value):
@@ -634,6 +638,8 @@ static func gml_typeof(value):
 	var value_type = typeof(value)
 	if value_type == TYPE_BOOL:
 		return GML_TYPE_BOOL
+	if is_int32(value):
+		return GML_TYPE_INT32
 	if value_type == TYPE_INT or value_type == TYPE_FLOAT:
 		return GML_TYPE_NUMBER
 	if value_type == TYPE_STRING or value_type == TYPE_STRING_NAME:

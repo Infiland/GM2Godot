@@ -402,7 +402,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_handle_type_ids = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_handle_next_type_id = 1", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_handle(value):\n\treturn value is GMLHandle", GML_RUNTIME_SCRIPT)
-        self.assertIn("return value is GMLInt64 or is_handle(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_int64(value):\n\treturn value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("var handle_type_id = _gml_handle_type_id(handle_kind)", GML_RUNTIME_SCRIPT)
         self.assertIn("var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)", GML_RUNTIME_SCRIPT)
         self.assertIn("type_id = int(handle_type_id)", GML_RUNTIME_SCRIPT)
@@ -544,6 +544,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_callable(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_method(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_typeof_agrees_with_specific_predicate_categories(self):
+        self.assertIn('const GML_TYPE_INT32 = "int32"', GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_TYPE_HANDLE = "ref"', GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_int64(value):\n\t\treturn GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_int32(value):\n\t\treturn GML_TYPE_INT32", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_real_operations_as_float_helpers(self):
         self.assertIn("return NAN", GML_RUNTIME_SCRIPT)

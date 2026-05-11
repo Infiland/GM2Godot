@@ -722,6 +722,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tbreak",
         )
 
+    def test_switch_preserves_case_fallthrough(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'switch (keyboard_key) { case vk_left: case ord("A"): x -= 4; break; }',
+                indent="",
+            ),
+            "var _gml_switch_value_0 = keyboard_key\n"
+            "var _gml_switch_matched_1 = false\n"
+            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, vk_left) or GMRuntime.gml_eq(_gml_switch_value_0, ord("A"))\n'
+            "while true:\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, vk_left):\n"
+            "\t\t_gml_switch_matched_1 = true\n"
+            "\tif _gml_switch_matched_1:\n"
+            "\t\tpass\n"
+            '\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, ord("A")):\n'
+            "\t\t_gml_switch_matched_1 = true\n"
+            "\tif _gml_switch_matched_1:\n"
+            "\t\tposition.x = GMRuntime.gml_sub(position.x, 4)\n"
+            "\t\tbreak\n"
+            "\tbreak",
+        )
+
     def test_for_loop_preserves_execution_order(self):
         self.assertEqual(
             transpile_gml_code(

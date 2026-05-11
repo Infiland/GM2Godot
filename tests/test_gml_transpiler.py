@@ -317,6 +317,26 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_eq(INF, GMRuntime.gml_undefined())",
         )
 
+    def test_special_equality_table_cells(self):
+        cases = (
+            ("NaN == NaN", "GMRuntime.gml_eq(NAN, NAN)"),
+            ("NaN == undefined", "GMRuntime.gml_eq(NAN, GMRuntime.gml_undefined())"),
+            ("NaN == infinity", "GMRuntime.gml_eq(NAN, INF)"),
+            ("undefined == NaN", "GMRuntime.gml_eq(GMRuntime.gml_undefined(), NAN)"),
+            (
+                "undefined == undefined",
+                "GMRuntime.gml_eq(GMRuntime.gml_undefined(), GMRuntime.gml_undefined())",
+            ),
+            ("undefined == infinity", "GMRuntime.gml_eq(GMRuntime.gml_undefined(), INF)"),
+            ("infinity == NaN", "GMRuntime.gml_eq(INF, NAN)"),
+            ("infinity == undefined", "GMRuntime.gml_eq(INF, GMRuntime.gml_undefined())"),
+            ("infinity == infinity", "INF == INF"),
+        )
+
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_nan_equality_uses_runtime_type_table(self):
         self.assertEqual(
             transpile_gml_expression("NaN == NaN"),

@@ -1579,6 +1579,8 @@ def _transpile_statement(
     assignment = _split_assignment(statement)
     if assignment is not None:
         target, operator, value = assignment
+        if _split_assignment(value) is not None:
+            raise GMLTranspileError("Chained assignments are not supported")
         _record_instance_assignment(target, local_names, instance_variables)
         target_expr = _parse_gml_expression(target)
         target = _emit_expression(target_expr, local_names)[0]

@@ -855,6 +855,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "position.x = GMRuntime.gml_add(position.x, GMRuntime.gml_mul(position.y, 2))",
         )
 
+    def test_rejects_chained_assignments(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code("a = b = c;", indent="")
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

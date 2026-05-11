@@ -305,7 +305,21 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("infinity == undefined"),
-            "INF == GMRuntime.gml_undefined()",
+            "GMRuntime.gml_eq(INF, GMRuntime.gml_undefined())",
+        )
+
+    def test_undefined_equality_uses_runtime_type_table(self):
+        self.assertEqual(
+            transpile_gml_expression("undefined == undefined"),
+            "GMRuntime.gml_eq(GMRuntime.gml_undefined(), GMRuntime.gml_undefined())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("undefined == NaN"),
+            "GMRuntime.gml_eq(GMRuntime.gml_undefined(), NAN)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("undefined != infinity"),
+            "GMRuntime.gml_ne(GMRuntime.gml_undefined(), INF)",
         )
 
     def test_transpiles_single_equals_as_expression_equality(self):

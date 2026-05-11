@@ -1216,6 +1216,14 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
         return f"{left} if not GMRuntime.is_undefined({left}) else {right}", _TERNARY_PRECEDENCE
 
+    if expr.operator in ("=", "==", "!=") and (
+        _contains_gml_undefined(expr.left) or _contains_gml_undefined(expr.right)
+    ):
+        left = _emit_expression(expr.left, local_names)[0]
+        right = _emit_expression(expr.right, local_names)[0]
+        helper = "gml_ne" if expr.operator == "!=" else "gml_eq"
+        return f"GMRuntime.{helper}({left}, {right})", _POSTFIX_PRECEDENCE
+
     if expr.operator == "/":
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -1241,6 +1249,34 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         local_names=local_names,
     )
     return f"{left} {operator} {right}", precedence
+
+
+def _contains_gml_undefined(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value == "GMRuntime.gml_undefined()"
+    if isinstance(expr, _Grouped):
+        return _contains_gml_undefined(expr.expr)
+    if isinstance(expr, _Unary):
+        return _contains_gml_undefined(expr.operand)
+    if isinstance(expr, _Binary):
+        return _contains_gml_undefined(expr.left) or _contains_gml_undefined(expr.right)
+    if isinstance(expr, _Ternary):
+        return (
+            _contains_gml_undefined(expr.condition)
+            or _contains_gml_undefined(expr.true_expr)
+            or _contains_gml_undefined(expr.false_expr)
+        )
+    if isinstance(expr, _Call):
+        return _contains_gml_undefined(expr.callee) or any(
+            _contains_gml_undefined(arg) for arg in expr.args
+        )
+    if isinstance(expr, _ArrayLiteral):
+        return any(_contains_gml_undefined(element) for element in expr.elements)
+    if isinstance(expr, _Index):
+        return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
+    if isinstance(expr, _Member):
+        return _contains_gml_undefined(expr.target)
+    return False
 
 
 def _emit_truthy_expression(expr: _Expression, local_names: Iterable[str]) -> str:

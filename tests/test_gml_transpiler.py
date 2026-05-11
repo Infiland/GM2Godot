@@ -955,6 +955,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_variable_instance_names_count(GMRuntime.gml_global_scope())",
         )
         self.assertEqual(
+            transpile_gml_expression("variable_instance_get_names(enemy)"),
+            "GMRuntime.gml_variable_instance_get_names(enemy)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_instance_names_count(enemy)"),
+            "GMRuntime.gml_variable_instance_names_count(enemy)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_instance_get_names(noone)"),
+            "GMRuntime.gml_variable_instance_get_names(GMRuntime.gml_instance_noone())",
+        )
+        self.assertEqual(
             transpile_gml_expression('variable_global_exists("score")'),
             'GMRuntime.gml_variable_global_exists("score")',
         )

@@ -230,6 +230,18 @@ RUNTIME_VALUE_PARITY_CASES = (
         "GMRuntime.gml_variable_instance_names_count(GMRuntime.gml_global_scope())",
     ),
     RuntimeValueParityCase(
+        "variable_instance_get_names(enemy)",
+        "GMRuntime.gml_variable_instance_get_names(enemy)",
+    ),
+    RuntimeValueParityCase(
+        "variable_instance_names_count(enemy)",
+        "GMRuntime.gml_variable_instance_names_count(enemy)",
+    ),
+    RuntimeValueParityCase(
+        "variable_instance_get_names(noone)",
+        "GMRuntime.gml_variable_instance_get_names(GMRuntime.gml_instance_noone())",
+    ),
+    RuntimeValueParityCase(
         'variable_global_exists("score")',
         'GMRuntime.gml_variable_global_exists("score")',
     ),
@@ -900,6 +912,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_global_scope = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_global_scope():\n\treturn _gml_global_scope", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
+        self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var resolved_instance = _gml_resolve_instance(instance_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_get_names(resolved_instance)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_names_count(resolved_instance)", GML_RUNTIME_SCRIPT)

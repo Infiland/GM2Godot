@@ -614,6 +614,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tadvance()",
         )
 
+    def test_for_loop_supports_var_declarations_in_header(self):
+        self.assertEqual(
+            transpile_gml_code("for (var i = 0, total = 0; i < 3; i++) total += i;", indent=""),
+            "var i = 0\n"
+            "var total = 0\n"
+            "while i < 3:\n"
+            "\ttotal = GMRuntime.gml_add(total, i)\n"
+            "\ti = GMRuntime.gml_add(i, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

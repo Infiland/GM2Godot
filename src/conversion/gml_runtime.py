@@ -815,6 +815,8 @@ static func _object_has_property(object_value, property_name):
 
 
 static func _gml_clone_value(value, depth):
+	if is_handle(value):
+		return value
 	var value_type = typeof(value)
 	if value_type == TYPE_ARRAY:
 		var clone = []

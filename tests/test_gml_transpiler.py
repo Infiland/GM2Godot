@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.gml_transpiler import (
     _ArrayLiteral,
+    _BUILTIN_VARIABLE_REGISTRY,
     GMLTranspileError,
     _ExpressionParser,
     _NumberLiteral,
@@ -22,6 +23,22 @@ from src.conversion.gml_transpiler import (
 
 
 class TestGMLExpressionTranspiler(unittest.TestCase):
+    def test_builtin_variable_registry_captures_scope_defaults_and_mutability(self):
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].scope, "instance")
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].default, "0")
+        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["x"].mutable)
+        self.assertFalse(_BUILTIN_VARIABLE_REGISTRY["x"].is_array)
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].subsystem, "transform")
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["room"].scope, "global")
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["room"].default, "undefined")
+        self.assertFalse(_BUILTIN_VARIABLE_REGISTRY["room"].mutable)
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["view_xview"].scope, "global")
+        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["view_xview"].mutable)
+        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["view_xview"].is_array)
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["view_xview"].subsystem, "view")
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["argument"].default, "[]")
+        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["async_load"].subsystem, "async_event")
+
     def test_preserves_arithmetic_precedence(self):
         self.assertEqual(
             transpile_gml_expression("a + b * c"),
@@ -1151,6 +1168,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "bbox_left = 0",
             "image_number += 1",
             "room++",
+            "view_current[0] = 1",
             "delete object_index",
         ):
             with self.subTest(source=source):

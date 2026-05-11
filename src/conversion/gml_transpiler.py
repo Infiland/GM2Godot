@@ -35,6 +35,15 @@ class _Token:
 
 
 @dataclass(frozen=True)
+class _BuiltinVariableMetadata:
+    scope: str
+    default: str
+    mutable: bool
+    is_array: bool
+    subsystem: str
+
+
+@dataclass(frozen=True)
 class _Name:
     value: str
 
@@ -364,17 +373,6 @@ _NAME_REPLACEMENTS = {
     "undefined": "GMRuntime.gml_undefined()",
 }
 
-_BUILTIN_GLOBAL_VARIABLES = frozenset({
-    "argument",
-    "argument_count",
-    "async_load",
-    "event_data",
-    "instance_count",
-    "room",
-    "room_height",
-    "room_width",
-})
-
 _BLOCK_DELIMITER_REPLACEMENTS = {
     "begin": "{",
     "end": "}",
@@ -385,51 +383,67 @@ _INSTANCE_NAME_REPLACEMENTS = {
     "y": "position.y",
 }
 
-_BUILTIN_ARRAY_VARIABLES = frozenset({
-    "view_angle",
-    "view_camera",
-    "view_current",
-    "view_enabled",
-    "view_hborder",
-    "view_hport",
-    "view_hspeed",
-    "view_hview",
-    "view_object",
-    "view_surface_id",
-    "view_vborder",
-    "view_visible",
-    "view_vspeed",
-    "view_wport",
-    "view_wview",
-    "view_xport",
-    "view_xview",
-    "view_yport",
-    "view_yview",
-})
+_BUILTIN_VARIABLE_REGISTRY = {
+    "argument": _BuiltinVariableMetadata("global", "[]", False, False, "script_arguments"),
+    "argument_count": _BuiltinVariableMetadata("global", "0", False, False, "script_arguments"),
+    "async_load": _BuiltinVariableMetadata("global", "{}", False, False, "async_event"),
+    "bbox_bottom": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_left": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_right": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_top": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "depth": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
+    "direction": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "event_data": _BuiltinVariableMetadata("global", "{}", False, False, "event"),
+    "fps": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "id": _BuiltinVariableMetadata("instance", "undefined", False, False, "identity"),
+    "image_index": _BuiltinVariableMetadata("instance", "0", True, False, "sprite"),
+    "image_number": _BuiltinVariableMetadata("instance", "0", False, False, "sprite"),
+    "instance_count": _BuiltinVariableMetadata("global", "0", False, False, "instances"),
+    "layer": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
+    "object_index": _BuiltinVariableMetadata("instance", "undefined", False, False, "identity"),
+    "room": _BuiltinVariableMetadata("global", "undefined", False, False, "room"),
+    "room_height": _BuiltinVariableMetadata("global", "0", False, False, "room"),
+    "room_width": _BuiltinVariableMetadata("global", "0", False, False, "room"),
+    "speed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "sprite_index": _BuiltinVariableMetadata("instance", "undefined", True, False, "sprite"),
+    "view_angle": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_camera": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_current": _BuiltinVariableMetadata("global", "undefined", False, True, "view"),
+    "view_enabled": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hborder": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hspeed": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_object": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_surface_id": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_vborder": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_visible": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_vspeed": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_wport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_wview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_xport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_xview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_yport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_yview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "visible": _BuiltinVariableMetadata("instance", "true", True, False, "rendering"),
+    "x": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+    "y": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+}
 
-_READ_ONLY_BUILTIN_VARIABLES = frozenset({
-    "bbox_bottom",
-    "bbox_left",
-    "bbox_right",
-    "bbox_top",
-    "current_time",
-    "fps",
-    "id",
-    "image_number",
-    "object_index",
-    "room",
-    "room_height",
-    "room_width",
-})
-
-_BUILTIN_INSTANCE_VARIABLES = frozenset({
-    *_INSTANCE_NAME_REPLACEMENTS,
-    *_BUILTIN_ARRAY_VARIABLES,
-    *_BUILTIN_GLOBAL_VARIABLES,
-    *_READ_ONLY_BUILTIN_VARIABLES,
-    "sprite_index",
-    "image_index",
-})
+_BUILTIN_GLOBAL_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.scope == "global" and not metadata.is_array
+)
+_BUILTIN_ARRAY_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.is_array
+)
+_READ_ONLY_BUILTIN_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if not metadata.mutable
+)
+_BUILTIN_INSTANCE_VARIABLES = frozenset(_BUILTIN_VARIABLE_REGISTRY)
 
 _VIRTUAL_KEY_ACTIONS = {
     "vk_left": "ui_left",
@@ -1773,6 +1787,8 @@ def _reject_readonly_builtin_assignment_target(
 ) -> None:
     local_name_set = _normalize_local_names(local_names)
     unwrapped_target = _unwrap_grouped_expression(target_expr)
+    if isinstance(unwrapped_target, _Index):
+        unwrapped_target = _unwrap_grouped_expression(unwrapped_target.target)
     if isinstance(unwrapped_target, _Name):
         name = unwrapped_target.value
         if name not in local_name_set and name in _READ_ONLY_BUILTIN_VARIABLES:

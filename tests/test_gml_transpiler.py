@@ -490,6 +490,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tthreshold = GMRuntime.gml_sub(threshold, count)",
         )
 
+    def test_transpiles_break_and_continue_inside_while(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "while running begin if should_skip begin continue; end if done begin break; end count += 1; end",
+                indent="",
+            ),
+            "while GMRuntime.gml_bool(running):\n"
+            "\tif GMRuntime.gml_bool(should_skip):\n"
+            "\t\tcontinue\n"
+            "\tif GMRuntime.gml_bool(done):\n"
+            "\t\tbreak\n"
+            "\tcount = GMRuntime.gml_add(count, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

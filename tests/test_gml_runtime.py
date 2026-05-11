@@ -62,6 +62,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("is_struct(mystruct)", "GMRuntime.is_struct(mystruct)"),
     RuntimeValueParityCase("is_method(callback)", "GMRuntime.is_method(callback)"),
     RuntimeValueParityCase("is_callable(callback)", "GMRuntime.is_callable(callback)"),
+    RuntimeValueParityCase("method_get_self(callback)", "GMRuntime.gml_method_get_self(callback)"),
+    RuntimeValueParityCase("method_get_index(callback)", "GMRuntime.gml_method_get_index(callback)"),
     RuntimeValueParityCase("method_call(callback)", "GMRuntime.gml_method_call(callback)"),
     RuntimeValueParityCase(
         "method_call(callback, [1, 2, 3], 1, 2)",
@@ -332,6 +334,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_resolve",
             "gml_handle_invalidate",
             "gml_method_call",
+            "gml_method_get_self",
+            "gml_method_get_index",
             "gml_repeat_count",
             "gml_sqrt",
             "gml_add",
@@ -537,6 +541,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var count = source_size - start if num_args == null else int(_to_real(num_args))", GML_RUNTIME_SCRIPT)
         self.assertIn("var step = -1 if count < 0 else 1", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_error(\"GML method_call argument range out of bounds\")", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_method_accessors_expose_bound_self_and_index(self):
+        self.assertIn("static func gml_method_get_self(method):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML method_get_self", method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("var bound_self = method.get_object()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if bound_self == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("return bound_self", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_method_get_index(method):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML method_get_index", method)', GML_RUNTIME_SCRIPT)
+        self.assertIn("return method", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

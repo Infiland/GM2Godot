@@ -285,6 +285,21 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	return method.callv(call_args)
 
 
+static func gml_method_get_self(method):
+	if not is_method(method):
+		return gml_unsupported_type_error("GML method_get_self", method)
+	var bound_self = method.get_object()
+	if bound_self == null:
+		return gml_undefined()
+	return bound_self
+
+
+static func gml_method_get_index(method):
+	if not is_method(method):
+		return gml_unsupported_type_error("GML method_get_index", method)
+	return method
+
+
 static func _gml_method_call_args(array_args, offset, num_args):
 	var source = [] if array_args == null else array_args
 	if typeof(source) != TYPE_ARRAY:

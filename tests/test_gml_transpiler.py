@@ -538,6 +538,32 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "Enum values must be integer compile-time constants"):
             transpile_gml_code("enum BAD { VALUE = score + 1 }", indent="")
 
+    def test_rejects_enum_member_mutation(self):
+        mutation_sources = [
+            "enum RAINBOW { GREEN }\nRAINBOW.GREEN = 2",
+            "enum RAINBOW { GREEN }\nRAINBOW.GREEN += 1",
+            'enum RAINBOW { GREEN }\nRAINBOW[$ "GREEN"] = 2',
+            "enum RAINBOW { GREEN }\nRAINBOW.GREEN++",
+            'enum RAINBOW { GREEN }\nstruct_set(RAINBOW, "GREEN", 2)',
+            "enum RAINBOW { GREEN }\nvar mutate = function() { RAINBOW.GREEN = 2; }",
+        ]
+
+        for source in mutation_sources:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "enum"):
+                    transpile_gml_code(source, indent="")
+
+    def test_rejects_enum_reassignment(self):
+        with self.assertRaisesRegex(GMLTranspileError, "Cannot assign to enum"):
+            transpile_gml_code("enum RAINBOW { GREEN }\nRAINBOW = {}", indent="")
+
+    def test_allows_enum_member_as_non_mutating_index(self):
+        self.assertEqual(
+            transpile_gml_code("enum RAINBOW { GREEN }\nitems[RAINBOW.GREEN] = 2", indent=""),
+            'var RAINBOW = GMRuntime.gml_enum({"GREEN": 0})\n'
+            'GMRuntime.gml_array_set(items, GMRuntime.gml_struct_get(RAINBOW, "GREEN"), 2)',
+        )
+
     def test_transpiles_nullish_operator(self):
         self.assertEqual(
             transpile_gml_expression("value ?? fallback"),

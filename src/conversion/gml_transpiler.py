@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Iterable, Literal, Mapping, MutableSet, TypeAlias
+from typing import Iterable, Literal, Mapping, MutableMapping, MutableSet, TypeAlias
 
 
 _AssignmentOperator: TypeAlias = Literal[
@@ -409,22 +409,50 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
 }
 
 
-def transpile_gml_expression(source: str, local_names: Iterable[str] | None = None) -> str:
+def transpile_gml_expression(
+    source: str,
+    local_names: Iterable[str] | None = None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+) -> str:
     """Transpile a single GML expression to a GDScript expression."""
-    parser = _ExpressionParser(_expression_tokens(source))
+    parser = _ExpressionParser(
+        _expression_tokens(source),
+        enum_values=enum_values,
+        enum_names=enum_names,
+    )
     expr = parser.parse()
+    _reject_enum_mutation_expression(expr, enum_names)
     return _emit_expression(expr, _normalize_local_names(local_names))[0]
 
 
-def transpile_gml_condition(source: str, local_names: Iterable[str] | None = None) -> str:
+def transpile_gml_condition(
+    source: str,
+    local_names: Iterable[str] | None = None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+) -> str:
     """Transpile a GML condition using GameMaker truthiness semantics."""
-    parser = _ExpressionParser(_expression_tokens(source))
+    parser = _ExpressionParser(
+        _expression_tokens(source),
+        enum_values=enum_values,
+        enum_names=enum_names,
+    )
     expr = parser.parse()
+    _reject_enum_mutation_expression(expr, enum_names)
     return _emit_truthy_expression(expr, _normalize_local_names(local_names))
 
 
-def _parse_gml_expression(source: str) -> _Expression:
-    parser = _ExpressionParser(_expression_tokens(source))
+def _parse_gml_expression(
+    source: str,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+) -> _Expression:
+    parser = _ExpressionParser(
+        _expression_tokens(source),
+        enum_values=enum_values,
+        enum_names=enum_names,
+    )
     return parser.parse()
 
 
@@ -447,9 +475,18 @@ def transpile_gml_code(
 
 
 class _ExpressionParser:
-    def __init__(self, tokens: list[_Token]) -> None:
+    def __init__(
+        self,
+        tokens: list[_Token],
+        enum_values: MutableMapping[str, dict[str, int]] | None = None,
+        enum_names: Iterable[str] | None = None,
+    ) -> None:
         self.tokens = tokens
         self.position = 0
+        self.enum_values: MutableMapping[str, dict[str, int]] = (
+            enum_values if enum_values is not None else {}
+        )
+        self.enum_names: set[str] = set(enum_names or [])
 
     def parse(self) -> _Expression:
         expr = self._parse_expression()
@@ -585,7 +622,12 @@ class _ExpressionParser:
         self._consume(")")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
-        body_parser = _StatementParser(body_tokens, local_names=parameters)
+        body_parser = _StatementParser(
+            body_tokens,
+            local_names=parameters,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
+        )
         body_lines = body_parser.parse()
         return _FunctionLiteral(name, tuple(parameters), tuple(body_lines or ["pass"]))
 
@@ -664,6 +706,8 @@ class _StatementParser:
         loop_depth: int = 0,
         continue_depth: int = 0,
         generated_counter: list[int] | None = None,
+        enum_values: MutableMapping[str, dict[str, int]] | None = None,
+        enum_names: Iterable[str] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -672,7 +716,10 @@ class _StatementParser:
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
         self.generated_counter = generated_counter if generated_counter is not None else [0]
-        self.enum_values: dict[str, dict[str, int]] = {}
+        self.enum_values: MutableMapping[str, dict[str, int]] = (
+            enum_values if enum_values is not None else {}
+        )
+        self.enum_names: set[str] = set(enum_names or [])
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -712,11 +759,14 @@ class _StatementParser:
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
 
     def _parse_enum_statement(self) -> list[str]:
         self._consume_identifier("enum")
-        enum_name = _sanitize_gdscript_identifier(self._consume_identifier_name())
+        enum_name = self._consume_identifier_name()
+        gdscript_enum_name = _sanitize_gdscript_identifier(enum_name)
         self._skip_newlines()
         self._consume("{")
 
@@ -744,9 +794,11 @@ class _StatementParser:
 
         self._consume("}")
         self.enum_values[enum_name] = current_enum_values
+        self.enum_names.add(enum_name)
+        self.local_names.add(enum_name)
 
         fields = ", ".join(f"{json.dumps(member_name)}: {value}" for member_name, value in members)
-        return [f"var {enum_name} = GMRuntime.gml_enum({{{fields}}})"]
+        return [f"var {gdscript_enum_name} = GMRuntime.gml_enum({{{fields}}})"]
 
     def _parse_if_statement(self) -> list[str]:
         self._consume_identifier("if")
@@ -757,6 +809,8 @@ class _StatementParser:
         condition = transpile_gml_condition(
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         body_lines = self._parse_body()
         lines = [f"if {condition}:"]
@@ -784,6 +838,8 @@ class _StatementParser:
         condition = transpile_gml_condition(
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -805,6 +861,8 @@ class _StatementParser:
         count = transpile_gml_expression(
             _tokens_to_source(count_tokens),
             local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -839,11 +897,18 @@ class _StatementParser:
                     self.instance_variables,
                     loop_depth=self.loop_depth,
                     continue_depth=self.continue_depth,
+                    enum_values=self.enum_values,
+                    enum_names=self.enum_names,
                 )
             )
 
         condition = (
-            transpile_gml_condition(condition_source, local_names=self.local_names)
+            transpile_gml_condition(
+                condition_source,
+                local_names=self.local_names,
+                enum_values=self.enum_values,
+                enum_names=self.enum_names,
+            )
             if condition_source
             else "true"
         )
@@ -854,6 +919,8 @@ class _StatementParser:
                 self.instance_variables,
                 loop_depth=self.loop_depth,
                 continue_depth=self.continue_depth,
+                enum_values=self.enum_values,
+                enum_names=self.enum_names,
             )
             if operation
             else []
@@ -894,6 +961,8 @@ class _StatementParser:
         condition = transpile_gml_condition(
             _tokens_to_source(condition_tokens),
             local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         body_lines = _insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
@@ -914,6 +983,8 @@ class _StatementParser:
         expression = transpile_gml_expression(
             _tokens_to_source(expression_tokens),
             local_names=self.local_names,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         sections = self._parse_switch_sections()
         case_values = [
@@ -962,6 +1033,8 @@ class _StatementParser:
                 label = transpile_gml_expression(
                     _tokens_to_source(label_tokens),
                     local_names=self.local_names,
+                    enum_values=self.enum_values,
+                    enum_names=self.enum_names,
                 )
                 body_tokens = self._read_switch_section_body_tokens()
                 sections.append(("case", label, self._parse_switch_section_body(body_tokens)))
@@ -984,9 +1057,12 @@ class _StatementParser:
             loop_depth=self.loop_depth + 1,
             continue_depth=self.continue_depth,
             generated_counter=self.generated_counter,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
+        self.enum_names.update(parser.enum_names)
         return lines
 
     def _read_switch_label_tokens(self) -> list[_Token]:
@@ -1040,6 +1116,8 @@ class _StatementParser:
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
         )
 
     def _parse_body(self) -> list[str]:
@@ -1532,6 +1610,97 @@ def _evaluate_enum_binary(operator: str, left: int, right: int) -> int | None:
     return None
 
 
+def _reject_enum_assignment_target(
+    target_expr: _Expression,
+    enum_names: Iterable[str] | None,
+) -> None:
+    enum_name_set = frozenset(enum_names or [])
+    if not enum_name_set:
+        return
+
+    unwrapped_target = _unwrap_grouped_expression(target_expr)
+    if _is_enum_reference(unwrapped_target, enum_name_set):
+        raise GMLTranspileError("Cannot assign to enum")
+    if _target_chain_starts_with_enum(unwrapped_target, enum_name_set):
+        raise GMLTranspileError("Cannot assign to enum member")
+
+
+def _reject_enum_mutation_expression(
+    expr: _Expression,
+    enum_names: Iterable[str] | None,
+) -> None:
+    enum_name_set = frozenset(enum_names or [])
+    if not enum_name_set:
+        return
+
+    if isinstance(expr, _Call):
+        if (
+            isinstance(expr.callee, _Name)
+            and expr.callee.value in ("struct_set", "struct_remove")
+            and expr.args
+            and _is_enum_reference(expr.args[0], enum_name_set)
+        ):
+            raise GMLTranspileError("Cannot mutate enum member")
+        _reject_enum_mutation_expression(expr.callee, enum_name_set)
+        for arg in expr.args:
+            _reject_enum_mutation_expression(arg, enum_name_set)
+        return
+    if isinstance(expr, _Grouped):
+        _reject_enum_mutation_expression(expr.expr, enum_name_set)
+        return
+    if isinstance(expr, _Unary):
+        _reject_enum_mutation_expression(expr.operand, enum_name_set)
+        return
+    if isinstance(expr, _Binary):
+        _reject_enum_mutation_expression(expr.left, enum_name_set)
+        _reject_enum_mutation_expression(expr.right, enum_name_set)
+        return
+    if isinstance(expr, _Ternary):
+        _reject_enum_mutation_expression(expr.condition, enum_name_set)
+        _reject_enum_mutation_expression(expr.true_expr, enum_name_set)
+        _reject_enum_mutation_expression(expr.false_expr, enum_name_set)
+        return
+    if isinstance(expr, _ArrayLiteral):
+        for element in expr.elements:
+            _reject_enum_mutation_expression(element, enum_name_set)
+        return
+    if isinstance(expr, _StructLiteral):
+        for _field_name, field_value in expr.fields:
+            _reject_enum_mutation_expression(field_value, enum_name_set)
+        return
+    if isinstance(expr, _Index):
+        _reject_enum_mutation_expression(expr.target, enum_name_set)
+        _reject_enum_mutation_expression(expr.index, enum_name_set)
+        return
+    if isinstance(expr, _StructAccess):
+        _reject_enum_mutation_expression(expr.target, enum_name_set)
+        _reject_enum_mutation_expression(expr.key, enum_name_set)
+        return
+    if isinstance(expr, _Member):
+        _reject_enum_mutation_expression(expr.target, enum_name_set)
+
+
+def _unwrap_grouped_expression(expr: _Expression) -> _Expression:
+    while isinstance(expr, _Grouped):
+        expr = expr.expr
+    return expr
+
+
+def _is_enum_reference(expr: _Expression, enum_names: Iterable[str]) -> bool:
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    return isinstance(unwrapped_expr, _Name) and unwrapped_expr.value in enum_names
+
+
+def _target_chain_starts_with_enum(expr: _Expression, enum_names: Iterable[str]) -> bool:
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    if isinstance(unwrapped_expr, _Member | _StructAccess | _Index):
+        return _is_enum_reference(unwrapped_expr.target, enum_names) or _target_chain_starts_with_enum(
+            unwrapped_expr.target,
+            enum_names,
+        )
+    return False
+
+
 def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:
     parts: list[list[_Token]] = [[]]
     depth = 0
@@ -1998,6 +2167,8 @@ def _transpile_statement(
     instance_variables: MutableSet[str] | None = None,
     loop_depth: int = 0,
     continue_depth: int = 0,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
 ) -> list[str]:
     if not statement:
         return []
@@ -2008,7 +2179,10 @@ def _transpile_statement(
     if statement == "return":
         return ["return"]
     if statement.startswith("return "):
-        return [f"return {transpile_gml_expression(statement[7:].strip(), local_names)}"]
+        return [
+            "return "
+            f"{transpile_gml_expression(statement[7:].strip(), local_names, enum_values, enum_names)}"
+        ]
     if statement == "break":
         if loop_depth <= 0:
             raise GMLTranspileError("break used outside a loop")
@@ -2022,20 +2196,22 @@ def _transpile_statement(
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()
-        target_expr = _parse_gml_expression(target_source)
+        target_expr = _parse_gml_expression(target_source, enum_values, enum_names)
+        _reject_enum_assignment_target(target_expr, enum_names)
         if not isinstance(target_expr, _Name):
             raise GMLTranspileError("delete can only be used with variables")
         target = _emit_expression(target_expr, local_names)[0]
         return [f"{target} = GMRuntime.gml_undefined()"]
 
     if statement.startswith("var "):
-        return _transpile_var_statement(statement[4:].strip(), local_names)
+        return _transpile_var_statement(statement[4:].strip(), local_names, enum_values, enum_names)
 
     increment = _parse_increment_statement(statement)
     if increment is not None:
         target, delta = increment
         helper = "gml_add" if delta > 0 else "gml_sub"
-        target_expr = _parse_gml_expression(target)
+        target_expr = _parse_gml_expression(target, enum_values, enum_names)
+        _reject_enum_assignment_target(target_expr, enum_names)
         struct_target = _struct_assignment_parts(target_expr, local_names)
         if struct_target is not None:
             container, key = struct_target
@@ -2052,10 +2228,11 @@ def _transpile_statement(
         target, operator, value = assignment
         if _split_assignment(value) is not None:
             raise GMLTranspileError("Chained assignments are not supported")
+        target_expr = _parse_gml_expression(target, enum_values, enum_names)
+        _reject_enum_assignment_target(target_expr, enum_names)
         _record_instance_assignment(target, local_names, instance_variables)
-        target_expr = _parse_gml_expression(target)
         target = _emit_expression(target_expr, local_names)[0]
-        value = transpile_gml_expression(value, local_names)
+        value = transpile_gml_expression(value, local_names, enum_values, enum_names)
         if isinstance(target_expr, _Index):
             container = _emit_expression(target_expr.target, local_names)[0]
             index = _emit_expression(target_expr.index, local_names)[0]
@@ -2095,7 +2272,7 @@ def _transpile_statement(
             return [f"{target} = {value}"]
         return [f"{target} {operator} {value}"]
 
-    return [transpile_gml_expression(statement, local_names)]
+    return [transpile_gml_expression(statement, local_names, enum_values, enum_names)]
 
 
 def _struct_assignment_parts(
@@ -2133,10 +2310,13 @@ def _record_instance_assignment(
 def _transpile_var_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if local_names is None:
         local_names = set()
+    enum_name_set = frozenset(enum_names or [])
     for declaration in _split_top_level(statement, ","):
         declaration = declaration.strip()
         if not declaration:
@@ -2145,6 +2325,8 @@ def _transpile_var_statement(
         if assignment is None:
             name = declaration.strip()
             _validate_gml_identifier(name)
+            if name in enum_name_set:
+                raise GMLTranspileError("Cannot redeclare enum")
             lines.append(f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
             local_names.add(name)
             continue
@@ -2153,8 +2335,11 @@ def _transpile_var_statement(
             raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
         _validate_gml_identifier(name)
+        if name in enum_name_set:
+            raise GMLTranspileError("Cannot redeclare enum")
         lines.append(
-            f"var {_sanitize_gdscript_identifier(name)} = {transpile_gml_expression(value, local_names)}"
+            f"var {_sanitize_gdscript_identifier(name)} = "
+            f"{transpile_gml_expression(value, local_names, enum_values, enum_names)}"
         )
         local_names.add(name)
     return lines

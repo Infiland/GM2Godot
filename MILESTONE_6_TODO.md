@@ -11,6 +11,7 @@ Current branch work to remember before redoing an issue:
 - `01245de` tightens invalid numeric `NaN` runtime coverage and references #425.
 - `7d7551a` adds self/other with-target coverage and references #298.
 - `9ed26ee` parses and lowers `with` statements through target loops and references #227, #301, and #303.
+- `cb7a2a3` adds statement-level coverage for single with-target forms and references #228.
 
 ## Working Order
 
@@ -243,7 +244,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #231 with: Support break and continue as loop control (open, parent #192, subissues 0/0)
 - [ ] #230 with: Share enclosing local variables (open, parent #192, subissues 0/0)
 - [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0)
-- [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0)
+- [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0) - branch-covered by `cb7a2a3`
 - [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)
 - [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0)

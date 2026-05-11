@@ -583,6 +583,25 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\t\tbreak",
         )
 
+    def test_transpiles_for_loop_clauses(self):
+        self.assertEqual(
+            transpile_gml_code("for (i = 0; i < 3; i++) begin score += i; end", indent=""),
+            "i = 0\n"
+            "while i < 3:\n"
+            "\tscore = GMRuntime.gml_add(score, i)\n"
+            "\ti = GMRuntime.gml_add(i, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("for (; keep_running; ) tick();", indent=""),
+            "while GMRuntime.gml_bool(keep_running):\n"
+            "\ttick()",
+        )
+        self.assertEqual(
+            transpile_gml_code("for (;;) score += 1;", indent=""),
+            "while true:\n"
+            "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

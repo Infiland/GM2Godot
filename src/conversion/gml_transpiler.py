@@ -505,6 +505,8 @@ class _StatementParser:
             return self._parse_repeat_statement()
         if self._check_identifier("do"):
             return self._parse_do_until_statement()
+        if self._check_identifier("for"):
+            return self._parse_for_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -589,6 +591,57 @@ class _StatementParser:
             self.continue_depth -= 1
 
         lines = [f"for _gml_repeat_index in range(GMRuntime.gml_repeat_count({count})):"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
+        return lines
+
+    def _parse_for_statement(self) -> list[str]:
+        self._consume_identifier("for")
+        self._consume("(")
+        header_tokens = self._read_balanced_tokens("(", ")")
+        header_parts = _split_top_level_tokens(header_tokens, ";")
+        if len(header_parts) != 3:
+            raise GMLTranspileError("Expected for initializer, condition, and operation clauses")
+
+        initializer = _tokens_to_source(header_parts[0])
+        condition_source = _tokens_to_source(header_parts[1])
+        operation = _tokens_to_source(header_parts[2])
+
+        lines: list[str] = []
+        if initializer:
+            lines.extend(
+                _transpile_statement(
+                    initializer,
+                    self.local_names,
+                    self.instance_variables,
+                    loop_depth=self.loop_depth,
+                    continue_depth=self.continue_depth,
+                )
+            )
+
+        condition = (
+            transpile_gml_condition(condition_source, local_names=self.local_names)
+            if condition_source
+            else "true"
+        )
+
+        self.loop_depth += 1
+        try:
+            body_lines = self._parse_body()
+        finally:
+            self.loop_depth -= 1
+
+        if operation:
+            body_lines.extend(
+                _transpile_statement(
+                    operation,
+                    self.local_names,
+                    self.instance_variables,
+                    loop_depth=self.loop_depth,
+                    continue_depth=self.continue_depth,
+                )
+            )
+
+        lines.append(f"while {condition}:")
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 
@@ -998,6 +1051,22 @@ def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
 
 def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
+
+
+def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:
+    parts: list[list[_Token]] = [[]]
+    depth = 0
+    for token in tokens:
+        if token.value in "([{":
+            depth += 1
+        elif token.value in ")]}" and depth > 0:
+            depth -= 1
+
+        if depth == 0 and token.value == separator:
+            parts.append([])
+            continue
+        parts[-1].append(token)
+    return parts
 
 
 def _indent_lines(lines: Iterable[str]) -> list[str]:

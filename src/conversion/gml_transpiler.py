@@ -87,9 +87,15 @@ class _ArrayLiteral:
 
 
 @dataclass(frozen=True)
+class _FunctionParameter:
+    name: str
+    default: _Expression | None
+
+
+@dataclass(frozen=True)
 class _FunctionLiteral:
     name: str | None
-    parameters: tuple[str, ...]
+    parameters: tuple[_FunctionParameter, ...]
     body_lines: tuple[str, ...]
 
 
@@ -559,7 +565,10 @@ class _ExpressionParser:
                 args: list[_Expression] = []
                 if not self._check(")"):
                     while True:
-                        args.append(self._parse_expression())
+                        if self._check(",") or self._check(")"):
+                            args.append(_Name(_NAME_REPLACEMENTS["undefined"]))
+                        else:
+                            args.append(self._parse_expression())
                         if not self._match(","):
                             break
                 self._consume(")")
@@ -639,19 +648,22 @@ class _ExpressionParser:
         if self._peek().kind == "IDENT":
             name = self._consume_identifier()
 
-        parameters: list[str] = []
+        parameters: list[_FunctionParameter] = []
         self._consume("(")
         if not self._check(")"):
             while True:
-                parameters.append(self._consume_identifier())
+                parameter_name = self._consume_identifier()
+                default = self._parse_expression() if self._match("=") else None
+                parameters.append(_FunctionParameter(parameter_name, default))
                 if not self._match(","):
                     break
         self._consume(")")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
+        parameter_names = [parameter.name for parameter in parameters]
         body_parser = _StatementParser(
             body_tokens,
-            local_names=parameters,
+            local_names=parameter_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
         )
@@ -1823,8 +1835,13 @@ def _emit_expression(
         return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _FunctionLiteral):
         name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
-        parameters = ", ".join(_sanitize_gdscript_identifier(parameter) for parameter in expr.parameters)
-        body = "; ".join(expr.body_lines)
+        parameter_names = [parameter.name for parameter in expr.parameters]
+        parameters = ", ".join(
+            f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+            for parameter in expr.parameters
+        )
+        default_lines = _emit_function_parameter_default_lines(expr.parameters, parameter_names)
+        body = "; ".join([*default_lines, *expr.body_lines])
         return f"func{name}({parameters}): {body}", _PRIMARY_PRECEDENCE
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
@@ -1853,6 +1870,24 @@ def _emit_expression(
 
 def _uses_direct_member_access(expr: _Member) -> bool:
     return isinstance(expr.target, _Name) and expr.target.value in _DIRECT_MEMBER_TARGETS
+
+
+def _emit_function_parameter_default_lines(
+    parameters: Iterable[_FunctionParameter],
+    local_names: Iterable[str],
+) -> list[str]:
+    default_lines: list[str] = []
+    for parameter in parameters:
+        parameter_name = _sanitize_gdscript_identifier(parameter.name)
+        if parameter.default is None:
+            default_lines.append(f"if {parameter_name} == null: {parameter_name} = GMRuntime.gml_undefined()")
+            continue
+        default_value = _emit_expression(parameter.default, local_names)[0]
+        default_lines.append(
+            f"if {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
+            f"{parameter_name} = {default_value}",
+        )
+    return default_lines
 
 
 def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:

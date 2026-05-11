@@ -738,11 +738,40 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_function_literals_inside_structs(self):
         self.assertEqual(
             transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
-            'GMRuntime.gml_struct({"apply": func(a, b): return GMRuntime.gml_add(a, b)})',
+            'GMRuntime.gml_struct({"apply": func(a = null, b = null): '
+            "if a == null: a = GMRuntime.gml_undefined(); "
+            "if b == null: b = GMRuntime.gml_undefined(); "
+            "return GMRuntime.gml_add(a, b)})",
         )
         self.assertEqual(
             transpile_gml_expression('string({toString: function() { return "ok"; }})'),
             'GMRuntime.gml_string(GMRuntime.gml_struct({"toString": func(): return "ok"}))',
+        )
+
+    def test_function_literals_preserve_optional_defaults(self):
+        self.assertEqual(
+            transpile_gml_expression("function(a, b = 90) { return b; }"),
+            "func(a = null, b = null): "
+            "if a == null: a = GMRuntime.gml_undefined(); "
+            "if b == null or GMRuntime.is_undefined(b): b = 90; "
+            "return b",
+        )
+        self.assertEqual(
+            transpile_gml_expression("function(a, b = a + 1) { return b; }"),
+            "func(a = null, b = null): "
+            "if a == null: a = GMRuntime.gml_undefined(); "
+            "if b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1); "
+            "return b",
+        )
+
+    def test_omitted_call_arguments_emit_gml_undefined(self):
+        self.assertEqual(
+            transpile_gml_expression("move(4,)"),
+            "move(4, GMRuntime.gml_undefined())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("my_func(0,,,1)"),
+            "my_func(0, GMRuntime.gml_undefined(), GMRuntime.gml_undefined(), 1)",
         )
 
     def test_rejects_invalid_struct_field_names(self):
@@ -1351,7 +1380,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "value = 1; try_to_modify_value(value); result = value;",
                 indent="",
             ),
-            "var try_to_modify_value = func(argument0): argument0 = 2\n"
+            "var try_to_modify_value = func(argument0 = null): "
+            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); argument0 = 2\n"
             "value = 1\n"
             "try_to_modify_value(value)\n"
             "result = value",
@@ -1364,7 +1394,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "items = [1]; try_to_modify_array(items); value = items[1];",
                 indent="",
             ),
-            "var try_to_modify_array = func(argument0): GMRuntime.gml_array_push(argument0, 2)\n"
+            "var try_to_modify_array = func(argument0 = null): "
+            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); "
+            "GMRuntime.gml_array_push(argument0, 2)\n"
             "items = [1]\n"
             "try_to_modify_array(items)\n"
             "value = GMRuntime.gml_array_get(items, 1)",

@@ -877,6 +877,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code(f"var {'a' * 65};", indent="")
 
+    def test_sanitizes_gdscript_reserved_local_names(self):
+        self.assertEqual(
+            transpile_gml_code("var match = 1; match += 1;", indent=""),
+            "var match_ = 1\nmatch_ = GMRuntime.gml_add(match_, 1)",
+        )
+
+    def test_sanitizes_generated_helper_name_collisions(self):
+        self.assertEqual(
+            transpile_gml_code("var _gml_switch_value_0 = 1; _gml_switch_value_0 += 1;", indent=""),
+            "var gml_user_gml_switch_value_0 = 1\n"
+            "gml_user_gml_switch_value_0 = GMRuntime.gml_add(gml_user_gml_switch_value_0, 1)",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

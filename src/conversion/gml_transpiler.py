@@ -196,8 +196,48 @@ _POSTFIX_PRECEDENCE = 120
 _PRIMARY_PRECEDENCE = 130
 _TERNARY_PRECEDENCE = 5
 _GML_IDENTIFIER_MAX_LENGTH = 64
+_GENERATED_IDENTIFIER_PREFIX = "_gml_"
 
 _RIGHT_ASSOCIATIVE = {"??"}
+
+_GDSCRIPT_RESERVED_IDENTIFIERS = frozenset({
+    "as",
+    "break",
+    "class",
+    "class_name",
+    "const",
+    "continue",
+    "elif",
+    "else",
+    "enum",
+    "extends",
+    "false",
+    "for",
+    "func",
+    "if",
+    "in",
+    "is",
+    "match",
+    "null",
+    "pass",
+    "return",
+    "self",
+    "signal",
+    "static",
+    "super",
+    "true",
+    "var",
+    "void",
+    "when",
+    "while",
+})
+_GML_LITERAL_IDENTIFIERS = frozenset({
+    "false",
+    "null",
+    "self",
+    "super",
+    "true",
+})
 
 _BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
     "&&",
@@ -1272,8 +1312,12 @@ def _emit_expression(
         return expr.value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
         value = expr.value
-        if value not in local_names:
+        is_local = value in local_names
+        if not is_local and value in _GML_LITERAL_IDENTIFIERS:
+            return value, _PRIMARY_PRECEDENCE
+        if not is_local:
             value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
+        value = _sanitize_gdscript_identifier(value)
         return value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Grouped):
         return f"({_emit_expression(expr.expr, local_names)[0]})", _PRIMARY_PRECEDENCE
@@ -1309,7 +1353,7 @@ def _emit_expression(
         index = _emit_expression(expr.index, local_names)[0]
         return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
     target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
-    return f"{target}.{expr.member}", _POSTFIX_PRECEDENCE
+    return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
 
 
 def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
@@ -1646,7 +1690,7 @@ def _transpile_var_statement(
         if assignment is None:
             name = declaration.strip()
             _validate_gml_identifier(name)
-            lines.append(f"var {name} = GMRuntime.gml_undefined()")
+            lines.append(f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
             local_names.add(name)
             continue
         name, operator, value = assignment
@@ -1654,9 +1698,29 @@ def _transpile_var_statement(
             raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
         _validate_gml_identifier(name)
-        lines.append(f"var {name} = {transpile_gml_expression(value, local_names)}")
+        lines.append(
+            f"var {_sanitize_gdscript_identifier(name)} = {transpile_gml_expression(value, local_names)}"
+        )
         local_names.add(name)
     return lines
+
+
+def _sanitize_gdscript_identifier(name: str) -> str:
+    if not _is_plain_identifier(name):
+        return name
+    if name in _GDSCRIPT_RESERVED_IDENTIFIERS:
+        return f"{name}_"
+    if name.startswith(_GENERATED_IDENTIFIER_PREFIX):
+        return f"gml_user{name}"
+    return name
+
+
+def _is_plain_identifier(name: str) -> bool:
+    if not name:
+        return False
+    return (name[0].isalpha() or name[0] == "_") and all(
+        char.isalnum() or char == "_" for char in name
+    )
 
 
 def _validate_gml_identifier(name: str) -> None:

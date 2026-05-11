@@ -469,6 +469,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "if GMRuntime.gml_bool(ready):\n\treturn (GMRuntime.gml_add(score, 1))",
         )
 
+    def test_transpiles_exit_statements(self):
+        self.assertEqual(transpile_gml_code("exit;", indent=""), "return")
+        self.assertEqual(
+            transpile_gml_code("if done begin exit; end score += 1;", indent=""),
+            "if GMRuntime.gml_bool(done):\n\treturn\nscore = GMRuntime.gml_add(score, 1)",
+        )
+
     def test_transpiles_while_blocks(self):
         self.assertEqual(
             transpile_gml_code("while score > 0 begin score -= 1; end", indent=""),

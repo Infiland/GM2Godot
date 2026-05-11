@@ -1161,6 +1161,8 @@ def _transpile_statement(
         return ["break"]
     if statement == "continue":
         return ["continue"]
+    if statement == "exit":
+        return ["return"]
 
     if statement.startswith("var "):
         return _transpile_var_statement(statement[4:].strip(), local_names)

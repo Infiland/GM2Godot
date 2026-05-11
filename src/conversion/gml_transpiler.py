@@ -1914,6 +1914,8 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         or _contains_gml_pointer(expr.right)
         or _contains_gml_handle(expr.left)
         or _contains_gml_handle(expr.right)
+        or _may_need_gml_reference_equality(expr.left)
+        or _may_need_gml_reference_equality(expr.right)
     ):
         left = _emit_expression(expr.left, local_names)[0]
         right = _emit_expression(expr.right, local_names)[0]
@@ -2085,6 +2087,28 @@ def _contains_gml_handle(expr: _Expression) -> bool:
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
     if isinstance(expr, _Member):
         return _contains_gml_handle(expr.target)
+    return False
+
+
+def _may_need_gml_reference_equality(expr: _Expression) -> bool:
+    if isinstance(expr, _Name):
+        return expr.value not in {"true", "false", "INF", "NAN"}
+    if isinstance(expr, (_ArrayLiteral, _StructLiteral, _FunctionLiteral)):
+        return True
+    if isinstance(expr, (_Call, _Index, _StructAccess, _DSMapAccess, _Member)):
+        return True
+    if isinstance(expr, _Grouped):
+        return _may_need_gml_reference_equality(expr.expr)
+    if isinstance(expr, _Unary):
+        return _may_need_gml_reference_equality(expr.operand)
+    if isinstance(expr, _Binary):
+        return _may_need_gml_reference_equality(expr.left) or _may_need_gml_reference_equality(expr.right)
+    if isinstance(expr, _Ternary):
+        return (
+            _may_need_gml_reference_equality(expr.condition)
+            or _may_need_gml_reference_equality(expr.true_expr)
+            or _may_need_gml_reference_equality(expr.false_expr)
+        )
     return False
 
 

@@ -570,11 +570,20 @@ static func gml_eq(left, right):
 		return false
 	if is_numeric(left) and is_numeric(right):
 		return _to_real(left) == _to_real(right)
+	if _is_gml_reference_value(left) or _is_gml_reference_value(right):
+		return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)
 	return left == right
 
 
 static func gml_ne(left, right):
 	return not gml_eq(left, right)
+
+
+static func _is_gml_reference_value(value):
+	if is_undefined(value) or is_int64(value) or is_ptr(value) or is_handle(value):
+		return false
+	var value_type = typeof(value)
+	return value_type == TYPE_ARRAY or value_type == TYPE_DICTIONARY or value_type == TYPE_OBJECT
 
 
 static func _gml_values_equal_for_array(left, right):

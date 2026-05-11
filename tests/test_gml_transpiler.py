@@ -352,7 +352,25 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_single_equals_as_expression_equality(self):
         self.assertEqual(
             transpile_gml_expression("faster = true"),
-            "faster == true",
+            "GMRuntime.gml_eq(faster, true)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("1 = 1"),
+            "1 == 1",
+        )
+
+    def test_transpiles_reference_equality_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("items == other_items"),
+            "GMRuntime.gml_eq(items, other_items)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("items != other_items"),
+            "GMRuntime.gml_ne(items, other_items)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("{a: 1} == {a: 1}"),
+            'GMRuntime.gml_eq(GMRuntime.gml_struct({"a": 1}), GMRuntime.gml_struct({"a": 1}))',
         )
 
     def test_transpiles_infinity_variable_functions(self):
@@ -1338,7 +1356,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_if_blocks_with_single_equals_conditions(self):
         self.assertEqual(
             transpile_gml_code("if faster = true { superSpeed = 20 }", indent=""),
-            "if faster == true:\n\tsuperSpeed = 20",
+            "if GMRuntime.gml_eq(faster, true):\n\tsuperSpeed = 20",
         )
 
     def test_transpiles_if_conditions_with_gml_numeric_truthiness(self):
@@ -1454,7 +1472,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tfaster = true\n"
             "else:\n"
             "\tfaster = false\n"
-            "if faster == true:\n"
+            "if GMRuntime.gml_eq(faster, true):\n"
             "\tsuperSpeed = 20\n"
             "if Input.is_action_pressed(\"ui_left\"):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)\n"

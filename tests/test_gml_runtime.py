@@ -106,6 +106,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
     RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
     RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, 2, 3)"),
+    RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
     RuntimeValueParityCase('mystruct[$ "x"]', 'GMRuntime.gml_struct_get(mystruct, "x")'),
@@ -376,6 +377,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ne(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return not gml_eq(left, right)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_reference_equality_uses_identity(self):
+        self.assertIn("static func _is_gml_reference_value(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _is_gml_reference_value(left) or _is_gml_reference_value(right):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "return value_type == TYPE_ARRAY or value_type == TYPE_DICTIONARY or value_type == TYPE_OBJECT",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("if is_undefined(value) or is_int64(value) or is_ptr(value) or is_handle(value):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_pointer_equality_and_nullish_are_special_cased(self):
         self.assertIn("if is_ptr(left) or is_ptr(right):", GML_RUNTIME_SCRIPT)

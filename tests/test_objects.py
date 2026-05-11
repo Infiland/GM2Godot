@@ -644,7 +644,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
         self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
-        self.assertIn("\tif faster == true:", content)
+        self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 

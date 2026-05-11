@@ -574,6 +574,15 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\t\tbreak",
         )
 
+    def test_do_until_checks_condition_after_body(self):
+        self.assertEqual(
+            transpile_gml_code("do begin ran = true; end until false;", indent=""),
+            "while true:\n"
+            "\tran = true\n"
+            "\tif false:\n"
+            "\t\tbreak",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

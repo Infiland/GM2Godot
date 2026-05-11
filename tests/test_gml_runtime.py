@@ -221,6 +221,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_string",
             "gml_bool",
             "gml_is_nullish",
+            "gml_type_name",
+            "gml_unsupported_type_error",
+            "gml_unsupported_binary_type_error",
         ):
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
@@ -229,6 +232,18 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertNotIn("Array[", GML_RUNTIME_SCRIPT)
         self.assertNotIn("Dictionary[", GML_RUNTIME_SCRIPT)
         self.assertNotIn("->", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_unsupported_any_diagnostics_name_type(self):
+        self.assertIn("static func gml_type_name(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return \"godot_type_\" + str(typeof(value))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_unsupported_type_error(api_name, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_error(str(api_name) + " does not support value of type " + gml_type_name(value))',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("static func gml_unsupported_binary_type_error(api_name, left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("+ gml_type_name(left)", GML_RUNTIME_SCRIPT)
+        self.assertIn("+ gml_type_name(right)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_uses_distinct_undefined_sentinel(self):
         self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
@@ -367,9 +382,18 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return is_undefined(value) or (is_ptr(value) and value.value == 0)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_rejects_pointer_numeric_operations(self):
-        self.assertIn('return gml_error("GML pointer arithmetic is not supported")', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML pointer numeric conversion is not supported")', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML pointer bitwise conversion is not supported")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            'return gml_unsupported_type_error("GML numeric conversion", value)',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            'return gml_unsupported_type_error("GML bitwise conversion", value)',
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_undefined_truthiness_and_conversions(self):
         self.assertIn(
@@ -424,7 +448,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_array_reads_check_bounds_before_access(self):
         self.assertIn("if typeof(array_value) != TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML array access requires an array")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_type_error("GML array access", array_value)',
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if resolved_index >= array_value.size():", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML array index out of bounds")', GML_RUNTIME_SCRIPT)
 
@@ -457,13 +484,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_struct_helper_keeps_dictionary_reference(self):
         self.assertIn("static func gml_struct(fields = {}):", GML_RUNTIME_SCRIPT)
         self.assertIn("if typeof(fields) != TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML struct literal requires a dictionary")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_type_error("GML struct literal", fields)',
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return fields", GML_RUNTIME_SCRIPT)
         self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
 
     def test_runtime_enum_helper_wraps_members_as_int64_values(self):
         self.assertIn("static func gml_enum(fields = {}):", GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML enum declaration requires a dictionary")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_type_error("GML enum declaration", fields)',
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("var enum_fields = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("for key in fields.keys():", GML_RUNTIME_SCRIPT)
         self.assertIn("enum_fields[key] = gml_int64(fields[key])", GML_RUNTIME_SCRIPT)
@@ -480,7 +513,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("struct_value[key] = value", GML_RUNTIME_SCRIPT)
         self.assertIn("struct_value.erase(key)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _object_has_property(object_value, property_name):", GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML struct access requires a struct")', GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'return gml_unsupported_type_error("GML struct access", struct_value)',
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_missing_value_helpers_return_undefined(self):
         self.assertIn("static func gml_variable_struct_get(struct_value, member_name):", GML_RUNTIME_SCRIPT)
@@ -532,7 +568,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if is_ptr(value):\n\t\treturn GMLInt64.new(value.value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_number(value) or is_string(value):\n\t\treturn GMLInt64.new(value)", GML_RUNTIME_SCRIPT)
         self.assertIn(
-            'return gml_error("GML int64 conversion requires a real, string, int64, int32, or pointer")',
+            'return gml_unsupported_type_error("GML int64 conversion", value)',
             GML_RUNTIME_SCRIPT,
         )
 

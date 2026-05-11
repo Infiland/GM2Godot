@@ -162,7 +162,7 @@ static func gml_ptr(value):
 		return GMLPointer.new(value.value)
 	if is_number(value) or is_string(value):
 		return GMLPointer.new(value)
-	return gml_error("GML ptr conversion requires a real, string, int64, int32, or pointer")
+	return gml_unsupported_type_error("GML ptr conversion", value)
 
 
 static func gml_handle_register(kind, reference, name = ""):
@@ -255,12 +255,14 @@ static func gml_handle_invalidate(handle):
 
 static func gml_div(left, right):
 	if is_ptr(left) or is_ptr(right):
-		return gml_error("GML pointer arithmetic is not supported")
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
+	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		return gml_unsupported_binary_type_error("GML divide", left, right)
 	var left_value = _to_real(left)
 	var right_value = _to_real(right)
 	if right_value == 0.0:
@@ -276,6 +278,8 @@ static func gml_int_div(left, right):
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
+	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		return gml_unsupported_binary_type_error("GML integer divide", left, right)
 	return int(_to_real(left) / _to_real(right))
 
 
@@ -292,7 +296,7 @@ static func gml_int64(value):
 		return GMLInt64.new(value.value)
 	if is_number(value) or is_string(value):
 		return GMLInt64.new(value)
-	return gml_error("GML int64 conversion requires a real, string, int64, int32, or pointer")
+	return gml_unsupported_type_error("GML int64 conversion", value)
 
 
 static func gml_repeat_count(value):
@@ -300,6 +304,8 @@ static func gml_repeat_count(value):
 
 
 static func gml_sqrt(value):
+	if not _is_real_convertible(value):
+		return gml_unsupported_type_error("GML sqrt", value)
 	var real_value = _to_real(value)
 	if real_value < 0.0:
 		return NAN
@@ -308,7 +314,7 @@ static func gml_sqrt(value):
 
 static func gml_add(left, right):
 	if is_ptr(left) or is_ptr(right):
-		return gml_error("GML pointer arithmetic is not supported")
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) + _to_int64_value(right))
 	if is_numeric(left) and is_numeric(right):
@@ -319,30 +325,36 @@ static func gml_add(left, right):
 		return gml_string(left) + str(right)
 	if is_string(left) and (is_numeric(right) or is_bool(right)):
 		return gml_error("Invalid GML string concatenation")
-	return left + right
+	return gml_unsupported_binary_type_error("GML add", left, right)
 
 
 static func gml_sub(left, right):
 	if is_ptr(left) or is_ptr(right):
-		return gml_error("GML pointer arithmetic is not supported")
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) - _to_int64_value(right))
+	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		return gml_unsupported_binary_type_error("GML subtract", left, right)
 	return _to_real(left) - _to_real(right)
 
 
 static func gml_mul(left, right):
 	if is_ptr(left) or is_ptr(right):
-		return gml_error("GML pointer arithmetic is not supported")
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) * _to_int64_value(right))
+	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		return gml_unsupported_binary_type_error("GML multiply", left, right)
 	return _to_real(left) * _to_real(right)
 
 
 static func gml_mod(left, right):
 	if is_ptr(left) or is_ptr(right):
-		return gml_error("GML pointer arithmetic is not supported")
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		return GMLInt64.new(_to_int64_value(left) % _to_int64_value(right))
+	if not _is_real_convertible(left) or not _is_real_convertible(right):
+		return gml_unsupported_binary_type_error("GML modulo", left, right)
 	return fmod(_to_real(left), _to_real(right))
 
 
@@ -351,7 +363,7 @@ static func gml_array_get(array_value, index):
 	if resolved_index < 0:
 		return gml_undefined()
 	if typeof(array_value) != TYPE_ARRAY:
-		return gml_error("GML array access requires an array")
+		return gml_unsupported_type_error("GML array access", array_value)
 	if resolved_index >= array_value.size():
 		return gml_error("GML array index out of bounds")
 	return array_value[resolved_index]
@@ -380,13 +392,13 @@ static func gml_array_equals(left, right):
 
 static func gml_struct(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
-		return gml_error("GML struct literal requires a dictionary")
+		return gml_unsupported_type_error("GML struct literal", fields)
 	return fields
 
 
 static func gml_enum(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
-		return gml_error("GML enum declaration requires a dictionary")
+		return gml_unsupported_type_error("GML enum declaration", fields)
 	var enum_fields = {}
 	for key in fields.keys():
 		enum_fields[key] = gml_int64(fields[key])
@@ -403,7 +415,7 @@ static func gml_struct_get(struct_value, member_name):
 		if _object_has_property(struct_value, key):
 			return struct_value.get(key)
 		return gml_undefined()
-	return gml_error("GML struct access requires a struct")
+	return gml_unsupported_type_error("GML struct access", struct_value)
 
 
 static func gml_variable_struct_get(struct_value, member_name):
@@ -423,7 +435,7 @@ static func gml_ds_map_find_value(map_value, key):
 		if resolved_map.has(key):
 			return resolved_map[key]
 		return gml_undefined()
-	return gml_error("GML ds_map access requires a map")
+	return gml_unsupported_type_error("GML ds_map access", resolved_map)
 
 
 static func gml_ds_map_exists(map_value, key):
@@ -438,7 +450,7 @@ static func gml_ds_map_set(map_value, key, value):
 	if typeof(resolved_map) == TYPE_DICTIONARY:
 		resolved_map[key] = value
 		return value
-	return gml_error("GML ds_map access requires a map")
+	return gml_unsupported_type_error("GML ds_map access", resolved_map)
 
 
 static func gml_struct_exists(struct_value, member_name):
@@ -458,7 +470,7 @@ static func gml_struct_set(struct_value, member_name, value):
 	if typeof(struct_value) == TYPE_OBJECT:
 		struct_value.set(key, value)
 		return value
-	return gml_error("GML struct access requires a struct")
+	return gml_unsupported_type_error("GML struct access", struct_value)
 
 
 static func gml_struct_remove(struct_value, member_name):
@@ -466,7 +478,7 @@ static func gml_struct_remove(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value.erase(key)
 		return gml_undefined()
-	return gml_error("GML struct access requires a mutable struct")
+	return gml_unsupported_type_error("GML mutable struct access", struct_value)
 
 
 static func gml_struct_get_names(struct_value):
@@ -625,24 +637,57 @@ static func gml_is_nullish(value):
 	return is_undefined(value) or (is_ptr(value) and value.value == 0)
 
 
+static func gml_type_name(value):
+	var gml_type = gml_typeof(value)
+	if gml_type != GML_TYPE_UNKNOWN:
+		return gml_type
+	return "godot_type_" + str(typeof(value))
+
+
+static func gml_unsupported_type_error(api_name, value):
+	return gml_error(str(api_name) + " does not support value of type " + gml_type_name(value))
+
+
+static func gml_unsupported_binary_type_error(api_name, left, right):
+	return gml_error(
+		str(api_name)
+		+ " does not support values of type "
+		+ gml_type_name(left)
+		+ " and "
+		+ gml_type_name(right)
+	)
+
+
+static func _is_real_convertible(value):
+	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value) or is_string(value)
+
+
+static func _is_int64_convertible(value):
+	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value) or is_string(value)
+
+
 static func _to_real(value):
 	if is_ptr(value):
-		return gml_error("GML pointer numeric conversion is not supported")
+		return gml_unsupported_type_error("GML numeric conversion", value)
 	if is_handle(value):
 		return float(value.index)
 	if is_int64(value):
 		return float(value.value)
-	return float(value)
+	if _is_real_convertible(value):
+		return float(value)
+	return gml_unsupported_type_error("GML numeric conversion", value)
 
 
 static func _to_int64_value(value):
 	if is_ptr(value):
-		return gml_error("GML pointer bitwise conversion is not supported")
+		return gml_unsupported_type_error("GML bitwise conversion", value)
 	if is_handle(value):
 		return int(value.value)
 	if is_int64(value):
 		return int(value.value)
-	return int(value)
+	if _is_int64_convertible(value):
+		return int(value)
+	return gml_unsupported_type_error("GML bitwise conversion", value)
 
 
 static func _returns_int64_arithmetic_result(left, right):

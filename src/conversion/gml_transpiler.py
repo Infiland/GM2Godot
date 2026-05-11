@@ -422,6 +422,10 @@ _DS_MAP_RUNTIME_FUNCTIONS = {
     "ds_map_find_value": "gml_ds_map_find_value",
 }
 
+_ARRAY_RUNTIME_FUNCTIONS = {
+    "array_equals": "gml_array_equals",
+}
+
 
 def transpile_gml_expression(
     source: str,
@@ -1863,6 +1867,9 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     if isinstance(expr.callee, _Name) and expr.callee.value in _DS_MAP_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_DS_MAP_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
+    if isinstance(expr.callee, _Name) and expr.callee.value in _ARRAY_RUNTIME_FUNCTIONS:
+        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        return f"GMRuntime.{_ARRAY_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS

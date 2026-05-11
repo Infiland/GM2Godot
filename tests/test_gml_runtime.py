@@ -104,6 +104,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
+    RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
     RuntimeValueParityCase('mystruct[$ "x"]', 'GMRuntime.gml_struct_get(mystruct, "x")'),
@@ -195,6 +196,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mod",
             "gml_array_get",
             "gml_array_set",
+            "gml_array_equals",
             "gml_struct",
             "gml_enum",
             "gml_struct_exists",
@@ -424,6 +426,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("array_value[resolved_index] = value", GML_RUNTIME_SCRIPT)
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_array_equals_uses_gml_element_equality(self):
+        self.assertIn("static func gml_array_equals(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if left.size() != right.size():", GML_RUNTIME_SCRIPT)
+        self.assertIn("for index in range(left.size()):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not _gml_values_equal_for_array(left[index], right[index]):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_values_equal_for_array(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_array_deletion_uses_undefined_without_registries(self):
         self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)

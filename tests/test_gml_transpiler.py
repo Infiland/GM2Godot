@@ -326,6 +326,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("NaN != NaN"),
             "GMRuntime.gml_ne(NAN, NAN)",
         )
+        self.assertEqual(
+            transpile_gml_expression("array_equals([NaN], [NaN])"),
+            "GMRuntime.gml_array_equals([NAN], [NAN])",
+        )
 
     def test_undefined_equality_uses_runtime_type_table(self):
         self.assertEqual(

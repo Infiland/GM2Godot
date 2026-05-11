@@ -367,6 +367,17 @@ static func gml_array_set(array_value, index, value):
 	return value
 
 
+static func gml_array_equals(left, right):
+	if typeof(left) != TYPE_ARRAY or typeof(right) != TYPE_ARRAY:
+		return false
+	if left.size() != right.size():
+		return false
+	for index in range(left.size()):
+		if not _gml_values_equal_for_array(left[index], right[index]):
+			return false
+	return true
+
+
 static func gml_struct(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_error("GML struct literal requires a dictionary")
@@ -535,6 +546,12 @@ static func gml_eq(left, right):
 
 static func gml_ne(left, right):
 	return not gml_eq(left, right)
+
+
+static func _gml_values_equal_for_array(left, right):
+	if typeof(left) == TYPE_ARRAY and typeof(right) == TYPE_ARRAY:
+		return gml_array_equals(left, right)
+	return gml_eq(left, right)
 
 
 static func gml_typeof(value):

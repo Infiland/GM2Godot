@@ -699,6 +699,29 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tbreak",
         )
 
+    def test_switch_matches_cases_against_single_evaluated_expression(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "switch (next_state()) { case 1: score = 1; break; case 2: score = 2; break; }",
+                indent="",
+            ),
+            "var _gml_switch_value_0 = next_state()\n"
+            "var _gml_switch_matched_1 = false\n"
+            "var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, 1) or GMRuntime.gml_eq(_gml_switch_value_0, 2)\n"
+            "while true:\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 1):\n"
+            "\t\t_gml_switch_matched_1 = true\n"
+            "\tif _gml_switch_matched_1:\n"
+            "\t\tscore = 1\n"
+            "\t\tbreak\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 2):\n"
+            "\t\t_gml_switch_matched_1 = true\n"
+            "\tif _gml_switch_matched_1:\n"
+            "\t\tscore = 2\n"
+            "\t\tbreak\n"
+            "\tbreak",
+        )
+
     def test_for_loop_preserves_execution_order(self):
         self.assertEqual(
             transpile_gml_code(

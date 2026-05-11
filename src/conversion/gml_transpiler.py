@@ -479,12 +479,14 @@ class _StatementParser:
         local_names: Iterable[str] | None = None,
         instance_variables: MutableSet[str] | None = None,
         loop_depth: int = 0,
+        continue_depth: int = 0,
     ) -> None:
         self.tokens = tokens
         self.position = 0
         self.local_names = set(local_names or [])
         self.instance_variables = instance_variables
         self.loop_depth = loop_depth
+        self.continue_depth = continue_depth
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -501,6 +503,8 @@ class _StatementParser:
             return self._parse_while_statement()
         if self._check_identifier("repeat"):
             return self._parse_repeat_statement()
+        if self._check_identifier("do"):
+            return self._parse_do_until_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -515,6 +519,7 @@ class _StatementParser:
             self.local_names,
             self.instance_variables,
             loop_depth=self.loop_depth,
+            continue_depth=self.continue_depth,
         )
 
     def _parse_if_statement(self) -> list[str]:
@@ -555,10 +560,12 @@ class _StatementParser:
             local_names=self.local_names,
         )
         self.loop_depth += 1
+        self.continue_depth += 1
         try:
             body_lines = self._parse_body()
         finally:
             self.loop_depth -= 1
+            self.continue_depth -= 1
         lines = [f"while {condition}:"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
@@ -574,14 +581,57 @@ class _StatementParser:
             local_names=self.local_names,
         )
         self.loop_depth += 1
+        self.continue_depth += 1
         try:
             body_lines = self._parse_body()
         finally:
             self.loop_depth -= 1
+            self.continue_depth -= 1
 
         lines = [f"for _gml_repeat_index in range(GMRuntime.gml_repeat_count({count})):"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
+
+    def _parse_do_until_statement(self) -> list[str]:
+        self._consume_identifier("do")
+        self.loop_depth += 1
+        try:
+            body_lines = self._parse_do_until_body()
+        finally:
+            self.loop_depth -= 1
+
+        self._skip_newlines()
+        self._consume_identifier("until")
+        condition_tokens = self._read_condition_tokens()
+        if not condition_tokens:
+            raise GMLTranspileError("Expected until condition")
+
+        condition = transpile_gml_condition(
+            _tokens_to_source(condition_tokens),
+            local_names=self.local_names,
+        )
+        lines = ["while true:"]
+        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.append(f"\tif {condition}:")
+        lines.append("\t\tbreak")
+        return lines
+
+    def _parse_do_until_body(self) -> list[str]:
+        if self._match("{"):
+            lines = self.parse(terminator="}")
+            self._consume("}")
+            return lines
+
+        statement_tokens = self._read_do_until_statement_tokens()
+        if not statement_tokens:
+            return []
+        return _transpile_statement(
+            _tokens_to_source(statement_tokens),
+            self.local_names,
+            self.instance_variables,
+            loop_depth=self.loop_depth,
+            continue_depth=self.continue_depth,
+        )
 
     def _parse_body(self) -> list[str]:
         if self._match("{"):
@@ -603,6 +653,22 @@ class _StatementParser:
             if depth == 0 and token.value == "{":
                 break
             if depth == 0 and token.value == ";":
+                break
+
+            if token.value in "([":
+                depth += 1
+            elif token.value in ")]" and depth > 0:
+                depth -= 1
+            tokens.append(self._advance())
+
+        return tokens
+
+    def _read_do_until_statement_tokens(self) -> list[_Token]:
+        tokens: list[_Token] = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.kind == "IDENT" and token.value == "until":
                 break
 
             if token.value in "([":
@@ -1176,6 +1242,7 @@ def _transpile_statement(
     local_names: MutableSet[str] | None = None,
     instance_variables: MutableSet[str] | None = None,
     loop_depth: int = 0,
+    continue_depth: int = 0,
 ) -> list[str]:
     if not statement:
         return []
@@ -1192,7 +1259,7 @@ def _transpile_statement(
             raise GMLTranspileError("break used outside a loop")
         return ["break"]
     if statement == "continue":
-        if loop_depth <= 0:
+        if continue_depth <= 0:
             raise GMLTranspileError("continue used outside a loop")
         return ["continue"]
     if statement == "exit":

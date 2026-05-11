@@ -558,6 +558,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
 
+    def test_transpiles_do_until_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("do begin score += 1; end until score >= 3;", indent=""),
+            "while true:\n"
+            "\tscore = GMRuntime.gml_add(score, 1)\n"
+            "\tif score >= 3:\n"
+            "\t\tbreak",
+        )
+        self.assertEqual(
+            transpile_gml_code("do score += 1 until score >= 3;", indent=""),
+            "while true:\n"
+            "\tscore = GMRuntime.gml_add(score, 1)\n"
+            "\tif score >= 3:\n"
+            "\t\tbreak",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

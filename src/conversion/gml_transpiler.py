@@ -430,6 +430,11 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "static_set": "gml_static_set",
     "is_instanceof": "gml_is_instanceof",
     "instanceof": "gml_instanceof",
+    "variable_get_hash": "gml_variable_get_hash",
+    "struct_get_from_hash": "gml_struct_get_from_hash",
+    "struct_set_from_hash": "gml_struct_set_from_hash",
+    "struct_exists_from_hash": "gml_struct_exists_from_hash",
+    "struct_remove_from_hash": "gml_struct_remove_from_hash",
 }
 
 _VARIABLE_RUNTIME_FUNCTIONS = {

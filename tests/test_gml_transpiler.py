@@ -1009,6 +1009,28 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_instanceof(mystruct)",
         )
 
+    def test_transpiles_hashed_struct_helpers_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression('variable_get_hash("x")'),
+            'GMRuntime.gml_variable_get_hash("x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_get_from_hash(point, variable_get_hash("x"))'),
+            'GMRuntime.gml_struct_get_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_set_from_hash(point, variable_get_hash("x"), 10)'),
+            'GMRuntime.gml_struct_set_from_hash(point, GMRuntime.gml_variable_get_hash("x"), 10)',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_exists_from_hash(point, variable_get_hash("x"))'),
+            'GMRuntime.gml_struct_exists_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('struct_remove_from_hash(point, variable_get_hash("x"))'),
+            'GMRuntime.gml_struct_remove_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+        )
+
     def test_transpiles_variable_clone_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("variable_clone(mystruct)"),

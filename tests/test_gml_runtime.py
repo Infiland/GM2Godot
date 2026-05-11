@@ -18,6 +18,13 @@ class RuntimeValueParityCase:
     gdscript_expression: str
 
 
+def fnv1a32(value: str) -> int:
+    hash_value = 2166136261
+    for char in value:
+        hash_value = ((hash_value ^ ord(char)) * 16777619) & 0xFFFFFFFF
+    return hash_value
+
+
 RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
     RuntimeValueParityCase("noone", "GMRuntime.gml_instance_noone()"),
@@ -108,6 +115,23 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("is_instanceof(mystruct, counter)", "GMRuntime.gml_is_instanceof(mystruct, counter)"),
     RuntimeValueParityCase("instanceof(mystruct)", "GMRuntime.gml_instanceof(mystruct)"),
+    RuntimeValueParityCase('variable_get_hash("x")', 'GMRuntime.gml_variable_get_hash("x")'),
+    RuntimeValueParityCase(
+        'struct_get_from_hash(point, variable_get_hash("x"))',
+        'GMRuntime.gml_struct_get_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+    ),
+    RuntimeValueParityCase(
+        'struct_set_from_hash(point, variable_get_hash("x"), 10)',
+        'GMRuntime.gml_struct_set_from_hash(point, GMRuntime.gml_variable_get_hash("x"), 10)',
+    ),
+    RuntimeValueParityCase(
+        'struct_exists_from_hash(point, variable_get_hash("x"))',
+        'GMRuntime.gml_struct_exists_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+    ),
+    RuntimeValueParityCase(
+        'struct_remove_from_hash(point, variable_get_hash("x"))',
+        'GMRuntime.gml_struct_remove_from_hash(point, GMRuntime.gml_variable_get_hash("x"))',
+    ),
     RuntimeValueParityCase("ptr(0)", "GMRuntime.gml_ptr(0)"),
     RuntimeValueParityCase("typeof(ptr(0))", "GMRuntime.gml_typeof(GMRuntime.gml_ptr(0))"),
     RuntimeValueParityCase('ptr("42")', 'GMRuntime.gml_ptr("42")'),
@@ -390,6 +414,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_static_set",
             "gml_is_instanceof",
             "gml_instanceof",
+            "gml_variable_get_hash",
+            "gml_struct_get_from_hash",
+            "gml_struct_set_from_hash",
+            "gml_struct_exists_from_hash",
+            "gml_struct_remove_from_hash",
             "gml_variable_struct_get",
             "gml_variable_instance_get",
             "gml_ds_map_find_value",
@@ -899,6 +928,39 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_hashes_struct_member_names_with_documented_vectors(self):
+        self.assertEqual(fnv1a32(""), 2166136261)
+        self.assertEqual(fnv1a32("a"), 3826002220)
+        self.assertEqual(fnv1a32("x"), 4245442695)
+        self.assertEqual(fnv1a32("position"), 2471448074)
+        self.assertEqual(fnv1a32("image_index"), 1603152005)
+        self.assertIn('const GML_VARIABLE_HASH_ALGORITHM = "fnv1a32"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_variable_hash_names = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_get_hash(name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var key = str(name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var hash = _gml_hash_string(key)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_variable_hash_names[hash] = key", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_hash_string(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var hash = 2166136261", GML_RUNTIME_SCRIPT)
+        self.assertIn("var code = text.unicode_at(index)", GML_RUNTIME_SCRIPT)
+        self.assertIn("hash = int((hash ^ code) * 16777619) & 0xffffffff", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_hashed_struct_helpers_resolve_registered_or_existing_names(self):
+        self.assertIn("static func gml_struct_get_from_hash(struct_value, member_hash):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_set_from_hash(struct_value, member_hash, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_exists_from_hash(struct_value, member_hash):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_remove_from_hash(struct_value, member_hash):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_struct_name_from_hash(struct_value, member_hash):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var hash = _to_int64_value(member_hash)", GML_RUNTIME_SCRIPT)
+        self.assertIn("for member_name in gml_struct_get_names(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_hash_string(member_name) == hash:\n\t\t\t\treturn str(member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _gml_variable_hash_names.has(hash):\n\t\treturn _gml_variable_hash_names[hash]", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_get(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_set(struct_value, member_name, value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_exists(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_remove(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("Unknown GML variable hash " + str(member_hash))', GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_string_output_uses_to_string_convention(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)

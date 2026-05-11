@@ -28,6 +28,7 @@ const GML_INSTANCE_INVALID_INDEX = -4
 const GML_INSTANCE_HANDLE_KIND = "instance"
 const GML_DS_MAP_HANDLE_KIND = "ds_map"
 const GML_REFERENCE_HANDLE_KIND = "dbgref"
+const GML_VARIABLE_HASH_ALGORITHM = "fnv1a32"
 
 
 class GMLInt64:
@@ -102,6 +103,7 @@ static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_variable_hash_names = {}
 
 
 static func gml_undefined():
@@ -670,6 +672,41 @@ static func gml_struct_foreach(struct_value, callback):
 	return null
 
 
+static func gml_variable_get_hash(name):
+	var key = str(name)
+	var hash = _gml_hash_string(key)
+	_gml_variable_hash_names[hash] = key
+	return hash
+
+
+static func gml_struct_get_from_hash(struct_value, member_hash):
+	var member_name = _gml_struct_name_from_hash(struct_value, member_hash)
+	if is_undefined(member_name):
+		return member_name
+	return gml_struct_get(struct_value, member_name)
+
+
+static func gml_struct_set_from_hash(struct_value, member_hash, value):
+	var member_name = _gml_struct_name_from_hash(struct_value, member_hash)
+	if is_undefined(member_name):
+		return gml_error("Unknown GML variable hash " + str(member_hash))
+	return gml_struct_set(struct_value, member_name, value)
+
+
+static func gml_struct_exists_from_hash(struct_value, member_hash):
+	var member_name = _gml_struct_name_from_hash(struct_value, member_hash)
+	if is_undefined(member_name):
+		return false
+	return gml_struct_exists(struct_value, member_name)
+
+
+static func gml_struct_remove_from_hash(struct_value, member_hash):
+	var member_name = _gml_struct_name_from_hash(struct_value, member_hash)
+	if is_undefined(member_name):
+		return member_name
+	return gml_struct_remove(struct_value, member_name)
+
+
 static func gml_static_get(value):
 	if value is GMLMethod:
 		return gml_static_get(value.function_value)
@@ -1137,6 +1174,26 @@ static func _gml_static_constructor_name(value):
 		if method_name != "":
 			return method_name
 	return ""
+
+
+static func _gml_struct_name_from_hash(struct_value, member_hash):
+	var hash = _to_int64_value(member_hash)
+	if is_struct(struct_value):
+		for member_name in gml_struct_get_names(struct_value):
+			if _gml_hash_string(member_name) == hash:
+				return str(member_name)
+	if _gml_variable_hash_names.has(hash):
+		return _gml_variable_hash_names[hash]
+	return gml_undefined()
+
+
+static func _gml_hash_string(value):
+	var text = str(value)
+	var hash = 2166136261
+	for index in range(text.length()):
+		var code = text.unicode_at(index)
+		hash = int((hash ^ code) * 16777619) & 0xffffffff
+	return hash
 
 
 static func _gml_static_same(left, right):

@@ -458,6 +458,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_get(items, -1)",
         )
 
+    def test_transpiles_multidimensional_array_access(self):
+        self.assertEqual(
+            transpile_gml_expression("grid[x][y]"),
+            "GMRuntime.gml_array_get(GMRuntime.gml_array_get(grid, position.x), position.y)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("[[1], [2, 3]][1][0]"),
+            "GMRuntime.gml_array_get(GMRuntime.gml_array_get([[1], [2, 3]], 1), 0)",
+        )
+
 
 class TestGMLStatementTranspiler(unittest.TestCase):
     def test_tokenizes_begin_end_as_block_delimiters(self):
@@ -711,6 +721,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("items[index] += 1;", indent=""),
             "GMRuntime.gml_array_set(items, index, "
             "GMRuntime.gml_add(GMRuntime.gml_array_get(items, index), 1))",
+        )
+
+    def test_transpiles_multidimensional_array_assignments(self):
+        self.assertEqual(
+            transpile_gml_code("grid[x][y] = value;", indent=""),
+            "GMRuntime.gml_array_set(GMRuntime.gml_array_get(grid, position.x), position.y, value)",
         )
 
     def test_transpiles_newline_separated_statements(self):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Iterable, Literal, MutableSet, TypeAlias
 
@@ -86,6 +87,18 @@ class _ArrayLiteral:
 
 
 @dataclass(frozen=True)
+class _FunctionLiteral:
+    name: str | None
+    parameters: tuple[str, ...]
+    body_lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _StructLiteral:
+    fields: tuple[tuple[str, _Expression], ...]
+
+
+@dataclass(frozen=True)
 class _Index:
     target: _Expression
     index: _Expression
@@ -112,6 +125,8 @@ _Expression: TypeAlias = (
     | _Ternary
     | _Call
     | _ArrayLiteral
+    | _FunctionLiteral
+    | _StructLiteral
     | _Index
     | _Member
     | _Grouped
@@ -469,6 +484,8 @@ class _ExpressionParser:
             return _NumberLiteral(token.value, _is_float_like_number(token.value))
         if token.kind == "STRING":
             return _StringLiteral(token.value)
+        if token.kind == "IDENT" and token.value == "function":
+            return self._parse_function_literal()
         if token.kind == "IDENT":
             return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
         if token.value == "[":
@@ -478,13 +495,50 @@ class _ExpressionParser:
                     elements.append(self._parse_expression())
                     if not self._match(","):
                         break
+                    if self._check("]"):
+                        break
             self._consume("]")
             return _ArrayLiteral(tuple(elements))
+        if token.value == "{":
+            fields: list[tuple[str, _Expression]] = []
+            if not self._check("}"):
+                while True:
+                    field_name = self._consume_identifier()
+                    if self._match(":"):
+                        field_value = self._parse_expression()
+                    else:
+                        field_value = _Name(_NAME_REPLACEMENTS.get(field_name, field_name))
+                    fields.append((field_name, field_value))
+                    if not self._match(","):
+                        break
+                    if self._check("}"):
+                        break
+            self._consume("}")
+            return _StructLiteral(tuple(fields))
         if token.value == "(":
             expr = self._parse_expression()
             self._consume(")")
             return _Grouped(expr)
         raise GMLTranspileError(f"Expected expression, got: {token.value}")
+
+    def _parse_function_literal(self) -> _Expression:
+        name = None
+        if self._peek().kind == "IDENT":
+            name = self._consume_identifier()
+
+        parameters: list[str] = []
+        self._consume("(")
+        if not self._check(")"):
+            while True:
+                parameters.append(self._consume_identifier())
+                if not self._match(","):
+                    break
+        self._consume(")")
+        self._consume("{")
+        body_tokens = self._read_balanced_tokens("{", "}")
+        body_parser = _StatementParser(body_tokens, local_names=parameters)
+        body_lines = body_parser.parse()
+        return _FunctionLiteral(name, tuple(parameters), tuple(body_lines or ["pass"]))
 
     def _current_operator(self) -> str | None:
         token = self._peek()
@@ -516,7 +570,23 @@ class _ExpressionParser:
         token = self._advance()
         if token.kind != "IDENT":
             raise GMLTranspileError(f"Expected identifier, got: {token.value}")
+        _validate_gml_identifier(token.value)
         return token.value
+
+    def _read_balanced_tokens(self, opener: str, closer: str) -> list[_Token]:
+        tokens: list[_Token] = []
+        depth = 1
+        while not self._at_end():
+            token = self._advance()
+            if token.value == opener:
+                depth += 1
+            elif token.value == closer:
+                depth -= 1
+                if depth == 0:
+                    return tokens
+            tokens.append(token)
+
+        raise GMLTranspileError(f"Expected '{closer}'")
 
     def _check(self, value: str) -> bool:
         return self._peek().value == value
@@ -1348,6 +1418,17 @@ def _emit_expression(
     if isinstance(expr, _ArrayLiteral):
         elements = ", ".join(_emit_expression(element, local_names)[0] for element in expr.elements)
         return f"[{elements}]", _PRIMARY_PRECEDENCE
+    if isinstance(expr, _FunctionLiteral):
+        name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
+        parameters = ", ".join(_sanitize_gdscript_identifier(parameter) for parameter in expr.parameters)
+        body = "; ".join(expr.body_lines)
+        return f"func{name}({parameters}): {body}", _PRIMARY_PRECEDENCE
+    if isinstance(expr, _StructLiteral):
+        fields = ", ".join(
+            f"{json.dumps(field_name)}: {_emit_expression(field_value, local_names)[0]}"
+            for field_name, field_value in expr.fields
+        )
+        return f"GMRuntime.gml_struct({{{fields}}})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
         target = _emit_expression(expr.target, local_names)[0]
         index = _emit_expression(expr.index, local_names)[0]
@@ -1456,6 +1537,10 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         )
     if isinstance(expr, _ArrayLiteral):
         return any(_contains_gml_undefined(element) for element in expr.elements)
+    if isinstance(expr, _FunctionLiteral):
+        return False
+    if isinstance(expr, _StructLiteral):
+        return any(_contains_gml_undefined(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
     if isinstance(expr, _Member):
@@ -1482,6 +1567,10 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return _contains_gml_nan(expr.callee) or any(_contains_gml_nan(arg) for arg in expr.args)
     if isinstance(expr, _ArrayLiteral):
         return any(_contains_gml_nan(element) for element in expr.elements)
+    if isinstance(expr, _FunctionLiteral):
+        return False
+    if isinstance(expr, _StructLiteral):
+        return any(_contains_gml_nan(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
     if isinstance(expr, _Member):

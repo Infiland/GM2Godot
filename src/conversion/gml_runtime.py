@@ -156,6 +156,12 @@ static func gml_array_set(array_value, index, value):
 	return value
 
 
+static func gml_struct(fields = {}):
+	if typeof(fields) != TYPE_DICTIONARY:
+		return gml_error("GML struct literal requires a dictionary")
+	return fields
+
+
 static func gml_bit_and(left, right):
 	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
 

@@ -13,6 +13,7 @@ from src.conversion.gml_transpiler import (
     _ExpressionParser,
     _NumberLiteral,
     _StringLiteral,
+    _StructLiteral,
     _expression_tokens,
     _tokenize,
     transpile_gml_code,
@@ -477,6 +478,52 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIsInstance(literal, _ArrayLiteral)
         assert isinstance(literal, _ArrayLiteral)
         self.assertEqual(len(literal.elements), 2)
+
+    def test_parses_struct_literals(self):
+        self.assertEqual(transpile_gml_expression("{}"), "GMRuntime.gml_struct({})")
+        self.assertEqual(
+            transpile_gml_expression('{a: 10, b: "Hello World"}'),
+            'GMRuntime.gml_struct({"a": 10, "b": "Hello World"})',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{d: _xx + 50, f: [10, 20], g: image_index}"),
+            'GMRuntime.gml_struct({"d": GMRuntime.gml_add(_xx, 50), '
+            '"f": [10, 20], "g": image_index})',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{child: {value: 1}, items: [[1], [2, 3]],}"),
+            'GMRuntime.gml_struct({"child": GMRuntime.gml_struct({"value": 1}), '
+            '"items": [[1], [2, 3]]})',
+        )
+
+    def test_preserves_struct_literal_metadata(self):
+        literal = _ExpressionParser(_expression_tokens("{a: 1, child: {b: 2}, shorthand}")).parse()
+
+        self.assertIsInstance(literal, _StructLiteral)
+        assert isinstance(literal, _StructLiteral)
+        self.assertEqual([field_name for field_name, _ in literal.fields], ["a", "child", "shorthand"])
+
+    def test_struct_literal_shorthand_uses_enclosing_scope(self):
+        self.assertEqual(
+            transpile_gml_expression("{x, y}", local_names={"x"}),
+            'GMRuntime.gml_struct({"x": x, "y": position.y})',
+        )
+
+    def test_struct_literal_initializers_do_not_see_prior_fields(self):
+        self.assertEqual(
+            transpile_gml_expression("{a: 10, b: 10, c: a + b}"),
+            'GMRuntime.gml_struct({"a": 10, "b": 10, "c": GMRuntime.gml_add(a, b)})',
+        )
+
+    def test_parses_function_literals_inside_structs(self):
+        self.assertEqual(
+            transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
+            'GMRuntime.gml_struct({"apply": func(a, b): return GMRuntime.gml_add(a, b)})',
+        )
+
+    def test_rejects_invalid_struct_field_names(self):
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression("{6fish: value}")
 
     def test_transpiles_array_indexing_through_runtime(self):
         self.assertEqual(

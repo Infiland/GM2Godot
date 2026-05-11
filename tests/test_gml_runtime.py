@@ -64,6 +64,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
+    RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -110,6 +111,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mod",
             "gml_array_get",
             "gml_array_set",
+            "gml_struct",
             "gml_bit_and",
             "gml_bit_or",
             "gml_bit_xor",
@@ -198,6 +200,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         )
         self.assertIn("if GML_ARRAY_COPY_ON_WRITE_ENABLED:", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_struct_helper_keeps_dictionary_reference(self):
+        self.assertIn("static func gml_struct(fields = {}):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if typeof(fields) != TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML struct literal requires a dictionary")', GML_RUNTIME_SCRIPT)
+        self.assertIn("return fields", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

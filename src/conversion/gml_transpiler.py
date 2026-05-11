@@ -500,6 +500,7 @@ class _StatementParser:
         instance_variables: MutableSet[str] | None = None,
         loop_depth: int = 0,
         continue_depth: int = 0,
+        generated_counter: list[int] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -507,6 +508,7 @@ class _StatementParser:
         self.instance_variables = instance_variables
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
+        self.generated_counter = generated_counter if generated_counter is not None else [0]
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -527,6 +529,8 @@ class _StatementParser:
             return self._parse_do_until_statement()
         if self._check_identifier("for"):
             return self._parse_for_statement()
+        if self._check_identifier("switch"):
+            return self._parse_switch_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -698,6 +702,129 @@ class _StatementParser:
         lines.append("\t\tbreak")
         return lines
 
+    def _parse_switch_statement(self) -> list[str]:
+        self._consume_identifier("switch")
+        expression_tokens = self._read_condition_tokens()
+        if not expression_tokens:
+            raise GMLTranspileError("Expected switch expression")
+
+        switch_value = self._next_generated_name("_gml_switch_value")
+        switch_matched = self._next_generated_name("_gml_switch_matched")
+        switch_has_case = self._next_generated_name("_gml_switch_has_case")
+        expression = transpile_gml_expression(
+            _tokens_to_source(expression_tokens),
+            local_names=self.local_names,
+        )
+        sections = self._parse_switch_sections()
+        case_values = [
+            section_value
+            for section_kind, section_value, _ in sections
+            if section_kind == "case" and section_value is not None
+        ]
+        case_conditions = [
+            f"GMRuntime.gml_eq({switch_value}, {case_value})"
+            for case_value in case_values
+        ]
+        has_case_expression = " or ".join(case_conditions) if case_conditions else "false"
+
+        lines = [
+            f"var {switch_value} = {expression}",
+            f"var {switch_matched} = false",
+            f"var {switch_has_case} = {has_case_expression}",
+            "while true:",
+        ]
+        for section_kind, section_value, section_lines in sections:
+            if section_kind == "case":
+                lines.append(
+                    f"\tif not {switch_matched} and GMRuntime.gml_eq({switch_value}, {section_value}):"
+                )
+                lines.append(f"\t\t{switch_matched} = true")
+            else:
+                lines.append(f"\tif not {switch_matched} and not {switch_has_case}:")
+                lines.append(f"\t\t{switch_matched} = true")
+
+            lines.append(f"\tif {switch_matched}:")
+            lines.extend(f"\t\t{line}" for line in (section_lines or ["pass"]))
+        lines.append("\tbreak")
+        return lines
+
+    def _parse_switch_sections(self) -> list[tuple[str, str | None, list[str]]]:
+        self._skip_newlines()
+        self._consume("{")
+        sections: list[tuple[str, str | None, list[str]]] = []
+        while not self._at_end() and not self._check("}"):
+            if self._match(";") or self._match("\n"):
+                continue
+            if self._match_identifier("case"):
+                label_tokens = self._read_switch_label_tokens()
+                if not label_tokens:
+                    raise GMLTranspileError("Expected switch case value")
+                label = transpile_gml_expression(
+                    _tokens_to_source(label_tokens),
+                    local_names=self.local_names,
+                )
+                body_tokens = self._read_switch_section_body_tokens()
+                sections.append(("case", label, self._parse_switch_section_body(body_tokens)))
+                continue
+            if self._match_identifier("default"):
+                self._consume(":")
+                body_tokens = self._read_switch_section_body_tokens()
+                sections.append(("default", None, self._parse_switch_section_body(body_tokens)))
+                continue
+            raise GMLTranspileError(f"Expected switch case or default, got: {self._peek().value}")
+
+        self._consume("}")
+        return sections
+
+    def _parse_switch_section_body(self, body_tokens: list[_Token]) -> list[str]:
+        parser = _StatementParser(
+            body_tokens,
+            local_names=self.local_names,
+            instance_variables=self.instance_variables,
+            loop_depth=self.loop_depth + 1,
+            continue_depth=self.continue_depth,
+            generated_counter=self.generated_counter,
+        )
+        lines = parser.parse()
+        self.local_names.update(parser.local_names)
+        return lines
+
+    def _read_switch_label_tokens(self) -> list[_Token]:
+        tokens: list[_Token] = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.value == ":":
+                self._advance()
+                return tokens
+
+            if token.value in "([{":
+                depth += 1
+            elif token.value in ")]}" and depth > 0:
+                depth -= 1
+            tokens.append(self._advance())
+
+        raise GMLTranspileError("Expected ':' after switch case")
+
+    def _read_switch_section_body_tokens(self) -> list[_Token]:
+        tokens: list[_Token] = []
+        depth = 0
+        while not self._at_end():
+            token = self._peek()
+            if depth == 0 and token.value == "}":
+                break
+            if depth == 0 and token.kind == "IDENT" and token.value in ("case", "default"):
+                break
+
+            if token.value in "([{":
+                depth += 1
+            elif token.value in ")]}":
+                if depth > 0:
+                    depth -= 1
+            tokens.append(self._advance())
+
+        return tokens
+
     def _parse_do_until_body(self) -> list[str]:
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -842,6 +969,11 @@ class _StatementParser:
 
     def _at_end(self) -> bool:
         return self._peek().kind == "EOF"
+
+    def _next_generated_name(self, prefix: str) -> str:
+        index = self.generated_counter[0]
+        self.generated_counter[0] += 1
+        return f"{prefix}_{index}"
 
 
 def _tokenize(source: str) -> list[_Token]:

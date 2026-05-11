@@ -446,6 +446,9 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
     "variable_instance_get": "gml_variable_instance_get",
     "variable_instance_get_names": "gml_variable_instance_get_names",
     "variable_instance_names_count": "gml_variable_instance_names_count",
+    "variable_global_exists": "gml_variable_global_exists",
+    "variable_global_get": "gml_variable_global_get",
+    "variable_global_set": "gml_variable_global_set",
     "variable_struct_get": "gml_variable_struct_get",
 }
 

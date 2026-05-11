@@ -954,6 +954,18 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("variable_instance_names_count(global)"),
             "GMRuntime.gml_variable_instance_names_count(GMRuntime.gml_global_scope())",
         )
+        self.assertEqual(
+            transpile_gml_expression('variable_global_exists("score")'),
+            'GMRuntime.gml_variable_global_exists("score")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_global_get("score")'),
+            'GMRuntime.gml_variable_global_get("score")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_global_set("score", score + 1)'),
+            'GMRuntime.gml_variable_global_set("score", GMRuntime.gml_add(score, 1))',
+        )
 
     def test_transpiles_ds_map_missing_value_apis_through_runtime(self):
         self.assertEqual(

@@ -609,6 +609,18 @@ static func gml_variable_instance_names_count(instance_value):
 	return gml_struct_names_count(resolved_instance)
 
 
+static func gml_variable_global_exists(member_name):
+	return gml_struct_exists(gml_global_scope(), member_name)
+
+
+static func gml_variable_global_get(member_name):
+	return gml_struct_get(gml_global_scope(), member_name)
+
+
+static func gml_variable_global_set(member_name, value):
+	return gml_struct_set(gml_global_scope(), member_name, value)
+
+
 static func gml_ds_map_find_value(map_value, key):
 	var resolved_map = _gml_resolve_ds_map(map_value)
 	if typeof(resolved_map) == TYPE_DICTIONARY:

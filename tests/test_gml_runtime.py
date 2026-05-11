@@ -74,6 +74,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("struct_get_names(mystruct)", "GMRuntime.gml_struct_get_names(mystruct)"),
     RuntimeValueParityCase("struct_names_count(mystruct)", "GMRuntime.gml_struct_names_count(mystruct)"),
     RuntimeValueParityCase('string({a: 1})', 'GMRuntime.gml_string(GMRuntime.gml_struct({"a": 1}))'),
+    RuntimeValueParityCase("variable_clone(mystruct)", "GMRuntime.gml_variable_clone(mystruct)"),
+    RuntimeValueParityCase("variable_clone(items, 0)", "GMRuntime.gml_variable_clone(items, 0)"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -127,6 +129,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct_names_count",
             "gml_struct_set",
             "gml_struct_remove",
+            "gml_variable_clone",
             "gml_bit_and",
             "gml_bit_or",
             "gml_bit_xor",
@@ -249,6 +252,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('if value.has("toString") and typeof(value["toString"]) == TYPE_CALLABLE:', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_string(value["toString"].call())', GML_RUNTIME_SCRIPT)
         self.assertIn("return str(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_variable_clone_preserves_documented_depth_behavior(self):
+        self.assertIn("static func gml_variable_clone(value, depth = 128):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_clone_value(value, max(0, int(_to_real(depth))))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_clone_value(value, depth):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value_type == TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value_type == TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
+        self.assertIn("clone.append(_gml_clone_value(element, depth - 1) if depth > 0 else element)", GML_RUNTIME_SCRIPT)
+        self.assertIn("clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

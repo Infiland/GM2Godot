@@ -576,6 +576,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_struct_names_count(mystruct)",
         )
 
+    def test_transpiles_variable_clone_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("variable_clone(mystruct)"),
+            "GMRuntime.gml_variable_clone(mystruct)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_clone(items, 0)"),
+            "GMRuntime.gml_variable_clone(items, 0)",
+        )
+
     def test_transpiles_array_indexing_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("items[0]"),

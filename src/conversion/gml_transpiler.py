@@ -387,6 +387,10 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_remove": "gml_struct_remove",
 }
 
+_VARIABLE_RUNTIME_FUNCTIONS = {
+    "variable_clone": "gml_variable_clone",
+}
+
 
 def transpile_gml_expression(source: str, local_names: Iterable[str] | None = None) -> str:
     """Transpile a single GML expression to a GDScript expression."""
@@ -1491,6 +1495,9 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
+    if isinstance(expr.callee, _Name) and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS:
+        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS

@@ -222,6 +222,10 @@ static func gml_struct_names_count(struct_value):
 	return -1
 
 
+static func gml_variable_clone(value, depth = 128):
+	return _gml_clone_value(value, max(0, int(_to_real(depth))))
+
+
 static func gml_bit_and(left, right):
 	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
 
@@ -338,6 +342,21 @@ static func _object_has_property(object_value, property_name):
 		if property.get("name") == property_name:
 			return true
 	return false
+
+
+static func _gml_clone_value(value, depth):
+	var value_type = typeof(value)
+	if value_type == TYPE_ARRAY:
+		var clone = []
+		for element in value:
+			clone.append(_gml_clone_value(element, depth - 1) if depth > 0 else element)
+		return clone
+	if value_type == TYPE_DICTIONARY:
+		var clone = {}
+		for key in value.keys():
+			clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]
+		return clone
+	return value
 
 
 static func gml_error(message):

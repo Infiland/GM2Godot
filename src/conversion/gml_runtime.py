@@ -136,7 +136,7 @@ static func is_handle(value):
 
 
 static func is_numeric(value):
-	return is_real(value) or is_int64(value)
+	return is_real(value) or is_int64(value) or is_bool(value)
 
 
 static func is_array(value):

@@ -52,6 +52,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("is_real(score)", "GMRuntime.is_real(score)"),
     RuntimeValueParityCase("is_numeric(score)", "GMRuntime.is_numeric(score)"),
+    RuntimeValueParityCase("is_numeric(true)", "GMRuntime.is_numeric(true)"),
     RuntimeValueParityCase("is_int32(score)", "GMRuntime.is_int32(score)"),
     RuntimeValueParityCase("is_int32(2147483647)", "GMRuntime.is_int32(2147483647)"),
     RuntimeValueParityCase("is_int32(2147483648)", "GMRuntime.is_int32(2147483648)"),
@@ -597,6 +598,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_callable(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_method(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_numeric(value):\n\treturn is_real(value) or is_int64(value) or is_bool(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_typeof_agrees_with_specific_predicate_categories(self):
         self.assertIn('const GML_TYPE_INT32 = "int32"', GML_RUNTIME_SCRIPT)

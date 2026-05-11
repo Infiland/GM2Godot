@@ -65,6 +65,29 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_expression("1.2.3")
 
+    def test_rejects_malformed_numeric_separator_placement(self):
+        cases = (
+            "1_",
+            "1__000",
+            "1_.0",
+            "1._0",
+            ".5_",
+            "0x_DEAD",
+            "0xDEAD_",
+            "0xDEAD__BEEF",
+            "$_DEAD",
+            "$DEAD_",
+            "$DEAD__BEEF",
+            "0b_1010",
+            "0b1010_",
+            "0b10__10",
+        )
+
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(GMLTranspileError):
+                    transpile_gml_expression(source)
+
     def test_parses_hexadecimal_literals(self):
         self.assertEqual(transpile_gml_expression("0x2c8e"), "0x2c8e")
         self.assertEqual(transpile_gml_expression("0XDEAD"), "0XDEAD")

@@ -381,6 +381,8 @@ _RUNTIME_FUNCTIONS = {
 _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_exists": "gml_struct_exists",
     "struct_get": "gml_struct_get",
+    "struct_get_names": "gml_struct_get_names",
+    "struct_names_count": "gml_struct_names_count",
     "struct_set": "gml_struct_set",
     "struct_remove": "gml_struct_remove",
 }

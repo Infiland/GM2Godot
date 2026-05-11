@@ -203,6 +203,25 @@ static func gml_struct_remove(struct_value, member_name):
 	return gml_error("GML struct access requires a mutable struct")
 
 
+static func gml_struct_get_names(struct_value):
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		return struct_value.keys()
+	if typeof(struct_value) == TYPE_OBJECT:
+		var names = []
+		for property in struct_value.get_property_list():
+			names.append(property.get("name"))
+		return names
+	return []
+
+
+static func gml_struct_names_count(struct_value):
+	if typeof(struct_value) == TYPE_DICTIONARY:
+		return struct_value.size()
+	if typeof(struct_value) == TYPE_OBJECT:
+		return struct_value.get_property_list().size()
+	return -1
+
+
 static func gml_bit_and(left, right):
 	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
 

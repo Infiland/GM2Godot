@@ -562,6 +562,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_struct_remove(mystruct, "x")',
         )
 
+    def test_transpiles_struct_name_enumeration_functions_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("struct_get_names(mystruct)"),
+            "GMRuntime.gml_struct_get_names(mystruct)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("struct_names_count(mystruct)"),
+            "GMRuntime.gml_struct_names_count(mystruct)",
+        )
+
     def test_transpiles_array_indexing_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("items[0]"),

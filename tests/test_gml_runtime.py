@@ -71,6 +71,8 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase('struct_get(mystruct, "x")', 'GMRuntime.gml_struct_get(mystruct, "x")'),
     RuntimeValueParityCase('struct_set(mystruct, "x", 1)', 'GMRuntime.gml_struct_set(mystruct, "x", 1)'),
     RuntimeValueParityCase('struct_remove(mystruct, "x")', 'GMRuntime.gml_struct_remove(mystruct, "x")'),
+    RuntimeValueParityCase("struct_get_names(mystruct)", "GMRuntime.gml_struct_get_names(mystruct)"),
+    RuntimeValueParityCase("struct_names_count(mystruct)", "GMRuntime.gml_struct_names_count(mystruct)"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -120,6 +122,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct",
             "gml_struct_exists",
             "gml_struct_get",
+            "gml_struct_get_names",
+            "gml_struct_names_count",
             "gml_struct_set",
             "gml_struct_remove",
             "gml_bit_and",
@@ -230,6 +234,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("struct_value.erase(key)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _object_has_property(object_value, property_name):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML struct access requires a struct")', GML_RUNTIME_SCRIPT)
+
+    def test_runtime_struct_name_helpers_return_visible_member_names(self):
+        self.assertIn("static func gml_struct_get_names(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_names_count(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
+        self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
+        self.assertIn("return -1", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

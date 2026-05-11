@@ -148,6 +148,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _to_array_index(value):", GML_RUNTIME_SCRIPT)
         self.assertIn('gml_error("Negative GML array index")', GML_RUNTIME_SCRIPT)
 
+    def test_runtime_array_reads_check_bounds_before_access(self):
+        self.assertIn("if typeof(array_value) != TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML array access requires an array")', GML_RUNTIME_SCRIPT)
+        self.assertIn("if resolved_index >= array_value.size():", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_error("GML array index out of bounds")', GML_RUNTIME_SCRIPT)
+
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)

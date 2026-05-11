@@ -130,6 +130,10 @@ static func gml_array_get(array_value, index):
 	var resolved_index = _to_array_index(index)
 	if resolved_index < 0:
 		return gml_undefined()
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_error("GML array access requires an array")
+	if resolved_index >= array_value.size():
+		return gml_error("GML array index out of bounds")
 	return array_value[resolved_index]
 
 

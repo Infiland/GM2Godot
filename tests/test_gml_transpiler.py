@@ -443,6 +443,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(kinds[values.index("{")], "OP")
         self.assertEqual(kinds[values.index("}")], "OP")
 
+    def test_lowers_begin_end_if_bodies(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "if ready begin score = 1; end else begin score = 0; end",
+                indent="",
+            ),
+            "if GMRuntime.gml_bool(ready):\n\tscore = 1\nelse:\n\tscore = 0",
+        )
+
+    def test_lowers_standalone_begin_end_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("begin score = 1; score += 2; end", indent=""),
+            "score = 1\nscore = GMRuntime.gml_add(score, 2)",
+        )
+
     def test_transpiles_var_assignments(self):
         self.assertEqual(
             transpile_gml_code("var x = a + b * c;", indent=""),

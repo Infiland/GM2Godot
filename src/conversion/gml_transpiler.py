@@ -496,6 +496,11 @@ class _StatementParser:
         if self._check_identifier("if"):
             return self._parse_if_statement()
 
+        if self._match("{"):
+            lines = self.parse(terminator="}")
+            self._consume("}")
+            return lines
+
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []

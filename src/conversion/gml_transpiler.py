@@ -320,6 +320,11 @@ def transpile_gml_condition(source: str, local_names: Iterable[str] | None = Non
     return _emit_truthy_expression(expr, _normalize_local_names(local_names))
 
 
+def _parse_gml_expression(source: str) -> _Expression:
+    parser = _ExpressionParser(_expression_tokens(source))
+    return parser.parse()
+
+
 def transpile_gml_code(
     source: str,
     indent: str = "\t",
@@ -1163,9 +1168,9 @@ def _emit_expression(
         elements = ", ".join(_emit_expression(element, local_names)[0] for element in expr.elements)
         return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _Index):
-        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+        target = _emit_expression(expr.target, local_names)[0]
         index = _emit_expression(expr.index, local_names)[0]
-        return f"{target}[{index}]", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
     target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
     return f"{target}.{expr.member}", _POSTFIX_PRECEDENCE
 
@@ -1399,8 +1404,21 @@ def _transpile_statement(
     if assignment is not None:
         target, operator, value = assignment
         _record_instance_assignment(target, local_names, instance_variables)
-        target = transpile_gml_expression(target, local_names)
+        target_expr = _parse_gml_expression(target)
+        target = _emit_expression(target_expr, local_names)[0]
         value = transpile_gml_expression(value, local_names)
+        if isinstance(target_expr, _Index):
+            container = _emit_expression(target_expr.target, local_names)[0]
+            index = _emit_expression(target_expr.index, local_names)[0]
+            if operator == "=":
+                return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = f"GMRuntime.gml_array_get({container}, {index})"
+                return [
+                    f"GMRuntime.gml_array_set({container}, {index}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
         if operator == "??=":
             return [f"if GMRuntime.is_undefined({target}):", f"\t{target} = {value}"]
         if operator in _COMPOUND_RUNTIME_FUNCTIONS:

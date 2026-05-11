@@ -427,7 +427,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_calls_indexes_and_members(self):
         self.assertEqual(
             transpile_gml_expression("choose(items[index + 1], other.value)"),
-            "choose(items[GMRuntime.gml_add(index, 1)], other.value)",
+            "choose(GMRuntime.gml_array_get(items, GMRuntime.gml_add(index, 1)), other.value)",
         )
 
     def test_parses_array_literals(self):
@@ -447,6 +447,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIsInstance(literal, _ArrayLiteral)
         assert isinstance(literal, _ArrayLiteral)
         self.assertEqual(len(literal.elements), 2)
+
+    def test_transpiles_array_indexing_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("items[0]"),
+            "GMRuntime.gml_array_get(items, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("items[-1]"),
+            "GMRuntime.gml_array_get(items, -1)",
+        )
 
 
 class TestGMLStatementTranspiler(unittest.TestCase):
@@ -690,6 +700,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),
             "position.x = GMRuntime.gml_add(position.x, GMRuntime.gml_mul(position.y, 2))",
+        )
+
+    def test_transpiles_array_assignments_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_code("items[index] = score + 1;", indent=""),
+            "GMRuntime.gml_array_set(items, index, GMRuntime.gml_add(score, 1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("items[index] += 1;", indent=""),
+            "GMRuntime.gml_array_set(items, index, "
+            "GMRuntime.gml_add(GMRuntime.gml_array_get(items, index), 1))",
         )
 
     def test_transpiles_newline_separated_statements(self):

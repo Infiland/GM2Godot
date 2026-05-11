@@ -126,6 +126,21 @@ static func gml_mod(left, right):
 	return fmod(_to_real(left), _to_real(right))
 
 
+static func gml_array_get(array_value, index):
+	var resolved_index = _to_array_index(index)
+	if resolved_index < 0:
+		return gml_undefined()
+	return array_value[resolved_index]
+
+
+static func gml_array_set(array_value, index, value):
+	var resolved_index = _to_array_index(index)
+	if resolved_index < 0:
+		return gml_undefined()
+	array_value[resolved_index] = value
+	return value
+
+
 static func gml_bit_and(left, right):
 	return GMLInt64.new(_to_int64_value(left) & _to_int64_value(right))
 
@@ -223,6 +238,14 @@ static func _to_int64_value(value):
 	if is_int64(value):
 		return int(value.value)
 	return int(value)
+
+
+static func _to_array_index(value):
+	var resolved_index = int(_to_real(value))
+	if resolved_index < 0:
+		gml_error("Negative GML array index")
+		return -1
+	return resolved_index
 
 
 static func gml_error(message):

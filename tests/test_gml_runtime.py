@@ -63,6 +63,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("0b01101000_01101001", "0b0110100001101001"),
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
+    RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
     RuntimeValueParityCase("a + b", "GMRuntime.gml_add(a, b)"),
     RuntimeValueParityCase('"a" + "b"', 'GMRuntime.gml_add("a", "b")'),
     RuntimeValueParityCase('1 + "px"', 'GMRuntime.gml_add(1, "px")'),
@@ -107,6 +108,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_sub",
             "gml_mul",
             "gml_mod",
+            "gml_array_get",
+            "gml_array_set",
             "gml_bit_and",
             "gml_bit_or",
             "gml_bit_xor",
@@ -138,6 +141,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_repeat_count_preserves_gml_rounding(self):
         self.assertIn("static func gml_repeat_count(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return max(0, int(round(_to_real(value))))", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_array_helpers_reject_negative_indices(self):
+        self.assertIn("static func gml_array_get(array_value, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_array_set(array_value, index, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _to_array_index(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn('gml_error("Negative GML array index")', GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

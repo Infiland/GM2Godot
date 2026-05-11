@@ -27,6 +27,7 @@ def fnv1a32(value: str) -> int:
 
 RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("undefined", "GMRuntime.gml_undefined()"),
+    RuntimeValueParityCase("all", "GMRuntime.gml_instance_all()"),
     RuntimeValueParityCase("noone", "GMRuntime.gml_instance_noone()"),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
@@ -226,6 +227,22 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase(
         'variable_instance_get(enemy, "hp")',
         'GMRuntime.gml_variable_instance_get(enemy, "hp")',
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_get(-1, "hp")',
+        'GMRuntime.gml_variable_instance_get(self, "hp")',
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_get(-2, "hp")',
+        'GMRuntime.gml_variable_instance_get(other, "hp")',
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_get_names(-3)',
+        "GMRuntime.gml_variable_instance_get_names(GMRuntime.gml_instance_all())",
+    ),
+    RuntimeValueParityCase(
+        'variable_instance_get(-4, "hp")',
+        'GMRuntime.gml_variable_instance_get(GMRuntime.gml_instance_noone(), "hp")',
     ),
     RuntimeValueParityCase(
         'variable_instance_exists(enemy, "hp")',
@@ -444,6 +461,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_get",
             "gml_handle_invalid",
             "gml_instance_noone",
+            "gml_instance_all",
             "gml_handle_is_valid",
             "gml_handle_parse",
             "gml_ref_create",
@@ -604,12 +622,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_normalizes_invalid_handle_values(self):
         self.assertIn("const GML_HANDLE_INVALID_INDEX = -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INSTANCE_SELF_INDEX = -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INSTANCE_OTHER_INDEX = -2", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INSTANCE_ALL_INDEX = -3", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_INSTANCE_INVALID_INDEX = -4", GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_INSTANCE_HANDLE_KIND = "instance"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_invalid(kind = \"\", invalid_index = GML_HANDLE_INVALID_INDEX):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_make_handle(str(kind), int(invalid_index), null, \"\", false)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_noone():", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_all():", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)", GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_REFERENCE_HANDLE_KIND = "dbgref"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)

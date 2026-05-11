@@ -961,6 +961,25 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_instance_set(GMRuntime.gml_instance_noone(), "hp", 10)',
         )
 
+    def test_transpiles_legacy_numeric_instance_keywords(self):
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_get(-1, "hp")'),
+            'GMRuntime.gml_variable_instance_get(self, "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_get(-2, "hp")'),
+            'GMRuntime.gml_variable_instance_get(other, "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_instance_get_names(-3)"),
+            "GMRuntime.gml_variable_instance_get_names(GMRuntime.gml_instance_all())",
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_instance_get(-4, "hp")'),
+            'GMRuntime.gml_variable_instance_get(GMRuntime.gml_instance_noone(), "hp")',
+        )
+        self.assertEqual(transpile_gml_expression("all"), "GMRuntime.gml_instance_all()")
+
     def test_transpiles_global_keyword_to_shared_runtime_scope(self):
         self.assertEqual(transpile_gml_expression("global"), "GMRuntime.gml_global_scope()")
         self.assertEqual(

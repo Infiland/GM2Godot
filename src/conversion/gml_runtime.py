@@ -24,6 +24,9 @@ const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode 
 const GML_HANDLE_TYPE_SHIFT = 32
 const GML_HANDLE_INDEX_MASK = 0xffffffff
 const GML_HANDLE_INVALID_INDEX = -1
+const GML_INSTANCE_SELF_INDEX = -1
+const GML_INSTANCE_OTHER_INDEX = -2
+const GML_INSTANCE_ALL_INDEX = -3
 const GML_INSTANCE_INVALID_INDEX = -4
 const GML_INSTANCE_HANDLE_KIND = "instance"
 const GML_DS_MAP_HANDLE_KIND = "ds_map"
@@ -258,6 +261,10 @@ static func gml_handle_invalid(kind = "", invalid_index = GML_HANDLE_INVALID_IND
 
 static func gml_instance_noone():
 	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)
+
+
+static func gml_instance_all():
+	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)
 
 
 static func gml_handle_is_valid(handle):

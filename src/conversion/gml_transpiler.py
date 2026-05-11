@@ -363,6 +363,7 @@ _OPERATOR_REPLACEMENTS = {
 }
 
 _NAME_REPLACEMENTS = {
+    "all": "GMRuntime.gml_instance_all()",
     "global": "GMRuntime.gml_global_scope()",
     "infinity": "INF",
     "NaN": "NAN",
@@ -2061,6 +2062,16 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
+    if (
+        isinstance(expr.callee, _Name)
+        and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS
+        and expr.callee.value.startswith("variable_instance_")
+        and expr.args
+    ):
+        first_arg = _emit_instance_keyword_argument(expr.args[0], local_names)
+        remaining_args = [_emit_expression(arg, local_names)[0] for arg in expr.args[1:]]
+        args = ", ".join([first_arg, *remaining_args])
+        return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS:
         args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
         return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
@@ -2077,6 +2088,35 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
     ):
         arg = _emit_expression(expr.args[0], local_names)[0]
         return f"GMRuntime.{_RUNTIME_FUNCTIONS[expr.callee.value]}({arg})"
+    return None
+
+
+def _emit_instance_keyword_argument(expr: _Expression, local_names: Iterable[str]) -> str:
+    legacy_keyword = _legacy_instance_keyword_value(expr)
+    if legacy_keyword == -1:
+        return "self"
+    if legacy_keyword == -2:
+        return "other"
+    if legacy_keyword == -3:
+        return "GMRuntime.gml_instance_all()"
+    if legacy_keyword == -4:
+        return "GMRuntime.gml_instance_noone()"
+    return _emit_expression(expr, local_names)[0]
+
+
+def _legacy_instance_keyword_value(expr: _Expression) -> int | None:
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    if not isinstance(unwrapped_expr, _Unary) or unwrapped_expr.operator != "-":
+        return None
+    operand = _unwrap_grouped_expression(unwrapped_expr.operand)
+    if not isinstance(operand, _NumberLiteral) or operand.is_float_like:
+        return None
+    try:
+        value = int(operand.value, 0)
+    except ValueError:
+        return None
+    if value in (1, 2, 3, 4):
+        return -value
     return None
 
 

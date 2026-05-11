@@ -43,6 +43,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("nan", "NAN"),
     RuntimeValueParityCase("real(NaN)", "GMRuntime.gml_real(NAN)"),
+    RuntimeValueParityCase("typeof(NaN)", "GMRuntime.gml_typeof(NAN)"),
     RuntimeValueParityCase("is_nan(NaN)", "GMRuntime.is_nan_value(NAN)"),
     RuntimeValueParityCase("0.5", "0.5"),
     RuntimeValueParityCase("100_000_000", "100000000"),

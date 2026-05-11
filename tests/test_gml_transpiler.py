@@ -334,6 +334,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.is_nan_value(NAN)",
         )
 
+    def test_transpiles_nan_type_helpers(self):
+        self.assertEqual(
+            transpile_gml_expression("typeof(NaN)"),
+            "GMRuntime.gml_typeof(NAN)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_nan(NaN)"),
+            "GMRuntime.is_nan_value(NAN)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("is_nan(0)"),
+            "GMRuntime.is_nan_value(0)",
+        )
+
     def test_transpiles_boolean_value_helpers(self):
         self.assertEqual(transpile_gml_expression("true"), "true")
         self.assertEqual(transpile_gml_expression("false"), "false")

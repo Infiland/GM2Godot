@@ -737,6 +737,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(alias, 0, 9)",
         )
 
+    def test_array_assignment_to_undefined_releases_reference(self):
+        self.assertEqual(
+            transpile_gml_code("items = [1, 2]; items = undefined;", indent=""),
+            "items = [1, 2]\nitems = GMRuntime.gml_undefined()",
+        )
+
     def test_transpiles_newline_separated_statements(self):
         self.assertEqual(
             transpile_gml_code("superSpeed = 0\nfaster = false;", indent=""),

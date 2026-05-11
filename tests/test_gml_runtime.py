@@ -159,6 +159,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_array_deletion_uses_plain_undefined_without_registries(self):
+        self.assertIn("static func gml_undefined():\n\treturn null", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("array_registry", GML_RUNTIME_SCRIPT)
+
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("class GMLInt64", GML_RUNTIME_SCRIPT)

@@ -842,6 +842,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var _str = GMRuntime.gml_undefined()",
         )
 
+    def test_local_var_lifetime_does_not_leak_between_transpiler_calls(self):
+        self.assertEqual(transpile_gml_code("var x = 1;", indent=""), "var x = 1")
+        self.assertEqual(
+            transpile_gml_code("x += 1;", indent=""),
+            "position.x = GMRuntime.gml_add(position.x, 1)",
+        )
+
     def test_transpiles_compound_assignments(self):
         self.assertEqual(
             transpile_gml_code("x += y * 2;", indent=""),

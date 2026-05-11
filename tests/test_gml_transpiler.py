@@ -607,6 +607,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_typeof(GMRuntime.gml_method(player, callback))",
         )
         self.assertEqual(
+            transpile_gml_expression('typeof(handle_parse("ref script 1"))'),
+            'GMRuntime.gml_typeof(GMRuntime.gml_handle_parse("ref script 1"))',
+        )
+        self.assertEqual(
             transpile_gml_expression("method_get_self(method(player, callback))"),
             "GMRuntime.gml_method_get_self(GMRuntime.gml_method(player, callback))",
         )

@@ -66,6 +66,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("method(undefined, callback)", "GMRuntime.gml_method(self, callback)"),
     RuntimeValueParityCase("typeof(method(player, callback))", "GMRuntime.gml_typeof(GMRuntime.gml_method(player, callback))"),
     RuntimeValueParityCase(
+        'typeof(handle_parse("ref script 1"))',
+        'GMRuntime.gml_typeof(GMRuntime.gml_handle_parse("ref script 1"))',
+    ),
+    RuntimeValueParityCase(
         "method_get_self(method(player, callback))",
         "GMRuntime.gml_method_get_self(GMRuntime.gml_method(player, callback))",
     ),
@@ -668,6 +672,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('const GML_TYPE_INT32 = "int32"', GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_TYPE_HANDLE = "ref"', GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE\n\tif is_int64(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value_type == TYPE_ARRAY:\n\t\treturn GML_TYPE_ARRAY\n\tif is_method(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_int64(value):\n\t\treturn GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_int32(value):\n\t\treturn GML_TYPE_INT32", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)

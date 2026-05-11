@@ -29,6 +29,7 @@ const GML_INSTANCE_HANDLE_KIND = "instance"
 const GML_DS_MAP_HANDLE_KIND = "ds_map"
 const GML_REFERENCE_HANDLE_KIND = "dbgref"
 const GML_VARIABLE_HASH_ALGORITHM = "fnv1a32"
+const GML_BUILTIN_ARRAY_SIZE = 8
 
 
 class GMLInt64:
@@ -105,6 +106,7 @@ static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {}
+static var _gml_builtin_arrays = {}
 
 
 static func gml_undefined():
@@ -121,6 +123,16 @@ static func gml_pointer_invalid():
 
 static func gml_global_scope():
 	return _gml_global_scope
+
+
+static func gml_builtin_array(name):
+	var key = str(name)
+	if not _gml_builtin_arrays.has(key):
+		var values = []
+		for _index in range(GML_BUILTIN_ARRAY_SIZE):
+			values.append(gml_undefined())
+		_gml_builtin_arrays[key] = values
+	return _gml_builtin_arrays[key]
 
 
 static func is_undefined(value):

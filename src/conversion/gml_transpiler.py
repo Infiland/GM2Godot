@@ -374,8 +374,31 @@ _INSTANCE_NAME_REPLACEMENTS = {
     "y": "position.y",
 }
 
+_BUILTIN_ARRAY_VARIABLES = frozenset({
+    "view_angle",
+    "view_camera",
+    "view_current",
+    "view_enabled",
+    "view_hborder",
+    "view_hport",
+    "view_hspeed",
+    "view_hview",
+    "view_object",
+    "view_surface_id",
+    "view_vborder",
+    "view_visible",
+    "view_vspeed",
+    "view_wport",
+    "view_wview",
+    "view_xport",
+    "view_xview",
+    "view_yport",
+    "view_yview",
+})
+
 _BUILTIN_INSTANCE_VARIABLES = frozenset({
     *_INSTANCE_NAME_REPLACEMENTS,
+    *_BUILTIN_ARRAY_VARIABLES,
     "sprite_index",
     "image_index",
 })
@@ -1857,6 +1880,8 @@ def _emit_expression(
             return value, _PRIMARY_PRECEDENCE
         if not is_local:
             value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
+            if value in _BUILTIN_ARRAY_VARIABLES:
+                return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
         value = _sanitize_gdscript_identifier(value)
         return value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _Grouped):

@@ -197,6 +197,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("0b0010 | 0b0100", "GMRuntime.gml_bit_or(0b0010, 0b0100)"),
     RuntimeValueParityCase("[1, score + 1]", "[1, GMRuntime.gml_add(score, 1)]"),
     RuntimeValueParityCase("items[-1]", "GMRuntime.gml_array_get(items, -1)"),
+    RuntimeValueParityCase(
+        "view_xview[0]",
+        'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xview"), 0)',
+    ),
     RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
     RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, 2, 3)"),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
@@ -403,6 +407,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_undefined",
             "gml_pointer_null",
             "gml_pointer_invalid",
+            "gml_builtin_array",
             "is_undefined",
             "is_bool",
             "is_string",
@@ -935,6 +940,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_global_scope():\n\treturn _gml_global_scope", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_builtin_array_variables_are_shared_fixed_slot_arrays(self):
+        self.assertIn("const GML_BUILTIN_ARRAY_SIZE = 8", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_builtin_arrays = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_builtin_array(name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var key = str(name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not _gml_builtin_arrays.has(key):", GML_RUNTIME_SCRIPT)
+        self.assertIn("for _index in range(GML_BUILTIN_ARRAY_SIZE):", GML_RUNTIME_SCRIPT)
+        self.assertIn("values.append(gml_undefined())", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_builtin_arrays[key] = values", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_builtin_arrays[key]", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)

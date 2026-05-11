@@ -1110,6 +1110,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_get(items, -1)",
         )
 
+    def test_transpiles_builtin_array_variables_through_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("view_xview"),
+            'GMRuntime.gml_builtin_array("view_xview")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("view_xview[0]"),
+            'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xview"), 0)',
+        )
+        self.assertEqual(
+            transpile_gml_code("view_xview[0] = x;", indent=""),
+            'GMRuntime.gml_array_set(GMRuntime.gml_builtin_array("view_xview"), 0, position.x)',
+        )
+        self.assertEqual(
+            transpile_gml_code("var view_xview = [1]; value = view_xview[0];", indent=""),
+            "var view_xview = [1]\nvalue = GMRuntime.gml_array_get(view_xview, 0)",
+        )
+
     def test_transpiles_multidimensional_array_access(self):
         self.assertEqual(
             transpile_gml_expression("grid[x][y]"),

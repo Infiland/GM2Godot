@@ -247,9 +247,9 @@ Current branch work to remember before redoing an issue:
 - [ ] #256 Variables: Info Functions (nameof, typeof) (open, parent #129, subissues 0/4)
 - [ ] #255 Variables: Built-in Variables (open, parent #129, subissues 1/5)
 - [ ] #254 Variables: Assignment and Naming Rules (open, parent #129, subissues 0/6)
-- [ ] #253 delete: Reject non-variable expressions (open, parent #198, subissues 0/0)
-- [ ] #252 delete: Clear struct references for garbage collection (open, parent #198, subissues 0/0)
-- [ ] #251 delete: Parse variable-only operator (open, parent #198, subissues 0/0)
+- [ ] #253 delete: Reject non-variable expressions (open, parent #198, subissues 0/0) - branch-covered by `ece6bfc`
+- [ ] #252 delete: Clear struct references for garbage collection (open, parent #198, subissues 0/0) - branch-covered by `5773bbb`
+- [ ] #251 delete: Parse variable-only operator (open, parent #198, subissues 0/0) - branch-covered by `8e4d05e`
 - [ ] #250 new: Reject non-constructor functions at runtime (open, parent #197, subissues 0/0)
 - [ ] #249 new: Bind constructor arguments and fields (open, parent #197, subissues 0/0)
 - [ ] #248 new: Allocate structs and run constructor body (open, parent #197, subissues 0/0)
@@ -264,44 +264,44 @@ Current branch work to remember before redoing an issue:
 - [ ] #239 try / catch / finally: Emulate exception control flow in Godot (open, parent #195, subissues 0/0)
 - [ ] #238 try / catch / finally: Represent catch exception structs (open, parent #195, subissues 0/0)
 - [ ] #237 try / catch / finally: Parse valid block combinations (open, parent #195, subissues 0/0)
-- [ ] #236 begin / end: Lower to normal block scopes (open, parent #194, subissues 0/0)
-- [ ] #235 begin / end: Tokenize legacy block delimiters (open, parent #194, subissues 0/0)
+- [ ] #236 begin / end: Lower to normal block scopes (open, parent #194, subissues 0/0) - branch-covered by `f1ddb9d`
+- [ ] #235 begin / end: Tokenize legacy block delimiters (open, parent #194, subissues 0/0) - branch-covered by `42b0b72`
 - [ ] #234 return: Reject return outside functions and methods (open, parent #193, subissues 0/0) - branch-covered by `b44940b`
-- [ ] #233 return: Return values from functions and methods (open, parent #193, subissues 0/0)
-- [ ] #232 return: Parse return expression statement (open, parent #193, subissues 0/0)
-- [ ] #231 with: Support break and continue as loop control (open, parent #192, subissues 0/0)
+- [ ] #233 return: Return values from functions and methods (open, parent #193, subissues 0/0) - branch-covered by `97129be`, `5933e69`
+- [ ] #232 return: Parse return expression statement (open, parent #193, subissues 0/0) - branch-covered by `925d295`, `b44940b`
+- [ ] #231 with: Support break and continue as loop control (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #230 with: Share enclosing local variables (open, parent #192, subissues 0/0)
 - [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0)
 - [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0) - branch-covered by `cb7a2a3`
 - [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)
-- [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0)
+- [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0) - branch-covered by `53bda39`
 - [ ] #224 exit: Return early from functions and methods (open, parent #191, subissues 0/0)
-- [ ] #223 exit: Parse event and function abort statement (open, parent #191, subissues 0/0)
-- [ ] #222 continue: Preserve context-specific post-step behavior (open, parent #190, subissues 0/0)
-- [ ] #221 continue: Advance with target iteration (open, parent #190, subissues 0/0)
-- [ ] #220 continue: Advance nearest loop iteration (open, parent #190, subissues 0/0)
-- [ ] #219 continue: Parse statement and validate context (open, parent #190, subissues 0/0)
-- [ ] #218 break: Exit with iteration block (open, parent #189, subissues 0/0)
-- [ ] #217 break: Exit nearest loop or switch (open, parent #189, subissues 0/0)
-- [ ] #216 break: Parse statement and validate context (open, parent #189, subissues 0/0)
-- [ ] #215 switch: Treat break as switch-local exit (open, parent #188, subissues 0/0)
-- [ ] #214 switch: Preserve fallthrough semantics (open, parent #188, subissues 0/0)
-- [ ] #213 switch: Match case constants against switch expression (open, parent #188, subissues 0/0)
-- [ ] #212 switch: Parse case and default labels (open, parent #188, subissues 0/0)
-- [ ] #211 for: Preserve continue running operation clause (open, parent #187, subissues 0/0)
-- [ ] #210 for: Support var declarations in headers (open, parent #187, subissues 0/0)
-- [ ] #209 for: Emit GML for-loop execution order (open, parent #187, subissues 0/0)
-- [ ] #208 for: Parse initializer condition and operation clauses (open, parent #187, subissues 0/0)
-- [ ] #207 do / until: Preserve continue before until check (open, parent #186, subissues 0/0)
-- [ ] #206 do / until: Emit at-least-once semantics (open, parent #186, subissues 0/0)
-- [ ] #205 do / until: Parse post-tested loop syntax (open, parent #186, subissues 0/0)
-- [ ] #204 while: Support break and continue inside while (open, parent #185, subissues 0/0)
-- [ ] #203 while: Emit condition re-evaluation semantics (open, parent #185, subissues 0/0)
-- [ ] #202 while: Parse condition-tested loop syntax (open, parent #185, subissues 0/0)
-- [ ] #201 repeat: Support break and continue inside repeat (open, parent #184, subissues 0/0)
-- [ ] #200 repeat: Preserve rounded iteration count (open, parent #184, subissues 0/0)
-- [ ] #199 repeat: Parse fixed-count loop syntax (open, parent #184, subissues 0/0)
+- [ ] #223 exit: Parse event and function abort statement (open, parent #191, subissues 0/0) - branch-covered by `de3712e`
+- [ ] #222 continue: Preserve context-specific post-step behavior (open, parent #190, subissues 0/0) - branch-covered by `b14808b`, `ecd5e24`
+- [ ] #221 continue: Advance with target iteration (open, parent #190, subissues 0/0) - branch-covered by `9ed26ee`
+- [ ] #220 continue: Advance nearest loop iteration (open, parent #190, subissues 0/0) - branch-covered by `bc9d702`
+- [ ] #219 continue: Parse statement and validate context (open, parent #190, subissues 0/0) - branch-covered by `bd4be9f`
+- [ ] #218 break: Exit with iteration block (open, parent #189, subissues 0/0) - branch-covered by `9ed26ee`
+- [ ] #217 break: Exit nearest loop or switch (open, parent #189, subissues 0/0) - branch-covered by `bc9d702`, `e07c338`
+- [ ] #216 break: Parse statement and validate context (open, parent #189, subissues 0/0) - branch-covered by `533d3f9`
+- [ ] #215 switch: Treat break as switch-local exit (open, parent #188, subissues 0/0) - branch-covered by `e07c338`
+- [ ] #214 switch: Preserve fallthrough semantics (open, parent #188, subissues 0/0) - branch-covered by `f1a4a2e`
+- [ ] #213 switch: Match case constants against switch expression (open, parent #188, subissues 0/0) - branch-covered by `ee7e805`
+- [ ] #212 switch: Parse case and default labels (open, parent #188, subissues 0/0) - branch-covered by `1ec6cd1`
+- [ ] #211 for: Preserve continue running operation clause (open, parent #187, subissues 0/0) - branch-covered by `ecd5e24`
+- [ ] #210 for: Support var declarations in headers (open, parent #187, subissues 0/0) - branch-covered by `15081c4`
+- [ ] #209 for: Emit GML for-loop execution order (open, parent #187, subissues 0/0) - branch-covered by `7fedc99`
+- [ ] #208 for: Parse initializer condition and operation clauses (open, parent #187, subissues 0/0) - branch-covered by `6fb52e0`
+- [ ] #207 do / until: Preserve continue before until check (open, parent #186, subissues 0/0) - branch-covered by `b14808b`
+- [ ] #206 do / until: Emit at-least-once semantics (open, parent #186, subissues 0/0) - branch-covered by `1b1be21`
+- [ ] #205 do / until: Parse post-tested loop syntax (open, parent #186, subissues 0/0) - branch-covered by `0d66070`
+- [ ] #204 while: Support break and continue inside while (open, parent #185, subissues 0/0) - branch-covered by `bc9d702`
+- [ ] #203 while: Emit condition re-evaluation semantics (open, parent #185, subissues 0/0) - branch-covered by `92d2cfd`
+- [ ] #202 while: Parse condition-tested loop syntax (open, parent #185, subissues 0/0) - branch-covered by `0d3b4d3`
+- [ ] #201 repeat: Support break and continue inside repeat (open, parent #184, subissues 0/0) - branch-covered by `358be3b`
+- [ ] #200 repeat: Preserve rounded iteration count (open, parent #184, subissues 0/0) - branch-covered by `4fa279f`
+- [ ] #199 repeat: Parse fixed-count loop syntax (open, parent #184, subissues 0/0) - branch-covered by `02bda32`
 - [ ] #198 Language Features: delete (open, parent #129, subissues 0/3)
 - [ ] #197 Language Features: new (open, parent #129, subissues 0/5)
 - [ ] #196 Language Features: throw (open, parent #129, subissues 0/4)

@@ -13,6 +13,7 @@ Current branch work to remember before redoing an issue:
 - `9ed26ee` parses and lowers `with` statements through target loops and references #227, #301, and #303.
 - `cb7a2a3` adds statement-level coverage for single with-target forms and references #228.
 - `8a8c358` adds focused NaN numeric type/equality coverage and references #422, #423, and #424.
+- `6515eac` adds focused undefined runtime model coverage and references #417, #418, #419, and #420.
 
 ## Working Order
 
@@ -52,11 +53,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #424 Data Types: NaN - Implement is_nan and typeof behavior (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
 - [ ] #423 Data Types: NaN - Preserve NaN inequality (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
 - [ ] #422 Data Types: NaN - Map NaN to numeric runtime value (open, parent #351, subissues 0/0) - branch-covered by `8a8c358`
-- [ ] #421 Data Types: Undefined - Avoid conflating undefined with uninitialized errors (open, parent #350, subissues 0/0)
-- [ ] #420 Data Types: Undefined - Implement undefined truthiness and conversion (open, parent #350, subissues 0/0)
-- [ ] #419 Data Types: Undefined - Implement undefined equality (open, parent #350, subissues 0/0)
-- [ ] #418 Data Types: Undefined - Return undefined from missing-value APIs (open, parent #350, subissues 0/0)
-- [ ] #417 Data Types: Undefined - Create undefined sentinel (open, parent #350, subissues 0/0)
+- [ ] #421 Data Types: Undefined - Avoid conflating undefined with uninitialized errors (open, parent #350, subissues 0/0) - branch-covered by `3908df10`
+- [ ] #420 Data Types: Undefined - Implement undefined truthiness and conversion (open, parent #350, subissues 0/0) - branch-covered by `e1b3e5bf`, `6515eac`
+- [ ] #419 Data Types: Undefined - Implement undefined equality (open, parent #350, subissues 0/0) - branch-covered by `ffa2115c`, `6515eac`
+- [ ] #418 Data Types: Undefined - Return undefined from missing-value APIs (open, parent #350, subissues 0/0) - branch-covered by `d7835949`, `6515eac`
+- [ ] #417 Data Types: Undefined - Create undefined sentinel (open, parent #350, subissues 0/0) - branch-covered by `27ee55ab`, `6515eac`
 - [ ] #416 Data Types: Enum - Prevent enum mutation (open, parent #349, subissues 0/0)
 - [ ] #415 Data Types: Enum - Evaluate enum expressions at compile time (open, parent #349, subissues 0/0)
 - [ ] #414 Data Types: Enum - Represent enum values as int64-like constants (open, parent #349, subissues 0/0)

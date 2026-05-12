@@ -31,6 +31,14 @@ Current branch work to remember before redoing an issue:
 - `84fc8d0` supports invalid handle values and references #399.
 - `96b18cf` parses and stringifies GML handles and references #400.
 - `8aad980` accepts legacy numeric handle IDs at API boundaries and references #401.
+- `3b77fba`, `b688e2f`, and `d65ac22` cover numeric separator stripping, validation, and exact value preservation for #433-#435.
+- `3219ab4`, `1baabce`, `235b415`, `64812ca`, and `420bae9` cover int64 representation, conversion, arithmetic, bitwise, and division behavior for #392-#396.
+- `6995898`, `5933e69`, `46cd4cf`, `bad72d2`, and `efd36a4` cover method value representation, function literals, bound calls, optional arguments, and type behavior for #387-#391.
+- `97129be`, `7bd8c8c`, `e680c60`, and `35a50d5` cover struct literals, access, scope/shorthand behavior, string output, and reference semantics for #381-#386.
+- `0370647`, `d1b843f`, `592d34a`, `8070f60`, `fb7182d`, `d3d758b`, and `db8a48d` cover arrays for #374-#380.
+- `47feb4a`, `3c1174e`, and `a430ae1` cover Any handling for #430-#432.
+- `dfc4987`, `5f8c969`, and `e143f3d` cover values/reference semantics for #436-#440.
+- `7e36986`, `ca00c03`, `cd5ad81`, `067359f`, and `836bc02` cover mixed-type operations and conformance tables for #441-#445.
 
 ## Working Order
 
@@ -46,22 +54,22 @@ Current branch work to remember before redoing an issue:
 
 - [x] #448 Game Input: keyboard_check and virtual key constants (closed, parent #129, subissues 0/0)
 - [x] #447 Language Features: if / else (closed, parent #129, subissues 0/0)
-- [ ] #445 Data Types: Mixed-Type Operations and Type Tables - Generate conformance tests from tables (open, parent #356, subissues 0/0)
-- [ ] #444 Data Types: Mixed-Type Operations and Type Tables - Implement special equality table (open, parent #356, subissues 0/0)
-- [ ] #443 Data Types: Mixed-Type Operations and Type Tables - Implement runtime type errors (open, parent #356, subissues 0/0)
-- [ ] #442 Data Types: Mixed-Type Operations and Type Tables - Implement string-result operations (open, parent #356, subissues 0/0)
-- [ ] #441 Data Types: Mixed-Type Operations and Type Tables - Implement arithmetic dispatch tables (open, parent #356, subissues 0/0)
-- [ ] #440 Data Types: Values and References - Implement clone and duplicate boundaries (open, parent #355, subissues 0/0)
-- [ ] #439 Data Types: Values and References - Support reference equality checks (open, parent #355, subissues 0/0)
-- [ ] #438 Data Types: Values and References - Preserve function argument mutation behavior (open, parent #355, subissues 0/0)
-- [ ] #437 Data Types: Values and References - Implement pass-by-reference categories (open, parent #355, subissues 0/0)
-- [ ] #436 Data Types: Values and References - Implement pass-by-value categories (open, parent #355, subissues 0/0)
-- [ ] #435 Data Types: Underscores in Numeric Literals - Preserve literal value exactly (open, parent #354, subissues 0/0)
-- [ ] #434 Data Types: Underscores in Numeric Literals - Validate underscore placement (open, parent #354, subissues 0/0)
-- [ ] #433 Data Types: Underscores in Numeric Literals - Strip numeric separators (open, parent #354, subissues 0/0)
-- [ ] #432 Data Types: Any - Document unsupported Any categories per API (open, parent #353, subissues 0/0)
-- [ ] #431 Data Types: Any - Preserve Any through function calls (open, parent #353, subissues 0/0)
-- [ ] #430 Data Types: Any - Represent Any with untyped Variant values (open, parent #353, subissues 0/0)
+- [ ] #445 Data Types: Mixed-Type Operations and Type Tables - Generate conformance tests from tables (open, parent #356, subissues 0/0) - branch-covered by `836bc02`
+- [ ] #444 Data Types: Mixed-Type Operations and Type Tables - Implement special equality table (open, parent #356, subissues 0/0) - branch-covered by `067359f`
+- [ ] #443 Data Types: Mixed-Type Operations and Type Tables - Implement runtime type errors (open, parent #356, subissues 0/0) - branch-covered by `cd5ad81`
+- [ ] #442 Data Types: Mixed-Type Operations and Type Tables - Implement string-result operations (open, parent #356, subissues 0/0) - branch-covered by `ca00c03`
+- [ ] #441 Data Types: Mixed-Type Operations and Type Tables - Implement arithmetic dispatch tables (open, parent #356, subissues 0/0) - branch-covered by `7e36986`
+- [ ] #440 Data Types: Values and References - Implement clone and duplicate boundaries (open, parent #355, subissues 0/0) - branch-covered by `e143f3d`
+- [ ] #439 Data Types: Values and References - Support reference equality checks (open, parent #355, subissues 0/0) - branch-covered by `5f8c969`
+- [ ] #438 Data Types: Values and References - Preserve function argument mutation behavior (open, parent #355, subissues 0/0) - branch-covered by `dfc4987`
+- [ ] #437 Data Types: Values and References - Implement pass-by-reference categories (open, parent #355, subissues 0/0) - branch-covered by `dfc4987`
+- [ ] #436 Data Types: Values and References - Implement pass-by-value categories (open, parent #355, subissues 0/0) - branch-covered by `dfc4987`
+- [ ] #435 Data Types: Underscores in Numeric Literals - Preserve literal value exactly (open, parent #354, subissues 0/0) - branch-covered by `d65ac22`
+- [ ] #434 Data Types: Underscores in Numeric Literals - Validate underscore placement (open, parent #354, subissues 0/0) - branch-covered by `b688e2f`
+- [ ] #433 Data Types: Underscores in Numeric Literals - Strip numeric separators (open, parent #354, subissues 0/0) - branch-covered by `3b77fba`
+- [ ] #432 Data Types: Any - Document unsupported Any categories per API (open, parent #353, subissues 0/0) - branch-covered by `a430ae1`
+- [ ] #431 Data Types: Any - Preserve Any through function calls (open, parent #353, subissues 0/0) - branch-covered by `3c1174e`
+- [ ] #430 Data Types: Any - Represent Any with untyped Variant values (open, parent #353, subissues 0/0) - branch-covered by `47feb4a`
 - [x] #429 Data Types: Infinity - Implement is_infinity and conversions (closed, parent #352, subissues 0/0)
 - [x] #428 Data Types: Infinity - Produce infinity from division by zero (closed, parent #352, subissues 0/0)
 - [x] #427 Data Types: Infinity - Preserve infinity equality (closed, parent #352, subissues 0/0)
@@ -95,29 +103,29 @@ Current branch work to remember before redoing an issue:
 - [ ] #399 Data Types: Handles - Support invalid handle values (open, parent #345, subissues 0/0) - branch-covered by `84fc8d0`
 - [ ] #398 Data Types: Handles - Encode typed 64-bit handles (open, parent #345, subissues 0/0) - branch-covered by `8bffdf3`
 - [ ] #397 Data Types: Handles - Create handle registry (open, parent #345, subissues 0/0) - branch-covered by `2357ae9`
-- [ ] #396 Data Types: int64 - Preserve int64 division behavior (open, parent #344, subissues 0/0)
-- [ ] #395 Data Types: int64 - Implement bitwise operations returning int64 (open, parent #344, subissues 0/0)
-- [ ] #394 Data Types: int64 - Preserve int64 arithmetic results (open, parent #344, subissues 0/0)
-- [ ] #393 Data Types: int64 - Implement int64 conversion (open, parent #344, subissues 0/0)
-- [ ] #392 Data Types: int64 - Represent explicit int64 values (open, parent #344, subissues 0/0)
-- [ ] #391 Data Types: Method Variables - Expose method value type behavior (open, parent #343, subissues 0/0)
-- [ ] #390 Data Types: Method Variables - Support missing and optional arguments (open, parent #343, subissues 0/0)
-- [ ] #389 Data Types: Method Variables - Call methods with bound self (open, parent #343, subissues 0/0)
-- [ ] #388 Data Types: Method Variables - Parse function literals as method values (open, parent #343, subissues 0/0)
-- [ ] #387 Data Types: Method Variables - Represent bound methods (open, parent #343, subissues 0/0)
-- [ ] #386 Data Types: Structs - Preserve struct reference semantics (open, parent #342, subissues 0/0)
-- [ ] #385 Data Types: Structs - Support struct string output (open, parent #342, subissues 0/0)
-- [ ] #384 Data Types: Structs - Implement shorthand initialization (open, parent #342, subissues 0/0)
-- [ ] #383 Data Types: Structs - Preserve struct literal scope rules (open, parent #342, subissues 0/0)
-- [ ] #382 Data Types: Structs - Preserve struct member access (open, parent #342, subissues 0/0)
-- [ ] #381 Data Types: Structs - Parse struct literals (open, parent #342, subissues 0/0)
-- [ ] #380 Data Types: Arrays - Support array deletion through undefined assignment (open, parent #341, subissues 0/0)
-- [ ] #379 Data Types: Arrays - Support legacy copy-on-write option (open, parent #341, subissues 0/0)
-- [ ] #378 Data Types: Arrays - Preserve reference mutation semantics (open, parent #341, subissues 0/0)
-- [ ] #377 Data Types: Arrays - Preserve array bounds errors (open, parent #341, subissues 0/0)
-- [ ] #376 Data Types: Arrays - Support multidimensional arrays (open, parent #341, subissues 0/0)
-- [ ] #375 Data Types: Arrays - Implement GML zero-based indexing (open, parent #341, subissues 0/0)
-- [ ] #374 Data Types: Arrays - Parse array literals (open, parent #341, subissues 0/0)
+- [ ] #396 Data Types: int64 - Preserve int64 division behavior (open, parent #344, subissues 0/0) - branch-covered by `420bae9`
+- [ ] #395 Data Types: int64 - Implement bitwise operations returning int64 (open, parent #344, subissues 0/0) - branch-covered by `64812ca`
+- [ ] #394 Data Types: int64 - Preserve int64 arithmetic results (open, parent #344, subissues 0/0) - branch-covered by `235b415`
+- [ ] #393 Data Types: int64 - Implement int64 conversion (open, parent #344, subissues 0/0) - branch-covered by `1baabce`
+- [ ] #392 Data Types: int64 - Represent explicit int64 values (open, parent #344, subissues 0/0) - branch-covered by `3219ab4`, `53142ea`
+- [ ] #391 Data Types: Method Variables - Expose method value type behavior (open, parent #343, subissues 0/0) - branch-covered by `efd36a4`
+- [ ] #390 Data Types: Method Variables - Support missing and optional arguments (open, parent #343, subissues 0/0) - branch-covered by `bad72d2`
+- [ ] #389 Data Types: Method Variables - Call methods with bound self (open, parent #343, subissues 0/0) - branch-covered by `46cd4cf`
+- [ ] #388 Data Types: Method Variables - Parse function literals as method values (open, parent #343, subissues 0/0) - branch-covered by `5933e69`
+- [ ] #387 Data Types: Method Variables - Represent bound methods (open, parent #343, subissues 0/0) - branch-covered by `6995898`
+- [ ] #386 Data Types: Structs - Preserve struct reference semantics (open, parent #342, subissues 0/0) - branch-covered by `35a50d5`
+- [ ] #385 Data Types: Structs - Support struct string output (open, parent #342, subissues 0/0) - branch-covered by `e680c60`
+- [ ] #384 Data Types: Structs - Implement shorthand initialization (open, parent #342, subissues 0/0) - branch-covered by `97129be`
+- [ ] #383 Data Types: Structs - Preserve struct literal scope rules (open, parent #342, subissues 0/0) - branch-covered by `97129be`
+- [ ] #382 Data Types: Structs - Preserve struct member access (open, parent #342, subissues 0/0) - branch-covered by `7bd8c8c`
+- [ ] #381 Data Types: Structs - Parse struct literals (open, parent #342, subissues 0/0) - branch-covered by `97129be`
+- [ ] #380 Data Types: Arrays - Support array deletion through undefined assignment (open, parent #341, subissues 0/0) - branch-covered by `db8a48d`
+- [ ] #379 Data Types: Arrays - Support legacy copy-on-write option (open, parent #341, subissues 0/0) - branch-covered by `d3d758b`
+- [ ] #378 Data Types: Arrays - Preserve reference mutation semantics (open, parent #341, subissues 0/0) - branch-covered by `fb7182d`
+- [ ] #377 Data Types: Arrays - Preserve array bounds errors (open, parent #341, subissues 0/0) - branch-covered by `8070f60`
+- [ ] #376 Data Types: Arrays - Support multidimensional arrays (open, parent #341, subissues 0/0) - branch-covered by `592d34a`
+- [ ] #375 Data Types: Arrays - Implement GML zero-based indexing (open, parent #341, subissues 0/0) - branch-covered by `d1b843f`
+- [ ] #374 Data Types: Arrays - Parse array literals (open, parent #341, subissues 0/0) - branch-covered by `0370647`
 - [x] #373 Data Types: Strings - Respect Godot String behavior deliberately (closed, parent #340, subissues 0/0)
 - [x] #372 Data Types: Strings - Implement string conversion baseline (closed, parent #340, subissues 0/0)
 - [x] #371 Data Types: Strings - Implement string concatenation semantics (closed, parent #340, subissues 0/0)

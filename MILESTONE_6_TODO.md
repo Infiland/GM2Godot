@@ -42,7 +42,7 @@ Current branch work to remember before redoing an issue:
 - `b44940b` rejects `return` outside function/method bodies and references #234.
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
 - `1104758` preserves inherited event boundaries when parent events exit and references #226.
-- `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
+- `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229, #230, and #302.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 - `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
 - `7962ae1` parses and lowers `try`/`catch`/`finally`, exposes catch exception structs, propagates uncaught GML exceptions, runs finally blocks, and rejects illegal finally control flow for #237-#241 and #244.
@@ -204,7 +204,7 @@ Current branch work to remember before redoing an issue:
 - [x] #305 Variables: Built-in Variables - Map built-in instance variables to object runtime state (closed, parent #255, subissues 0/0)
 - [ ] #304 Variables: Built-in Variables - Build a built-in variable registry (open, parent #255, subissues 0/0)
 - [ ] #303 Variables: with() Scope Switching + Instance Keywords - Support break and continue in with (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`
-- [ ] #302 Variables: with() Scope Switching + Instance Keywords - Preserve locals and caller scope inside with (open, parent #181, subissues 0/0)
+- [ ] #302 Variables: with() Scope Switching + Instance Keywords - Preserve locals and caller scope inside with (open, parent #181, subissues 0/0) - branch-covered by `3d7c4d3`
 - [ ] #301 Variables: with() Scope Switching + Instance Keywords - Lower with target execution counts (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #300 Variables: with() Scope Switching + Instance Keywords - Support legacy numeric keyword values (open, parent #181, subissues 0/0) - branch-covered by `1212f46`
 - [ ] #299 Variables: with() Scope Switching + Instance Keywords - Resolve all and noone keywords (open, parent #181, subissues 0/0) - branch-covered by `106712e`

@@ -213,11 +213,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #300 Variables: with() Scope Switching + Instance Keywords - Support legacy numeric keyword values (open, parent #181, subissues 0/0) - branch-covered by `1212f46`
 - [ ] #299 Variables: with() Scope Switching + Instance Keywords - Resolve all and noone keywords (open, parent #181, subissues 0/0) - branch-covered by `106712e`
 - [ ] #298 Variables: with() Scope Switching + Instance Keywords - Resolve self and other keywords (open, parent #181, subissues 0/0) - branch-covered by `7d7551a`
-- [ ] #297 Variables: Constants (enum, #macro, built-ins) - Map built-in constants (open, parent #180, subissues 0/0) - branch-covered by `1af5a73`, `a7b12fc`, `1fce6d1`, current constants work
-- [ ] #296 Variables: Constants (enum, #macro, built-ins) - Prevent writes to constants (open, parent #180, subissues 0/0) - branch-covered by `603d8b6`, `a0f7596`, current constants work
-- [ ] #295 Variables: Constants (enum, #macro, built-ins) - Support configuration-specific macro overrides (open, parent #180, subissues 0/0) - branch-covered by current constants work
-- [ ] #294 Variables: Constants (enum, #macro, built-ins) - Parse macro declarations (open, parent #180, subissues 0/0) - branch-covered by current constants work
-- [ ] #293 Variables: Constants (enum, #macro, built-ins) - Evaluate enum integer values (open, parent #180, subissues 0/0) - branch-covered by `8fec290`, `a86f461`, current constants work
+- [ ] #297 Variables: Constants (enum, #macro, built-ins) - Map built-in constants (open, parent #180, subissues 0/0) - branch-covered by `1af5a73`, `a7b12fc`, `1fce6d1`, `de7c4ef`
+- [ ] #296 Variables: Constants (enum, #macro, built-ins) - Prevent writes to constants (open, parent #180, subissues 0/0) - branch-covered by `603d8b6`, `a0f7596`, `de7c4ef`
+- [ ] #295 Variables: Constants (enum, #macro, built-ins) - Support configuration-specific macro overrides (open, parent #180, subissues 0/0) - branch-covered by `de7c4ef`
+- [ ] #294 Variables: Constants (enum, #macro, built-ins) - Parse macro declarations (open, parent #180, subissues 0/0) - branch-covered by `de7c4ef`
+- [ ] #293 Variables: Constants (enum, #macro, built-ins) - Evaluate enum integer values (open, parent #180, subissues 0/0) - branch-covered by `8fec290`, `a86f461`, `de7c4ef`
 - [ ] #292 Variables: Constants (enum, #macro, built-ins) - Parse enum declarations (open, parent #180, subissues 0/0) - branch-covered by `91af8d3`, `a86f461`
 - [ ] #291 Variables: Static Variables (static) - Support static method variables (open, parent #179, subissues 0/0)
 - [ ] #290 Variables: Static Variables (static) - Support static variable access and static_get/static_set (open, parent #179, subissues 0/0)

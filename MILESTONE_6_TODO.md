@@ -197,11 +197,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #316 Variables: Struct Variable Functions + variable_get_hash - Implement hashed struct access (open, parent #183, subissues 0/0) - branch-covered by `33b3740`
 - [ ] #315 Variables: Struct Variable Functions + variable_get_hash - Implement struct name enumeration (open, parent #183, subissues 0/0) - branch-covered by `9215a09`
 - [ ] #314 Variables: Struct Variable Functions + variable_get_hash - Implement struct get set exists and remove (open, parent #183, subissues 0/0) - branch-covered by `7bd8c8c`
-- [ ] #313 Variables: Variable Functions (instance/global) - Support global keyword in instance functions (open, parent #182, subissues 0/0)
-- [ ] #312 Variables: Variable Functions (instance/global) - Return undefined for missing dynamic gets (open, parent #182, subissues 0/0)
-- [ ] #311 Variables: Variable Functions (instance/global) - Implement variable_global_exists get and set (open, parent #182, subissues 0/0)
-- [ ] #310 Variables: Variable Functions (instance/global) - Implement variable_instance name enumeration (open, parent #182, subissues 0/0)
-- [ ] #309 Variables: Variable Functions (instance/global) - Implement variable_instance_exists get and set (open, parent #182, subissues 0/0)
+- [ ] #313 Variables: Variable Functions (instance/global) - Support global keyword in instance functions (open, parent #182, subissues 0/0) - branch-covered by `bd95a3a`
+- [ ] #312 Variables: Variable Functions (instance/global) - Return undefined for missing dynamic gets (open, parent #182, subissues 0/0) - branch-covered by `d783594`, `6515eac`
+- [ ] #311 Variables: Variable Functions (instance/global) - Implement variable_global_exists get and set (open, parent #182, subissues 0/0) - branch-covered by `bdda255`
+- [ ] #310 Variables: Variable Functions (instance/global) - Implement variable_instance name enumeration (open, parent #182, subissues 0/0) - branch-covered by `bd95a3a`, `db2f8c9`
+- [ ] #309 Variables: Variable Functions (instance/global) - Implement variable_instance_exists get and set (open, parent #182, subissues 0/0) - branch-covered by `084712e`
 - [ ] #308 Variables: Built-in Variables - Support built-in array variables (open, parent #255, subissues 0/0)
 - [ ] #307 Variables: Built-in Variables - Handle mutable versus read-only built-ins (open, parent #255, subissues 0/0)
 - [ ] #306 Variables: Built-in Variables - Map built-in room and global variables (open, parent #255, subissues 0/0)

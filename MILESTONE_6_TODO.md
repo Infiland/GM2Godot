@@ -41,6 +41,7 @@ Current branch work to remember before redoing an issue:
 - `7e36986`, `ca00c03`, `cd5ad81`, `067359f`, and `836bc02` cover mixed-type operations and conformance tables for #441-#445.
 - `b44940b` rejects `return` outside function/method bodies and references #234.
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
+- `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
 
 ## Working Order
 
@@ -271,8 +272,8 @@ Current branch work to remember before redoing an issue:
 - [ ] #233 return: Return values from functions and methods (open, parent #193, subissues 0/0) - branch-covered by `97129be`, `5933e69`
 - [ ] #232 return: Parse return expression statement (open, parent #193, subissues 0/0) - branch-covered by `925d295`, `b44940b`
 - [ ] #231 with: Support break and continue as loop control (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
-- [ ] #230 with: Share enclosing local variables (open, parent #192, subissues 0/0)
-- [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0)
+- [ ] #230 with: Share enclosing local variables (open, parent #192, subissues 0/0) - branch-covered by `3d7c4d3`
+- [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0) - branch-covered by `3d7c4d3`
 - [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0) - branch-covered by `cb7a2a3`
 - [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)

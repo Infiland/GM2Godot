@@ -26,6 +26,11 @@ Current branch work to remember before redoing an issue:
 - `7a77559` parses GML hash color literals with GameMaker byte order and references #403.
 - `6927221` covers hex literals as numeric values and references #404.
 - `e898990` adds hash color parity examples and references #405.
+- `2357ae9` creates the shared GML handle registry and references #397.
+- `8bffdf3` encodes handles as typed 64-bit values and references #398.
+- `84fc8d0` supports invalid handle values and references #399.
+- `96b18cf` parses and stringifies GML handles and references #400.
+- `8aad980` accepts legacy numeric handle IDs at API boundaries and references #401.
 
 ## Working Order
 
@@ -85,11 +90,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #404 Data Types: Hexadecimal Literals - Preserve hex literal numeric type (open, parent #346, subissues 0/0) - branch-covered by `6927221`
 - [ ] #403 Data Types: Hexadecimal Literals - Parse hash color literals (open, parent #346, subissues 0/0) - branch-covered by `7a77559`
 - [ ] #402 Data Types: Hexadecimal Literals - Parse dollar and 0x hex forms (open, parent #346, subissues 0/0) - branch-covered by `6d16bb7`
-- [ ] #401 Data Types: Handles - Support legacy numeric resource IDs (open, parent #345, subissues 0/0)
-- [ ] #400 Data Types: Handles - Implement handle string conversion and parse (open, parent #345, subissues 0/0)
-- [ ] #399 Data Types: Handles - Support invalid handle values (open, parent #345, subissues 0/0)
-- [ ] #398 Data Types: Handles - Encode typed 64-bit handles (open, parent #345, subissues 0/0)
-- [ ] #397 Data Types: Handles - Create handle registry (open, parent #345, subissues 0/0)
+- [ ] #401 Data Types: Handles - Support legacy numeric resource IDs (open, parent #345, subissues 0/0) - branch-covered by `8aad980`
+- [ ] #400 Data Types: Handles - Implement handle string conversion and parse (open, parent #345, subissues 0/0) - branch-covered by `96b18cf`
+- [ ] #399 Data Types: Handles - Support invalid handle values (open, parent #345, subissues 0/0) - branch-covered by `84fc8d0`
+- [ ] #398 Data Types: Handles - Encode typed 64-bit handles (open, parent #345, subissues 0/0) - branch-covered by `8bffdf3`
+- [ ] #397 Data Types: Handles - Create handle registry (open, parent #345, subissues 0/0) - branch-covered by `2357ae9`
 - [ ] #396 Data Types: int64 - Preserve int64 division behavior (open, parent #344, subissues 0/0)
 - [ ] #395 Data Types: int64 - Implement bitwise operations returning int64 (open, parent #344, subissues 0/0)
 - [ ] #394 Data Types: int64 - Preserve int64 arithmetic results (open, parent #344, subissues 0/0)

@@ -46,6 +46,14 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("string(undefined)", "GMRuntime.gml_string(GMRuntime.gml_undefined())"),
     RuntimeValueParityCase("string(pointer_invalid)", "GMRuntime.gml_string(GMRuntime.gml_pointer_invalid())"),
     RuntimeValueParityCase("bool(undefined)", "GMRuntime.gml_bool(GMRuntime.gml_undefined())"),
+    RuntimeValueParityCase(
+        "undefined == undefined",
+        "GMRuntime.gml_eq(GMRuntime.gml_undefined(), GMRuntime.gml_undefined())",
+    ),
+    RuntimeValueParityCase(
+        "undefined != infinity",
+        "GMRuntime.gml_ne(GMRuntime.gml_undefined(), INF)",
+    ),
     RuntimeValueParityCase("bool(pointer_null)", "GMRuntime.gml_bool(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
@@ -1006,6 +1014,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_ds_map_set(map_value, key, value):", GML_RUNTIME_SCRIPT)
         self.assertIn("resolved_map[key] = value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("resolved_map.get(", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_preserves_undefined_value_model(self):
+        self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_undefined(value):\n\treturn value is GMLUndefined", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_undefined(left) or is_undefined(right):\n\t\treturn is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if resolved_map.has(key):\n\t\t\treturn resolved_map[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_variable_helpers_resolve_instances_and_invalid_ids(self):
         self.assertIn("static func gml_variable_instance_exists(instance_value, member_name):", GML_RUNTIME_SCRIPT)

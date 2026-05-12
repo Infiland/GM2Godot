@@ -39,6 +39,7 @@ Current branch work to remember before redoing an issue:
 - `47feb4a`, `3c1174e`, and `a430ae1` cover Any handling for #430-#432.
 - `dfc4987`, `5f8c969`, and `e143f3d` cover values/reference semantics for #436-#440.
 - `7e36986`, `ca00c03`, `cd5ad81`, `067359f`, and `836bc02` cover mixed-type operations and conformance tables for #441-#445.
+- `b44940b` rejects `return` outside function/method bodies and references #234.
 
 ## Working Order
 
@@ -265,7 +266,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #237 try / catch / finally: Parse valid block combinations (open, parent #195, subissues 0/0)
 - [ ] #236 begin / end: Lower to normal block scopes (open, parent #194, subissues 0/0)
 - [ ] #235 begin / end: Tokenize legacy block delimiters (open, parent #194, subissues 0/0)
-- [ ] #234 return: Reject return outside functions and methods (open, parent #193, subissues 0/0)
+- [ ] #234 return: Reject return outside functions and methods (open, parent #193, subissues 0/0) - branch-covered by `b44940b`
 - [ ] #233 return: Return values from functions and methods (open, parent #193, subissues 0/0)
 - [ ] #232 return: Parse return expression statement (open, parent #193, subissues 0/0)
 - [ ] #231 with: Support break and continue as loop control (open, parent #192, subissues 0/0)

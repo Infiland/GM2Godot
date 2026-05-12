@@ -51,6 +51,7 @@ class _ScopeContext:
     instance_target: str | None = None
     global_scope: bool = False
     global_names: frozenset[str] = frozenset()
+    asset_names: frozenset[str] = frozenset()
 
 
 _DEFAULT_SCOPE_CONTEXT = _ScopeContext()
@@ -587,11 +588,13 @@ def transpile_gml_expression(
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
     global_names: Iterable[str] | None = None,
+    asset_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile a single GML expression to a GDScript expression."""
     scope_context = _scope_context_with_global_names(
         _normalize_scope_context(scope_context),
         global_names,
+        asset_names=asset_names,
     )
     parser = _ExpressionParser(
         _expression_tokens(source),
@@ -617,11 +620,13 @@ def transpile_gml_condition(
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
     global_names: Iterable[str] | None = None,
+    asset_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile a GML condition using GameMaker truthiness semantics."""
     scope_context = _scope_context_with_global_names(
         _normalize_scope_context(scope_context),
         global_names,
+        asset_names=asset_names,
     )
     parser = _ExpressionParser(
         _expression_tokens(source),
@@ -666,6 +671,7 @@ def transpile_gml_code(
     macro_configuration: str | None = None,
     top_level_global_scope: bool = False,
     legacy_global_builtins: bool = False,
+    asset_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
@@ -675,6 +681,7 @@ def transpile_gml_code(
         macro_configuration=macro_configuration,
         top_level_global_scope=top_level_global_scope,
         global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
+        asset_names=asset_names,
     )
     lines = parser.parse()
 
@@ -912,6 +919,9 @@ class _ExpressionParser:
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
         parameter_names = [parameter.name for parameter in parameters]
+        for parameter_name in parameter_names:
+            _validate_gml_identifier(parameter_name)
+            _reject_asset_identifier_name(parameter_name, self.scope_context)
         scope_context = self.scope_context
         if is_constructor:
             scope_context = _ScopeContext(
@@ -919,6 +929,7 @@ class _ExpressionParser:
                 other_expression=self.scope_context.other_expression,
                 instance_target="_gml_constructor_self",
                 global_names=self.scope_context.global_names,
+                asset_names=self.scope_context.asset_names,
             )
         else:
             scope_context = _ScopeContext(
@@ -926,6 +937,7 @@ class _ExpressionParser:
                 other_expression=scope_context.other_expression,
                 instance_target=scope_context.instance_target,
                 global_names=scope_context.global_names,
+                asset_names=scope_context.asset_names,
             )
         body_parser = _StatementParser(
             body_tokens,
@@ -1038,6 +1050,7 @@ class _StatementParser:
         macro_configuration: str | None = None,
         top_level_global_scope: bool = False,
         global_names: Iterable[str] | None = None,
+        asset_names: Iterable[str] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -1057,6 +1070,7 @@ class _StatementParser:
             _normalize_scope_context(scope_context),
             self.global_names,
             top_level_global_scope=top_level_global_scope,
+            asset_names=asset_names,
         )
         self.inherited_event_call = inherited_event_call
         self.macro_values: MutableMapping[str, str] = (
@@ -1153,6 +1167,8 @@ class _StatementParser:
         self._consume_identifier("globalvar")
         while not self._at_end() and not self._check(";") and not self._check("\n"):
             name = self._consume_identifier_name()
+            _validate_gml_identifier(name)
+            _reject_asset_identifier_name(name, self.scope_context)
             self.global_names.add(name)
             if not self._match(","):
                 break
@@ -1254,6 +1270,7 @@ class _StatementParser:
             other_expression=outer_scope_context.self_expression,
             instance_target=with_target,
             global_names=outer_scope_context.global_names,
+            asset_names=outer_scope_context.asset_names,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -2472,15 +2489,19 @@ def _scope_context_with_global_names(
     scope_context: _ScopeContext,
     global_names: Iterable[str] | None,
     top_level_global_scope: bool | None = None,
+    asset_names: Iterable[str] | None = None,
 ) -> _ScopeContext:
     names = set(scope_context.global_names)
     names.update(global_names or [])
+    assets = set(scope_context.asset_names)
+    assets.update(asset_names or [])
     return _ScopeContext(
         self_expression=scope_context.self_expression,
         other_expression=scope_context.other_expression,
         instance_target=scope_context.instance_target,
         global_scope=scope_context.global_scope if top_level_global_scope is None else top_level_global_scope,
         global_names=frozenset(names),
+        asset_names=frozenset(assets),
     )
 
 
@@ -3365,6 +3386,8 @@ def _transpile_statement(
         )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        if isinstance(target_expr, _Name):
+            _reject_asset_identifier_name(target_expr.value, scope_context)
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3415,6 +3438,8 @@ def _transpile_statement(
             raise GMLTranspileError("Increment target must be assignable")
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        if isinstance(target_expr, _Name):
+            _reject_asset_identifier_name(target_expr.value, scope_context)
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3609,6 +3634,8 @@ def _transpile_statement(
         )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        if isinstance(target_expr, _Name):
+            _reject_asset_identifier_name(target_expr.value, scope_context)
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3977,6 +4004,7 @@ def _transpile_var_statement(
         if assignment is None:
             name = declaration.strip()
             _validate_gml_identifier(name)
+            _reject_asset_identifier_name(name, scope_context)
             _reject_constant_declaration_name(name, macro_values.keys())
             if name in enum_name_set:
                 raise GMLTranspileError("Cannot redeclare enum")
@@ -3988,6 +4016,7 @@ def _transpile_var_statement(
             raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
         _validate_gml_identifier(name)
+        _reject_asset_identifier_name(name, scope_context)
         _reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
@@ -4031,6 +4060,11 @@ def _validate_gml_identifier(name: str) -> None:
         raise GMLTranspileError("GML identifier must start with a letter or underscore")
     if not all(char.isalnum() or char == "_" for char in name):
         raise GMLTranspileError("GML identifier can only contain letters, numbers, and underscores")
+
+
+def _reject_asset_identifier_name(name: str, scope_context: _ScopeContext) -> None:
+    if name in scope_context.asset_names:
+        raise GMLTranspileError(f"Unscoped identifier '{name}' collides with an asset name")
 
 
 def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | None:
@@ -4109,6 +4143,8 @@ def _transpile_assignment_to_emitted_value(
     )
     _reject_enum_assignment_target(target_expr, enum_names)
     _reject_readonly_builtin_assignment_target(target_expr, local_names)
+    if isinstance(target_expr, _Name):
+        _reject_asset_identifier_name(target_expr.value, scope_context)
     global_target = _global_scope_assignment_parts(
         target_expr,
         local_names,

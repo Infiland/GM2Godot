@@ -71,6 +71,43 @@ class ObjectConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Objects_YYPFilterWarning"))
             return None
 
+    def _get_project_asset_names(self) -> set[str]:
+        """Return GameMaker resource names that can collide with unscoped GML identifiers."""
+        try:
+            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
+            if yyp_files:
+                yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
+                with open(yyp_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                cleaned = re.sub(r',\s*([}\]])', r'\1', content)
+                data = cast(JsonDict, json.loads(cleaned))
+
+                asset_names: set[str] = set()
+                for resource in cast(list[JsonDict], data.get('resources', [])):
+                    res_id = cast(JsonDict, resource.get('id', {}))
+                    name = res_id.get('name')
+                    if isinstance(name, str) and name:
+                        asset_names.add(name)
+                return asset_names
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            pass
+
+        asset_names = set()
+        for resource_dir in ("objects", "sprites", "sounds", "rooms", "scripts"):
+            root = os.path.join(self.gm_project_path, resource_dir)
+            if not os.path.isdir(root):
+                continue
+            try:
+                asset_names.update(
+                    name
+                    for name in os.listdir(root)
+                    if os.path.isdir(os.path.join(root, name))
+                )
+            except OSError:
+                continue
+        return asset_names
+
     def _parse_object_yy(self, object_name: str) -> ParsedObject | None:
         """Parse an object .yy file and extract the sprite reference and event list.
 
@@ -209,6 +246,7 @@ class ObjectConverter(BaseConverter):
         object_name: str,
         event_list: list[JsonDict],
         inherited_event_functions: set[str] | None = None,
+        asset_names: set[str] | None = None,
     ) -> tuple[dict[str, str], set[str]]:
         code_bodies: dict[str, str] = {}
         instance_variables: set[str] = set()
@@ -246,6 +284,7 @@ class ObjectConverter(BaseConverter):
                     source,
                     instance_variables=instance_variables,
                     inherited_event_call=inherited_event_call,
+                    asset_names=asset_names,
                 )
             except GMLTranspileError as exc:
                 self._safe_log(
@@ -280,6 +319,7 @@ class ObjectConverter(BaseConverter):
         object_name: str,
         subfolder: str = "",
         sprite_scene_paths: Mapping[str, str] | None = None,
+        asset_names: set[str] | None = None,
     ) -> ObjectProcessResult | None:
         """Process a single object: parse .yy, generate scene and script, write files.
 
@@ -321,6 +361,7 @@ class ObjectConverter(BaseConverter):
             object_name,
             event_list,
             inherited_event_functions=inherited_event_functions,
+            asset_names=asset_names,
         )
         script_content = generate_script_content(
             event_list,
@@ -380,10 +421,17 @@ class ObjectConverter(BaseConverter):
         total = len(object_names)
         processed = 0
         sprite_scene_paths = self._get_available_sprite_scene_paths()
+        asset_names = self._get_project_asset_names()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_object, name, object_subfolders.get(name, ""), sprite_scene_paths): name
+                executor.submit(
+                    self._process_object,
+                    name,
+                    object_subfolders.get(name, ""),
+                    sprite_scene_paths,
+                    asset_names,
+                ): name
                 for name in object_names
             }
             for future in as_completed(futures_map):

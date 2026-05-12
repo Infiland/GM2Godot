@@ -1993,6 +1993,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "gml_user_gml_switch_value_0 = GMRuntime.gml_add(gml_user_gml_switch_value_0, 1)",
         )
 
+    def test_rejects_unscoped_asset_name_variable_collisions(self):
+        asset_names = {"Script1"}
+
+        for source in ("var Script1 = 1;", "globalvar Script1;", "Script1 = 1;", "Script1++;"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "collides with an asset name"):
+                    transpile_gml_code(source, indent="", asset_names=asset_names)
+
+        self.assertEqual(
+            transpile_gml_code("self.Script1 = Script1;", indent="", asset_names=asset_names),
+            "self.Script1 = Script1",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

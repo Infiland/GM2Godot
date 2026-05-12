@@ -1307,6 +1307,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "if GMRuntime.gml_bool(done):\n\treturn\nscore = GMRuntime.gml_add(score, 1)",
         )
 
+    def test_transpiles_function_exit_as_early_return(self):
+        self.assertEqual(
+            transpile_gml_expression("function() { if done begin exit; end return score; }"),
+            "GMRuntime.gml_method(self, func(): "
+            "if GMRuntime.gml_bool(done):; \treturn; return score)",
+        )
+
     def test_exit_aborts_later_generated_event_code(self):
         self.assertEqual(
             transpile_gml_code("score = 1; exit; score = 2;", indent=""),

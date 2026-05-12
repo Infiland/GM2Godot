@@ -218,7 +218,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #295 Variables: Constants (enum, #macro, built-ins) - Support configuration-specific macro overrides (open, parent #180, subissues 0/0)
 - [ ] #294 Variables: Constants (enum, #macro, built-ins) - Parse macro declarations (open, parent #180, subissues 0/0)
 - [ ] #293 Variables: Constants (enum, #macro, built-ins) - Evaluate enum integer values (open, parent #180, subissues 0/0)
-- [ ] #292 Variables: Constants (enum, #macro, built-ins) - Parse enum declarations (open, parent #180, subissues 0/0)
+- [ ] #292 Variables: Constants (enum, #macro, built-ins) - Parse enum declarations (open, parent #180, subissues 0/0) - branch-covered by `91af8d3`, `a86f461`
 - [ ] #291 Variables: Static Variables (static) - Support static method variables (open, parent #179, subissues 0/0)
 - [ ] #290 Variables: Static Variables (static) - Support static variable access and static_get/static_set (open, parent #179, subissues 0/0)
 - [ ] #289 Variables: Static Variables (static) - Support constructor inheritance initialization order (open, parent #179, subissues 0/0)
@@ -229,26 +229,26 @@ Current branch work to remember before redoing an issue:
 - [ ] #284 Variables: Global Variables (global.) - Expose built-in global variables (open, parent #178, subissues 0/0)
 - [ ] #283 Variables: Global Variables (global.) - Support deprecated globalvar minimally (open, parent #178, subissues 0/0)
 - [ ] #282 Variables: Global Variables (global.) - Support top-level script global scope (open, parent #178, subissues 0/0)
-- [ ] #281 Variables: Global Variables (global.) - Preserve global lifetime (open, parent #178, subissues 0/0)
-- [ ] #280 Variables: Global Variables (global.) - Map global dot variables to a global struct (open, parent #178, subissues 0/0)
+- [ ] #281 Variables: Global Variables (global.) - Preserve global lifetime (open, parent #178, subissues 0/0) - branch-covered by `bd95a3a`, `bdda255`
+- [ ] #280 Variables: Global Variables (global.) - Map global dot variables to a global struct (open, parent #178, subissues 0/0) - branch-covered by `bd95a3a`
 - [ ] #279 Variables: Instance Variables - Preserve instance variable reads before assignment behavior (open, parent #177, subissues 0/0)
 - [ ] #278 Variables: Instance Variables - Support dynamic instance variable storage (open, parent #177, subissues 0/0)
 - [ ] #277 Variables: Instance Variables - Access built-in instance variables without declaration (open, parent #177, subissues 0/0)
 - [ ] #276 Variables: Instance Variables - Store variables per instance (open, parent #177, subissues 0/0)
-- [ ] #275 Variables: Instance Variables - Create instance variables by assignment (open, parent #177, subissues 0/0)
-- [ ] #274 Variables: Local Variables (var) - Initialize unassigned locals predictably (open, parent #176, subissues 0/0)
-- [ ] #273 Variables: Local Variables (var) - Share enclosing locals across with blocks (open, parent #176, subissues 0/0)
-- [ ] #272 Variables: Local Variables (var) - Support local shadowing of instance variables (open, parent #176, subissues 0/0)
+- [ ] #275 Variables: Instance Variables - Create instance variables by assignment (open, parent #177, subissues 0/0) - branch-covered by `024be6a`
+- [ ] #274 Variables: Local Variables (var) - Initialize unassigned locals predictably (open, parent #176, subissues 0/0) - branch-covered by `5ba48ea`
+- [ ] #273 Variables: Local Variables (var) - Share enclosing locals across with blocks (open, parent #176, subissues 0/0) - branch-covered by `3d7c4d3`
+- [ ] #272 Variables: Local Variables (var) - Support local shadowing of instance variables (open, parent #176, subissues 0/0) - branch-covered by `41fa979`, `c2031c0`
 - [ ] #271 Variables: Local Variables (var) - Preserve local lifetime (open, parent #176, subissues 0/0)
-- [ ] #270 Variables: Local Variables (var) - Parse local var declarations (open, parent #176, subissues 0/0)
+- [ ] #270 Variables: Local Variables (var) - Parse local var declarations (open, parent #176, subissues 0/0) - branch-covered by `193ae42`
 - [ ] #269 Variables: Scope Model and Identifier Resolution - Track variables created by first assignment (open, parent #175, subissues 0/0)
-- [ ] #268 Variables: Scope Model and Identifier Resolution - Sanitize identifiers for GDScript output (open, parent #175, subissues 0/0)
+- [ ] #268 Variables: Scope Model and Identifier Resolution - Sanitize identifiers for GDScript output (open, parent #175, subissues 0/0) - branch-covered by `245fc4f`
 - [ ] #267 Variables: Scope Model and Identifier Resolution - Implement dot-operator scope access (open, parent #175, subissues 0/0)
 - [ ] #266 Variables: Scope Model and Identifier Resolution - Resolve unqualified identifiers by GML precedence (open, parent #175, subissues 0/0)
 - [ ] #265 Variables: Scope Model and Identifier Resolution - Build scope stack for events functions and structs (open, parent #175, subissues 0/0)
 - [ ] #264 Variables: Assignment and Naming Rules - Reject reserved and asset-name collisions when unscoped (open, parent #254, subissues 0/0)
 - [ ] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0)
-- [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0)
+- [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0) - branch-covered by `351b367`
 - [ ] #261 Variables: Assignment and Naming Rules - Support prefix and postfix increment/decrement statements (open, parent #254, subissues 0/0)
 - [ ] #260 Variables: Assignment and Naming Rules - Lower compound assignments exactly once (open, parent #254, subissues 0/0)
 - [ ] #259 Variables: Assignment and Naming Rules - Parse assignment operator forms (open, parent #254, subissues 0/0)

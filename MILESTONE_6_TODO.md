@@ -202,11 +202,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #311 Variables: Variable Functions (instance/global) - Implement variable_global_exists get and set (open, parent #182, subissues 0/0) - branch-covered by `bdda255`
 - [ ] #310 Variables: Variable Functions (instance/global) - Implement variable_instance name enumeration (open, parent #182, subissues 0/0) - branch-covered by `bd95a3a`, `db2f8c9`
 - [ ] #309 Variables: Variable Functions (instance/global) - Implement variable_instance_exists get and set (open, parent #182, subissues 0/0) - branch-covered by `084712e`
-- [ ] #308 Variables: Built-in Variables - Support built-in array variables (open, parent #255, subissues 0/0)
-- [ ] #307 Variables: Built-in Variables - Handle mutable versus read-only built-ins (open, parent #255, subissues 0/0)
-- [ ] #306 Variables: Built-in Variables - Map built-in room and global variables (open, parent #255, subissues 0/0)
+- [ ] #308 Variables: Built-in Variables - Support built-in array variables (open, parent #255, subissues 0/0) - branch-covered by `3a20cce`, `04c64dc`
+- [ ] #307 Variables: Built-in Variables - Handle mutable versus read-only built-ins (open, parent #255, subissues 0/0) - branch-covered by `a0f7596`, `04c64dc`
+- [ ] #306 Variables: Built-in Variables - Map built-in room and global variables (open, parent #255, subissues 0/0) - branch-covered by `d3486f9`, `04c64dc`
 - [x] #305 Variables: Built-in Variables - Map built-in instance variables to object runtime state (closed, parent #255, subissues 0/0)
-- [ ] #304 Variables: Built-in Variables - Build a built-in variable registry (open, parent #255, subissues 0/0)
+- [ ] #304 Variables: Built-in Variables - Build a built-in variable registry (open, parent #255, subissues 0/0) - branch-covered by `04c64dc`
 - [ ] #303 Variables: with() Scope Switching + Instance Keywords - Support break and continue in with (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #302 Variables: with() Scope Switching + Instance Keywords - Preserve locals and caller scope inside with (open, parent #181, subissues 0/0) - branch-covered by `3d7c4d3`
 - [ ] #301 Variables: with() Scope Switching + Instance Keywords - Lower with target execution counts (open, parent #181, subissues 0/0) - branch-covered by `9ed26ee`

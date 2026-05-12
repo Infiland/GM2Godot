@@ -43,6 +43,7 @@ Current branch work to remember before redoing an issue:
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
 - `1104758` preserves inherited event boundaries when parent events exit and references #226.
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229, #230, and #302.
+- `7094450`, `ecb0bbb`, `387fb30`, `6fabdb8`, `7148790`, `ed5aeff`, and `2856a99` cover data type helper predicates, conversions, refs, handle parsing, and consistency for #331-#336.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 - `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
 - `7962ae1` parses and lowers `try`/`catch`/`finally`, exposes catch exception structs, propagates uncaught GML exceptions, runs finally blocks, and rejects illegal finally control flow for #237-#241 and #244.
@@ -170,12 +171,12 @@ Current branch work to remember before redoing an issue:
 - [x] #339 Data Types: Boolean (closed, parent #129, subissues 4/4)
 - [x] #338 Data Types: Real Numbers (closed, parent #129, subissues 5/5)
 - [x] #337 Data Types: Runtime Value Model (closed, parent #129, subissues 4/4)
-- [ ] #336 Variables: Data Type Functions - Preserve typeof and is_* consistency (open, parent #258, subissues 0/0)
-- [ ] #335 Variables: Data Type Functions - Implement ref_create and handle_parse (open, parent #258, subissues 0/0)
-- [ ] #334 Variables: Data Type Functions - Implement bool real int64 and ptr conversions (open, parent #258, subissues 0/0)
-- [ ] #333 Variables: Data Type Functions - Implement undefined pointer and handle predicates (open, parent #258, subissues 0/0)
-- [ ] #332 Variables: Data Type Functions - Implement numeric width and special value predicates (open, parent #258, subissues 0/0)
-- [ ] #331 Variables: Data Type Functions - Implement primitive type predicates (open, parent #258, subissues 0/0)
+- [ ] #336 Variables: Data Type Functions - Preserve typeof and is_* consistency (open, parent #258, subissues 0/0) - branch-covered by `2856a99`, `185992e`, `efd36a4`
+- [ ] #335 Variables: Data Type Functions - Implement ref_create and handle_parse (open, parent #258, subissues 0/0) - branch-covered by `ed5aeff`, `96b18cf`
+- [ ] #334 Variables: Data Type Functions - Implement bool real int64 and ptr conversions (open, parent #258, subissues 0/0) - branch-covered by `f6766b8`, `7148790`, `1baabce`, `1fce6d1`
+- [ ] #333 Variables: Data Type Functions - Implement undefined pointer and handle predicates (open, parent #258, subissues 0/0) - branch-covered by `6515eac`, `1fce6d1`, `6fabdb8`
+- [ ] #332 Variables: Data Type Functions - Implement numeric width and special value predicates (open, parent #258, subissues 0/0) - branch-covered by `ecb0bbb`, `387fb30`, `8a8c358`
+- [ ] #331 Variables: Data Type Functions - Implement primitive type predicates (open, parent #258, subissues 0/0) - branch-covered by `7094450`, `e1e1ee6`
 - [ ] #330 Variables: Method Variable Functions - Preserve optional argument defaults and undefined arguments (open, parent #257, subissues 0/0)
 - [ ] #329 Variables: Method Variable Functions - Implement method_call argument slicing (open, parent #257, subissues 0/0)
 - [ ] #328 Variables: Method Variable Functions - Implement method_get_self and method_get_index (open, parent #257, subissues 0/0)

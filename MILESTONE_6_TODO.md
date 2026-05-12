@@ -18,6 +18,8 @@ Current branch work to remember before redoing an issue:
 - `a86f461` represents enum members as runtime int64 values and references #414.
 - `8fec290` evaluates enum constant expressions at compile time and references #415.
 - `603d8b6` prevents enum reassignment/member mutation and references #416.
+- `1fce6d1` represents pointer values, constants, helpers, and equality and references #409, #410, and #411.
+- `acf5913` rejects unsupported pointer operations and references #412.
 
 ## Working Order
 
@@ -66,10 +68,10 @@ Current branch work to remember before redoing an issue:
 - [ ] #415 Data Types: Enum - Evaluate enum expressions at compile time (open, parent #349, subissues 0/0) - branch-covered by `8fec290`
 - [ ] #414 Data Types: Enum - Represent enum values as int64-like constants (open, parent #349, subissues 0/0) - branch-covered by `a86f461`
 - [ ] #413 Data Types: Enum - Parse enum type declarations (open, parent #349, subissues 0/0) - branch-covered by `91af8d3`
-- [ ] #412 Data Types: Pointer - Reject unsupported pointer operations (open, parent #348, subissues 0/0)
-- [ ] #411 Data Types: Pointer - Implement ptr and is_ptr helpers (open, parent #348, subissues 0/0)
-- [ ] #410 Data Types: Pointer - Map pointer constants (open, parent #348, subissues 0/0)
-- [ ] #409 Data Types: Pointer - Represent pointer values separately (open, parent #348, subissues 0/0)
+- [ ] #412 Data Types: Pointer - Reject unsupported pointer operations (open, parent #348, subissues 0/0) - branch-covered by `acf5913`
+- [ ] #411 Data Types: Pointer - Implement ptr and is_ptr helpers (open, parent #348, subissues 0/0) - branch-covered by `1fce6d1`
+- [ ] #410 Data Types: Pointer - Map pointer constants (open, parent #348, subissues 0/0) - branch-covered by `1fce6d1`
+- [ ] #409 Data Types: Pointer - Represent pointer values separately (open, parent #348, subissues 0/0) - branch-covered by `1fce6d1`
 - [ ] #408 Data Types: Binary Literals - Reject invalid binary digits (open, parent #347, subissues 0/0)
 - [ ] #407 Data Types: Binary Literals - Support binary literals in bitwise expressions (open, parent #347, subissues 0/0)
 - [ ] #406 Data Types: Binary Literals - Parse binary literal syntax (open, parent #347, subissues 0/0)

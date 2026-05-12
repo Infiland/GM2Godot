@@ -233,7 +233,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #280 Variables: Global Variables (global.) - Map global dot variables to a global struct (open, parent #178, subissues 0/0) - branch-covered by `bd95a3a`
 - [ ] #279 Variables: Instance Variables - Preserve instance variable reads before assignment behavior (open, parent #177, subissues 0/0)
 - [ ] #278 Variables: Instance Variables - Support dynamic instance variable storage (open, parent #177, subissues 0/0)
-- [ ] #277 Variables: Instance Variables - Access built-in instance variables without declaration (open, parent #177, subissues 0/0)
+- [ ] #277 Variables: Instance Variables - Access built-in instance variables without declaration (open, parent #177, subissues 0/0) - branch-covered by `41fa979`, `ed21cf2`, current assignment work
 - [ ] #276 Variables: Instance Variables - Store variables per instance (open, parent #177, subissues 0/0)
 - [ ] #275 Variables: Instance Variables - Create instance variables by assignment (open, parent #177, subissues 0/0) - branch-covered by `024be6a`
 - [ ] #274 Variables: Local Variables (var) - Initialize unassigned locals predictably (open, parent #176, subissues 0/0) - branch-covered by `5ba48ea`
@@ -250,8 +250,8 @@ Current branch work to remember before redoing an issue:
 - [ ] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0)
 - [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0) - branch-covered by `351b367`
 - [ ] #261 Variables: Assignment and Naming Rules - Support prefix and postfix increment/decrement statements (open, parent #254, subissues 0/0)
-- [ ] #260 Variables: Assignment and Naming Rules - Lower compound assignments exactly once (open, parent #254, subissues 0/0)
-- [ ] #259 Variables: Assignment and Naming Rules - Parse assignment operator forms (open, parent #254, subissues 0/0)
+- [ ] #260 Variables: Assignment and Naming Rules - Lower compound assignments exactly once (open, parent #254, subissues 0/0) - branch-covered by `3219ab4`, `7bd8c8c`, current assignment work
+- [ ] #259 Variables: Assignment and Naming Rules - Parse assignment operator forms (open, parent #254, subissues 0/0) - branch-covered by `193ae42`, `8f8414d`, `a7b12fc`, current assignment work
 - [ ] #258 Variables: Data Type Functions (open, parent #129, subissues 0/6)
 - [ ] #257 Variables: Method Variable Functions (open, parent #129, subissues 0/6)
 - [ ] #256 Variables: Info Functions (nameof, typeof) (open, parent #129, subissues 0/4)

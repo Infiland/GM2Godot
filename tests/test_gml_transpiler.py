@@ -1956,6 +1956,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "position.x = GMRuntime.gml_add(position.x, GMRuntime.gml_mul(position.y, 2))",
         )
         self.assertEqual(
+            transpile_gml_code("flags |= mask; flags &= keep; flags ^= toggle;", indent=""),
+            "flags = GMRuntime.gml_bit_or(flags, mask)\n"
+            "flags = GMRuntime.gml_bit_and(flags, keep)\n"
+            "flags = GMRuntime.gml_bit_xor(flags, toggle)",
+        )
+        self.assertEqual(
             transpile_gml_code("score := 10;", indent=""),
             "score = 10",
         )
@@ -1997,6 +2003,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(items, index, "
             "GMRuntime.gml_add(GMRuntime.gml_array_get(items, index), 1))",
         )
+        self.assertEqual(
+            transpile_gml_code("items[next_index()] += value;", indent=""),
+            "var _gml_array_index_0 = next_index()\n"
+            "GMRuntime.gml_array_set(items, _gml_array_index_0, "
+            "GMRuntime.gml_add(GMRuntime.gml_array_get(items, _gml_array_index_0), value))",
+        )
 
     def test_transpiles_multidimensional_array_assignments(self):
         self.assertEqual(
@@ -2027,6 +2039,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("mystruct.a++;", indent=""),
             'GMRuntime.gml_struct_set(mystruct, "a", '
             'GMRuntime.gml_add(GMRuntime.gml_struct_get(mystruct, "a"), 1))',
+        )
+        self.assertEqual(
+            transpile_gml_code("get_struct().a += 1;", indent=""),
+            'var _gml_struct_target_0 = get_struct()\n'
+            'GMRuntime.gml_struct_set(_gml_struct_target_0, "a", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(_gml_struct_target_0, "a"), 1))',
         )
 
     def test_array_assignment_aliases_preserve_reference_mutation(self):
@@ -2225,6 +2243,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "sprite_index = s_enemy\n"
             "image_index = 2\n"
             "image_index = GMRuntime.gml_add(image_index, 1)",
+        )
+        self.assertEqual(instance_variables, set())
+
+    def test_path_builtins_are_predeclared_instance_state(self):
+        instance_variables: set[str] = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                "path_index = path_main; path_scale *= 2; path_speed = speed;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "path_index = path_main\n"
+            "path_scale = GMRuntime.gml_mul(path_scale, 2)\n"
+            "path_speed = speed",
         )
         self.assertEqual(instance_variables, set())
 

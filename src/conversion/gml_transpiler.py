@@ -306,6 +306,20 @@ _GML_LITERAL_IDENTIFIERS = frozenset({
     "super",
     "true",
 })
+_GML_BUILTIN_CONSTANT_IDENTIFIERS = frozenset({
+    "NaN",
+    "all",
+    "false",
+    "infinity",
+    "nan",
+    "noone",
+    "null",
+    "pi",
+    "pointer_invalid",
+    "pointer_null",
+    "true",
+    "undefined",
+})
 _DIRECT_MEMBER_TARGETS = frozenset({
     "global",
     "other",
@@ -387,6 +401,7 @@ _NAME_REPLACEMENTS = {
     "NaN": "NAN",
     "nan": "NAN",
     "noone": "GMRuntime.gml_instance_noone()",
+    "pi": "PI",
     "pointer_invalid": "GMRuntime.gml_pointer_invalid()",
     "pointer_null": "GMRuntime.gml_pointer_null()",
     "undefined": "GMRuntime.gml_undefined()",
@@ -556,6 +571,7 @@ def transpile_gml_expression(
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> str:
     """Transpile a single GML expression to a GDScript expression."""
     parser = _ExpressionParser(
@@ -563,6 +579,7 @@ def transpile_gml_expression(
         enum_values=enum_values,
         enum_names=enum_names,
         scope_context=scope_context,
+        macro_values=macro_values,
     )
     expr = parser.parse()
     _reject_enum_mutation_expression(expr, enum_names)
@@ -579,6 +596,7 @@ def transpile_gml_condition(
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> str:
     """Transpile a GML condition using GameMaker truthiness semantics."""
     parser = _ExpressionParser(
@@ -586,6 +604,7 @@ def transpile_gml_condition(
         enum_values=enum_values,
         enum_names=enum_names,
         scope_context=scope_context,
+        macro_values=macro_values,
     )
     expr = parser.parse()
     _reject_enum_mutation_expression(expr, enum_names)
@@ -600,11 +619,17 @@ def _parse_gml_expression(
     source: str,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    macro_expansion_stack: frozenset[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> _Expression:
     parser = _ExpressionParser(
         _expression_tokens(source),
         enum_values=enum_values,
         enum_names=enum_names,
+        scope_context=scope_context,
+        macro_values=macro_values,
+        macro_expansion_stack=macro_expansion_stack,
     )
     return parser.parse()
 
@@ -614,12 +639,14 @@ def transpile_gml_code(
     indent: str = "\t",
     instance_variables: MutableSet[str] | None = None,
     inherited_event_call: str | None = None,
+    macro_configuration: str | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
-        _tokenize(_strip_comments(source)),
+        _tokenize(_join_macro_continuation_lines(_strip_comments(source))),
         instance_variables=instance_variables,
         inherited_event_call=inherited_event_call,
+        macro_configuration=macro_configuration,
     )
     lines = parser.parse()
 
@@ -636,6 +663,8 @@ class _ExpressionParser:
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
         scope_context: _ScopeContext | None = None,
+        macro_values: Mapping[str, str] | None = None,
+        macro_expansion_stack: frozenset[str] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -644,6 +673,8 @@ class _ExpressionParser:
         )
         self.enum_names: set[str] = set(enum_names or [])
         self.scope_context = _normalize_scope_context(scope_context)
+        self.macro_values: MutableMapping[str, str] = dict(macro_values or {})
+        self.macro_expansion_stack = macro_expansion_stack or frozenset()
 
     def parse(self) -> _Expression:
         expr = self._parse_expression()
@@ -742,6 +773,9 @@ class _ExpressionParser:
         if token.kind == "IDENT" and token.value == "function":
             return self._parse_function_literal()
         if token.kind == "IDENT":
+            macro_expr = self._parse_macro_expansion(token.value)
+            if macro_expr is not None:
+                return macro_expr
             return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
         if token.value == "[":
             elements: list[_Expression] = []
@@ -775,6 +809,21 @@ class _ExpressionParser:
             self._consume(")")
             return _Grouped(expr)
         raise GMLTranspileError(f"Expected expression, got: {token.value}")
+
+    def _parse_macro_expansion(self, name: str) -> _Expression | None:
+        macro_source = self.macro_values.get(name)
+        if macro_source is None:
+            return None
+        if name in self.macro_expansion_stack:
+            raise GMLTranspileError(f"Recursive macro expansion for {name}")
+        return _parse_gml_expression(
+            macro_source,
+            self.enum_values,
+            self.enum_names,
+            self.macro_values,
+            self.macro_expansion_stack | {name},
+            scope_context=self.scope_context,
+        )
 
     def _parse_new_expression(self) -> _Expression:
         constructor = self._parse_primary()
@@ -849,6 +898,7 @@ class _ExpressionParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=scope_context,
+            macro_values=self.macro_values,
         )
         body_lines = body_parser.parse()
         return _FunctionLiteral(
@@ -946,6 +996,9 @@ class _StatementParser:
         enum_names: Iterable[str] | None = None,
         scope_context: _ScopeContext | None = None,
         inherited_event_call: str | None = None,
+        macro_values: MutableMapping[str, str] | None = None,
+        macro_priorities: MutableMapping[str, int] | None = None,
+        macro_configuration: str | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -962,6 +1015,13 @@ class _StatementParser:
         self.enum_names: set[str] = set(enum_names or [])
         self.scope_context = _normalize_scope_context(scope_context)
         self.inherited_event_call = inherited_event_call
+        self.macro_values: MutableMapping[str, str] = (
+            macro_values if macro_values is not None else {}
+        )
+        self.macro_priorities: MutableMapping[str, int] = (
+            macro_priorities if macro_priorities is not None else {}
+        )
+        self.macro_configuration = macro_configuration
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -972,6 +1032,8 @@ class _StatementParser:
         return lines
 
     def _parse_statement(self) -> list[str]:
+        if self._check_directive("#macro"):
+            return self._parse_macro_statement()
         if self._check_identifier("enum"):
             return self._parse_enum_statement()
         if self._check_identifier("if"):
@@ -1011,7 +1073,34 @@ class _StatementParser:
             enum_names=self.enum_names,
             scope_context=self.scope_context,
             inherited_event_call=self.inherited_event_call,
+            macro_values=self.macro_values,
         )
+
+    def _parse_macro_statement(self) -> list[str]:
+        self._consume_directive("#macro")
+        configuration_or_name = self._consume_identifier_name()
+        configuration: str | None = None
+        name = configuration_or_name
+        if self._match(":"):
+            configuration = configuration_or_name
+            name = self._consume_identifier_name()
+
+        value_tokens = self._read_macro_value_tokens()
+        value_source = _tokens_to_source(value_tokens)
+        if not value_source:
+            raise GMLTranspileError("Expected macro value")
+
+        priority = 0
+        if configuration is not None:
+            if not _macro_configuration_matches(configuration, self.macro_configuration):
+                return []
+            priority = 1
+
+        current_priority = self.macro_priorities.get(name, -1)
+        if priority >= current_priority:
+            self.macro_values[name] = value_source
+            self.macro_priorities[name] = priority
+        return []
 
     def _parse_enum_statement(self) -> list[str]:
         self._consume_identifier("enum")
@@ -1033,6 +1122,7 @@ class _StatementParser:
                     value_tokens,
                     self.enum_values,
                     current_enum_values,
+                    self.macro_values,
                 )
                 next_integer_value = enum_value + 1
             else:
@@ -1062,6 +1152,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         body_lines = self._parse_body()
         lines = [f"if {condition}:"]
@@ -1092,6 +1183,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         with_target = self._next_generated_name("_gml_with_target")
         outer_scope_context = self.scope_context
@@ -1130,6 +1222,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -1154,6 +1247,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -1194,6 +1288,7 @@ class _StatementParser:
                     enum_names=self.enum_names,
                     scope_context=self.scope_context,
                     inherited_event_call=self.inherited_event_call,
+                    macro_values=self.macro_values,
                 )
             )
 
@@ -1204,6 +1299,7 @@ class _StatementParser:
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
                 scope_context=self.scope_context,
+                macro_values=self.macro_values,
             )
             if condition_source
             else "true"
@@ -1221,6 +1317,7 @@ class _StatementParser:
                 enum_names=self.enum_names,
                 scope_context=self.scope_context,
                 inherited_event_call=self.inherited_event_call,
+                macro_values=self.macro_values,
             )
             if operation
             else []
@@ -1264,6 +1361,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         body_lines = _insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
@@ -1287,6 +1385,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            macro_values=self.macro_values,
         )
         sections = self._parse_switch_sections()
         case_values = [
@@ -1338,6 +1437,7 @@ class _StatementParser:
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
                     scope_context=self.scope_context,
+                    macro_values=self.macro_values,
                 )
                 body_tokens = self._read_switch_section_body_tokens()
                 sections.append(("case", label, self._parse_switch_section_body(body_tokens)))
@@ -1366,6 +1466,9 @@ class _StatementParser:
             enum_names=self.enum_names,
             scope_context=self.scope_context,
             inherited_event_call=self.inherited_event_call,
+            macro_values=self.macro_values,
+            macro_priorities=self.macro_priorities,
+            macro_configuration=self.macro_configuration,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
@@ -1494,6 +1597,7 @@ class _StatementParser:
             enum_names=self.enum_names,
             scope_context=self.scope_context,
             inherited_event_call=self.inherited_event_call,
+            macro_values=self.macro_values,
         )
 
     def _parse_body(self) -> list[str]:
@@ -1558,6 +1662,13 @@ class _StatementParser:
             raise GMLTranspileError("Expected enum value")
         return tokens
 
+    def _read_macro_value_tokens(self) -> list[_Token]:
+        tokens: list[_Token] = []
+        while not self._at_end() and not self._check("\n"):
+            tokens.append(self._advance())
+        self._match("\n")
+        return tokens
+
     def _skip_newlines(self) -> None:
         while self._match("\n"):
             pass
@@ -1617,6 +1728,11 @@ class _StatementParser:
         if not self._match_identifier(value):
             raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
 
+    def _consume_directive(self, value: str) -> None:
+        if not self._check_directive(value):
+            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+        self.position += 1
+
     def _consume_identifier_name(self) -> str:
         token = self._advance()
         if token.kind != "IDENT":
@@ -1632,6 +1748,10 @@ class _StatementParser:
     def _check_identifier(self, value: str) -> bool:
         token = self._peek()
         return token.kind == "IDENT" and token.value == value
+
+    def _check_directive(self, value: str) -> bool:
+        token = self._peek()
+        return token.kind == "DIRECTIVE" and token.value == value
 
     def _advance(self) -> _Token:
         token = self._peek()
@@ -1693,6 +1813,10 @@ def _tokenize(source: str) -> list[_Token]:
             continue
 
         if char == "#":
+            if _source_startswith_directive(source, index, "#macro"):
+                tokens.append(_Token("DIRECTIVE", "#macro"))
+                index += len("#macro")
+                continue
             color_literal, color_end = _read_hash_color_literal(source, index)
             tokens.append(_Token("NUMBER", color_literal))
             index = color_end
@@ -1731,6 +1855,16 @@ def _tokenize(source: str) -> list[_Token]:
 
     tokens.append(_EOF)
     return tokens
+
+
+def _source_startswith_directive(source: str, index: int, directive: str) -> bool:
+    if not source.startswith(directive, index):
+        return False
+    end = index + len(directive)
+    if end >= len(source):
+        return True
+    next_char = source[end]
+    return not (next_char.isalnum() or next_char == "_")
 
 
 def _expression_tokens(source: str) -> list[_Token]:
@@ -1901,10 +2035,11 @@ def _evaluate_enum_value_tokens(
     tokens: Iterable[_Token],
     enum_values: Mapping[str, Mapping[str, int]],
     current_enum_values: Mapping[str, int],
+    macro_values: Mapping[str, str] | None = None,
 ) -> int:
     source = _tokens_to_source(tokens)
     value = _evaluate_enum_expression(
-        _parse_gml_expression(source),
+        _parse_gml_expression(source, macro_values=macro_values),
         enum_values,
         current_enum_values,
     )
@@ -1923,6 +2058,10 @@ def _evaluate_enum_expression(
     if isinstance(expr, _Grouped):
         return _evaluate_enum_expression(expr.expr, enum_values, current_enum_values)
     if isinstance(expr, _Name):
+        if expr.value == "true":
+            return 1
+        if expr.value == "false":
+            return 0
         return current_enum_values.get(expr.value)
     if isinstance(expr, _Member) and isinstance(expr.target, _Name):
         enum_members = enum_values.get(expr.target.value)
@@ -1946,6 +2085,14 @@ def _evaluate_enum_expression(
         if left is None or right is None:
             return None
         return _evaluate_enum_binary(expr.operator, left, right)
+    if isinstance(expr, _Call) and isinstance(expr.callee, _Name):
+        args: list[int] = []
+        for arg in expr.args:
+            arg_value = _evaluate_enum_expression(arg, enum_values, current_enum_values)
+            if arg_value is None:
+                return None
+            args.append(arg_value)
+        return _evaluate_enum_call(expr.callee.value, args)
     return None
 
 
@@ -1986,6 +2133,17 @@ def _evaluate_enum_binary(operator: str, left: int, right: int) -> int | None:
     return None
 
 
+def _evaluate_enum_call(function_name: str, args: Iterable[int]) -> int | None:
+    arg_values = list(args)
+    if function_name in ("int64", "real") and len(arg_values) == 1:
+        return int(arg_values[0])
+    if function_name == "bool" and len(arg_values) == 1:
+        return 1 if arg_values[0] else 0
+    if function_name == "abs" and len(arg_values) == 1:
+        return abs(int(arg_values[0]))
+    return None
+
+
 def _reject_enum_assignment_target(
     target_expr: _Expression,
     enum_names: Iterable[str] | None,
@@ -2013,6 +2171,36 @@ def _reject_readonly_builtin_assignment_target(
         name = unwrapped_target.value
         if name not in local_name_set and name in _READ_ONLY_BUILTIN_VARIABLES:
             raise GMLTranspileError(f"Cannot assign to read-only built-in variable {name}")
+
+
+def _reject_constant_assignment_target_name(
+    target_source: str,
+    macro_names: Iterable[str],
+) -> None:
+    target_name = _raw_identifier_target_name(target_source)
+    if target_name is None:
+        return
+    if target_name in _GML_BUILTIN_CONSTANT_IDENTIFIERS:
+        raise GMLTranspileError(f"Cannot assign to built-in constant {target_name}")
+    if target_name in macro_names:
+        raise GMLTranspileError(f"Cannot assign to macro constant {target_name}")
+
+
+def _reject_constant_declaration_name(
+    name: str,
+    macro_names: Iterable[str],
+) -> None:
+    if name in _GML_BUILTIN_CONSTANT_IDENTIFIERS:
+        raise GMLTranspileError(f"Cannot redeclare built-in constant {name}")
+    if name in macro_names:
+        raise GMLTranspileError(f"Cannot redeclare macro constant {name}")
+
+
+def _raw_identifier_target_name(target_source: str) -> str | None:
+    tokens = _expression_tokens(target_source)
+    if len(tokens) == 2 and tokens[0].kind == "IDENT" and tokens[1].kind == "EOF":
+        return tokens[0].value
+    return None
 
 
 def _reject_enum_mutation_expression(
@@ -2141,6 +2329,12 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
 
 def _normalize_scope_context(scope_context: _ScopeContext | None) -> _ScopeContext:
     return scope_context if scope_context is not None else _DEFAULT_SCOPE_CONTEXT
+
+
+def _macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
+    if active_configuration is None:
+        return False
+    return configuration.casefold() == active_configuration.casefold()
 
 
 def _emit_name(
@@ -2857,6 +3051,23 @@ def _strip_comments(source: str) -> str:
     return "".join(result)
 
 
+def _join_macro_continuation_lines(source: str) -> str:
+    lines: list[str] = []
+    pending_macro: str | None = None
+    for line in source.splitlines():
+        current = line if pending_macro is None else f"{pending_macro} {line.lstrip()}"
+        if current.lstrip().startswith("#macro") and current.rstrip().endswith("\\"):
+            pending_macro = current.rstrip()[:-1].rstrip()
+            continue
+        lines.append(current)
+        pending_macro = None
+
+    if pending_macro is not None:
+        lines.append(pending_macro)
+
+    return "\n".join(lines)
+
+
 def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnusedFunction]
     statements: list[str] = []
     start = 0
@@ -2905,6 +3116,7 @@ def _transpile_statement(
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
     inherited_event_call: str | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> list[str]:
     if not statement:
         return []
@@ -2912,6 +3124,7 @@ def _transpile_statement(
     if local_names is None:
         local_names = set()
     scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
 
     if statement == "return":
         _reject_finally_control_flow(finally_depth)
@@ -2928,6 +3141,7 @@ def _transpile_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
         return [f"return {return_value}"]
     if statement == "break":
@@ -2955,12 +3169,20 @@ def _transpile_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
         return [f"return GMRuntime.gml_throw({thrown_value})"]
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()
-        target_expr = _parse_gml_expression(target_source, enum_values, enum_names)
+        _reject_constant_assignment_target_name(target_source, macro_values.keys())
+        target_expr = _parse_gml_expression(
+            target_source,
+            enum_values,
+            enum_names,
+            macro_values=macro_values,
+            scope_context=scope_context,
+        )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if not isinstance(target_expr, _Name):
@@ -2986,13 +3208,21 @@ def _transpile_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
 
     increment = _parse_increment_statement(statement)
     if increment is not None:
         target, delta = increment
         helper = "gml_add" if delta > 0 else "gml_sub"
-        target_expr = _parse_gml_expression(target, enum_values, enum_names)
+        _reject_constant_assignment_target_name(target, macro_values.keys())
+        target_expr = _parse_gml_expression(
+            target,
+            enum_values,
+            enum_names,
+            macro_values=macro_values,
+            scope_context=scope_context,
+        )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         scoped_target = _scoped_instance_assignment_parts(
@@ -3040,7 +3270,14 @@ def _transpile_statement(
         target, operator, value = assignment
         if _split_assignment(value) is not None:
             raise GMLTranspileError("Chained assignments are not supported")
-        target_expr = _parse_gml_expression(target, enum_values, enum_names)
+        _reject_constant_assignment_target_name(target, macro_values.keys())
+        target_expr = _parse_gml_expression(
+            target,
+            enum_values,
+            enum_names,
+            macro_values=macro_values,
+            scope_context=scope_context,
+        )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         scoped_target = _scoped_instance_assignment_parts(
@@ -3054,6 +3291,7 @@ def _transpile_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
         if scoped_target is not None:
             instance_target, member_name = scoped_target
@@ -3160,6 +3398,7 @@ def _transpile_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
     ]
 
@@ -3290,12 +3529,14 @@ def _transpile_var_statement(
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if local_names is None:
         local_names = set()
     scope_context = _normalize_scope_context(scope_context)
     enum_name_set = frozenset(enum_names or [])
+    macro_values = macro_values or {}
     for declaration in _split_top_level(statement, ","):
         declaration = declaration.strip()
         if not declaration:
@@ -3304,6 +3545,7 @@ def _transpile_var_statement(
         if assignment is None:
             name = declaration.strip()
             _validate_gml_identifier(name)
+            _reject_constant_declaration_name(name, macro_values.keys())
             if name in enum_name_set:
                 raise GMLTranspileError("Cannot redeclare enum")
             lines.append(f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
@@ -3314,6 +3556,7 @@ def _transpile_var_statement(
             raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
         _validate_gml_identifier(name)
+        _reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
         initial_value = transpile_gml_expression(
@@ -3322,6 +3565,7 @@ def _transpile_var_statement(
             enum_values,
             enum_names,
             scope_context=scope_context,
+            macro_values=macro_values,
         )
         lines.append(f"var {_sanitize_gdscript_identifier(name)} = {initial_value}")
         local_names.add(name)

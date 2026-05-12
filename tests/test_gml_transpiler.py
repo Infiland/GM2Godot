@@ -308,6 +308,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_infinity_and_nan_constants(self):
         self.assertEqual(transpile_gml_expression("infinity"), "INF")
         self.assertEqual(transpile_gml_expression("NaN"), "NAN")
+        self.assertEqual(transpile_gml_expression("pi"), "PI")
 
     def test_transpiles_nan_as_numeric_runtime_value(self):
         self.assertEqual(transpile_gml_expression("nan"), "NAN")
@@ -762,6 +763,69 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'var ENUM_TEST = GMRuntime.gml_enum({"VAL": 10})\n'
             'var RAINBOW = GMRuntime.gml_enum({"RED": 5, "ORANGE": 10, "VIOLET": 350})',
         )
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro BASE 0x10\n"
+                "enum FLAGS { A = BASE, B = int64(A << 1), C = bool(false) }",
+                indent="",
+            ),
+            'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
+        )
+
+    def test_transpiles_macro_declarations_and_configuration_overrides(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro STEP 4\n"
+                "#macro DOUBLE STEP * 2\n"
+                "speed = DOUBLE + 1",
+                indent="",
+            ),
+            "speed = GMRuntime.gml_add(GMRuntime.gml_mul(4, 2), 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro TOTAL 1 + \\\n"
+                "2\n"
+                "score = TOTAL",
+                indent="",
+            ),
+            "score = GMRuntime.gml_add(1, 2)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                '#macro AD_ID "default"\n'
+                '#macro Android:AD_ID "android"\n'
+                "value = AD_ID",
+                indent="",
+                macro_configuration="Android",
+            ),
+            'value = "android"',
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                '#macro AD_ID "default"\n'
+                '#macro Android:AD_ID "android"\n'
+                "value = AD_ID",
+                indent="",
+            ),
+            'value = "default"',
+        )
+
+    def test_rejects_recursive_macros(self):
+        with self.assertRaisesRegex(GMLTranspileError, "Recursive macro"):
+            transpile_gml_code("#macro LOOP LOOP\nvalue = LOOP", indent="")
+
+    def test_rejects_writes_to_builtin_and_macro_constants(self):
+        for source in (
+            "pi = 3",
+            "NaN++",
+            "delete pointer_null",
+            "#macro LIMIT 10\nLIMIT = 11",
+            "#macro LIMIT 10\nvar LIMIT = 11",
+        ):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "constant"):
+                    transpile_gml_code(source, indent="")
 
     def test_rejects_runtime_enum_value_expressions(self):
         with self.assertRaisesRegex(GMLTranspileError, "Enum values must be integer compile-time constants"):

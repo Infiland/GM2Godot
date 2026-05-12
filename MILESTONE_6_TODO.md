@@ -43,6 +43,7 @@ Current branch work to remember before redoing an issue:
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
+- `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
 
 ## Working Order
 
@@ -258,10 +259,10 @@ Current branch work to remember before redoing an issue:
 - [ ] #248 new: Allocate structs and run constructor body (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
 - [ ] #247 new: Track constructor-qualified functions (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
 - [ ] #246 new: Parse constructor invocation syntax (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
-- [ ] #245 throw: Support arbitrary thrown values (open, parent #196, subissues 0/0)
+- [ ] #245 throw: Support arbitrary thrown values (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
 - [ ] #244 throw: Propagate to catch or unhandled handler (open, parent #196, subissues 0/0)
-- [ ] #243 throw: Raise runtime exception payloads (open, parent #196, subissues 0/0)
-- [ ] #242 throw: Parse throw expression (open, parent #196, subissues 0/0)
+- [ ] #243 throw: Raise runtime exception payloads (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
+- [ ] #242 throw: Parse throw expression (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
 - [ ] #241 try / catch / finally: Reject illegal control flow inside finally (open, parent #195, subissues 0/0)
 - [ ] #240 try / catch / finally: Always execute finally blocks (open, parent #195, subissues 0/0)
 - [ ] #239 try / catch / finally: Emulate exception control flow in Godot (open, parent #195, subissues 0/0)

@@ -22,6 +22,7 @@ _AssignmentOperator: TypeAlias = Literal[
 ]
 
 _IncrementDelta: TypeAlias = Literal[-1, 1]
+_IncrementMode: TypeAlias = Literal["prefix", "postfix"]
 
 
 class GMLTranspileError(ValueError):
@@ -3410,6 +3411,8 @@ def _transpile_statement(
             macro_values=macro_values,
             scope_context=scope_context,
         )
+        if not _is_increment_target_expression(target_expr):
+            raise GMLTranspileError("Increment target must be assignable")
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         global_target = _global_scope_assignment_parts(
@@ -3543,6 +3546,59 @@ def _transpile_statement(
         target, operator, value = assignment
         if _split_assignment(value) is not None:
             raise GMLTranspileError("Chained assignments are not supported")
+        increment_value = _parse_increment_expression(value)
+        if operator in ("=", ":=") and increment_value is not None:
+            increment_target, increment_delta, increment_mode = increment_value
+            increment_expr = _parse_gml_expression(
+                increment_target,
+                enum_values,
+                enum_names,
+                macro_values=macro_values,
+                scope_context=scope_context,
+            )
+            if not _is_increment_target_expression(increment_expr):
+                raise GMLTranspileError("Increment expression target must be assignable")
+            increment_value_text = _emit_expression(
+                increment_expr,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            prelude_lines: list[str] = []
+            assigned_value = increment_value_text
+            if increment_mode == "postfix":
+                assigned_value = _next_generated_name_from_counter(
+                    generated_counter,
+                    "_gml_increment_value",
+                )
+                prelude_lines.append(f"var {assigned_value} = {increment_value_text}")
+                local_names.add(assigned_value)
+            suffix = "++" if increment_delta > 0 else "--"
+            increment_lines = _transpile_statement(
+                f"{increment_target}{suffix}",
+                local_names,
+                instance_variables,
+                loop_depth=loop_depth,
+                continue_depth=continue_depth,
+                return_depth=return_depth,
+                finally_depth=finally_depth,
+                enum_values=enum_values,
+                enum_names=enum_names,
+                scope_context=scope_context,
+                inherited_event_call=inherited_event_call,
+                macro_values=macro_values,
+                generated_counter=generated_counter,
+            )
+            assignment_lines = _transpile_assignment_to_emitted_value(
+                target,
+                assigned_value,
+                local_names,
+                instance_variables,
+                enum_values=enum_values,
+                enum_names=enum_names,
+                scope_context=scope_context,
+                macro_values=macro_values,
+            )
+            return [*prelude_lines, *increment_lines, *assignment_lines]
         _reject_constant_assignment_target_name(target, macro_values.keys())
         target_expr = _parse_gml_expression(
             target,
@@ -3980,14 +4036,133 @@ def _validate_gml_identifier(name: str) -> None:
 def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | None:
     stripped = statement.strip()
     if stripped.endswith("++"):
-        return stripped[:-2].strip(), 1
+        target = stripped[:-2].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, 1
     if stripped.endswith("--"):
-        return stripped[:-2].strip(), -1
+        target = stripped[:-2].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, -1
     if stripped.startswith("++"):
-        return stripped[2:].strip(), 1
+        target = stripped[2:].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, 1
     if stripped.startswith("--"):
-        return stripped[2:].strip(), -1
+        target = stripped[2:].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, -1
     return None
+
+
+def _parse_increment_expression(statement: str) -> tuple[str, _IncrementDelta, _IncrementMode] | None:
+    stripped = statement.strip()
+    if stripped.endswith("++"):
+        target = stripped[:-2].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, 1, "postfix"
+    if stripped.endswith("--"):
+        target = stripped[:-2].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, -1, "postfix"
+    if stripped.startswith("++"):
+        target = stripped[2:].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, 1, "prefix"
+    if stripped.startswith("--"):
+        target = stripped[2:].strip()
+        if _split_assignment(target) is not None:
+            return None
+        return target, -1, "prefix"
+    return None
+
+
+def _is_increment_target_expression(expr: _Expression) -> bool:
+    return isinstance(expr, _Name | _Index | _Member | _StructAccess | _DSMapAccess)
+
+
+def _transpile_assignment_to_emitted_value(
+    target: str,
+    value: str,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+) -> list[str]:
+    scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
+    _reject_constant_assignment_target_name(target, macro_values.keys())
+    target_expr = _parse_gml_expression(
+        target,
+        enum_values,
+        enum_names,
+        macro_values=macro_values,
+        scope_context=scope_context,
+    )
+    _reject_enum_assignment_target(target_expr, enum_names)
+    _reject_readonly_builtin_assignment_target(target_expr, local_names)
+    global_target = _global_scope_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context,
+    )
+    if global_target is not None:
+        global_scope, member_name = global_target
+        return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
+    scoped_target = _scoped_instance_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context,
+    )
+    if scoped_target is not None:
+        instance_target, member_name = scoped_target
+        return [
+            "GMRuntime.gml_variable_instance_set("
+            f"{instance_target}, {member_name}, {value})"
+        ]
+    _record_instance_assignment(target, local_names, instance_variables)
+    if isinstance(target_expr, _Index):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(
+            target_expr.index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
+    ds_map_target = _ds_map_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if ds_map_target is not None:
+        container, key = ds_map_target
+        return [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
+    struct_target = _struct_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if struct_target is not None:
+        container, key = struct_target
+        return [f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
+    emitted_target = _emit_expression(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )[0]
+    return [f"{emitted_target} = {value}"]
 
 
 def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | None:

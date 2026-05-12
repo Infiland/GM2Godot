@@ -2134,6 +2134,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("--count;", indent=""),
             "count = GMRuntime.gml_sub(count, 1)",
         )
+        self.assertEqual(
+            transpile_gml_code("value = count++; other_value = --count;", indent=""),
+            "var _gml_increment_value_0 = count\n"
+            "count = GMRuntime.gml_add(count, 1)\n"
+            "value = _gml_increment_value_0\n"
+            "count = GMRuntime.gml_sub(count, 1)\n"
+            "other_value = count",
+        )
+        with self.assertRaisesRegex(GMLTranspileError, "Increment target must be assignable"):
+            transpile_gml_code("1++;", indent="")
 
     def test_transpiles_expression_statements(self):
         self.assertEqual(

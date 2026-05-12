@@ -22,6 +22,10 @@ Current branch work to remember before redoing an issue:
 - `acf5913` rejects unsupported pointer operations and references #412.
 - `0e6a5c4` parses GML binary literal syntax and references #406 and #407.
 - `f0117f2` rejects malformed binary literals and references #408.
+- `6d16bb7` parses dollar and `0x` hexadecimal literal forms and references #402.
+- `7a77559` parses GML hash color literals with GameMaker byte order and references #403.
+- `6927221` covers hex literals as numeric values and references #404.
+- `e898990` adds hash color parity examples and references #405.
 
 ## Working Order
 
@@ -77,10 +81,10 @@ Current branch work to remember before redoing an issue:
 - [ ] #408 Data Types: Binary Literals - Reject invalid binary digits (open, parent #347, subissues 0/0) - branch-covered by `f0117f2`
 - [ ] #407 Data Types: Binary Literals - Support binary literals in bitwise expressions (open, parent #347, subissues 0/0) - branch-covered by `0e6a5c4`, `64812ca`
 - [ ] #406 Data Types: Binary Literals - Parse binary literal syntax (open, parent #347, subissues 0/0) - branch-covered by `0e6a5c4`
-- [ ] #405 Data Types: Hexadecimal Literals - Test color literal parity (open, parent #346, subissues 0/0)
-- [ ] #404 Data Types: Hexadecimal Literals - Preserve hex literal numeric type (open, parent #346, subissues 0/0)
-- [ ] #403 Data Types: Hexadecimal Literals - Parse hash color literals (open, parent #346, subissues 0/0)
-- [ ] #402 Data Types: Hexadecimal Literals - Parse dollar and 0x hex forms (open, parent #346, subissues 0/0)
+- [ ] #405 Data Types: Hexadecimal Literals - Test color literal parity (open, parent #346, subissues 0/0) - branch-covered by `e898990`
+- [ ] #404 Data Types: Hexadecimal Literals - Preserve hex literal numeric type (open, parent #346, subissues 0/0) - branch-covered by `6927221`
+- [ ] #403 Data Types: Hexadecimal Literals - Parse hash color literals (open, parent #346, subissues 0/0) - branch-covered by `7a77559`
+- [ ] #402 Data Types: Hexadecimal Literals - Parse dollar and 0x hex forms (open, parent #346, subissues 0/0) - branch-covered by `6d16bb7`
 - [ ] #401 Data Types: Handles - Support legacy numeric resource IDs (open, parent #345, subissues 0/0)
 - [ ] #400 Data Types: Handles - Implement handle string conversion and parse (open, parent #345, subissues 0/0)
 - [ ] #399 Data Types: Handles - Support invalid handle values (open, parent #345, subissues 0/0)

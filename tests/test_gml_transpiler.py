@@ -1344,6 +1344,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 1\nreturn\nscore = 2",
         )
 
+    def test_transpiles_throw_statements(self):
+        cases = (
+            ('throw "bad";', 'return GMRuntime.gml_throw("bad")'),
+            ("throw 404;", "return GMRuntime.gml_throw(404)"),
+            (
+                "throw {message: reason, code: 404};",
+                'return GMRuntime.gml_throw(GMRuntime.gml_struct({"message": reason, "code": 404}))',
+            ),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
+        with self.assertRaisesRegex(GMLTranspileError, "throw requires an expression"):
+            transpile_gml_code("throw;", indent="")
+
     def test_transpiles_delete_variable_operator(self):
         self.assertEqual(
             transpile_gml_code("delete mystruct;", indent=""),

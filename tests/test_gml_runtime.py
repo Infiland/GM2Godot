@@ -462,6 +462,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_struct",
             "is_method",
             "is_callable",
+            "is_gml_exception",
             "is_nan_value",
             "is_infinity",
             "gml_eq",
@@ -487,6 +488,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_method",
             "gml_constructor",
             "gml_new",
+            "gml_throw",
+            "gml_exception_value",
             "gml_method_call",
             "gml_method_get_self",
             "gml_method_get_index",
@@ -790,6 +793,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("call_args.append_array(args)", GML_RUNTIME_SCRIPT)
         self.assertIn("constructor.function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
         self.assertIn("return instance", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_throw_preserves_arbitrary_payload_values(self):
+        self.assertIn("class GMLException:", GML_RUNTIME_SCRIPT)
+        self.assertIn("var value = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("func _init(exception_value = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("value = exception_value", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_gml_exception(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return value is GMLException", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_throw(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLException.new(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_exception_value(exception):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if exception is GMLException:\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

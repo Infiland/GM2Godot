@@ -96,6 +96,13 @@ class GMLMethod:
 		return function_value.callv(args)
 
 
+class GMLException:
+	var value = null
+
+	func _init(exception_value = null):
+		value = exception_value
+
+
 class GMLUndefined:
 	pass
 
@@ -213,6 +220,10 @@ static func is_method(value):
 
 static func is_callable(value):
 	return is_method(value)
+
+
+static func is_gml_exception(value):
+	return value is GMLException
 
 
 static func is_nan_value(value):
@@ -397,6 +408,16 @@ static func gml_new(constructor, args = []):
 		call_args.append(args)
 	constructor.function_value.callv(call_args)
 	return instance
+
+
+static func gml_throw(value):
+	return GMLException.new(value)
+
+
+static func gml_exception_value(exception):
+	if exception is GMLException:
+		return exception.value
+	return gml_undefined()
 
 
 static func gml_method_get_self(method):

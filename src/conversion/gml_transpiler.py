@@ -2853,6 +2853,17 @@ def _transpile_statement(
         return ["continue"]
     if statement == "exit":
         return ["return"]
+    if statement == "throw":
+        raise GMLTranspileError("throw requires an expression")
+    if statement.startswith("throw "):
+        thrown_value = transpile_gml_expression(
+            statement[6:].strip(),
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+        )
+        return [f"return GMRuntime.gml_throw({thrown_value})"]
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()

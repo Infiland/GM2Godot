@@ -1980,6 +1980,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code(f"var {'a' * 65};", indent="")
 
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_code(f"globalvar {'a' * 65};", indent="")
+
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression(f"function({'a' * 65}) {{ return 0; }}")
+
     def test_sanitizes_gdscript_reserved_local_names(self):
         self.assertEqual(
             transpile_gml_code("var match = 1; match += 1;", indent=""),

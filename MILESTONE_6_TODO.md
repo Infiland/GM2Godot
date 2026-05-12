@@ -247,7 +247,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #266 Variables: Scope Model and Identifier Resolution - Resolve unqualified identifiers by GML precedence (open, parent #175, subissues 0/0)
 - [ ] #265 Variables: Scope Model and Identifier Resolution - Build scope stack for events functions and structs (open, parent #175, subissues 0/0)
 - [x] #264 Variables: Assignment and Naming Rules - Reject reserved and asset-name collisions when unscoped (open, parent #254, subissues 0/0) - branch-covered by 8cb4c0c
-- [ ] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0)
+- [x] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0) - branch-covered by 8cb4c0c
 - [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0) - branch-covered by `351b367`
 - [x] #261 Variables: Assignment and Naming Rules - Support prefix and postfix increment/decrement statements (open, parent #254, subissues 0/0) - branch-covered by 4f67f4e
 - [ ] #260 Variables: Assignment and Naming Rules - Lower compound assignments exactly once (open, parent #254, subissues 0/0) - branch-covered by `3219ab4`, `7bd8c8c`, `8c243f4`

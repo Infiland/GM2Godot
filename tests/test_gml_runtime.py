@@ -1155,6 +1155,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_static_helpers_track_static_chain_relationships(self):
         self.assertIn("static var _gml_static_root = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_static_registry = []", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_static_named_scopes = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_static_get(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if value is GMLMethod:\n\t\treturn gml_static_get(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_method(value):\n\t\treturn _gml_static_ensure(value)", GML_RUNTIME_SCRIPT)
@@ -1170,6 +1171,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         )
         self.assertIn('return gml_unsupported_type_error("GML static_set static struct", static_struct)', GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_static_set_parent(struct_value, static_struct)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_static_scope(scope_id):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_static_bind(value, scope_id, constructor_name = \"\"):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_static_initialize(static_struct, initializers):", GML_RUNTIME_SCRIPT)
+        self.assertIn('static_struct["__gml_static_initialized"] = true', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_ensure(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_static_set_parent(static_struct, _gml_static_root, constructor_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_lookup(value):", GML_RUNTIME_SCRIPT)

@@ -285,6 +285,7 @@ class ObjectConverter(BaseConverter):
                     instance_variables=instance_variables,
                     inherited_event_call=inherited_event_call,
                     asset_names=asset_names,
+                    static_scope_prefix=f"{object_name}.{mapping.godot_func}",
                 )
             except GMLTranspileError as exc:
                 self._safe_log(

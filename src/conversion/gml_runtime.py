@@ -116,6 +116,7 @@ static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {
 	"health": 100,
@@ -888,6 +889,36 @@ static func gml_static_get(value):
 	if static_struct != null:
 		return static_struct
 	return _gml_static_root
+
+
+static func gml_static_scope(scope_id):
+	if not _gml_static_named_scopes.has(scope_id):
+		_gml_static_named_scopes[scope_id] = {}
+	return _gml_static_named_scopes[scope_id]
+
+
+static func gml_static_bind(value, scope_id, constructor_name = ""):
+	var static_struct = gml_static_scope(scope_id)
+	if value is GMLMethod:
+		_gml_static_set_parent(value.function_value, static_struct, constructor_name)
+	elif is_method(value):
+		_gml_static_set_parent(value, static_struct, constructor_name)
+	else:
+		return gml_unsupported_type_error("GML static bind", value)
+	return value
+
+
+static func gml_static_initialize(static_struct, initializers):
+	if not is_struct(static_struct):
+		return gml_unsupported_type_error("GML static initialize", static_struct)
+	if static_struct.has("__gml_static_initialized"):
+		return null
+	static_struct["__gml_static_initialized"] = true
+	for initializer in initializers:
+		var static_name = initializer[0]
+		var initializer_function = initializer[1]
+		static_struct[static_name] = initializer_function.call()
+	return null
 
 
 static func gml_static_set(struct_value, static_struct):

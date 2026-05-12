@@ -1260,6 +1260,42 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "y", _y))',
         )
 
+    def test_transpiles_function_static_variables(self):
+        output = transpile_gml_expression(
+            "function counter() { show_debug_message(n); static n = 0; n += 1; return n; }"
+        )
+
+        self.assertIn("GMRuntime.gml_static_bind(func counter():", output)
+        self.assertIn('GMRuntime.gml_static_scope("gml_static:counter:', output)
+        self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", output)
+        self.assertIn('[["n", func(): return 0]]', output)
+        self.assertIn(
+            "show_debug_message(GMRuntime.gml_struct_get(_gml_static_scope_",
+            output,
+        )
+        self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", output)
+        self.assertLess(
+            output.index("GMRuntime.gml_static_initialize"),
+            output.index("show_debug_message"),
+        )
+
+    def test_rejects_static_declarations_outside_functions(self):
+        with self.assertRaisesRegex(GMLTranspileError, "static declarations"):
+            transpile_gml_code("static n = 0;", indent="")
+
+    def test_transpiles_constructor_static_method_variables(self):
+        output = transpile_gml_expression(
+            "function Point() constructor { static make = function() { return 1; }; return make; }"
+        )
+
+        self.assertIn("GMRuntime.gml_constructor(self, GMRuntime.gml_static_bind(func Point", output)
+        self.assertIn('"Point"', output)
+        self.assertIn(
+            '["make", func(): return GMRuntime.gml_method(_gml_constructor_self, func(): return 1)]',
+            output,
+        )
+        self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", output)
+
     def test_transpiles_hashed_struct_helpers_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression('variable_get_hash("x")'),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Literal, Mapping, MutableMapping, MutableSet, TypeAlias
 
@@ -52,6 +53,9 @@ class _ScopeContext:
     global_scope: bool = False
     global_names: frozenset[str] = frozenset()
     asset_names: frozenset[str] = frozenset()
+    static_scope: str | None = None
+    static_names: frozenset[str] = frozenset()
+    static_prefix: str = "gml_static"
 
 
 _DEFAULT_SCOPE_CONTEXT = _ScopeContext()
@@ -121,11 +125,18 @@ class _FunctionParameter:
 
 
 @dataclass(frozen=True)
+class _StaticDeclaration:
+    name: str
+    value_source: str
+
+
+@dataclass(frozen=True)
 class _FunctionLiteral:
     name: str | None
     parameters: tuple[_FunctionParameter, ...]
     body_lines: tuple[str, ...]
     is_constructor: bool = False
+    static_scope_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -672,6 +683,7 @@ def transpile_gml_code(
     top_level_global_scope: bool = False,
     legacy_global_builtins: bool = False,
     asset_names: Iterable[str] | None = None,
+    static_scope_prefix: str | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
@@ -682,6 +694,7 @@ def transpile_gml_code(
         top_level_global_scope=top_level_global_scope,
         global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
         asset_names=asset_names,
+        static_scope_prefix=static_scope_prefix,
     )
     lines = parser.parse()
 
@@ -918,11 +931,22 @@ class _ExpressionParser:
         is_constructor = self._match_identifier("constructor")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
+        static_declarations = _collect_static_declarations(body_tokens)
         parameter_names = [parameter.name for parameter in parameters]
         for parameter_name in parameter_names:
             _validate_gml_identifier(parameter_name)
             _reject_asset_identifier_name(parameter_name, self.scope_context)
         scope_context = self.scope_context
+        static_scope_id = None
+        static_scope_name = None
+        static_prefix = scope_context.static_prefix
+        if static_declarations:
+            static_scope_id = _static_scope_id(static_prefix, name, self.position, body_tokens)
+            static_scope_name = (
+                f"_gml_static_scope_{hashlib.sha1(static_scope_id.encode('utf-8')).hexdigest()[:12]}"
+            )
+            static_prefix = static_scope_id
+        static_names = frozenset(declaration.name for declaration in static_declarations)
         if is_constructor:
             scope_context = _ScopeContext(
                 self_expression="_gml_constructor_self",
@@ -930,6 +954,9 @@ class _ExpressionParser:
                 instance_target="_gml_constructor_self",
                 global_names=self.scope_context.global_names,
                 asset_names=self.scope_context.asset_names,
+                static_scope=static_scope_name,
+                static_names=static_names,
+                static_prefix=static_prefix,
             )
         else:
             scope_context = _ScopeContext(
@@ -938,6 +965,9 @@ class _ExpressionParser:
                 instance_target=scope_context.instance_target,
                 global_names=scope_context.global_names,
                 asset_names=scope_context.asset_names,
+                static_scope=static_scope_name,
+                static_names=static_names,
+                static_prefix=static_prefix,
             )
         body_parser = _StatementParser(
             body_tokens,
@@ -950,11 +980,26 @@ class _ExpressionParser:
             global_names=scope_context.global_names,
         )
         body_lines = body_parser.parse()
+        if static_declarations:
+            body_lines = [
+                *_emit_static_initialization_lines(
+                    static_scope_name,
+                    static_scope_id,
+                    static_declarations,
+                    parameter_names,
+                    scope_context,
+                    self.enum_values,
+                    self.enum_names,
+                    self.macro_values,
+                ),
+                *body_lines,
+            ]
         return _FunctionLiteral(
             name,
             tuple(parameters),
             tuple(body_lines or ["pass"]),
             is_constructor,
+            static_scope_id if static_declarations else None,
         )
 
     def _current_operator(self) -> str | None:
@@ -1051,6 +1096,7 @@ class _StatementParser:
         top_level_global_scope: bool = False,
         global_names: Iterable[str] | None = None,
         asset_names: Iterable[str] | None = None,
+        static_scope_prefix: str | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -1071,6 +1117,7 @@ class _StatementParser:
             self.global_names,
             top_level_global_scope=top_level_global_scope,
             asset_names=asset_names,
+            static_prefix=static_scope_prefix,
         )
         self.inherited_event_call = inherited_event_call
         self.macro_values: MutableMapping[str, str] = (
@@ -1094,6 +1141,8 @@ class _StatementParser:
             return self._parse_macro_statement()
         if self._check_identifier("globalvar"):
             return self._parse_globalvar_statement()
+        if self._check_identifier("static"):
+            return self._parse_static_statement()
         if self._check_identifier("enum"):
             return self._parse_enum_statement()
         if self._check_identifier("if"):
@@ -1178,6 +1227,12 @@ class _StatementParser:
             self.scope_context,
             self.global_names,
         )
+        return []
+
+    def _parse_static_statement(self) -> list[str]:
+        self._read_simple_statement()
+        if self.scope_context.static_scope is None:
+            raise GMLTranspileError("static declarations are only supported inside functions")
         return []
 
     def _parse_enum_statement(self) -> list[str]:
@@ -1271,6 +1326,9 @@ class _StatementParser:
             instance_target=with_target,
             global_names=outer_scope_context.global_names,
             asset_names=outer_scope_context.asset_names,
+            static_scope=outer_scope_context.static_scope,
+            static_names=outer_scope_context.static_names,
+            static_prefix=outer_scope_context.static_prefix,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -2120,6 +2178,127 @@ def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
 
 
+def _static_scope_id(
+    prefix: str,
+    name: str | None,
+    position: int,
+    body_tokens: Iterable[_Token],
+) -> str:
+    body_source = _tokens_to_source(body_tokens)
+    digest = hashlib.sha1(body_source.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}:{name or '<anonymous>'}:{position}:{digest}"
+
+
+def _collect_static_declarations(tokens: Iterable[_Token]) -> tuple[_StaticDeclaration, ...]:
+    token_list = list(tokens)
+    declarations: list[_StaticDeclaration] = []
+    index = 0
+    while index < len(token_list):
+        token = token_list[index]
+        if token.kind == "IDENT" and token.value == "function":
+            index = _skip_function_literal_tokens(token_list, index)
+            continue
+        if token.kind == "IDENT" and token.value == "static":
+            statement_tokens, index = _read_static_declaration_tokens(token_list, index + 1)
+            declarations.extend(_parse_static_declarations(_tokens_to_source(statement_tokens)))
+            continue
+        index += 1
+    return tuple(declarations)
+
+
+def _skip_function_literal_tokens(tokens: list[_Token], index: int) -> int:
+    body_start = index + 1
+    while body_start < len(tokens) and tokens[body_start].value != "{":
+        body_start += 1
+    if body_start >= len(tokens):
+        return index + 1
+
+    depth = 1
+    current = body_start + 1
+    while current < len(tokens) and depth > 0:
+        value = tokens[current].value
+        if value == "{":
+            depth += 1
+        elif value == "}":
+            depth -= 1
+        current += 1
+    return current
+
+
+def _read_static_declaration_tokens(
+    tokens: list[_Token],
+    index: int,
+) -> tuple[list[_Token], int]:
+    statement_tokens: list[_Token] = []
+    depth = 0
+    current = index
+    while current < len(tokens):
+        token = tokens[current]
+        if depth == 0 and token.value == ";":
+            return statement_tokens, current + 1
+        if depth == 0 and token.kind == "NEWLINE":
+            return statement_tokens, current + 1
+        if token.value in "([{":
+            depth += 1
+        elif token.value in ")]}" and depth > 0:
+            depth -= 1
+        statement_tokens.append(token)
+        current += 1
+    return statement_tokens, current
+
+
+def _parse_static_declarations(source: str) -> list[_StaticDeclaration]:
+    declarations: list[_StaticDeclaration] = []
+    for declaration in _split_top_level(source, ","):
+        declaration = declaration.strip()
+        if not declaration:
+            continue
+        assignment = _split_assignment(declaration)
+        if assignment is None:
+            name = declaration
+            value_source = "undefined"
+        else:
+            name, operator, value_source = assignment
+            if operator not in ("=", ":="):
+                raise GMLTranspileError("Static declarations only support simple assignments")
+            name = name.strip()
+            value_source = value_source.strip()
+        _validate_gml_identifier(name)
+        declarations.append(_StaticDeclaration(name, value_source))
+    return declarations
+
+
+def _emit_static_initialization_lines(
+    static_scope_name: str | None,
+    static_scope_id: str | None,
+    declarations: Iterable[_StaticDeclaration],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+    enum_values: MutableMapping[str, dict[str, int]],
+    enum_names: Iterable[str],
+    macro_values: Mapping[str, str],
+) -> list[str]:
+    if static_scope_name is None or static_scope_id is None:
+        return []
+
+    initializer_names = set(local_names)
+    initializers: list[str] = []
+    for declaration in declarations:
+        value = transpile_gml_expression(
+            declaration.value_source,
+            initializer_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+        )
+        initializers.append(f"[{json.dumps(declaration.name)}, func(): return {value}]")
+    return [
+        f"var {static_scope_name} = GMRuntime.gml_static_scope({json.dumps(static_scope_id)})",
+        f"GMRuntime.gml_static_initialize({static_scope_name}, [{', '.join(initializers)}])",
+    ]
+
+
 def _evaluate_enum_value_tokens(
     tokens: Iterable[_Token],
     enum_values: Mapping[str, Mapping[str, int]],
@@ -2490,6 +2669,7 @@ def _scope_context_with_global_names(
     global_names: Iterable[str] | None,
     top_level_global_scope: bool | None = None,
     asset_names: Iterable[str] | None = None,
+    static_prefix: str | None = None,
 ) -> _ScopeContext:
     names = set(scope_context.global_names)
     names.update(global_names or [])
@@ -2502,6 +2682,9 @@ def _scope_context_with_global_names(
         global_scope=scope_context.global_scope if top_level_global_scope is None else top_level_global_scope,
         global_names=frozenset(names),
         asset_names=frozenset(assets),
+        static_scope=scope_context.static_scope,
+        static_names=scope_context.static_names,
+        static_prefix=scope_context.static_prefix if static_prefix is None else static_prefix,
     )
 
 
@@ -2523,6 +2706,15 @@ def _emit_name(
         return scope_context.other_expression, _PRIMARY_PRECEDENCE
     if not is_local and value in _GML_LITERAL_IDENTIFIERS:
         return value, _PRIMARY_PRECEDENCE
+    if (
+        not is_local
+        and scope_context.static_scope is not None
+        and value in scope_context.static_names
+    ):
+        return (
+            f"GMRuntime.gml_struct_get({scope_context.static_scope}, {json.dumps(value)})",
+            _POSTFIX_PRECEDENCE,
+        )
     if not is_local:
         if value in _BUILTIN_ARRAY_VARIABLES:
             return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
@@ -2647,6 +2839,11 @@ def _emit_expression(
         return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _FunctionLiteral):
         function_literal = _emit_function_literal(expr, local_names, scope_context=scope_context)
+        if expr.static_scope_id is not None:
+            function_literal = (
+                "GMRuntime.gml_static_bind("
+                f"{function_literal}, {json.dumps(expr.static_scope_id)}, {json.dumps(expr.name or '')})"
+            )
         if bind_function_literals:
             if expr.is_constructor:
                 return (
@@ -3388,6 +3585,10 @@ def _transpile_statement(
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             _reject_asset_identifier_name(target_expr.value, scope_context)
+        static_target = _static_scope_assignment_parts(target_expr, scope_context)
+        if static_target is not None:
+            static_scope, member_name = static_target
+            return [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, GMRuntime.gml_undefined())"]
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3440,6 +3641,14 @@ def _transpile_statement(
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             _reject_asset_identifier_name(target_expr.value, scope_context)
+        static_target = _static_scope_assignment_parts(target_expr, scope_context)
+        if static_target is not None:
+            static_scope, member_name = static_target
+            current_value = f"GMRuntime.gml_struct_get({static_scope}, {member_name})"
+            return [
+                f"GMRuntime.gml_struct_set({static_scope}, {member_name}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3636,6 +3845,7 @@ def _transpile_statement(
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             _reject_asset_identifier_name(target_expr.value, scope_context)
+        static_target = _static_scope_assignment_parts(target_expr, scope_context)
         global_target = _global_scope_assignment_parts(
             target_expr,
             local_names,
@@ -3654,6 +3864,23 @@ def _transpile_statement(
             scope_context=scope_context,
             macro_values=macro_values,
         )
+        if static_target is not None:
+            static_scope, member_name = static_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"]
+            current_value = f"GMRuntime.gml_struct_get({static_scope}, {member_name})"
+            if operator == "??=":
+                return [
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    f"\tGMRuntime.gml_struct_set({static_scope}, {member_name}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                return [
+                    f"GMRuntime.gml_struct_set({static_scope}, {member_name}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported static assignment operator")
         if global_target is not None:
             global_scope, member_name = global_target
             if operator in ("=", ":="):
@@ -3950,6 +4177,19 @@ def _scoped_instance_assignment_parts(
     return scope_context.instance_target, json.dumps(name)
 
 
+def _static_scope_assignment_parts(
+    target_expr: _Expression,
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if scope_context.static_scope is None or not isinstance(target_expr, _Name):
+        return None
+    name = target_expr.value
+    if name not in scope_context.static_names:
+        return None
+    return scope_context.static_scope, json.dumps(name)
+
+
 def _global_scope_assignment_parts(
     target_expr: _Expression,
     local_names: Iterable[str],
@@ -4145,6 +4385,10 @@ def _transpile_assignment_to_emitted_value(
     _reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
         _reject_asset_identifier_name(target_expr.value, scope_context)
+    static_target = _static_scope_assignment_parts(target_expr, scope_context)
+    if static_target is not None:
+        static_scope, member_name = static_target
+        return [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"]
     global_target = _global_scope_assignment_parts(
         target_expr,
         local_names,

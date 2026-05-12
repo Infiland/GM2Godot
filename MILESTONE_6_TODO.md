@@ -45,6 +45,7 @@ Current branch work to remember before redoing an issue:
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229, #230, and #302.
 - `7094450`, `ecb0bbb`, `387fb30`, `6fabdb8`, `7148790`, `ed5aeff`, and `2856a99` cover data type helper predicates, conversions, refs, handle parsing, and consistency for #331-#336.
 - `6995898`, `5933e69`, `46cd4cf`, `092a648`, `c115399`, and `bad72d2` cover method variable functions for #325-#330.
+- `6563aec`, `f313f77`, `185992e`, and `efd36a4` cover `nameof`/`typeof` info functions for #321-#324.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 - `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
 - `7962ae1` parses and lowers `try`/`catch`/`finally`, exposes catch exception structs, propagates uncaught GML exceptions, runs finally blocks, and rejects illegal finally control flow for #237-#241 and #244.
@@ -184,10 +185,10 @@ Current branch work to remember before redoing an issue:
 - [ ] #327 Variables: Method Variable Functions - Implement method rebinding (open, parent #257, subissues 0/0) - branch-covered by `46cd4cf`
 - [ ] #326 Variables: Method Variable Functions - Bind methods implicitly at function literal creation (open, parent #257, subissues 0/0) - branch-covered by `5933e69`
 - [ ] #325 Variables: Method Variable Functions - Represent bound method values (open, parent #257, subissues 0/0) - branch-covered by `6995898`
-- [ ] #324 Variables: Info Functions (nameof, typeof) - Distinguish methods from script references (open, parent #256, subissues 0/0)
-- [ ] #323 Variables: Info Functions (nameof, typeof) - Implement typeof return strings (open, parent #256, subissues 0/0)
-- [ ] #322 Variables: Info Functions (nameof, typeof) - Support nameof on function-call syntax (open, parent #256, subissues 0/0)
-- [ ] #321 Variables: Info Functions (nameof, typeof) - Implement nameof compile-time name extraction (open, parent #256, subissues 0/0)
+- [ ] #324 Variables: Info Functions (nameof, typeof) - Distinguish methods from script references (open, parent #256, subissues 0/0) - branch-covered by `efd36a4`
+- [ ] #323 Variables: Info Functions (nameof, typeof) - Implement typeof return strings (open, parent #256, subissues 0/0) - branch-covered by `185992e`, `2856a99`
+- [ ] #322 Variables: Info Functions (nameof, typeof) - Support nameof on function-call syntax (open, parent #256, subissues 0/0) - branch-covered by `f313f77`
+- [ ] #321 Variables: Info Functions (nameof, typeof) - Implement nameof compile-time name extraction (open, parent #256, subissues 0/0) - branch-covered by `6563aec`
 - [ ] #320 Variables: Struct Variable Functions + variable_get_hash - Implement variable_clone (open, parent #183, subissues 0/0)
 - [ ] #319 Variables: Struct Variable Functions + variable_get_hash - Implement struct_foreach (open, parent #183, subissues 0/0)
 - [ ] #318 Variables: Struct Variable Functions + variable_get_hash - Implement static struct helpers (open, parent #183, subissues 0/0)

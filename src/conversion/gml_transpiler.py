@@ -44,6 +44,16 @@ class _BuiltinVariableMetadata:
 
 
 @dataclass(frozen=True)
+class _ScopeContext:
+    self_expression: str = "self"
+    other_expression: str = "other"
+    instance_target: str | None = None
+
+
+_DEFAULT_SCOPE_CONTEXT = _ScopeContext()
+
+
+@dataclass(frozen=True)
 class _Name:
     value: str
 
@@ -537,16 +547,22 @@ def transpile_gml_expression(
     local_names: Iterable[str] | None = None,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> str:
     """Transpile a single GML expression to a GDScript expression."""
     parser = _ExpressionParser(
         _expression_tokens(source),
         enum_values=enum_values,
         enum_names=enum_names,
+        scope_context=scope_context,
     )
     expr = parser.parse()
     _reject_enum_mutation_expression(expr, enum_names)
-    return _emit_expression(expr, _normalize_local_names(local_names))[0]
+    return _emit_expression(
+        expr,
+        _normalize_local_names(local_names),
+        scope_context=scope_context,
+    )[0]
 
 
 def transpile_gml_condition(
@@ -554,16 +570,22 @@ def transpile_gml_condition(
     local_names: Iterable[str] | None = None,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> str:
     """Transpile a GML condition using GameMaker truthiness semantics."""
     parser = _ExpressionParser(
         _expression_tokens(source),
         enum_values=enum_values,
         enum_names=enum_names,
+        scope_context=scope_context,
     )
     expr = parser.parse()
     _reject_enum_mutation_expression(expr, enum_names)
-    return _emit_truthy_expression(expr, _normalize_local_names(local_names))
+    return _emit_truthy_expression(
+        expr,
+        _normalize_local_names(local_names),
+        scope_context=scope_context,
+    )
 
 
 def _parse_gml_expression(
@@ -603,6 +625,7 @@ class _ExpressionParser:
         tokens: list[_Token],
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
+        scope_context: _ScopeContext | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -610,6 +633,7 @@ class _ExpressionParser:
             enum_values if enum_values is not None else {}
         )
         self.enum_names: set[str] = set(enum_names or [])
+        self.scope_context = _normalize_scope_context(scope_context)
 
     def parse(self) -> _Expression:
         expr = self._parse_expression()
@@ -786,6 +810,7 @@ class _ExpressionParser:
             return_depth=1,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         body_lines = body_parser.parse()
         return _FunctionLiteral(name, tuple(parameters), tuple(body_lines or ["pass"]))
@@ -868,6 +893,7 @@ class _StatementParser:
         generated_counter: list[int] | None = None,
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
+        scope_context: _ScopeContext | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -881,6 +907,7 @@ class _StatementParser:
             enum_values if enum_values is not None else {}
         )
         self.enum_names: set[str] = set(enum_names or [])
+        self.scope_context = _normalize_scope_context(scope_context)
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -925,6 +952,7 @@ class _StatementParser:
             return_depth=self.return_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
 
     def _parse_enum_statement(self) -> list[str]:
@@ -975,6 +1003,7 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         body_lines = self._parse_body()
         lines = [f"if {condition}:"]
@@ -1004,8 +1033,15 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         with_target = self._next_generated_name("_gml_with_target")
+        outer_scope_context = self.scope_context
+        self.scope_context = _ScopeContext(
+            self_expression=with_target,
+            other_expression=outer_scope_context.self_expression,
+            instance_target=with_target,
+        )
         self.loop_depth += 1
         self.continue_depth += 1
         try:
@@ -1013,8 +1049,14 @@ class _StatementParser:
         finally:
             self.loop_depth -= 1
             self.continue_depth -= 1
+            self.scope_context = outer_scope_context
 
-        lines = [f"for {with_target} in GMRuntime.gml_with_targets({target}, self, other):"]
+        lines = [
+            "for "
+            f"{with_target} in "
+            f"GMRuntime.gml_with_targets({target}, "
+            f"{outer_scope_context.self_expression}, {outer_scope_context.other_expression}):"
+        ]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 
@@ -1029,6 +1071,7 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -1052,6 +1095,7 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -1089,6 +1133,7 @@ class _StatementParser:
                     return_depth=self.return_depth,
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
+                    scope_context=self.scope_context,
                 )
             )
 
@@ -1098,6 +1143,7 @@ class _StatementParser:
                 local_names=self.local_names,
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
+                scope_context=self.scope_context,
             )
             if condition_source
             else "true"
@@ -1112,6 +1158,7 @@ class _StatementParser:
                 return_depth=self.return_depth,
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
+                scope_context=self.scope_context,
             )
             if operation
             else []
@@ -1154,6 +1201,7 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         body_lines = _insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
@@ -1176,6 +1224,7 @@ class _StatementParser:
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         sections = self._parse_switch_sections()
         case_values = [
@@ -1226,6 +1275,7 @@ class _StatementParser:
                     local_names=self.local_names,
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
+                    scope_context=self.scope_context,
                 )
                 body_tokens = self._read_switch_section_body_tokens()
                 sections.append(("case", label, self._parse_switch_section_body(body_tokens)))
@@ -1251,6 +1301,7 @@ class _StatementParser:
             generated_counter=self.generated_counter,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
@@ -1311,6 +1362,7 @@ class _StatementParser:
             return_depth=self.return_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
+            scope_context=self.scope_context,
         )
 
     def _parse_body(self) -> list[str]:
@@ -1956,100 +2008,197 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
     return result
 
 
+def _normalize_scope_context(scope_context: _ScopeContext | None) -> _ScopeContext:
+    return scope_context if scope_context is not None else _DEFAULT_SCOPE_CONTEXT
+
+
+def _emit_name(
+    value: str,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> tuple[str, int]:
+    is_local = value in local_names
+    if not is_local and value == "self":
+        return scope_context.self_expression, _PRIMARY_PRECEDENCE
+    if not is_local and value == "other":
+        return scope_context.other_expression, _PRIMARY_PRECEDENCE
+    if not is_local and value in _GML_LITERAL_IDENTIFIERS:
+        return value, _PRIMARY_PRECEDENCE
+    if not is_local:
+        if value in _BUILTIN_ARRAY_VARIABLES:
+            return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
+        if value in _BUILTIN_GLOBAL_VARIABLES:
+            return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
+        if scope_context.instance_target is not None and _is_plain_identifier(value):
+            return (
+                "GMRuntime.gml_variable_instance_get("
+                f"{scope_context.instance_target}, {json.dumps(value)})"
+            ), _POSTFIX_PRECEDENCE
+        value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
+    value = _sanitize_gdscript_identifier(value)
+    return value, _PRIMARY_PRECEDENCE
+
+
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
     bind_function_literals: bool = True,
+    scope_context: _ScopeContext | None = None,
 ) -> tuple[str, int]:
     local_names = _normalize_local_names(local_names)
+    scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
         return expr.value, _PRIMARY_PRECEDENCE
     if isinstance(expr, _NameOf):
         return json.dumps(expr.value), _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
-        value = expr.value
-        is_local = value in local_names
-        if not is_local and value in _GML_LITERAL_IDENTIFIERS:
-            return value, _PRIMARY_PRECEDENCE
-        if not is_local:
-            value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
-            if value in _BUILTIN_ARRAY_VARIABLES:
-                return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
-            if value in _BUILTIN_GLOBAL_VARIABLES:
-                return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
-        value = _sanitize_gdscript_identifier(value)
-        return value, _PRIMARY_PRECEDENCE
+        return _emit_name(expr.value, local_names, scope_context)
     if isinstance(expr, _Grouped):
-        return f"({_emit_expression(expr.expr, local_names)[0]})", _PRIMARY_PRECEDENCE
+        return (
+            f"({_emit_expression(expr.expr, local_names, scope_context=scope_context)[0]})",
+            _PRIMARY_PRECEDENCE,
+        )
     if isinstance(expr, _Unary):
         if expr.operator == "!":
-            return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
+            return (
+                f"not {_emit_truthy_expression(expr.operand, local_names, scope_context=scope_context)}",
+                _UNARY_PRECEDENCE,
+            )
         if expr.operator == "not":
-            return f"not {_emit_truthy_expression(expr.operand, local_names)}", _UNARY_PRECEDENCE
+            return (
+                f"not {_emit_truthy_expression(expr.operand, local_names, scope_context=scope_context)}",
+                _UNARY_PRECEDENCE,
+            )
         if expr.operator == "~":
-            operand = _emit_expression(expr.operand, local_names)[0]
+            operand = _emit_expression(expr.operand, local_names, scope_context=scope_context)[0]
             return f"GMRuntime.gml_bit_not({operand})", _POSTFIX_PRECEDENCE
-        operand = _emit_child(expr.operand, _UNARY_PRECEDENCE, local_names=local_names)
+        operand = _emit_child(
+            expr.operand,
+            _UNARY_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
         return f"{expr.operator}{operand}", _UNARY_PRECEDENCE
     if isinstance(expr, _Binary):
-        return _emit_binary(expr, local_names)
+        return _emit_binary(expr, local_names, scope_context=scope_context)
     if isinstance(expr, _Ternary):
-        condition = _emit_truthy_expression(expr.condition, local_names)
-        true_expr = _emit_child(expr.true_expr, _TERNARY_PRECEDENCE, local_names=local_names)
-        false_expr = _emit_child(expr.false_expr, _TERNARY_PRECEDENCE, local_names=local_names)
+        condition = _emit_truthy_expression(
+            expr.condition,
+            local_names,
+            scope_context=scope_context,
+        )
+        true_expr = _emit_child(
+            expr.true_expr,
+            _TERNARY_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
+        false_expr = _emit_child(
+            expr.false_expr,
+            _TERNARY_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
         return f"{true_expr} if {condition} else {false_expr}", _TERNARY_PRECEDENCE
     if isinstance(expr, _Call):
-        builtin_call = _emit_builtin_call(expr, local_names)
+        builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
             return builtin_call, _POSTFIX_PRECEDENCE
-        callee = _emit_child(expr.callee, _POSTFIX_PRECEDENCE, local_names=local_names)
-        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        callee = _emit_child(
+            expr.callee,
+            _POSTFIX_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         return f"{callee}({args})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _ArrayLiteral):
-        elements = ", ".join(_emit_expression(element, local_names)[0] for element in expr.elements)
+        elements = ", ".join(
+            _emit_expression(element, local_names, scope_context=scope_context)[0]
+            for element in expr.elements
+        )
         return f"[{elements}]", _PRIMARY_PRECEDENCE
     if isinstance(expr, _FunctionLiteral):
-        function_literal = _emit_function_literal(expr, local_names)
+        function_literal = _emit_function_literal(expr, local_names, scope_context=scope_context)
         if bind_function_literals:
-            return f"GMRuntime.gml_method(self, {function_literal})", _POSTFIX_PRECEDENCE
+            return (
+                f"GMRuntime.gml_method({scope_context.self_expression}, {function_literal})",
+                _POSTFIX_PRECEDENCE,
+            )
         return function_literal, _PRIMARY_PRECEDENCE
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
-            _emit_struct_field(field_name, field_value, local_names)
+            _emit_struct_field(
+                field_name,
+                field_value,
+                local_names,
+                scope_context=scope_context,
+            )
             for field_name, field_value in expr.fields
         )
         return f"GMRuntime.gml_struct({{{fields}}})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
-        target = _emit_expression(expr.target, local_names)[0]
-        index = _emit_expression(expr.index, local_names)[0]
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _StructAccess):
-        target = _emit_expression(expr.target, local_names)[0]
-        key = _emit_expression(expr.key, local_names)[0]
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        key = _emit_expression(expr.key, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_struct_get({target}, {key})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _DSMapAccess):
-        target = _emit_expression(expr.target, local_names)[0]
-        key = _emit_expression(expr.key, local_names)[0]
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        key = _emit_expression(expr.key, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_ds_map_find_value({target}, {key})", _POSTFIX_PRECEDENCE
-    if _uses_direct_member_access(expr):
-        target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+    if _uses_direct_member_access(expr, scope_context=scope_context):
+        target = _emit_child(
+            expr.target,
+            _POSTFIX_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
         return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
-    target = _emit_child(expr.target, _POSTFIX_PRECEDENCE, local_names=local_names)
+    target = _emit_child(
+        expr.target,
+        _POSTFIX_PRECEDENCE,
+        local_names=local_names,
+        scope_context=scope_context,
+    )
     return f"GMRuntime.gml_struct_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
 
 
-def _uses_direct_member_access(expr: _Member) -> bool:
-    return isinstance(expr.target, _Name) and expr.target.value in _DIRECT_MEMBER_TARGETS
+def _uses_direct_member_access(
+    expr: _Member,
+    scope_context: _ScopeContext | None = None,
+) -> bool:
+    scope_context = _normalize_scope_context(scope_context)
+    if not isinstance(expr.target, _Name):
+        return False
+    if expr.target.value == "self" and scope_context.self_expression != "self":
+        return False
+    if expr.target.value == "other" and scope_context.other_expression != "other":
+        return False
+    return expr.target.value in _DIRECT_MEMBER_TARGETS
 
 
-def _emit_function_literal(expr: _FunctionLiteral, local_names: Iterable[str]) -> str:
+def _emit_function_literal(
+    expr: _FunctionLiteral,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> str:
     name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
     parameter_names = [parameter.name for parameter in expr.parameters]
     parameters = ", ".join(
         f"{_sanitize_gdscript_identifier(parameter.name)} = null"
         for parameter in expr.parameters
     )
-    default_lines = _emit_function_parameter_default_lines(expr.parameters, parameter_names)
+    default_lines = _emit_function_parameter_default_lines(
+        expr.parameters,
+        parameter_names,
+        scope_context=scope_context,
+    )
     body = "; ".join([*default_lines, *expr.body_lines])
     return f"func{name}({parameters}): {body}"
 
@@ -2058,15 +2207,22 @@ def _emit_struct_field(
     field_name: str,
     field_value: _Expression,
     local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
 ) -> str:
     bind_function_literal = not isinstance(_unwrap_grouped_expression(field_value), _FunctionLiteral)
-    field_text = _emit_expression(field_value, local_names, bind_function_literal)[0]
+    field_text = _emit_expression(
+        field_value,
+        local_names,
+        bind_function_literal,
+        scope_context=scope_context,
+    )[0]
     return f"{json.dumps(field_name)}: {field_text}"
 
 
 def _emit_function_parameter_default_lines(
     parameters: Iterable[_FunctionParameter],
     local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
 ) -> list[str]:
     default_lines: list[str] = []
     for parameter in parameters:
@@ -2074,7 +2230,11 @@ def _emit_function_parameter_default_lines(
         if parameter.default is None:
             default_lines.append(f"if {parameter_name} == null: {parameter_name} = GMRuntime.gml_undefined()")
             continue
-        default_value = _emit_expression(parameter.default, local_names)[0]
+        default_value = _emit_expression(
+            parameter.default,
+            local_names,
+            scope_context=scope_context,
+        )[0]
         default_lines.append(
             f"if {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
             f"{parameter_name} = {default_value}",
@@ -2082,7 +2242,12 @@ def _emit_function_parameter_default_lines(
     return default_lines
 
 
-def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
+def _emit_builtin_call(
+    expr: _Call,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> str | None:
+    scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr.callee, _Name) and expr.callee.value == "keyboard_check" and len(expr.args) == 1:
         key = expr.args[0]
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
@@ -2090,16 +2255,27 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
             return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
     if isinstance(expr.callee, _Name) and expr.callee.value == "method" and len(expr.args) == 2:
-        scope = _emit_expression(expr.args[0], local_names)[0]
+        scope = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
         if scope == _NAME_REPLACEMENTS["undefined"]:
-            scope = "self"
-        function_value = _emit_expression(expr.args[1], local_names)[0]
+            scope = scope_context.self_expression
+        function_value = _emit_expression(
+            expr.args[1],
+            local_names,
+            scope_context=scope_context,
+        )[0]
         return f"GMRuntime.gml_method({scope}, {function_value})"
     if isinstance(expr.callee, _Name) and expr.callee.value == "with_targets" and len(expr.args) == 1:
-        target = _emit_instance_keyword_argument(expr.args[0], local_names)
+        target = _emit_instance_keyword_argument(
+            expr.args[0],
+            local_names,
+            scope_context=scope_context,
+        )
         return f"GMRuntime.gml_with_targets({target})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
-        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
@@ -2107,40 +2283,61 @@ def _emit_builtin_call(expr: _Call, local_names: Iterable[str]) -> str | None:
         and expr.callee.value.startswith("variable_instance_")
         and expr.args
     ):
-        first_arg = _emit_instance_keyword_argument(expr.args[0], local_names)
-        remaining_args = [_emit_expression(arg, local_names)[0] for arg in expr.args[1:]]
+        first_arg = _emit_instance_keyword_argument(
+            expr.args[0],
+            local_names,
+            scope_context=scope_context,
+        )
+        remaining_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args[1:]
+        ]
         args = ", ".join([first_arg, *remaining_args])
         return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS:
-        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _DS_MAP_RUNTIME_FUNCTIONS:
-        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         return f"GMRuntime.{_DS_MAP_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _ARRAY_RUNTIME_FUNCTIONS:
-        args = ", ".join(_emit_expression(arg, local_names)[0] for arg in expr.args)
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         return f"GMRuntime.{_ARRAY_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
     if (
         isinstance(expr.callee, _Name)
         and expr.callee.value in _RUNTIME_FUNCTIONS
         and len(expr.args) == 1
     ):
-        arg = _emit_expression(expr.args[0], local_names)[0]
+        arg = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
         return f"GMRuntime.{_RUNTIME_FUNCTIONS[expr.callee.value]}({arg})"
     return None
 
 
-def _emit_instance_keyword_argument(expr: _Expression, local_names: Iterable[str]) -> str:
+def _emit_instance_keyword_argument(
+    expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> str:
+    scope_context = _normalize_scope_context(scope_context)
     legacy_keyword = _legacy_instance_keyword_value(expr)
     if legacy_keyword == -1:
-        return "self"
+        return scope_context.self_expression
     if legacy_keyword == -2:
-        return "other"
+        return scope_context.other_expression
     if legacy_keyword == -3:
         return "GMRuntime.gml_instance_all()"
     if legacy_keyword == -4:
         return "GMRuntime.gml_instance_noone()"
-    return _emit_expression(expr, local_names)[0]
+    return _emit_expression(expr, local_names, scope_context=scope_context)[0]
 
 
 def _legacy_instance_keyword_value(expr: _Expression) -> int | None:
@@ -2159,28 +2356,38 @@ def _legacy_instance_keyword_value(expr: _Expression) -> int | None:
     return None
 
 
-def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
+def _emit_binary(
+    expr: _Binary,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, int]:
+    scope_context = _normalize_scope_context(scope_context)
     operator = _OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
 
     if expr.operator in ("&&", "and", "||", "or"):
         operator = "and" if expr.operator in ("&&", "and") else "or"
-        left = _emit_truthy_expression(expr.left, local_names)
-        right = _emit_truthy_expression(expr.right, local_names)
+        left = _emit_truthy_expression(expr.left, local_names, scope_context=scope_context)
+        right = _emit_truthy_expression(expr.right, local_names, scope_context=scope_context)
         return f"{left} {operator} {right}", _BINARY_PRECEDENCE[expr.operator]
 
     if expr.operator == "^^":
-        left = _emit_truthy_expression(expr.left, local_names)
-        right = _emit_truthy_expression(expr.right, local_names)
+        left = _emit_truthy_expression(expr.left, local_names, scope_context=scope_context)
+        right = _emit_truthy_expression(expr.right, local_names, scope_context=scope_context)
         return f"{left} != {right}", _BINARY_PRECEDENCE[expr.operator]
 
     if expr.operator == "div":
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_expression(expr.right, local_names)[0]
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_int_div({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator == "??":
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_child(expr.right, _TERNARY_PRECEDENCE, local_names=local_names)
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_child(
+            expr.right,
+            _TERNARY_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
+        )
         return f"{left} if not GMRuntime.gml_is_nullish({left}) else {right}", _TERNARY_PRECEDENCE
 
     if expr.operator in ("=", "==", "!=") and (
@@ -2195,34 +2402,40 @@ def _emit_binary(expr: _Binary, local_names: Iterable[str]) -> tuple[str, int]:
         or _may_need_gml_reference_equality(expr.left)
         or _may_need_gml_reference_equality(expr.right)
     ):
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_expression(expr.right, local_names)[0]
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         helper = "gml_ne" if expr.operator == "!=" else "gml_eq"
         return f"GMRuntime.{helper}({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator == "/":
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_expression(expr.right, local_names)[0]
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_div({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator in _ARITHMETIC_RUNTIME_FUNCTIONS:
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_expression(expr.right, local_names)[0]
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.{_ARITHMETIC_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator in _BITWISE_RUNTIME_FUNCTIONS:
-        left = _emit_expression(expr.left, local_names)[0]
-        right = _emit_expression(expr.right, local_names)[0]
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.{_BITWISE_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
 
     precedence = _BINARY_PRECEDENCE[expr.operator]
-    left = _emit_child(expr.left, precedence, local_names=local_names)
+    left = _emit_child(
+        expr.left,
+        precedence,
+        local_names=local_names,
+        scope_context=scope_context,
+    )
     right = _emit_child(
         expr.right,
         precedence,
         is_right_child=True,
         parent_operator=expr.operator,
         local_names=local_names,
+        scope_context=scope_context,
     )
     return f"{left} {operator} {right}", precedence
 
@@ -2390,10 +2603,14 @@ def _may_need_gml_reference_equality(expr: _Expression) -> bool:
     return False
 
 
-def _emit_truthy_expression(expr: _Expression, local_names: Iterable[str]) -> str:
+def _emit_truthy_expression(
+    expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> str:
     if _emits_boolean_result(expr):
-        return _emit_expression(expr, local_names)[0]
-    return _gml_bool_call(_emit_expression(expr, local_names)[0])
+        return _emit_expression(expr, local_names, scope_context=scope_context)[0]
+    return _gml_bool_call(_emit_expression(expr, local_names, scope_context=scope_context)[0])
 
 
 def _emits_boolean_result(expr: _Expression) -> bool:
@@ -2420,8 +2637,9 @@ def _emit_child(
     is_right_child: bool = False,
     parent_operator: str | None = None,
     local_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> str:
-    text, precedence = _emit_expression(expr, local_names)
+    text, precedence = _emit_expression(expr, local_names, scope_context=scope_context)
     needs_parentheses = precedence < parent_precedence
     if is_right_child and precedence == parent_precedence and parent_operator not in _RIGHT_ASSOCIATIVE:
         needs_parentheses = True
@@ -2518,12 +2736,14 @@ def _transpile_statement(
     return_depth: int = 0,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> list[str]:
     if not statement:
         return []
 
     if local_names is None:
         local_names = set()
+    scope_context = _normalize_scope_context(scope_context)
 
     if statement == "return":
         if return_depth <= 0:
@@ -2532,10 +2752,14 @@ def _transpile_statement(
     if statement.startswith("return "):
         if return_depth <= 0:
             raise GMLTranspileError("return used outside a function or method")
-        return [
-            "return "
-            f"{transpile_gml_expression(statement[7:].strip(), local_names, enum_values, enum_names)}"
-        ]
+        return_value = transpile_gml_expression(
+            statement[7:].strip(),
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+        )
+        return [f"return {return_value}"]
     if statement == "break":
         if loop_depth <= 0:
             raise GMLTranspileError("break used outside a loop")
@@ -2554,11 +2778,28 @@ def _transpile_statement(
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if not isinstance(target_expr, _Name):
             raise GMLTranspileError("delete can only be used with variables")
-        target = _emit_expression(target_expr, local_names)[0]
+        scoped_target = _scoped_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if scoped_target is not None:
+            instance_target, member_name = scoped_target
+            return [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, GMRuntime.gml_undefined())"
+            ]
+        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         return [f"{target} = GMRuntime.gml_undefined()"]
 
     if statement.startswith("var "):
-        return _transpile_var_statement(statement[4:].strip(), local_names, enum_values, enum_names)
+        return _transpile_var_statement(
+            statement[4:].strip(),
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+        )
 
     increment = _parse_increment_statement(statement)
     if increment is not None:
@@ -2567,7 +2808,24 @@ def _transpile_statement(
         target_expr = _parse_gml_expression(target, enum_values, enum_names)
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
-        struct_target = _struct_assignment_parts(target_expr, local_names)
+        scoped_target = _scoped_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if scoped_target is not None:
+            instance_target, member_name = scoped_target
+            current_value = f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})"
+            return [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
+        struct_target = _struct_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
         if struct_target is not None:
             container, key = struct_target
             current_value = f"GMRuntime.gml_struct_get({container}, {key})"
@@ -2575,7 +2833,11 @@ def _transpile_statement(
                 f"GMRuntime.gml_struct_set({container}, {key}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
             ]
-        ds_map_target = _ds_map_assignment_parts(target_expr, local_names)
+        ds_map_target = _ds_map_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
         if ds_map_target is not None:
             container, key = ds_map_target
             current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
@@ -2583,7 +2845,7 @@ def _transpile_statement(
                 f"GMRuntime.gml_ds_map_set({container}, {key}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
             ]
-        target = _emit_expression(target_expr, local_names)[0]
+        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
     assignment = _split_assignment(statement)
@@ -2594,12 +2856,53 @@ def _transpile_statement(
         target_expr = _parse_gml_expression(target, enum_values, enum_names)
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        scoped_target = _scoped_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        value = transpile_gml_expression(
+            value,
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+        )
+        if scoped_target is not None:
+            instance_target, member_name = scoped_target
+            if operator in ("=", ":="):
+                return [
+                    "GMRuntime.gml_variable_instance_set("
+                    f"{instance_target}, {member_name}, {value})"
+                ]
+            current_value = f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})"
+            if operator == "??=":
+                return [
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    "\tGMRuntime.gml_variable_instance_set("
+                    f"{instance_target}, {member_name}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                return [
+                    "GMRuntime.gml_variable_instance_set("
+                    f"{instance_target}, {member_name}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported scoped instance assignment operator")
         _record_instance_assignment(target, local_names, instance_variables)
-        target = _emit_expression(target_expr, local_names)[0]
-        value = transpile_gml_expression(value, local_names, enum_values, enum_names)
+        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         if isinstance(target_expr, _Index):
-            container = _emit_expression(target_expr.target, local_names)[0]
-            index = _emit_expression(target_expr.index, local_names)[0]
+            container = _emit_expression(
+                target_expr.target,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            index = _emit_expression(
+                target_expr.index,
+                local_names,
+                scope_context=scope_context,
+            )[0]
             if operator in ("=", ":="):
                 return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
@@ -2609,7 +2912,11 @@ def _transpile_statement(
                     f"GMRuntime.gml_array_set({container}, {index}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
-        ds_map_target = _ds_map_assignment_parts(target_expr, local_names)
+        ds_map_target = _ds_map_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
         if ds_map_target is not None:
             container, key = ds_map_target
             if operator in ("=", ":="):
@@ -2628,7 +2935,11 @@ def _transpile_statement(
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
             raise GMLTranspileError("Unsupported DS map accessor assignment operator")
-        struct_target = _struct_assignment_parts(target_expr, local_names)
+        struct_target = _struct_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
         if struct_target is not None:
             container, key = struct_target
             if operator in ("=", ":="):
@@ -2655,19 +2966,44 @@ def _transpile_statement(
             return [f"{target} = {value}"]
         return [f"{target} {operator} {value}"]
 
-    return [transpile_gml_expression(statement, local_names, enum_values, enum_names)]
+    return [
+        transpile_gml_expression(
+            statement,
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+        )
+    ]
 
 
 def _struct_assignment_parts(
     target_expr: _Expression,
     local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _StructAccess):
-        container = _emit_expression(target_expr.target, local_names)[0]
-        key = _emit_expression(target_expr.key, local_names)[0]
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        key = _emit_expression(
+            target_expr.key,
+            local_names,
+            scope_context=scope_context,
+        )[0]
         return container, key
-    if isinstance(target_expr, _Member) and not _uses_direct_member_access(target_expr):
-        container = _emit_expression(target_expr.target, local_names)[0]
+    if isinstance(target_expr, _Member) and not _uses_direct_member_access(
+        target_expr,
+        scope_context=scope_context,
+    ):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
         return container, json.dumps(target_expr.member)
     return None
 
@@ -2675,12 +3011,43 @@ def _struct_assignment_parts(
 def _ds_map_assignment_parts(
     target_expr: _Expression,
     local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSMapAccess):
-        container = _emit_expression(target_expr.target, local_names)[0]
-        key = _emit_expression(target_expr.key, local_names)[0]
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        key = _emit_expression(
+            target_expr.key,
+            local_names,
+            scope_context=scope_context,
+        )[0]
         return container, key
     return None
+
+
+def _scoped_instance_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if scope_context.instance_target is None or not isinstance(target_expr, _Name):
+        return None
+
+    name = target_expr.value
+    if (
+        name in local_names
+        or name in _GML_LITERAL_IDENTIFIERS
+        or name in _BUILTIN_ARRAY_VARIABLES
+        or name in _BUILTIN_GLOBAL_VARIABLES
+        or not _is_plain_identifier(name)
+    ):
+        return None
+    return scope_context.instance_target, json.dumps(name)
 
 
 def _record_instance_assignment(
@@ -2706,10 +3073,12 @@ def _transpile_var_statement(
     local_names: MutableSet[str] | None = None,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if local_names is None:
         local_names = set()
+    scope_context = _normalize_scope_context(scope_context)
     enum_name_set = frozenset(enum_names or [])
     for declaration in _split_top_level(statement, ","):
         declaration = declaration.strip()
@@ -2731,10 +3100,14 @@ def _transpile_var_statement(
         _validate_gml_identifier(name)
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
-        lines.append(
-            f"var {_sanitize_gdscript_identifier(name)} = "
-            f"{transpile_gml_expression(value, local_names, enum_values, enum_names)}"
+        initial_value = transpile_gml_expression(
+            value,
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
         )
+        lines.append(f"var {_sanitize_gdscript_identifier(name)} = {initial_value}")
         local_names.add(name)
     return lines
 

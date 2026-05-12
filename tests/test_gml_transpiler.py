@@ -1330,19 +1330,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("with (all) begin score += 1; end", indent=""),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
-            "\tscore = GMRuntime.gml_add(score, 1)",
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "score"), 1))',
         )
         self.assertEqual(
             transpile_gml_code("with (enemy) score += 1;", indent=""),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(enemy, self, other):\n"
-            "\tscore = GMRuntime.gml_add(score, 1)",
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "score"), 1))',
         )
 
     def test_with_noone_lowers_to_zero_target_runtime_loop(self):
         self.assertEqual(
             transpile_gml_code("with (noone) score = 1;", indent=""),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone(), self, other):\n"
-            "\tscore = 1",
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", 1)',
         )
 
     def test_with_lowers_single_targets_through_runtime(self):
@@ -1350,22 +1352,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             (
                 "with (self) score = 1;",
                 "for _gml_with_target_0 in GMRuntime.gml_with_targets(self, self, other):\n"
-                "\tscore = 1",
+                '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", 1)',
             ),
             (
                 "with (other) score = 1;",
                 "for _gml_with_target_0 in GMRuntime.gml_with_targets(other, self, other):\n"
-                "\tscore = 1",
+                '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", 1)',
             ),
             (
                 "with (global) score = 1;",
                 "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_global_scope(), self, other):\n"
-                "\tscore = 1",
+                '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", 1)',
             ),
             (
                 "with ({hp: 10}) score = 1;",
                 'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_struct({"hp": 10}), self, other):\n'
-                "\tscore = 1",
+                '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", 1)',
             ),
         )
 
@@ -1380,11 +1382,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 indent="",
             ),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
-            "\tif GMRuntime.gml_bool(skip):\n"
+            '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "skip")):\n'
             "\t\tcontinue\n"
-            "\tif GMRuntime.gml_bool(done):\n"
+            '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "done")):\n'
             "\t\tbreak\n"
-            "\tscore = GMRuntime.gml_add(score, 1)",
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "score"), 1))',
+        )
+
+    def test_with_remaps_self_other_and_unqualified_instance_members(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "with (enemy) begin hp = hp + damage; other.total += hp; self.flag = true; end",
+                indent="",
+            ),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(enemy, self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"), '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "damage")))\n'
+            '\tGMRuntime.gml_struct_set(self, "total", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(self, "total"), '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp")))\n'
+            '\tGMRuntime.gml_struct_set(_gml_with_target_0, "flag", true)',
+        )
+
+    def test_with_preserves_enclosing_local_mutation(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var total = 0; with (enemy) begin total += hp; var seen = total; hp = seen; end",
+                indent="",
+            ),
+            "var total = 0\n"
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(enemy, self, other):\n"
+            '\ttotal = GMRuntime.gml_add(total, GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"))\n'
+            "\tvar seen = total\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", seen)',
         )
 
     def test_delete_clears_only_named_struct_reference(self):

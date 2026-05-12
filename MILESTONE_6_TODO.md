@@ -41,6 +41,7 @@ Current branch work to remember before redoing an issue:
 - `7e36986`, `ca00c03`, `cd5ad81`, `067359f`, and `836bc02` cover mixed-type operations and conformance tables for #441-#445.
 - `b44940b` rejects `return` outside function/method bodies and references #234.
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
+- `1104758` preserves inherited event boundaries when parent events exit and references #226.
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 - `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
@@ -279,7 +280,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #229 with: Remap self and other scope (open, parent #192, subissues 0/0) - branch-covered by `3d7c4d3`
 - [ ] #228 with: Resolve single multi and empty targets (open, parent #192, subissues 0/0) - branch-covered by `cb7a2a3`
 - [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
-- [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)
+- [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0) - branch-covered by `1104758`
 - [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0) - branch-covered by `53bda39`
 - [ ] #224 exit: Return early from functions and methods (open, parent #191, subissues 0/0) - branch-covered by `585098a`
 - [ ] #223 exit: Parse event and function abort statement (open, parent #191, subissues 0/0) - branch-covered by `de3712e`

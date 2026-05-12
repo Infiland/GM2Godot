@@ -420,6 +420,25 @@ static func gml_exception_value(exception):
 	return gml_undefined()
 
 
+static func gml_exception_struct(exception):
+	if not (exception is GMLException):
+		return gml_struct({
+			"message": gml_string(exception),
+			"longMessage": gml_string(exception),
+			"script": "",
+			"stacktrace": []
+		})
+	if is_struct(exception.value):
+		return exception.value
+	var message = gml_string(exception.value)
+	return gml_struct({
+		"message": message,
+		"longMessage": message,
+		"script": "",
+		"stacktrace": []
+	})
+
+
 static func gml_method_get_self(method):
 	if not is_method(method):
 		return gml_unsupported_type_error("GML method_get_self", method)

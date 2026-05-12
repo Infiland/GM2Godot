@@ -938,6 +938,7 @@ class _StatementParser:
         loop_depth: int = 0,
         continue_depth: int = 0,
         return_depth: int = 0,
+        finally_depth: int = 0,
         generated_counter: list[int] | None = None,
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
@@ -950,6 +951,7 @@ class _StatementParser:
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
         self.return_depth = return_depth
+        self.finally_depth = finally_depth
         self.generated_counter = generated_counter if generated_counter is not None else [0]
         self.enum_values: MutableMapping[str, dict[str, int]] = (
             enum_values if enum_values is not None else {}
@@ -982,6 +984,8 @@ class _StatementParser:
             return self._parse_for_statement()
         if self._check_identifier("switch"):
             return self._parse_switch_statement()
+        if self._check_identifier("try"):
+            return self._parse_try_statement()
 
         if self._match("{"):
             lines = self.parse(terminator="}")
@@ -998,6 +1002,7 @@ class _StatementParser:
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
             return_depth=self.return_depth,
+            finally_depth=self.finally_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
@@ -1179,6 +1184,7 @@ class _StatementParser:
                     loop_depth=self.loop_depth,
                     continue_depth=self.continue_depth,
                     return_depth=self.return_depth,
+                    finally_depth=self.finally_depth,
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
                     scope_context=self.scope_context,
@@ -1204,6 +1210,7 @@ class _StatementParser:
                 loop_depth=self.loop_depth,
                 continue_depth=self.continue_depth,
                 return_depth=self.return_depth,
+                finally_depth=self.finally_depth,
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
                 scope_context=self.scope_context,
@@ -1346,6 +1353,7 @@ class _StatementParser:
             loop_depth=self.loop_depth + 1,
             continue_depth=self.continue_depth,
             return_depth=self.return_depth,
+            finally_depth=self.finally_depth,
             generated_counter=self.generated_counter,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -1355,6 +1363,71 @@ class _StatementParser:
         self.local_names.update(parser.local_names)
         self.enum_names.update(parser.enum_names)
         return lines
+
+    def _parse_try_statement(self) -> list[str]:
+        self._consume_identifier("try")
+        exception_name = self._next_generated_name("_gml_try_exception")
+        try_lines = self._parse_body()
+
+        self._skip_newlines()
+        catch_name: str | None = None
+        catch_lines: list[str] | None = None
+        if self._match_identifier("catch"):
+            catch_name = self._parse_catch_variable_name()
+            had_catch_local = catch_name in self.local_names
+            self.local_names.add(catch_name)
+            try:
+                catch_lines = self._parse_body()
+            finally:
+                if not had_catch_local:
+                    self.local_names.discard(catch_name)
+
+        self._skip_newlines()
+        finally_lines: list[str] | None = None
+        if self._match_identifier("finally"):
+            self.finally_depth += 1
+            try:
+                finally_lines = self._parse_body()
+            finally:
+                self.finally_depth -= 1
+
+        if catch_lines is None and finally_lines is None:
+            raise GMLTranspileError("try requires catch or finally")
+
+        lines = [
+            f"var {exception_name} = (func():",
+            *_indent_lines(try_lines or ["pass"]),
+            "\treturn GMRuntime.gml_undefined()",
+            ").call()",
+        ]
+
+        if catch_lines is not None and catch_name is not None:
+            gdscript_catch_name = _sanitize_gdscript_identifier(catch_name)
+            lines.extend([
+                f"if GMRuntime.is_gml_exception({exception_name}):",
+                f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({exception_name})",
+                f"\t{exception_name} = (func():",
+                *[f"\t\t{line}" if line else "" for line in (catch_lines or ["pass"])],
+                "\t\treturn GMRuntime.gml_undefined()",
+                "\t).call()",
+            ])
+
+        if finally_lines is not None:
+            lines.extend(finally_lines or ["pass"])
+
+        lines.extend([
+            f"if GMRuntime.is_gml_exception({exception_name}):",
+            f"\treturn {exception_name}",
+        ])
+        return lines
+
+    def _parse_catch_variable_name(self) -> str:
+        catch_tokens = self._read_condition_tokens()
+        if len(catch_tokens) != 1 or catch_tokens[0].kind != "IDENT":
+            raise GMLTranspileError("catch requires a variable name")
+        catch_name = catch_tokens[0].value
+        _validate_gml_identifier(catch_name)
+        return catch_name
 
     def _read_switch_label_tokens(self) -> list[_Token]:
         tokens: list[_Token] = []
@@ -1408,6 +1481,7 @@ class _StatementParser:
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
             return_depth=self.return_depth,
+            finally_depth=self.finally_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
@@ -2817,6 +2891,7 @@ def _transpile_statement(
     loop_depth: int = 0,
     continue_depth: int = 0,
     return_depth: int = 0,
+    finally_depth: int = 0,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
@@ -2829,10 +2904,12 @@ def _transpile_statement(
     scope_context = _normalize_scope_context(scope_context)
 
     if statement == "return":
+        _reject_finally_control_flow(finally_depth)
         if return_depth <= 0:
             raise GMLTranspileError("return used outside a function or method")
         return ["return"]
     if statement.startswith("return "):
+        _reject_finally_control_flow(finally_depth)
         if return_depth <= 0:
             raise GMLTranspileError("return used outside a function or method")
         return_value = transpile_gml_expression(
@@ -2844,14 +2921,17 @@ def _transpile_statement(
         )
         return [f"return {return_value}"]
     if statement == "break":
+        _reject_finally_control_flow(finally_depth)
         if loop_depth <= 0:
             raise GMLTranspileError("break used outside a loop")
         return ["break"]
     if statement == "continue":
+        _reject_finally_control_flow(finally_depth)
         if continue_depth <= 0:
             raise GMLTranspileError("continue used outside a loop")
         return ["continue"]
     if statement == "exit":
+        _reject_finally_control_flow(finally_depth)
         return ["return"]
     if statement == "throw":
         raise GMLTranspileError("throw requires an expression")
@@ -3069,6 +3149,11 @@ def _transpile_statement(
             scope_context=scope_context,
         )
     ]
+
+
+def _reject_finally_control_flow(finally_depth: int) -> None:
+    if finally_depth > 0:
+        raise GMLTranspileError("break, continue, exit, and return are not allowed inside finally")
 
 
 def _struct_assignment_parts(

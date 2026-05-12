@@ -1360,6 +1360,72 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "throw requires an expression"):
             transpile_gml_code("throw;", indent="")
 
+    def test_transpiles_try_catch_blocks(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'try { throw "bad"; } catch (err) { message = err.message; }',
+                indent="",
+            ),
+            "var _gml_try_exception_0 = (func():\n"
+            '\treturn GMRuntime.gml_throw("bad")\n'
+            "\treturn GMRuntime.gml_undefined()\n"
+            ").call()\n"
+            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
+            "\tvar err = GMRuntime.gml_exception_struct(_gml_try_exception_0)\n"
+            "\t_gml_try_exception_0 = (func():\n"
+            '\t\tmessage = GMRuntime.gml_struct_get(err, "message")\n'
+            "\t\treturn GMRuntime.gml_undefined()\n"
+            "\t).call()\n"
+            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
+            "\treturn _gml_try_exception_0",
+        )
+
+    def test_transpiles_try_finally_blocks(self):
+        self.assertEqual(
+            transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent=""),
+            "var _gml_try_exception_0 = (func():\n"
+            "\tscore = 1\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ").call()\n"
+            "cleaned = true\n"
+            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
+            "\treturn _gml_try_exception_0",
+        )
+
+    def test_transpiles_nested_try_catch_propagation(self):
+        output = transpile_gml_code(
+            'try { try { throw "bad"; } catch (inner) { throw inner; } } '
+            "catch (outer) { message = outer.message; }",
+            indent="",
+        )
+
+        self.assertIn("var _gml_try_exception_0 = (func():", output)
+        self.assertIn("\tvar _gml_try_exception_1 = (func():", output)
+        self.assertIn("\t\treturn GMRuntime.gml_throw(\"bad\")", output)
+        self.assertIn("\t\tvar inner = GMRuntime.gml_exception_struct(_gml_try_exception_1)", output)
+        self.assertIn("\t\t\treturn GMRuntime.gml_throw(inner)", output)
+        self.assertIn("\treturn _gml_try_exception_1", output)
+        self.assertIn("var outer = GMRuntime.gml_exception_struct(_gml_try_exception_0)", output)
+        self.assertIn('message = GMRuntime.gml_struct_get(outer, "message")', output)
+
+    def test_rejects_control_flow_inside_finally_blocks(self):
+        cases = (
+            "try { score = 1; } finally { return; }",
+            "try { score = 1; } finally { exit; }",
+            "while ready { try { score = 1; } finally { break; } }",
+            "while ready { try { score = 1; } finally { continue; } }",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "not allowed inside finally"):
+                    transpile_gml_code(source, indent="")
+
+        with self.assertRaisesRegex(GMLTranspileError, "try requires catch or finally"):
+            transpile_gml_code("try { score = 1; }", indent="")
+
+        with self.assertRaisesRegex(GMLTranspileError, "catch requires a variable name"):
+            transpile_gml_code("try { score = 1; } catch { score = 2; }", indent="")
+
     def test_transpiles_delete_variable_operator(self):
         self.assertEqual(
             transpile_gml_code("delete mystruct;", indent=""),

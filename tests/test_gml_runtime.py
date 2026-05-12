@@ -490,6 +490,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_new",
             "gml_throw",
             "gml_exception_value",
+            "gml_exception_struct",
             "gml_method_call",
             "gml_method_get_self",
             "gml_method_get_index",
@@ -806,6 +807,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_exception_value(exception):", GML_RUNTIME_SCRIPT)
         self.assertIn("if exception is GMLException:\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_exception_struct(exception):", GML_RUNTIME_SCRIPT)
+        self.assertIn('"message": gml_string(exception)', GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_struct(exception.value):\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
+        self.assertIn("var message = gml_string(exception.value)", GML_RUNTIME_SCRIPT)
+        self.assertIn('"longMessage": message', GML_RUNTIME_SCRIPT)
+        self.assertIn('"script": ""', GML_RUNTIME_SCRIPT)
+        self.assertIn('"stacktrace": []', GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

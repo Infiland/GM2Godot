@@ -1080,7 +1080,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_scope_is_a_shared_struct_for_instance_apis(self):
-        self.assertIn("static var _gml_global_scope = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_global_scope = {", GML_RUNTIME_SCRIPT)
+        self.assertIn('"score": 0', GML_RUNTIME_SCRIPT)
+        self.assertIn('"health": 100,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"lives": 0,', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_global_scope():\n\treturn _gml_global_scope", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)

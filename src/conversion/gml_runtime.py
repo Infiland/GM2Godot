@@ -117,7 +117,11 @@ static var _gml_handle_next_type_id = 1
 static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_variable_hash_names = {}
-static var _gml_global_scope = {}
+static var _gml_global_scope = {
+	"health": 100,
+	"lives": 0,
+	"score": 0
+}
 static var _gml_builtin_arrays = {}
 static var _gml_builtin_globals = {
 	"argument": [],

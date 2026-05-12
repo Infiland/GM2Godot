@@ -226,9 +226,9 @@ Current branch work to remember before redoing an issue:
 - [ ] #287 Variables: Static Variables (static) - Persist static values per function identity (open, parent #179, subissues 0/0)
 - [ ] #286 Variables: Static Variables (static) - Initialize statics on first call before body (open, parent #179, subissues 0/0)
 - [ ] #285 Variables: Static Variables (static) - Parse static declarations only in functions (open, parent #179, subissues 0/0)
-- [ ] #284 Variables: Global Variables (global.) - Expose built-in global variables (open, parent #178, subissues 0/0)
-- [ ] #283 Variables: Global Variables (global.) - Support deprecated globalvar minimally (open, parent #178, subissues 0/0)
-- [ ] #282 Variables: Global Variables (global.) - Support top-level script global scope (open, parent #178, subissues 0/0)
+- [ ] #284 Variables: Global Variables (global.) - Expose built-in global variables (open, parent #178, subissues 0/0) - branch-covered by current global work
+- [ ] #283 Variables: Global Variables (global.) - Support deprecated globalvar minimally (open, parent #178, subissues 0/0) - branch-covered by current global work
+- [ ] #282 Variables: Global Variables (global.) - Support top-level script global scope (open, parent #178, subissues 0/0) - branch-covered by current global work
 - [ ] #281 Variables: Global Variables (global.) - Preserve global lifetime (open, parent #178, subissues 0/0) - branch-covered by `bd95a3a`, `bdda255`
 - [ ] #280 Variables: Global Variables (global.) - Map global dot variables to a global struct (open, parent #178, subissues 0/0) - branch-covered by `bd95a3a`
 - [ ] #279 Variables: Instance Variables - Preserve instance variable reads before assignment behavior (open, parent #177, subissues 0/0)

@@ -1133,6 +1133,32 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_global_set("score", GMRuntime.gml_add(score, 1))',
         )
 
+    def test_transpiles_script_global_scope_and_globalvar(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "score = 10; total = score + 1; var local_score = score;",
+                indent="",
+                top_level_global_scope=True,
+            ),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "score", 10)\n'
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "total", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score"), 1))\n'
+            'var local_score = GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")',
+        )
+        self.assertEqual(
+            transpile_gml_code("globalvar score, health; score += health;", indent=""),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score"), '
+            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "health")))',
+        )
+        self.assertEqual(
+            transpile_gml_code("score++; lives = score;", indent="", legacy_global_builtins=True),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score"), 1))\n'
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "lives", '
+            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score"))',
+        )
+
     def test_transpiles_ds_map_missing_value_apis_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression('ds_map_find_value(inventory, "food")'),

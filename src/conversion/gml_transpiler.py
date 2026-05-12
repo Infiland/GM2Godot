@@ -48,6 +48,8 @@ class _ScopeContext:
     self_expression: str = "self"
     other_expression: str = "other"
     instance_target: str | None = None
+    global_scope: bool = False
+    global_names: frozenset[str] = frozenset()
 
 
 _DEFAULT_SCOPE_CONTEXT = _ScopeContext()
@@ -417,6 +419,8 @@ _INSTANCE_NAME_REPLACEMENTS = {
     "y": "position.y",
 }
 
+_LEGACY_GLOBAL_BUILTINS = frozenset({"health", "lives", "score"})
+
 _BUILTIN_VARIABLE_REGISTRY = {
     "argument": _BuiltinVariableMetadata("global", "[]", False, False, "script_arguments"),
     "argument_count": _BuiltinVariableMetadata("global", "0", False, False, "script_arguments"),
@@ -572,8 +576,13 @@ def transpile_gml_expression(
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
+    global_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile a single GML expression to a GDScript expression."""
+    scope_context = _scope_context_with_global_names(
+        _normalize_scope_context(scope_context),
+        global_names,
+    )
     parser = _ExpressionParser(
         _expression_tokens(source),
         enum_values=enum_values,
@@ -597,8 +606,13 @@ def transpile_gml_condition(
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
+    global_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile a GML condition using GameMaker truthiness semantics."""
+    scope_context = _scope_context_with_global_names(
+        _normalize_scope_context(scope_context),
+        global_names,
+    )
     parser = _ExpressionParser(
         _expression_tokens(source),
         enum_values=enum_values,
@@ -640,6 +654,8 @@ def transpile_gml_code(
     instance_variables: MutableSet[str] | None = None,
     inherited_event_call: str | None = None,
     macro_configuration: str | None = None,
+    top_level_global_scope: bool = False,
+    legacy_global_builtins: bool = False,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
@@ -647,6 +663,8 @@ def transpile_gml_code(
         instance_variables=instance_variables,
         inherited_event_call=inherited_event_call,
         macro_configuration=macro_configuration,
+        top_level_global_scope=top_level_global_scope,
+        global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
     )
     lines = parser.parse()
 
@@ -890,6 +908,14 @@ class _ExpressionParser:
                 self_expression="_gml_constructor_self",
                 other_expression=self.scope_context.other_expression,
                 instance_target="_gml_constructor_self",
+                global_names=self.scope_context.global_names,
+            )
+        else:
+            scope_context = _ScopeContext(
+                self_expression=scope_context.self_expression,
+                other_expression=scope_context.other_expression,
+                instance_target=scope_context.instance_target,
+                global_names=scope_context.global_names,
             )
         body_parser = _StatementParser(
             body_tokens,
@@ -899,6 +925,7 @@ class _ExpressionParser:
             enum_names=self.enum_names,
             scope_context=scope_context,
             macro_values=self.macro_values,
+            global_names=scope_context.global_names,
         )
         body_lines = body_parser.parse()
         return _FunctionLiteral(
@@ -999,6 +1026,8 @@ class _StatementParser:
         macro_values: MutableMapping[str, str] | None = None,
         macro_priorities: MutableMapping[str, int] | None = None,
         macro_configuration: str | None = None,
+        top_level_global_scope: bool = False,
+        global_names: Iterable[str] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -1013,7 +1042,12 @@ class _StatementParser:
             enum_values if enum_values is not None else {}
         )
         self.enum_names: set[str] = set(enum_names or [])
-        self.scope_context = _normalize_scope_context(scope_context)
+        self.global_names: set[str] = set(global_names or [])
+        self.scope_context = _scope_context_with_global_names(
+            _normalize_scope_context(scope_context),
+            self.global_names,
+            top_level_global_scope=top_level_global_scope,
+        )
         self.inherited_event_call = inherited_event_call
         self.macro_values: MutableMapping[str, str] = (
             macro_values if macro_values is not None else {}
@@ -1034,6 +1068,8 @@ class _StatementParser:
     def _parse_statement(self) -> list[str]:
         if self._check_directive("#macro"):
             return self._parse_macro_statement()
+        if self._check_identifier("globalvar"):
+            return self._parse_globalvar_statement()
         if self._check_identifier("enum"):
             return self._parse_enum_statement()
         if self._check_identifier("if"):
@@ -1100,6 +1136,21 @@ class _StatementParser:
         if priority >= current_priority:
             self.macro_values[name] = value_source
             self.macro_priorities[name] = priority
+        return []
+
+    def _parse_globalvar_statement(self) -> list[str]:
+        self._consume_identifier("globalvar")
+        while not self._at_end() and not self._check(";") and not self._check("\n"):
+            name = self._consume_identifier_name()
+            self.global_names.add(name)
+            if not self._match(","):
+                break
+        self._match(";")
+        self._match("\n")
+        self.scope_context = _scope_context_with_global_names(
+            self.scope_context,
+            self.global_names,
+        )
         return []
 
     def _parse_enum_statement(self) -> list[str]:
@@ -1191,6 +1242,7 @@ class _StatementParser:
             self_expression=with_target,
             other_expression=outer_scope_context.self_expression,
             instance_target=with_target,
+            global_names=outer_scope_context.global_names,
         )
         self.loop_depth += 1
         self.continue_depth += 1
@@ -1469,10 +1521,16 @@ class _StatementParser:
             macro_values=self.macro_values,
             macro_priorities=self.macro_priorities,
             macro_configuration=self.macro_configuration,
+            global_names=self.global_names,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
         self.enum_names.update(parser.enum_names)
+        self.global_names.update(parser.global_names)
+        self.scope_context = _scope_context_with_global_names(
+            self.scope_context,
+            self.global_names,
+        )
         return lines
 
     def _parse_try_statement(self) -> list[str]:
@@ -2331,6 +2389,22 @@ def _normalize_scope_context(scope_context: _ScopeContext | None) -> _ScopeConte
     return scope_context if scope_context is not None else _DEFAULT_SCOPE_CONTEXT
 
 
+def _scope_context_with_global_names(
+    scope_context: _ScopeContext,
+    global_names: Iterable[str] | None,
+    top_level_global_scope: bool | None = None,
+) -> _ScopeContext:
+    names = set(scope_context.global_names)
+    names.update(global_names or [])
+    return _ScopeContext(
+        self_expression=scope_context.self_expression,
+        other_expression=scope_context.other_expression,
+        instance_target=scope_context.instance_target,
+        global_scope=scope_context.global_scope if top_level_global_scope is None else top_level_global_scope,
+        global_names=frozenset(names),
+    )
+
+
 def _macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
     if active_configuration is None:
         return False
@@ -2354,6 +2428,11 @@ def _emit_name(
             return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
         if value in _BUILTIN_GLOBAL_VARIABLES:
             return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
+        if _name_resolves_to_global(value, local_names, scope_context):
+            return (
+                "GMRuntime.gml_struct_get("
+                f"GMRuntime.gml_global_scope(), {json.dumps(value)})"
+            ), _POSTFIX_PRECEDENCE
         if scope_context.instance_target is not None and _is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
@@ -2362,6 +2441,26 @@ def _emit_name(
         value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
     value = _sanitize_gdscript_identifier(value)
     return value, _PRIMARY_PRECEDENCE
+
+
+def _name_resolves_to_global(
+    name: str,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> bool:
+    if name in local_names or not _is_plain_identifier(name):
+        return False
+    if name in _GML_LITERAL_IDENTIFIERS:
+        return False
+    if name in _BUILTIN_ARRAY_VARIABLES or name in _BUILTIN_GLOBAL_VARIABLES:
+        return False
+    if name in scope_context.global_names:
+        return True
+    return (
+        scope_context.global_scope
+        and name not in _BUILTIN_INSTANCE_VARIABLES
+        and name not in _GML_BUILTIN_CONSTANT_IDENTIFIERS
+    )
 
 
 def _emit_expression(
@@ -3185,6 +3284,14 @@ def _transpile_statement(
         )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        global_target = _global_scope_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if global_target is not None:
+            global_scope, member_name = global_target
+            return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, GMRuntime.gml_undefined())"]
         if not isinstance(target_expr, _Name):
             raise GMLTranspileError("delete can only be used with variables")
         scoped_target = _scoped_instance_assignment_parts(
@@ -3225,6 +3332,18 @@ def _transpile_statement(
         )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        global_target = _global_scope_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if global_target is not None:
+            global_scope, member_name = global_target
+            current_value = f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
+            return [
+                f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
         scoped_target = _scoped_instance_assignment_parts(
             target_expr,
             local_names,
@@ -3280,6 +3399,11 @@ def _transpile_statement(
         )
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        global_target = _global_scope_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
         scoped_target = _scoped_instance_assignment_parts(
             target_expr,
             local_names,
@@ -3293,6 +3417,23 @@ def _transpile_statement(
             scope_context=scope_context,
             macro_values=macro_values,
         )
+        if global_target is not None:
+            global_scope, member_name = global_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
+            current_value = f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
+            if operator == "??=":
+                return [
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    f"\tGMRuntime.gml_struct_set({global_scope}, {member_name}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                return [
+                    f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported global assignment operator")
         if scoped_target is not None:
             instance_target, member_name = scoped_target
             if operator in ("=", ":="):
@@ -3503,6 +3644,20 @@ def _scoped_instance_assignment_parts(
     ):
         return None
     return scope_context.instance_target, json.dumps(name)
+
+
+def _global_scope_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if not isinstance(target_expr, _Name):
+        return None
+    name = target_expr.value
+    if not _name_resolves_to_global(name, local_names, scope_context):
+        return None
+    return "GMRuntime.gml_global_scope()", json.dumps(name)
 
 
 def _record_instance_assignment(

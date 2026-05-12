@@ -42,6 +42,7 @@ Current branch work to remember before redoing an issue:
 - `b44940b` rejects `return` outside function/method bodies and references #234.
 - `585098a` covers `exit` returning early from function/method bodies and references #224.
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
+- `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 
 ## Working Order
 
@@ -252,11 +253,11 @@ Current branch work to remember before redoing an issue:
 - [ ] #253 delete: Reject non-variable expressions (open, parent #198, subissues 0/0) - branch-covered by `ece6bfc`
 - [ ] #252 delete: Clear struct references for garbage collection (open, parent #198, subissues 0/0) - branch-covered by `5773bbb`
 - [ ] #251 delete: Parse variable-only operator (open, parent #198, subissues 0/0) - branch-covered by `8e4d05e`
-- [ ] #250 new: Reject non-constructor functions at runtime (open, parent #197, subissues 0/0)
-- [ ] #249 new: Bind constructor arguments and fields (open, parent #197, subissues 0/0)
-- [ ] #248 new: Allocate structs and run constructor body (open, parent #197, subissues 0/0)
-- [ ] #247 new: Track constructor-qualified functions (open, parent #197, subissues 0/0)
-- [ ] #246 new: Parse constructor invocation syntax (open, parent #197, subissues 0/0)
+- [ ] #250 new: Reject non-constructor functions at runtime (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
+- [ ] #249 new: Bind constructor arguments and fields (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
+- [ ] #248 new: Allocate structs and run constructor body (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
+- [ ] #247 new: Track constructor-qualified functions (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
+- [ ] #246 new: Parse constructor invocation syntax (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
 - [ ] #245 throw: Support arbitrary thrown values (open, parent #196, subissues 0/0)
 - [ ] #244 throw: Propagate to catch or unhandled handler (open, parent #196, subissues 0/0)
 - [ ] #243 throw: Raise runtime exception payloads (open, parent #196, subissues 0/0)

@@ -40,6 +40,7 @@ Current branch work to remember before redoing an issue:
 - `dfc4987`, `5f8c969`, and `e143f3d` cover values/reference semantics for #436-#440.
 - `7e36986`, `ca00c03`, `cd5ad81`, `067359f`, and `836bc02` cover mixed-type operations and conformance tables for #441-#445.
 - `b44940b` rejects `return` outside function/method bodies and references #234.
+- `585098a` covers `exit` returning early from function/method bodies and references #224.
 
 ## Working Order
 
@@ -276,7 +277,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #227 with: Parse scoped execution block (open, parent #192, subissues 0/0) - branch-covered by `9ed26ee`
 - [ ] #226 exit: Preserve inherited event boundaries (open, parent #191, subissues 0/0)
 - [ ] #225 exit: Abort remaining generated event code (open, parent #191, subissues 0/0) - branch-covered by `53bda39`
-- [ ] #224 exit: Return early from functions and methods (open, parent #191, subissues 0/0)
+- [ ] #224 exit: Return early from functions and methods (open, parent #191, subissues 0/0) - branch-covered by `585098a`
 - [ ] #223 exit: Parse event and function abort statement (open, parent #191, subissues 0/0) - branch-covered by `de3712e`
 - [ ] #222 continue: Preserve context-specific post-step behavior (open, parent #190, subissues 0/0) - branch-covered by `b14808b`, `ecd5e24`
 - [ ] #221 continue: Advance with target iteration (open, parent #190, subissues 0/0) - branch-covered by `9ed26ee`

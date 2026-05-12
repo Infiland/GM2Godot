@@ -336,5 +336,5 @@ Current branch work to remember before redoing an issue:
 - [ ] #177 Variables: Instance Variables (open, parent #129, subissues 0/5)
 - [ ] #176 Variables: Local Variables (var) (open, parent #129, subissues 0/5)
 - [ ] #175 Variables: Scope Model and Identifier Resolution (open, parent #129, subissues 0/5)
-- [ ] #130 Very basic full game conversion test cases (open, parent #129, subissues 0/0)
+- [x] #130 Very basic full game conversion test cases (open, parent #129, subissues 0/0) - branch-covered by 41fa979, 142f72e, 74e36a4
 - [ ] #129 GML to GDScript Transpiler (open, parent none, subissues 7/52)

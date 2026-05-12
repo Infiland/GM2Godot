@@ -219,13 +219,13 @@ Current branch work to remember before redoing an issue:
 - [ ] #294 Variables: Constants (enum, #macro, built-ins) - Parse macro declarations (open, parent #180, subissues 0/0) - branch-covered by `de7c4ef`
 - [ ] #293 Variables: Constants (enum, #macro, built-ins) - Evaluate enum integer values (open, parent #180, subissues 0/0) - branch-covered by `8fec290`, `a86f461`, `de7c4ef`
 - [ ] #292 Variables: Constants (enum, #macro, built-ins) - Parse enum declarations (open, parent #180, subissues 0/0) - branch-covered by `91af8d3`, `a86f461`
-- [ ] #291 Variables: Static Variables (static) - Support static method variables (open, parent #179, subissues 0/0)
-- [ ] #290 Variables: Static Variables (static) - Support static variable access and static_get/static_set (open, parent #179, subissues 0/0)
-- [ ] #289 Variables: Static Variables (static) - Support constructor inheritance initialization order (open, parent #179, subissues 0/0)
-- [ ] #288 Variables: Static Variables (static) - Support constructor static sharing (open, parent #179, subissues 0/0)
-- [ ] #287 Variables: Static Variables (static) - Persist static values per function identity (open, parent #179, subissues 0/0)
-- [ ] #286 Variables: Static Variables (static) - Initialize statics on first call before body (open, parent #179, subissues 0/0)
-- [ ] #285 Variables: Static Variables (static) - Parse static declarations only in functions (open, parent #179, subissues 0/0)
+- [x] #291 Variables: Static Variables (static) - Support static method variables (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0
+- [x] #290 Variables: Static Variables (static) - Support static variable access and static_get/static_set (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0
+- [x] #289 Variables: Static Variables (static) - Support constructor inheritance initialization order (open, parent #179, subissues 0/0) - branch-covered by 956ae18
+- [x] #288 Variables: Static Variables (static) - Support constructor static sharing (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0, 956ae18
+- [x] #287 Variables: Static Variables (static) - Persist static values per function identity (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0
+- [x] #286 Variables: Static Variables (static) - Initialize statics on first call before body (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0, 956ae18
+- [x] #285 Variables: Static Variables (static) - Parse static declarations only in functions (open, parent #179, subissues 0/0) - branch-covered by 1dac1d0
 - [ ] #284 Variables: Global Variables (global.) - Expose built-in global variables (open, parent #178, subissues 0/0) - branch-covered by `821170c`
 - [ ] #283 Variables: Global Variables (global.) - Support deprecated globalvar minimally (open, parent #178, subissues 0/0) - branch-covered by `821170c`
 - [ ] #282 Variables: Global Variables (global.) - Support top-level script global scope (open, parent #178, subissues 0/0) - branch-covered by `821170c`
@@ -244,8 +244,8 @@ Current branch work to remember before redoing an issue:
 - [x] #269 Variables: Scope Model and Identifier Resolution - Track variables created by first assignment (open, parent #175, subissues 0/0) - branch-covered by 024be6a
 - [ ] #268 Variables: Scope Model and Identifier Resolution - Sanitize identifiers for GDScript output (open, parent #175, subissues 0/0) - branch-covered by `245fc4f`
 - [x] #267 Variables: Scope Model and Identifier Resolution - Implement dot-operator scope access (open, parent #175, subissues 0/0) - branch-covered by 7bd8c8c, 3d7c4d3, 821170c
-- [ ] #266 Variables: Scope Model and Identifier Resolution - Resolve unqualified identifiers by GML precedence (open, parent #175, subissues 0/0)
-- [ ] #265 Variables: Scope Model and Identifier Resolution - Build scope stack for events functions and structs (open, parent #175, subissues 0/0)
+- [x] #266 Variables: Scope Model and Identifier Resolution - Resolve unqualified identifiers by GML precedence (open, parent #175, subissues 0/0) - branch-covered by 3d7c4d3, 821170c, de7c4ef, 1dac1d0
+- [x] #265 Variables: Scope Model and Identifier Resolution - Build scope stack for events functions and structs (open, parent #175, subissues 0/0) - branch-covered by 3d7c4d3, 821170c, 1dac1d0
 - [x] #264 Variables: Assignment and Naming Rules - Reject reserved and asset-name collisions when unscoped (open, parent #254, subissues 0/0) - branch-covered by 8cb4c0c
 - [x] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0) - branch-covered by 8cb4c0c
 - [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0) - branch-covered by `351b367`

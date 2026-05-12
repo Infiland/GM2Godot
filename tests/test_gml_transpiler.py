@@ -1146,6 +1146,30 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_instanceof(mystruct)",
         )
 
+    def test_transpiles_new_constructor_invocations(self):
+        self.assertEqual(
+            transpile_gml_expression("new Point(4, 5)"),
+            "GMRuntime.gml_new(Point, [4, 5])",
+        )
+        self.assertEqual(
+            transpile_gml_expression("new factory.Point(name, )"),
+            'GMRuntime.gml_new(GMRuntime.gml_struct_get(factory, "Point"), '
+            "[name, GMRuntime.gml_undefined()])",
+        )
+
+    def test_transpiles_constructor_qualified_function_literals(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                "function Point(_x, _y) constructor { x = _x; y = _y; }",
+            ),
+            "GMRuntime.gml_constructor(self, "
+            "func Point(_gml_constructor_self = null, _x = null, _y = null): "
+            "if _x == null: _x = GMRuntime.gml_undefined(); "
+            "if _y == null: _y = GMRuntime.gml_undefined(); "
+            'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "x", _x); '
+            'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "y", _y))',
+        )
+
     def test_transpiles_hashed_struct_helpers_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression('variable_get_hash("x")'),

@@ -121,6 +121,13 @@ class _FunctionLiteral:
     name: str | None
     parameters: tuple[_FunctionParameter, ...]
     body_lines: tuple[str, ...]
+    is_constructor: bool = False
+
+
+@dataclass(frozen=True)
+class _NewCall:
+    constructor: _Expression
+    args: tuple[_Expression, ...]
 
 
 @dataclass(frozen=True)
@@ -169,6 +176,7 @@ _Expression: TypeAlias = (
     | _Call
     | _ArrayLiteral
     | _FunctionLiteral
+    | _NewCall
     | _StructLiteral
     | _Index
     | _StructAccess
@@ -727,6 +735,8 @@ class _ExpressionParser:
             return _StringLiteral(token.value)
         if token.kind == "IDENT" and token.value == "nameof":
             return self._parse_nameof_expression()
+        if token.kind == "IDENT" and token.value == "new":
+            return self._parse_new_expression()
         if token.kind == "IDENT" and token.value == "function":
             return self._parse_function_literal()
         if token.kind == "IDENT":
@@ -763,6 +773,24 @@ class _ExpressionParser:
             self._consume(")")
             return _Grouped(expr)
         raise GMLTranspileError(f"Expected expression, got: {token.value}")
+
+    def _parse_new_expression(self) -> _Expression:
+        constructor = self._parse_primary()
+        while self._match("."):
+            constructor = _Member(constructor, self._consume_identifier())
+
+        self._consume("(")
+        args: list[_Expression] = []
+        if not self._check(")"):
+            while True:
+                if self._check(",") or self._check(")"):
+                    args.append(_Name(_NAME_REPLACEMENTS["undefined"]))
+                else:
+                    args.append(self._parse_expression())
+                if not self._match(","):
+                    break
+        self._consume(")")
+        return _NewCall(constructor, tuple(args))
 
     def _parse_nameof_expression(self) -> _Expression:
         self._consume("(")
@@ -801,19 +829,32 @@ class _ExpressionParser:
                 if not self._match(","):
                     break
         self._consume(")")
+        is_constructor = self._match_identifier("constructor")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
         parameter_names = [parameter.name for parameter in parameters]
+        scope_context = self.scope_context
+        if is_constructor:
+            scope_context = _ScopeContext(
+                self_expression="_gml_constructor_self",
+                other_expression=self.scope_context.other_expression,
+                instance_target="_gml_constructor_self",
+            )
         body_parser = _StatementParser(
             body_tokens,
             local_names=parameter_names,
             return_depth=1,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
-            scope_context=self.scope_context,
+            scope_context=scope_context,
         )
         body_lines = body_parser.parse()
-        return _FunctionLiteral(name, tuple(parameters), tuple(body_lines or ["pass"]))
+        return _FunctionLiteral(
+            name,
+            tuple(parameters),
+            tuple(body_lines or ["pass"]),
+            is_constructor,
+        )
 
     def _current_operator(self) -> str | None:
         token = self._peek()
@@ -833,6 +874,13 @@ class _ExpressionParser:
 
     def _match(self, value: str) -> bool:
         if self._check(value):
+            self.position += 1
+            return True
+        return False
+
+    def _match_identifier(self, value: str) -> bool:
+        token = self._peek()
+        if token.kind == "IDENT" and token.value == value:
             self.position += 1
             return True
         return False
@@ -2124,11 +2172,27 @@ def _emit_expression(
     if isinstance(expr, _FunctionLiteral):
         function_literal = _emit_function_literal(expr, local_names, scope_context=scope_context)
         if bind_function_literals:
+            if expr.is_constructor:
+                return (
+                    f"GMRuntime.gml_constructor({scope_context.self_expression}, {function_literal})",
+                    _POSTFIX_PRECEDENCE,
+                )
             return (
                 f"GMRuntime.gml_method({scope_context.self_expression}, {function_literal})",
                 _POSTFIX_PRECEDENCE,
             )
         return function_literal, _PRIMARY_PRECEDENCE
+    if isinstance(expr, _NewCall):
+        constructor = _emit_expression(
+            expr.constructor,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
+        return f"GMRuntime.gml_new({constructor}, [{args}])", _POSTFIX_PRECEDENCE
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
             _emit_struct_field(
@@ -2190,10 +2254,13 @@ def _emit_function_literal(
 ) -> str:
     name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
     parameter_names = [parameter.name for parameter in expr.parameters]
-    parameters = ", ".join(
+    emitted_parameters = [
         f"{_sanitize_gdscript_identifier(parameter.name)} = null"
         for parameter in expr.parameters
-    )
+    ]
+    if expr.is_constructor:
+        emitted_parameters.insert(0, "_gml_constructor_self = null")
+    parameters = ", ".join(emitted_parameters)
     default_lines = _emit_function_parameter_default_lines(
         expr.parameters,
         parameter_names,
@@ -2463,6 +2530,10 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return any(_contains_gml_undefined(element) for element in expr.elements)
     if isinstance(expr, _FunctionLiteral):
         return False
+    if isinstance(expr, _NewCall):
+        return _contains_gml_undefined(expr.constructor) or any(
+            _contains_gml_undefined(arg) for arg in expr.args
+        )
     if isinstance(expr, _StructLiteral):
         return any(_contains_gml_undefined(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
@@ -2497,6 +2568,10 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return any(_contains_gml_nan(element) for element in expr.elements)
     if isinstance(expr, _FunctionLiteral):
         return False
+    if isinstance(expr, _NewCall):
+        return _contains_gml_nan(expr.constructor) or any(
+            _contains_gml_nan(arg) for arg in expr.args
+        )
     if isinstance(expr, _StructLiteral):
         return any(_contains_gml_nan(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
@@ -2534,6 +2609,10 @@ def _contains_gml_pointer(expr: _Expression) -> bool:
         return any(_contains_gml_pointer(element) for element in expr.elements)
     if isinstance(expr, _FunctionLiteral):
         return False
+    if isinstance(expr, _NewCall):
+        return _contains_gml_pointer(expr.constructor) or any(
+            _contains_gml_pointer(arg) for arg in expr.args
+        )
     if isinstance(expr, _StructLiteral):
         return any(_contains_gml_pointer(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
@@ -2568,6 +2647,10 @@ def _contains_gml_handle(expr: _Expression) -> bool:
         return any(_contains_gml_handle(element) for element in expr.elements)
     if isinstance(expr, _FunctionLiteral):
         return False
+    if isinstance(expr, _NewCall):
+        return _contains_gml_handle(expr.constructor) or any(
+            _contains_gml_handle(arg) for arg in expr.args
+        )
     if isinstance(expr, _StructLiteral):
         return any(_contains_gml_handle(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
@@ -2586,7 +2669,7 @@ def _may_need_gml_reference_equality(expr: _Expression) -> bool:
         return expr.value not in {"true", "false", "INF", "NAN"}
     if isinstance(expr, (_ArrayLiteral, _StructLiteral, _FunctionLiteral)):
         return True
-    if isinstance(expr, (_Call, _Index, _StructAccess, _DSMapAccess, _Member)):
+    if isinstance(expr, (_Call, _NewCall, _Index, _StructAccess, _DSMapAccess, _Member)):
         return True
     if isinstance(expr, _Grouped):
         return _may_need_gml_reference_equality(expr.expr)

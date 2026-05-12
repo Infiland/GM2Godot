@@ -81,10 +81,12 @@ class GMLHandle:
 class GMLMethod:
 	var bound_self = null
 	var function_value = null
+	var is_constructor = false
 
-	func _init(method_self = null, method_function = null):
+	func _init(method_self = null, method_function = null, method_is_constructor = false):
 		bound_self = method_self
 		function_value = method_function
+		is_constructor = bool(method_is_constructor)
 
 	func callv(args):
 		if bound_self is Object and is_method(function_value):
@@ -363,13 +365,38 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	return method.callv(call_args)
 
 
-static func gml_method(scope, func_or_method):
+static func gml_method(scope, func_or_method, method_is_constructor = false):
 	if not is_method(func_or_method):
 		return gml_unsupported_type_error("GML method", func_or_method)
 	var function_value = gml_method_get_index(func_or_method)
 	if is_undefined(function_value):
 		return function_value
-	return GMLMethod.new(scope, function_value)
+	return GMLMethod.new(scope, function_value, method_is_constructor)
+
+
+static func gml_constructor(scope, func_or_method):
+	var constructor_method = gml_method(scope, func_or_method, true)
+	if constructor_method is GMLMethod:
+		gml_static_get(constructor_method)
+	return constructor_method
+
+
+static func gml_new(constructor, args = []):
+	if not (constructor is GMLMethod):
+		return gml_unsupported_type_error("GML new constructor", constructor)
+	if not constructor.is_constructor:
+		return gml_unsupported_type_error("GML new constructor", constructor)
+	var instance = gml_struct({})
+	var constructor_static = gml_static_get(constructor)
+	if not is_undefined(constructor_static):
+		gml_static_set(instance, constructor_static)
+	var call_args = [instance]
+	if typeof(args) == TYPE_ARRAY:
+		call_args.append_array(args)
+	else:
+		call_args.append(args)
+	constructor.function_value.callv(call_args)
+	return instance
 
 
 static func gml_method_get_self(method):

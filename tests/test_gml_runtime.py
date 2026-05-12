@@ -485,6 +485,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_resolve",
             "gml_handle_invalidate",
             "gml_method",
+            "gml_constructor",
+            "gml_new",
             "gml_method_call",
             "gml_method_get_self",
             "gml_method_get_index",
@@ -751,14 +753,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("class GMLMethod:", GML_RUNTIME_SCRIPT)
         self.assertIn("var bound_self = null", GML_RUNTIME_SCRIPT)
         self.assertIn("var function_value = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("var is_constructor = false", GML_RUNTIME_SCRIPT)
         self.assertIn("bound_self = method_self", GML_RUNTIME_SCRIPT)
         self.assertIn("function_value = method_function", GML_RUNTIME_SCRIPT)
+        self.assertIn("is_constructor = bool(method_is_constructor)", GML_RUNTIME_SCRIPT)
         self.assertIn("func callv(args):", GML_RUNTIME_SCRIPT)
         self.assertIn("return function_value.callv(args)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_method(scope, func_or_method):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_method(scope, func_or_method, method_is_constructor = false):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method", func_or_method)', GML_RUNTIME_SCRIPT)
         self.assertIn("var function_value = gml_method_get_index(func_or_method)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLMethod.new(scope, function_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLMethod.new(scope, function_value, method_is_constructor)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_method_get_self(method):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_get_self", method)', GML_RUNTIME_SCRIPT)
         self.assertIn("if method is GMLMethod:", GML_RUNTIME_SCRIPT)
@@ -771,6 +775,21 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return method.function_value", GML_RUNTIME_SCRIPT)
         self.assertIn("return method", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_method(value):\n\t\treturn GML_TYPE_METHOD", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_constructor_methods_allocate_new_structs(self):
+        self.assertIn("static func gml_constructor(scope, func_or_method):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var constructor_method = gml_method(scope, func_or_method, true)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_static_get(constructor_method)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_new(constructor, args = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_type_error("GML new constructor", constructor)', GML_RUNTIME_SCRIPT)
+        self.assertIn("if not constructor.is_constructor:", GML_RUNTIME_SCRIPT)
+        self.assertIn("var instance = gml_struct({})", GML_RUNTIME_SCRIPT)
+        self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_static_set(instance, constructor_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var call_args = [instance]", GML_RUNTIME_SCRIPT)
+        self.assertIn("call_args.append_array(args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("constructor.function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return instance", GML_RUNTIME_SCRIPT)
 
     def test_runtime_undefined_equality_is_special_cased(self):
         self.assertIn("static func gml_eq(left, right):", GML_RUNTIME_SCRIPT)

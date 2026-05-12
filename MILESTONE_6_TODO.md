@@ -249,7 +249,7 @@ Current branch work to remember before redoing an issue:
 - [ ] #264 Variables: Assignment and Naming Rules - Reject reserved and asset-name collisions when unscoped (open, parent #254, subissues 0/0)
 - [ ] #263 Variables: Assignment and Naming Rules - Validate identifier names and length (open, parent #254, subissues 0/0)
 - [ ] #262 Variables: Assignment and Naming Rules - Reject chained assignment (open, parent #254, subissues 0/0) - branch-covered by `351b367`
-- [ ] #261 Variables: Assignment and Naming Rules - Support prefix and postfix increment/decrement statements (open, parent #254, subissues 0/0)
+- [x] #261 Variables: Assignment and Naming Rules - Support prefix and postfix increment/decrement statements (open, parent #254, subissues 0/0) - branch-covered by 4f67f4e
 - [ ] #260 Variables: Assignment and Naming Rules - Lower compound assignments exactly once (open, parent #254, subissues 0/0) - branch-covered by `3219ab4`, `7bd8c8c`, `8c243f4`
 - [ ] #259 Variables: Assignment and Naming Rules - Parse assignment operator forms (open, parent #254, subissues 0/0) - branch-covered by `193ae42`, `8f8414d`, `a7b12fc`, `8c243f4`
 - [ ] #258 Variables: Data Type Functions (open, parent #129, subissues 0/6)

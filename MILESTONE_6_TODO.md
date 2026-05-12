@@ -44,6 +44,7 @@ Current branch work to remember before redoing an issue:
 - `3d7c4d3` remaps `with` body `self`/`other` scope and preserves enclosing local mutation for #229 and #230.
 - `2ebe72d` parses `new`, tracks constructor-qualified functions, allocates/runs constructor structs, binds arguments/fields, and rejects non-constructors for #246-#250.
 - `ffb9622` parses `throw` statements and preserves arbitrary thrown payloads in runtime exception values for #242, #243, and #245.
+- `7962ae1` parses and lowers `try`/`catch`/`finally`, exposes catch exception structs, propagates uncaught GML exceptions, runs finally blocks, and rejects illegal finally control flow for #237-#241 and #244.
 
 ## Working Order
 
@@ -260,14 +261,14 @@ Current branch work to remember before redoing an issue:
 - [ ] #247 new: Track constructor-qualified functions (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
 - [ ] #246 new: Parse constructor invocation syntax (open, parent #197, subissues 0/0) - branch-covered by `2ebe72d`
 - [ ] #245 throw: Support arbitrary thrown values (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
-- [ ] #244 throw: Propagate to catch or unhandled handler (open, parent #196, subissues 0/0)
+- [ ] #244 throw: Propagate to catch or unhandled handler (open, parent #196, subissues 0/0) - branch-covered by `7962ae1`
 - [ ] #243 throw: Raise runtime exception payloads (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
 - [ ] #242 throw: Parse throw expression (open, parent #196, subissues 0/0) - branch-covered by `ffb9622`
-- [ ] #241 try / catch / finally: Reject illegal control flow inside finally (open, parent #195, subissues 0/0)
-- [ ] #240 try / catch / finally: Always execute finally blocks (open, parent #195, subissues 0/0)
-- [ ] #239 try / catch / finally: Emulate exception control flow in Godot (open, parent #195, subissues 0/0)
-- [ ] #238 try / catch / finally: Represent catch exception structs (open, parent #195, subissues 0/0)
-- [ ] #237 try / catch / finally: Parse valid block combinations (open, parent #195, subissues 0/0)
+- [ ] #241 try / catch / finally: Reject illegal control flow inside finally (open, parent #195, subissues 0/0) - branch-covered by `7962ae1`
+- [ ] #240 try / catch / finally: Always execute finally blocks (open, parent #195, subissues 0/0) - branch-covered by `7962ae1`
+- [ ] #239 try / catch / finally: Emulate exception control flow in Godot (open, parent #195, subissues 0/0) - branch-covered by `7962ae1`
+- [ ] #238 try / catch / finally: Represent catch exception structs (open, parent #195, subissues 0/0) - branch-covered by `7962ae1`
+- [ ] #237 try / catch / finally: Parse valid block combinations (open, parent #195, subissues 0/0) - branch-covered by `7962ae1`
 - [ ] #236 begin / end: Lower to normal block scopes (open, parent #194, subissues 0/0) - branch-covered by `f1ddb9d`
 - [ ] #235 begin / end: Tokenize legacy block delimiters (open, parent #194, subissues 0/0) - branch-covered by `42b0b72`
 - [ ] #234 return: Reject return outside functions and methods (open, parent #193, subissues 0/0) - branch-covered by `b44940b`

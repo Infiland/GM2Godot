@@ -22,6 +22,19 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         content = generate_script_content([{"eventType": 0, "eventNum": 0}])
         self.assertTrue(content.startswith("extends Node2D"))
 
+    def test_parent_script_path_replaces_node_base(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+
+    def test_parent_script_path_preserved_without_local_events(self):
+        self.assertEqual(
+            generate_script_content([], base_script_path="res://objects/o_parent/o_parent.gd"),
+            'extends "res://objects/o_parent/o_parent.gd"\n',
+        )
+
 
 class TestScriptGeneratorEvents(unittest.TestCase):
     """Test that events produce correct function stubs."""

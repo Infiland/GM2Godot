@@ -7,6 +7,7 @@ from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
@@ -16,6 +17,7 @@ from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, P
 
 class ParsedObject(TypedDict):
     sprite_name: str | None
+    parent_object_name: str | None
     event_list: list[JsonDict]
 
 
@@ -89,12 +91,44 @@ class ObjectConverter(BaseConverter):
                 sprite_name = cast(str | None, sprite_data.get('name', None))
 
             event_list = cast(list[JsonDict], data.get('eventList', []))
+            parent_object_name = self._parse_parent_object_name(data.get('parentObjectId'))
 
-            return {"sprite_name": sprite_name, "event_list": event_list}
+            return {
+                "sprite_name": sprite_name,
+                "parent_object_name": parent_object_name,
+                "event_list": event_list,
+            }
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_ParseError").format(
                 yy_path=yy_path, object_name=object_name))
             return None
+
+    def _parse_parent_object_name(self, parent_object_id: object) -> str | None:
+        if not isinstance(parent_object_id, dict):
+            return None
+
+        parent_data = cast(JsonDict, parent_object_id)
+        parent_name = parent_data.get("name")
+        if isinstance(parent_name, str) and parent_name:
+            return parent_name
+
+        parent_path = parent_data.get("path")
+        if not isinstance(parent_path, str):
+            return None
+
+        path_parts = parent_path.replace("\\", "/").split("/")
+        if len(path_parts) >= 2 and path_parts[0] == "objects" and path_parts[1]:
+            return path_parts[1]
+        return None
+
+    def _object_script_res_path(self, object_name: str, subfolder: str = "") -> str:
+        if subfolder:
+            return f"res://objects/{subfolder}/{object_name}/{object_name}.gd"
+        return f"res://objects/{object_name}/{object_name}.gd"
+
+    def _get_object_subfolder(self, object_name: str) -> str:
+        yy_path = os.path.join(self.gm_project_path, 'objects', object_name, object_name + '.yy')
+        return self._get_subfolder_from_yy(yy_path)
 
     def _get_sprite_subfolder(self, sprite_name: str) -> str:
         """Resolve a sprite's subfolder by reading its .yy file from the GM project."""
@@ -170,9 +204,15 @@ class ObjectConverter(BaseConverter):
 
         return ''.join(parts)
 
-    def _load_event_code_bodies(self, object_name: str, event_list: list[JsonDict]) -> tuple[dict[str, str], set[str]]:
+    def _load_event_code_bodies(
+        self,
+        object_name: str,
+        event_list: list[JsonDict],
+        inherited_event_functions: set[str] | None = None,
+    ) -> tuple[dict[str, str], set[str]]:
         code_bodies: dict[str, str] = {}
         instance_variables: set[str] = set()
+        inherited_functions = inherited_event_functions or set()
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
 
         for event in event_list or []:
@@ -196,10 +236,16 @@ class ObjectConverter(BaseConverter):
             if not source.strip():
                 continue
 
+            inherited_event_call = (
+                self._inherited_event_call(mapping)
+                if mapping.godot_func in inherited_functions
+                else None
+            )
             try:
                 code_bodies[mapping.godot_func] = transpile_gml_code(
                     source,
                     instance_variables=instance_variables,
+                    inherited_event_call=inherited_event_call,
                 )
             except GMLTranspileError as exc:
                 self._safe_log(
@@ -208,6 +254,26 @@ class ObjectConverter(BaseConverter):
                 )
 
         return code_bodies, instance_variables
+
+    def _inherited_event_call(self, mapping: EventMapping) -> str:
+        if not mapping.params:
+            return f"super.{mapping.godot_func}()"
+        return f"super.{mapping.godot_func}({mapping.params})"
+
+    def _parent_event_function_names(self, parent_object_name: str | None) -> set[str]:
+        if parent_object_name is None:
+            return set()
+
+        parsed_parent = self._parse_object_yy(parent_object_name)
+        if parsed_parent is None:
+            return set()
+
+        function_names: set[str] = set()
+        for event in parsed_parent["event_list"]:
+            mapping = map_event(event)
+            if mapping is not None:
+                function_names.add(mapping.godot_func)
+        return function_names
 
     def _process_object(
         self,
@@ -227,8 +293,16 @@ class ObjectConverter(BaseConverter):
             return {"success": False, "name": object_name, "has_sprite": False, "sprite_name": None, "event_count": 0}
 
         sprite_name = parsed["sprite_name"]
+        parent_object_name = parsed["parent_object_name"]
         event_list = parsed["event_list"]
         sprite_subfolder = ""
+        parent_script_res_path = None
+        inherited_event_functions: set[str] = set()
+
+        if parent_object_name is not None and parent_object_name != object_name:
+            parent_subfolder = self._get_object_subfolder(parent_object_name)
+            parent_script_res_path = self._object_script_res_path(parent_object_name, parent_subfolder)
+            inherited_event_functions = self._parent_event_function_names(parent_object_name)
 
         if sprite_name is not None:
             sprite_subfolder = self._get_sprite_subfolder(sprite_name)
@@ -239,12 +313,15 @@ class ObjectConverter(BaseConverter):
 
         if subfolder:
             object_dir = os.path.join(self.godot_objects_path, subfolder, object_name)
-            script_res_path = f"res://objects/{subfolder}/{object_name}/{object_name}.gd"
         else:
             object_dir = os.path.join(self.godot_objects_path, object_name)
-            script_res_path = f"res://objects/{object_name}/{object_name}.gd"
+        script_res_path = self._object_script_res_path(object_name, subfolder)
 
-        code_bodies, instance_variables = self._load_event_code_bodies(object_name, event_list)
+        code_bodies, instance_variables = self._load_event_code_bodies(
+            object_name,
+            event_list,
+            inherited_event_functions=inherited_event_functions,
+        )
         script_content = generate_script_content(
             event_list,
             code_bodies=code_bodies,
@@ -253,6 +330,7 @@ class ObjectConverter(BaseConverter):
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,
             ),
+            base_script_path=parent_script_res_path,
         )
         scene_content = self._generate_object_scene(object_name, sprite_name, sprite_subfolder, script_res_path)
 

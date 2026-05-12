@@ -136,6 +136,12 @@ def _gd_string(value: str) -> str:
     return json.dumps(value)
 
 
+def _extends_line(base_script_path: str | None = None) -> str:
+    if base_script_path is None:
+        return "extends Node2D\n"
+    return f"extends {_gd_string(base_script_path)}\n"
+
+
 def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntimeConfig) -> None:
     sprite_scene_paths = dict(sprite_runtime.sprite_scene_paths or {})
     sprite_constants = [
@@ -256,6 +262,7 @@ def generate_script_content(
     code_bodies: _CodeBodies | None = None,
     instance_variables: Iterable[str] | None = None,
     sprite_runtime: SpriteRuntimeConfig | None = None,
+    base_script_path: str | None = None,
 ) -> str:
     """Generate .gd script content with function stubs for each event.
 
@@ -272,13 +279,15 @@ def generate_script_content(
             names to declare as GDScript member variables.
         sprite_runtime: Optional sprite runtime configuration for GameMaker
             sprite_index and image_index compatibility.
+        base_script_path: Optional converted parent object script path to
+            extend for GameMaker object inheritance.
 
     Returns:
         Complete .gd file content as a string.
     """
     uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
     if not event_list and not uses_sprite_runtime:
-        return "extends Node2D\n"
+        return _extends_line(base_script_path)
 
     functions: list[EventMapping] = []
     has_input = False
@@ -320,7 +329,7 @@ def generate_script_content(
     # Sort by sort_key, then alphabetically for same key
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
-    lines = ["extends Node2D\n"]
+    lines = [_extends_line(base_script_path)]
     if _uses_gml_runtime(code_bodies):
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:

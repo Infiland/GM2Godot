@@ -1344,6 +1344,25 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 1\nreturn\nscore = 2",
         )
 
+    def test_event_inherited_calls_parent_event_and_continues_child_body(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "child_before = true; event_inherited(); child_after = true;",
+                indent="",
+                inherited_event_call="super._ready()",
+            ),
+            "child_before = true\nsuper._ready()\nchild_after = true",
+        )
+
+    def test_event_inherited_without_parent_event_is_noop(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "if ready begin event_inherited(); end child_after = true;",
+                indent="",
+            ),
+            "if GMRuntime.gml_bool(ready):\n\tpass\nchild_after = true",
+        )
+
     def test_transpiles_throw_statements(self):
         cases = (
             ('throw "bad";', 'return GMRuntime.gml_throw("bad")'),

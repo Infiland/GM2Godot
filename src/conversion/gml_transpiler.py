@@ -613,11 +613,13 @@ def transpile_gml_code(
     source: str,
     indent: str = "\t",
     instance_variables: MutableSet[str] | None = None,
+    inherited_event_call: str | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     parser = _StatementParser(
         _tokenize(_strip_comments(source)),
         instance_variables=instance_variables,
+        inherited_event_call=inherited_event_call,
     )
     lines = parser.parse()
 
@@ -943,6 +945,7 @@ class _StatementParser:
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
         scope_context: _ScopeContext | None = None,
+        inherited_event_call: str | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -958,6 +961,7 @@ class _StatementParser:
         )
         self.enum_names: set[str] = set(enum_names or [])
         self.scope_context = _normalize_scope_context(scope_context)
+        self.inherited_event_call = inherited_event_call
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
@@ -1006,6 +1010,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            inherited_event_call=self.inherited_event_call,
         )
 
     def _parse_enum_statement(self) -> list[str]:
@@ -1188,6 +1193,7 @@ class _StatementParser:
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
                     scope_context=self.scope_context,
+                    inherited_event_call=self.inherited_event_call,
                 )
             )
 
@@ -1214,6 +1220,7 @@ class _StatementParser:
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
                 scope_context=self.scope_context,
+                inherited_event_call=self.inherited_event_call,
             )
             if operation
             else []
@@ -1358,6 +1365,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            inherited_event_call=self.inherited_event_call,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
@@ -1485,6 +1493,7 @@ class _StatementParser:
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
+            inherited_event_call=self.inherited_event_call,
         )
 
     def _parse_body(self) -> list[str]:
@@ -2895,6 +2904,7 @@ def _transpile_statement(
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
+    inherited_event_call: str | None = None,
 ) -> list[str]:
     if not statement:
         return []
@@ -2933,6 +2943,9 @@ def _transpile_statement(
     if statement == "exit":
         _reject_finally_control_flow(finally_depth)
         return ["return"]
+    event_inherited_lines = _transpile_event_inherited_statement(statement, inherited_event_call)
+    if event_inherited_lines is not None:
+        return event_inherited_lines
     if statement == "throw":
         raise GMLTranspileError("throw requires an expression")
     if statement.startswith("throw "):
@@ -3154,6 +3167,30 @@ def _transpile_statement(
 def _reject_finally_control_flow(finally_depth: int) -> None:
     if finally_depth > 0:
         raise GMLTranspileError("break, continue, exit, and return are not allowed inside finally")
+
+
+def _transpile_event_inherited_statement(
+    statement: str,
+    inherited_event_call: str | None,
+) -> list[str] | None:
+    if not statement.strip().startswith("event_inherited"):
+        return None
+
+    expr = _parse_gml_expression(statement)
+    expr = _unwrap_grouped_expression(expr)
+    if not (
+        isinstance(expr, _Call)
+        and isinstance(expr.callee, _Name)
+        and expr.callee.value == "event_inherited"
+    ):
+        return None
+
+    if expr.args:
+        raise GMLTranspileError("event_inherited does not accept arguments")
+
+    if inherited_event_call is None:
+        return ["pass"]
+    return [inherited_event_call]
 
 
 def _struct_assignment_parts(

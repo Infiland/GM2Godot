@@ -1284,16 +1284,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 1\nscore = GMRuntime.gml_add(score, 2)",
         )
 
-    def test_transpiles_return_statements(self):
-        self.assertEqual(transpile_gml_code("return;", indent=""), "return")
+    def test_transpiles_function_return_statements(self):
         self.assertEqual(
-            transpile_gml_code("return score + bonus;", indent=""),
-            "return GMRuntime.gml_add(score, bonus)",
+            transpile_gml_expression("function() { return; }"),
+            "GMRuntime.gml_method(self, func(): return)",
         )
         self.assertEqual(
-            transpile_gml_code("if ready begin return (score + 1); end", indent=""),
-            "if GMRuntime.gml_bool(ready):\n\treturn (GMRuntime.gml_add(score, 1))",
+            transpile_gml_expression("function() { return score + bonus; }"),
+            "GMRuntime.gml_method(self, func(): return GMRuntime.gml_add(score, bonus))",
         )
+
+    def test_rejects_return_outside_functions_and_methods(self):
+        for source in ("return;", "return score + bonus;", "if ready begin return score; end"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "return used outside"):
+                    transpile_gml_code(source, indent="")
 
     def test_transpiles_exit_statements(self):
         self.assertEqual(transpile_gml_code("exit;", indent=""), "return")

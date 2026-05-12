@@ -783,6 +783,7 @@ class _ExpressionParser:
         body_parser = _StatementParser(
             body_tokens,
             local_names=parameter_names,
+            return_depth=1,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
         )
@@ -863,6 +864,7 @@ class _StatementParser:
         instance_variables: MutableSet[str] | None = None,
         loop_depth: int = 0,
         continue_depth: int = 0,
+        return_depth: int = 0,
         generated_counter: list[int] | None = None,
         enum_values: MutableMapping[str, dict[str, int]] | None = None,
         enum_names: Iterable[str] | None = None,
@@ -873,6 +875,7 @@ class _StatementParser:
         self.instance_variables = instance_variables
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
+        self.return_depth = return_depth
         self.generated_counter = generated_counter if generated_counter is not None else [0]
         self.enum_values: MutableMapping[str, dict[str, int]] = (
             enum_values if enum_values is not None else {}
@@ -919,6 +922,7 @@ class _StatementParser:
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
+            return_depth=self.return_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
         )
@@ -1082,6 +1086,7 @@ class _StatementParser:
                     self.instance_variables,
                     loop_depth=self.loop_depth,
                     continue_depth=self.continue_depth,
+                    return_depth=self.return_depth,
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
                 )
@@ -1104,6 +1109,7 @@ class _StatementParser:
                 self.instance_variables,
                 loop_depth=self.loop_depth,
                 continue_depth=self.continue_depth,
+                return_depth=self.return_depth,
                 enum_values=self.enum_values,
                 enum_names=self.enum_names,
             )
@@ -1241,6 +1247,7 @@ class _StatementParser:
             instance_variables=self.instance_variables,
             loop_depth=self.loop_depth + 1,
             continue_depth=self.continue_depth,
+            return_depth=self.return_depth,
             generated_counter=self.generated_counter,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -1301,6 +1308,7 @@ class _StatementParser:
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
+            return_depth=self.return_depth,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
         )
@@ -2507,6 +2515,7 @@ def _transpile_statement(
     instance_variables: MutableSet[str] | None = None,
     loop_depth: int = 0,
     continue_depth: int = 0,
+    return_depth: int = 0,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
 ) -> list[str]:
@@ -2517,8 +2526,12 @@ def _transpile_statement(
         local_names = set()
 
     if statement == "return":
+        if return_depth <= 0:
+            raise GMLTranspileError("return used outside a function or method")
         return ["return"]
     if statement.startswith("return "):
+        if return_depth <= 0:
+            raise GMLTranspileError("return used outside a function or method")
         return [
             "return "
             f"{transpile_gml_expression(statement[7:].strip(), local_names, enum_values, enum_names)}"

@@ -415,6 +415,25 @@ static func gml_new(constructor, args = []):
 	return instance
 
 
+static func gml_constructor_inherit(instance, constructor, args = []):
+	if not (constructor is GMLMethod):
+		return gml_unsupported_type_error("GML parent constructor", constructor)
+	if not constructor.is_constructor:
+		return gml_unsupported_type_error("GML parent constructor", constructor)
+	var parent_static = gml_static_get(constructor)
+	if not is_undefined(parent_static):
+		var current_static = gml_static_get(instance)
+		if not is_undefined(current_static):
+			gml_static_set(current_static, parent_static)
+	var call_args = [instance]
+	if typeof(args) == TYPE_ARRAY:
+		call_args.append_array(args)
+	else:
+		call_args.append(args)
+	constructor.function_value.callv(call_args)
+	return instance
+
+
 static func gml_throw(value):
 	return GMLException.new(value)
 

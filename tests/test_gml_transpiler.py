@@ -1296,6 +1296,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", output)
 
+    def test_transpiles_constructor_inheritance_before_child_statics(self):
+        output = transpile_gml_expression(
+            "function Child(x) : Parent(x) constructor { static c = 1; return c; }"
+        )
+
+        self.assertIn("GMRuntime.gml_constructor_inherit(_gml_constructor_self, Parent, [x])", output)
+        self.assertLess(
+            output.index("GMRuntime.gml_constructor_inherit"),
+            output.index("GMRuntime.gml_static_initialize"),
+        )
+
     def test_transpiles_hashed_struct_helpers_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression('variable_get_hash("x")'),

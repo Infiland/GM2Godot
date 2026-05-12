@@ -793,6 +793,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var call_args = [instance]", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append_array(args)", GML_RUNTIME_SCRIPT)
         self.assertIn("constructor.function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_constructor_inherit(instance, constructor, args = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var parent_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_static_set(current_static, parent_static)", GML_RUNTIME_SCRIPT)
         self.assertIn("return instance", GML_RUNTIME_SCRIPT)
 
     def test_runtime_throw_preserves_arbitrary_payload_values(self):

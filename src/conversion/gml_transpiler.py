@@ -928,6 +928,9 @@ class _ExpressionParser:
                 if not self._match(","):
                     break
         self._consume(")")
+        parent_constructor: _Expression | None = None
+        if self._match(":"):
+            parent_constructor = self._parse_expression()
         is_constructor = self._match_identifier("constructor")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
@@ -980,9 +983,21 @@ class _ExpressionParser:
             global_names=scope_context.global_names,
         )
         body_lines = body_parser.parse()
+        prelude_lines: list[str] = []
+        if parent_constructor is not None:
+            if not is_constructor:
+                raise GMLTranspileError("Constructor inheritance requires a constructor function")
+            prelude_lines.append(
+                _emit_constructor_inheritance_line(
+                    parent_constructor,
+                    parameter_names,
+                    scope_context,
+                    self.scope_context,
+                )
+            )
         if static_declarations:
-            body_lines = [
-                *_emit_static_initialization_lines(
+            prelude_lines.extend(
+                _emit_static_initialization_lines(
                     static_scope_name,
                     static_scope_id,
                     static_declarations,
@@ -991,9 +1006,10 @@ class _ExpressionParser:
                     self.enum_values,
                     self.enum_names,
                     self.macro_values,
-                ),
-                *body_lines,
-            ]
+                )
+            )
+        if prelude_lines:
+            body_lines = [*prelude_lines, *body_lines]
         return _FunctionLiteral(
             name,
             tuple(parameters),
@@ -2297,6 +2313,30 @@ def _emit_static_initialization_lines(
         f"var {static_scope_name} = GMRuntime.gml_static_scope({json.dumps(static_scope_id)})",
         f"GMRuntime.gml_static_initialize({static_scope_name}, [{', '.join(initializers)}])",
     ]
+
+
+def _emit_constructor_inheritance_line(
+    parent_constructor: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+    constructor_scope_context: _ScopeContext,
+) -> str:
+    parent_expr = parent_constructor
+    args: tuple[_Expression, ...] = ()
+    if isinstance(parent_constructor, _Call):
+        parent_expr = parent_constructor.callee
+        args = parent_constructor.args
+
+    constructor = _emit_expression(
+        parent_expr,
+        local_names,
+        scope_context=constructor_scope_context,
+    )[0]
+    emitted_args = ", ".join(
+        _emit_expression(arg, local_names, scope_context=scope_context)[0]
+        for arg in args
+    )
+    return f"GMRuntime.gml_constructor_inherit(_gml_constructor_self, {constructor}, [{emitted_args}])"
 
 
 def _evaluate_enum_value_tokens(

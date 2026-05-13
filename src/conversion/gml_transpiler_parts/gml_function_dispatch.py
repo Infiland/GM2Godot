@@ -8,6 +8,7 @@ from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
+    _DRAW_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
@@ -172,6 +173,21 @@ _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
     "mp_grid_path": (7, 7),
 }
 
+_DRAW_ARITY: dict[str, tuple[int, int | None]] = {
+    "draw_set_color": (1, 1),
+    "draw_get_color": (0, 0),
+    "draw_set_alpha": (1, 1),
+    "draw_get_alpha": (0, 0),
+    "draw_set_line_width": (1, 1),
+    "draw_get_line_width": (0, 0),
+    "draw_clear": (1, 1),
+    "draw_line": (4, 4),
+    "draw_rectangle": (5, 5),
+    "draw_circle": (4, 4),
+    "draw_triangle": (7, 7),
+    "draw_point": (2, 2),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -281,6 +297,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         if name == "mp_grid_path":
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
+
+    for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _DRAW_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

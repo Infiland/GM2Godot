@@ -12,6 +12,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "45_collision_queries.gd",
     "46_motion_helpers.gd",
     "47_paths_motion_planning.gd",
+    "48_drawing_basic_forms.gd",
     "50_static_types_and_clone.gd",
     "60_conversion_helpers.gd",
     "70_handle_string_helpers.gd",

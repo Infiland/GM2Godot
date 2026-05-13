@@ -112,7 +112,10 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
     def test_draw_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 0}])
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn("func _draw():", content)
+        self.assertIn('GMRuntime.gml_draw_begin(self, "_draw")', content)
+        self.assertIn("GMRuntime.gml_draw_end()", content)
 
     def test_cleanup_event(self):
         content = generate_script_content([{"eventType": 12, "eventNum": 0}])

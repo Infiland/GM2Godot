@@ -44,6 +44,16 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "yprevious",
     "ystart",
 })
+_DRAW_RUNTIME_FUNCTIONS = frozenset({
+    "_draw",
+    "_on_draw_begin",
+    "_on_draw_end",
+    "_on_draw_gui",
+    "_on_draw_gui_begin",
+    "_on_draw_gui_end",
+    "_on_post_draw",
+    "_on_pre_draw",
+})
 _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "AnimatedSprite2D",
     "GMRuntime",
@@ -133,6 +143,10 @@ def _uses_object_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
 
 def _uses_motion_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
     return object_runtime is not None
+
+
+def _uses_draw_runtime(function_names: set[str]) -> bool:
+    return bool(function_names & _DRAW_RUNTIME_FUNCTIONS)
 
 
 def _get_function_body(func: EventMapping, code_bodies: _CodeBodies | None) -> str:
@@ -390,6 +404,14 @@ def _wrap_motion_process_body(body: str) -> str:
     return f"{body}\n{motion_line}"
 
 
+def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
+    begin_line = f'\tGMRuntime.gml_draw_begin(self, {_gd_string(func.godot_func)})'
+    end_line = "\tGMRuntime.gml_draw_end()"
+    if body.strip() == "pass":
+        return f"{begin_line}\n{end_line}"
+    return f"{begin_line}\n{body}\n{end_line}"
+
+
 def generate_script_content(
     event_list: Sequence[JsonDict] | None,
     code_bodies: _CodeBodies | None = None,
@@ -473,13 +495,14 @@ def generate_script_content(
 
         unique_functions = _deduplicate_functions(unique_functions + functions_to_add)
         function_names = {func.godot_func for func in unique_functions}
+    uses_draw_runtime = _uses_draw_runtime(function_names)
 
     # Sort by sort_key, then alphabetically for same key
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
     lines = [_extends_line(base_script_path)]
     runtime_const_inherited = base_script_path is not None and uses_object_runtime
-    if (_uses_gml_runtime(code_bodies) or uses_object_runtime) and not runtime_const_inherited:
+    if (_uses_gml_runtime(code_bodies) or uses_object_runtime or uses_draw_runtime) and not runtime_const_inherited:
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
@@ -515,6 +538,8 @@ def generate_script_content(
             body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
         if uses_motion_runtime and func.godot_func == "_process":
             body = _wrap_motion_process_body(body)
+        if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
+            body = _wrap_draw_runtime_body(func, body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

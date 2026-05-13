@@ -2228,6 +2228,27 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_mp_grid_path(grid, GMRuntime.gml_asset_get_index("path_patrol"), 0, 0, 48, 48, false)',
         )
 
+    def test_basic_draw_helpers_lower_to_runtime_context(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "draw_set_color(c_red); draw_set_alpha(0.5); draw_set_line_width(2); "
+                "draw_line(0, 0, 10, 10); draw_rectangle(0, 0, 8, 8, false); "
+                "draw_circle(4, 4, 2, true); draw_triangle(0, 0, 4, 0, 0, 4, false); "
+                "draw_point(1, 1); draw_clear(c_black); seen = draw_get_alpha();",
+                indent="",
+            ),
+            "GMRuntime.gml_draw_set_color(0x0000ff)\n"
+            "GMRuntime.gml_draw_set_alpha(0.5)\n"
+            "GMRuntime.gml_draw_set_line_width(2)\n"
+            "GMRuntime.gml_draw_line(0, 0, 10, 10)\n"
+            "GMRuntime.gml_draw_rectangle(0, 0, 8, 8, false)\n"
+            "GMRuntime.gml_draw_circle(4, 4, 2, true)\n"
+            "GMRuntime.gml_draw_triangle(0, 0, 4, 0, 0, 4, false)\n"
+            "GMRuntime.gml_draw_point(1, 1)\n"
+            "GMRuntime.gml_draw_clear(0x000000)\n"
+            "seen = GMRuntime.gml_draw_get_alpha()",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

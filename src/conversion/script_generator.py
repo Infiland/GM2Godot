@@ -81,6 +81,14 @@ class SpriteRuntimeConfig:
     sprite_scene_paths: Mapping[str, str] | None = None
 
 
+@dataclass(frozen=True)
+class ObjectRuntimeConfig:
+    object_name: str
+    parent_object_names: tuple[str, ...] = ()
+    inherit_ready: bool = False
+    inherit_exit_tree: bool = False
+
+
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
     return any("GMRuntime." in body for body in (code_bodies or {}).values())
 
@@ -97,6 +105,10 @@ def _uses_sprite_runtime(
         _SPRITE_RUNTIME_IDENTIFIER_RE.search(body) is not None
         for body in (code_bodies or {}).values()
     )
+
+
+def _uses_object_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
+    return object_runtime is not None
 
 
 def _get_function_body(func: EventMapping, code_bodies: _CodeBodies | None) -> str:
@@ -134,6 +146,10 @@ def _is_valid_gdscript_identifier(name: str) -> bool:
 
 def _gd_string(value: str) -> str:
     return json.dumps(value)
+
+
+def _gd_string_array(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_gd_string(value) for value in values) + "]"
 
 
 def _extends_line(base_script_path: str | None = None) -> str:
@@ -257,11 +273,64 @@ def _prepend_sprite_runtime_ready_body(body: str) -> str:
     return f"{init_body}\n{body}"
 
 
+def _emit_object_runtime_prelude(
+    lines: list[str],
+    object_runtime: ObjectRuntimeConfig,
+    *,
+    declare_members: bool,
+) -> None:
+    member_lines = (
+        "\n\nvar id = GMRuntime.gml_instance_noone()"
+        f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
+        "\nvar depth = 0"
+        if declare_members
+        else ""
+    )
+    lines.append(
+        member_lines
+        + "\n\nfunc _gm_register_instance():"
+        "\n\tif GMRuntime.gml_handle_is_valid(id):"
+        "\n\t\treturn"
+        f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
+        f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
+        "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
+        "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
+        "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"
+        "\n\tif has_meta(\"gamemaker_instance_object_name\"):"
+        "\n\t\tGMRuntime.gml_variable_instance_set(self, \"object_index\", GMRuntime.gml_asset_get_index(get_meta(\"gamemaker_instance_object_name\")))"
+        "\n\tif has_meta(\"gamemaker_instance_name\"):"
+        "\n\t\tGMRuntime.gml_variable_instance_set(self, \"name\", get_meta(\"gamemaker_instance_name\"))"
+        "\n\nfunc _gm_unregister_instance():"
+        "\n\tGMRuntime.gml_instance_unregister(id)\n"
+    )
+
+
+def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
+    init_lines = ["\t_gm_register_instance()"]
+    if object_runtime.inherit_ready and body.strip() == "pass":
+        init_lines.append("\tsuper._ready()")
+        return "\n".join(init_lines)
+    if body.strip() == "pass":
+        return "\n".join(init_lines)
+    return "\n".join(init_lines) + "\n" + body
+
+
+def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
+    cleanup_lines: list[str] = []
+    if object_runtime.inherit_exit_tree and body.strip() == "pass":
+        cleanup_lines.append("\tsuper._exit_tree()")
+    elif body.strip() != "pass":
+        cleanup_lines.append(body)
+    cleanup_lines.append("\t_gm_unregister_instance()")
+    return "\n".join(cleanup_lines)
+
+
 def generate_script_content(
     event_list: Sequence[JsonDict] | None,
     code_bodies: _CodeBodies | None = None,
     instance_variables: Iterable[str] | None = None,
     sprite_runtime: SpriteRuntimeConfig | None = None,
+    object_runtime: ObjectRuntimeConfig | None = None,
     base_script_path: str | None = None,
 ) -> str:
     """Generate .gd script content with function stubs for each event.
@@ -279,6 +348,7 @@ def generate_script_content(
             names to declare as GDScript member variables.
         sprite_runtime: Optional sprite runtime configuration for GameMaker
             sprite_index and image_index compatibility.
+        object_runtime: Optional object instance registry configuration.
         base_script_path: Optional converted parent object script path to
             extend for GameMaker object inheritance.
 
@@ -286,7 +356,8 @@ def generate_script_content(
         Complete .gd file content as a string.
     """
     uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
-    if not event_list and not uses_sprite_runtime:
+    uses_object_runtime = _uses_object_runtime(object_runtime)
+    if not event_list and not uses_sprite_runtime and not uses_object_runtime:
         return _extends_line(base_script_path)
 
     functions: list[EventMapping] = []
@@ -309,6 +380,15 @@ def generate_script_content(
     if uses_sprite_runtime and "_ready" not in function_names:
         unique_functions = _deduplicate_functions(unique_functions + [EventMapping("_ready", "", 0, "")])
         function_names = {func.godot_func for func in unique_functions}
+    if uses_object_runtime:
+        required_functions: list[EventMapping] = []
+        if "_ready" not in function_names:
+            required_functions.append(EventMapping("_ready", "", 0, ""))
+        if "_exit_tree" not in function_names:
+            required_functions.append(EventMapping("_exit_tree", "", 5, ""))
+        if required_functions:
+            unique_functions = _deduplicate_functions(unique_functions + required_functions)
+            function_names = {func.godot_func for func in unique_functions}
     script_features = get_script_features()
 
     for feature in script_features:
@@ -330,7 +410,8 @@ def generate_script_content(
     unique_functions.sort(key=lambda f: (f.sort_key, f.godot_func))
 
     lines = [_extends_line(base_script_path)]
-    if _uses_gml_runtime(code_bodies):
+    runtime_const_inherited = base_script_path is not None and uses_object_runtime
+    if (_uses_gml_runtime(code_bodies) or uses_object_runtime) and not runtime_const_inherited:
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
@@ -338,6 +419,12 @@ def generate_script_content(
             emit_prelude(lines, function_names)
     if uses_sprite_runtime and sprite_runtime is not None:
         _emit_sprite_runtime_prelude(lines, sprite_runtime)
+    if uses_object_runtime and object_runtime is not None:
+        _emit_object_runtime_prelude(
+            lines,
+            object_runtime,
+            declare_members=base_script_path is None,
+        )
     for variable_name in _valid_instance_variables(instance_variables):
         lines.append(f"\n\nvar {variable_name}\n")
 
@@ -349,6 +436,10 @@ def generate_script_content(
                 body = wrap_body(func, body, function_names)
         if uses_sprite_runtime and func.godot_func == "_ready":
             body = _prepend_sprite_runtime_ready_body(body)
+        if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
+            body = _wrap_object_runtime_ready_body(body, object_runtime)
+        if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
+            body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

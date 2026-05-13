@@ -400,3 +400,15 @@ _ASSET_RUNTIME_FUNCTIONS = {
     "asset_get_index_from_id": "gml_asset_get_index_from_id",
     "asset_has_any_tag": "gml_asset_has_any_tag",
 }
+
+_INSTANCE_RUNTIME_FUNCTIONS = {
+    "instance_create_layer": "gml_instance_create_layer",
+    "instance_create_depth": "gml_instance_create_depth",
+    "instance_destroy": "gml_instance_destroy",
+    "instance_exists": "gml_instance_exists",
+    "instance_find": "gml_instance_find",
+    "instance_number": "gml_instance_number",
+    "instance_nearest": "gml_instance_nearest",
+    "instance_furthest": "gml_instance_furthest",
+    "instance_id_get": "gml_instance_id_get",
+}

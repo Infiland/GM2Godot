@@ -82,8 +82,8 @@ class GMLMethod:
 		function_value = method_function
 		is_constructor = bool(method_is_constructor)
 
-	func callv(args):
-		if bound_self is Object and is_method(function_value):
+	func gml_callv(args):
+		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE:
 			var method_name = function_value.get_method()
 			if str(method_name) != "":
 				return Callable(bound_self, method_name).callv(args)
@@ -108,6 +108,11 @@ static var _gml_handle_registry = {}
 static var _gml_handle_next_indices = {}
 static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
+static var _gml_instance_entries = {}
+static var _gml_instance_handles_by_node_id = {}
+static var _gml_instance_ids_by_object = {}
+static var _gml_instance_ids_by_object_name = {}
+static var _gml_instance_creation_counter = 0
 static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_static_named_scopes = {}
@@ -231,5 +236,3 @@ static func is_nan_value(value):
 
 static func is_infinity(value):
 	return is_number(value) and is_inf(float(value))
-
-

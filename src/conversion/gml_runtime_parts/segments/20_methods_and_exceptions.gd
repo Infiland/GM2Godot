@@ -4,7 +4,7 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	var call_args = _gml_method_call_args(array_args, offset, num_args)
 	if is_undefined(call_args):
 		return call_args
-	return method.callv(call_args)
+	return method.gml_callv(call_args)
 
 
 static func gml_method(scope, func_or_method, method_is_constructor = false):
@@ -134,5 +134,4 @@ static func _gml_method_call_args(array_args, offset, num_args):
 		index += step
 		remaining -= 1
 	return args
-
 

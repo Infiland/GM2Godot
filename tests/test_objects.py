@@ -503,7 +503,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertTrue(content.startswith("extends Node2D"))
 
     def test_script_with_no_events(self):
-        """Object with empty eventList produces minimal script."""
+        """Object with empty eventList still registers with the runtime instance registry."""
         self._setup_object("o_empty", event_list=[])
         converter = self._make_converter()
         converter.convert_all()
@@ -511,7 +511,24 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_empty", "o_empty.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertEqual(content, "extends Node2D\n")
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
+        self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
+        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
+        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+
+    def test_script_registers_parent_object_chain(self):
+        self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_child", event_list=[], parent_object_name="o_parent")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
+        self.assertIn("func _ready():\n\t_gm_register_instance()\n\tsuper._ready()", content)
 
     def test_script_with_create_event(self):
         """eventType 0 should produce func _ready()."""
@@ -523,7 +540,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertIn("func _ready():", content)
-        self.assertIn("pass", content)
+        self.assertIn("\t_gm_register_instance()", content)
 
     def test_script_transpiles_create_event_gml_body(self):
         """Simple expression/operator GML bodies should populate event functions."""

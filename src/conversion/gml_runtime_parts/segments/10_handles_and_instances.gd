@@ -44,6 +44,117 @@ static func gml_instance_all():
 	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)
 
 
+static func gml_instance_register(instance, object_selector = null, parent_selectors = []):
+	if instance == null:
+		return gml_instance_noone()
+	var existing_handle = _gml_instance_handle_for_node(instance)
+	if gml_handle_is_valid(existing_handle):
+		return existing_handle
+	var object_id = _gml_object_selector_id(object_selector)
+	var object_name = _gml_object_selector_name(object_selector)
+	var handle = gml_handle_register(GML_INSTANCE_HANDLE_KIND, instance, object_name)
+	var selector_ids = _gml_object_selector_id_array([object_selector] + parent_selectors)
+	var selector_names = _gml_object_selector_name_array([object_selector] + parent_selectors)
+	var entry = {
+		"handle": handle,
+		"instance": instance,
+		"object_id": object_id,
+		"object_name": object_name,
+		"selector_ids": selector_ids,
+		"selector_names": selector_names,
+		"destroyed": false,
+		"creation_order": _gml_instance_creation_counter
+	}
+	_gml_instance_creation_counter += 1
+	_gml_instance_entries[handle.index] = entry
+	if instance is Object:
+		_gml_instance_handles_by_node_id[instance.get_instance_id()] = handle
+		_gml_instance_set_meta(instance, "_gm2godot_instance_id", handle.index)
+	for selector_id in selector_ids:
+		_gml_instance_index_add(_gml_instance_ids_by_object, selector_id, handle.index)
+	for selector_name in selector_names:
+		_gml_instance_index_add(_gml_instance_ids_by_object_name, selector_name, handle.index)
+	_gml_builtin_globals["instance_count"] = _gml_live_instance_entries().size()
+	return handle
+
+
+static func gml_instance_unregister(instance_or_handle):
+	var entry = _gml_instance_entry(instance_or_handle)
+	if entry == null:
+		return false
+	entry["destroyed"] = true
+	var handle = entry["handle"]
+	var instance = entry["instance"]
+	_gml_instance_entries.erase(handle.index)
+	if instance is Object:
+		_gml_instance_handles_by_node_id.erase(instance.get_instance_id())
+	for selector_id in entry["selector_ids"]:
+		_gml_instance_index_remove(_gml_instance_ids_by_object, selector_id, handle.index)
+	for selector_name in entry["selector_names"]:
+		_gml_instance_index_remove(_gml_instance_ids_by_object_name, selector_name, handle.index)
+	gml_handle_invalidate(handle)
+	_gml_builtin_globals["instance_count"] = _gml_live_instance_entries().size()
+	return true
+
+
+static func gml_instance_destroy(target = null):
+	var destroy_target = target if target != null else gml_instance_noone()
+	for instance in gml_with_targets(destroy_target):
+		var entry = _gml_instance_entry(instance)
+		if entry == null or entry["destroyed"]:
+			continue
+		entry["destroyed"] = true
+		if instance != null and instance.has_method("_on_destroy"):
+			instance.call("_on_destroy")
+		gml_instance_unregister(entry["handle"])
+		if instance is Node and instance.is_inside_tree():
+			instance.queue_free()
+	return null
+
+
+static func gml_instance_exists(target):
+	return gml_with_targets(target).size() > 0
+
+
+static func gml_instance_find(target, index):
+	var targets = gml_with_targets(target)
+	var target_index = int(_to_real(index))
+	if target_index < 0 or target_index >= targets.size():
+		return gml_instance_noone()
+	var entry = _gml_instance_entry(targets[target_index])
+	if entry == null:
+		return gml_instance_noone()
+	return entry["handle"]
+
+
+static func gml_instance_number(target):
+	return gml_with_targets(target).size()
+
+
+static func gml_instance_id_get(index):
+	var entries = _gml_live_instance_entries()
+	var target_index = int(_to_real(index))
+	if target_index < 0 or target_index >= entries.size():
+		return gml_instance_noone()
+	return entries[target_index]["handle"]
+
+
+static func gml_instance_nearest(x, y, target):
+	return _gml_instance_distance_extreme(x, y, target, true)
+
+
+static func gml_instance_furthest(x, y, target):
+	return _gml_instance_distance_extreme(x, y, target, false)
+
+
+static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):
+	return _gml_instance_create_at(x, y, layer, null, object_selector, current_self)
+
+
+static func gml_instance_create_depth(x, y, depth_value, object_selector, current_self = null):
+	return _gml_instance_create_at(x, y, null, depth_value, object_selector, current_self)
+
+
 static func gml_with_targets(target, current_self = null, current_other = null):
 	if is_undefined(target):
 		return []
@@ -54,6 +165,9 @@ static func gml_with_targets(target, current_self = null, current_other = null):
 		var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, current_self, current_other)
 		if keyword_targets != null:
 			return keyword_targets
+	var selector_targets = _gml_instance_selector_targets(target)
+	if selector_targets != null:
+		return selector_targets
 	var resolved_instance = _gml_resolve_instance(target)
 	if resolved_instance == null:
 		return []
@@ -129,5 +243,4 @@ static func gml_handle_invalidate(handle):
 		handle.value = _gml_encode_handle_value(handle.type_id, handle.index)
 		_gml_handle_registry.erase(old_key)
 	return handle
-
 

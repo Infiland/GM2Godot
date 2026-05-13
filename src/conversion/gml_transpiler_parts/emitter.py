@@ -71,6 +71,17 @@ _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_furthest": frozenset({2}),
 }
 
+_COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
+    "place_meeting": frozenset({2}),
+    "position_meeting": frozenset({2}),
+    "instance_place": frozenset({2}),
+    "instance_position": frozenset({2}),
+    "collision_point": frozenset({2}),
+    "collision_rectangle": frozenset({4}),
+    "collision_line": frozenset({4}),
+    "collision_circle": frozenset({3}),
+}
+
 
 def _emit_name(
     value: str,
@@ -443,6 +454,7 @@ def _emit_descriptor_call(
 
     if descriptor.lowering_kind in {
         "runtime_append_self",
+        "runtime_collision_api",
         "runtime_instance_api",
         "runtime_self_default",
     }:
@@ -452,6 +464,8 @@ def _emit_descriptor_call(
             local_names,
             scope_context=scope_context,
         )
+        if descriptor.lowering_kind == "runtime_collision_api":
+            emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_append_self":
             emitted_args.append(scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_self_default" and not emitted_args:
@@ -491,7 +505,9 @@ def _emit_instance_api_args(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> list[str]:
-    selector_indices = _INSTANCE_SELECTOR_ARG_INDICES.get(descriptor.name, frozenset())
+    selector_indices = _INSTANCE_SELECTOR_ARG_INDICES.get(descriptor.name)
+    if selector_indices is None:
+        selector_indices = _COLLISION_SELECTOR_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in selector_indices:

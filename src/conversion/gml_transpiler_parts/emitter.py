@@ -6,7 +6,6 @@ from typing import Iterable
 
 from .constants import (
     _ARITHMETIC_RUNTIME_FUNCTIONS,
-    _ARRAY_RUNTIME_FUNCTIONS,
     _BINARY_PRECEDENCE,
     _BITWISE_RUNTIME_FUNCTIONS,
     _BOOLEAN_RESULT_BINARY_OPERATORS,
@@ -15,7 +14,6 @@ from .constants import (
     _BUILTIN_GLOBAL_VARIABLES,
     _BUILTIN_INSTANCE_VARIABLES,
     _DIRECT_MEMBER_TARGETS,
-    _DS_MAP_RUNTIME_FUNCTIONS,
     _GML_BUILTIN_CONSTANT_IDENTIFIERS,
     _GML_LITERAL_IDENTIFIERS,
     _INSTANCE_NAME_REPLACEMENTS,
@@ -24,13 +22,15 @@ from .constants import (
     _POSTFIX_PRECEDENCE,
     _PRIMARY_PRECEDENCE,
     _RIGHT_ASSOCIATIVE,
-    _RUNTIME_FUNCTIONS,
-    _STRUCT_RUNTIME_FUNCTIONS,
     _TERNARY_PRECEDENCE,
     _UNARY_PRECEDENCE,
-    _VARIABLE_RUNTIME_FUNCTIONS,
     _VIRTUAL_KEY_ACTIONS,
     _VIRTUAL_KEY_CONSTANTS,
+)
+from .gml_function_dispatch import (
+    GMLFunctionDescriptor,
+    get_gml_function_descriptor,
+    validate_gml_function_arity,
 )
 from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
 from .identifiers import _is_plain_identifier, _sanitize_gdscript_identifier
@@ -354,89 +354,86 @@ def _emit_builtin_call(
     scope_context: _ScopeContext | None = None,
 ) -> str | None:
     scope_context = _normalize_scope_context(scope_context)
-    if isinstance(expr.callee, _Name) and expr.callee.value == "keyboard_check" and len(expr.args) == 1:
-        key = expr.args[0]
+    if not isinstance(expr.callee, _Name):
+        return None
+
+    descriptor = get_gml_function_descriptor(expr.callee.value)
+    if descriptor is not None:
+        return _emit_descriptor_call(
+            descriptor,
+            expr.args,
+            local_names,
+            scope_context=scope_context,
+        )
+
+    diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
+    if diagnostic is not None:
+        raise GMLTranspileError(diagnostic)
+    return None
+
+
+def _emit_descriptor_call(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    arity_diagnostic = validate_gml_function_arity(descriptor, len(args))
+    if arity_diagnostic is not None:
+        raise GMLTranspileError(arity_diagnostic)
+
+    if descriptor.lowering_kind == "keyboard_check":
+        key = args[0]
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
             return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
         if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
             return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
-    if isinstance(expr.callee, _Name) and expr.callee.value == "method" and len(expr.args) == 2:
-        scope = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
+        raise GMLTranspileError(
+            "GML API 'keyboard_check' currently supports mapped vk_* constants only; "
+            f"tracked by #{descriptor.issue_number}."
+        )
+
+    if descriptor.lowering_kind == "method":
+        scope = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
         if scope == _NAME_REPLACEMENTS["undefined"]:
             scope = scope_context.self_expression
         function_value = _emit_expression(
-            expr.args[1],
+            args[1],
             local_names,
             scope_context=scope_context,
         )[0]
-        return f"GMRuntime.gml_method({scope}, {function_value})"
-    if isinstance(expr.callee, _Name) and expr.callee.value == "with_targets" and len(expr.args) == 1:
+        return f"GMRuntime.{descriptor.lowering_target}({scope}, {function_value})"
+
+    if descriptor.lowering_kind == "with_targets":
         target = _emit_instance_keyword_argument(
-            expr.args[0],
+            args[0],
             local_names,
             scope_context=scope_context,
         )
-        return f"GMRuntime.gml_with_targets({target})"
-    if (
-        isinstance(expr.callee, _Name)
-        and expr.callee.value == "show_debug_message"
-        and len(expr.args) == 1
-    ):
-        arg = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
-        return f"print({arg})"
-    if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
-        )
-        return f"GMRuntime.{_STRUCT_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
-    if (
-        isinstance(expr.callee, _Name)
-        and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS
-        and expr.callee.value.startswith("variable_instance_")
-        and expr.args
-    ):
+        return f"GMRuntime.{descriptor.lowering_target}({target})"
+
+    if descriptor.lowering_kind == "print":
+        arg = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
+        return f"{descriptor.lowering_target}({arg})"
+
+    if descriptor.lowering_kind == "runtime_instance_keyword_first_arg":
         first_arg = _emit_instance_keyword_argument(
-            expr.args[0],
+            args[0],
             local_names,
             scope_context=scope_context,
         )
         remaining_args = [
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args[1:]
+            for arg in args[1:]
         ]
-        args = ", ".join([first_arg, *remaining_args])
-        return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
-    if isinstance(expr.callee, _Name) and expr.callee.value in _VARIABLE_RUNTIME_FUNCTIONS:
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
-        )
-        return f"GMRuntime.{_VARIABLE_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
-    if isinstance(expr.callee, _Name) and expr.callee.value in _DS_MAP_RUNTIME_FUNCTIONS:
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
-        )
-        return f"GMRuntime.{_DS_MAP_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
-    if isinstance(expr.callee, _Name) and expr.callee.value in _ARRAY_RUNTIME_FUNCTIONS:
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
-        )
-        return f"GMRuntime.{_ARRAY_RUNTIME_FUNCTIONS[expr.callee.value]}({args})"
-    if (
-        isinstance(expr.callee, _Name)
-        and expr.callee.value in _RUNTIME_FUNCTIONS
-        and len(expr.args) == 1
-    ):
-        arg = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.{_RUNTIME_FUNCTIONS[expr.callee.value]}({arg})"
-    if isinstance(expr.callee, _Name):
-        diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
-        if diagnostic is not None:
-            raise GMLTranspileError(diagnostic)
-    return None
+        emitted_args = ", ".join([first_arg, *remaining_args])
+        return f"GMRuntime.{descriptor.lowering_target}({emitted_args})"
+
+    emitted_args = ", ".join(
+        _emit_expression(arg, local_names, scope_context=scope_context)[0]
+        for arg in args
+    )
+    return f"GMRuntime.{descriptor.lowering_target}({emitted_args})"
 
 
 def _emit_instance_keyword_argument(

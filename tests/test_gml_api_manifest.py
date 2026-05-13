@@ -13,10 +13,13 @@ from src.conversion.gml_transpiler import (
     diagnostic_for_unimplemented_gml_api,
     generate_gml_api_compatibility_report,
     get_gml_api_entry,
+    get_gml_function_descriptor,
     godot_docs_root,
     is_known_gml_api,
     iter_gml_api_entries,
+    iter_gml_function_descriptors,
     transpile_gml_expression,
+    validate_gml_function_arity,
 )
 
 
@@ -76,9 +79,55 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("draw_sprite", diagnostic)
         self.assertIn("#491", diagnostic)
 
+    def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
+        descriptor = get_gml_function_descriptor("array_push")
+
+        self.assertIsNotNone(descriptor)
+        assert descriptor is not None
+        self.assertEqual(descriptor.category, "Arrays")
+        self.assertEqual(descriptor.min_args, 2)
+        self.assertIsNone(descriptor.max_args)
+        self.assertEqual(descriptor.lowering_kind, "runtime")
+        self.assertEqual(descriptor.lowering_target, "gml_array_push")
+        self.assertEqual(descriptor.issue_url, "https://github.com/Infiland/GM2Godot/issues/502")
+
+    def test_function_descriptors_cover_current_implemented_call_helpers(self):
+        descriptor_names = {descriptor.name for descriptor in iter_gml_function_descriptors()}
+
+        for name in (
+            "array_push",
+            "bool",
+            "keyboard_check",
+            "method",
+            "show_debug_message",
+            "struct_get",
+            "variable_instance_get",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, descriptor_names)
+
+    def test_function_descriptor_arity_validation_is_deterministic(self):
+        descriptor = get_gml_function_descriptor("struct_set")
+
+        self.assertIsNotNone(descriptor)
+        assert descriptor is not None
+        diagnostic = validate_gml_function_arity(descriptor, 2)
+
+        self.assertIsNotNone(diagnostic)
+        assert diagnostic is not None
+        self.assertIn("struct_set", diagnostic)
+        self.assertIn("expects 3", diagnostic)
+        self.assertIn("#483", diagnostic)
+
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
         with self.assertRaisesRegex(GMLTranspileError, "draw_sprite.*#491"):
             transpile_gml_expression("draw_sprite(spr_player, 0, x, y)")
+
+    def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
+        with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):
+            transpile_gml_expression("real()")
+        with self.assertRaisesRegex(GMLTranspileError, "array_push.*at least 2.*got 1"):
+            transpile_gml_expression("array_push(items)")
 
     def test_unknown_project_local_function_calls_still_pass_through(self):
         self.assertEqual(

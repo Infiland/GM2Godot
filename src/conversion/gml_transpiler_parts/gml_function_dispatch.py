@@ -1,0 +1,216 @@
+# pyright: reportPrivateUsage=false
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, TypeAlias
+
+from .constants import (
+    _ARRAY_RUNTIME_FUNCTIONS,
+    _DS_MAP_RUNTIME_FUNCTIONS,
+    _RUNTIME_FUNCTIONS,
+    _STRUCT_RUNTIME_FUNCTIONS,
+    _VARIABLE_RUNTIME_FUNCTIONS,
+)
+from .gml_api_manifest import get_gml_api_entry
+
+GMLFunctionLoweringKind: TypeAlias = Literal[
+    "keyboard_check",
+    "method",
+    "print",
+    "runtime",
+    "runtime_instance_keyword_first_arg",
+    "with_targets",
+]
+
+
+@dataclass(frozen=True)
+class GMLFunctionDescriptor:
+    name: str
+    category: str
+    min_args: int
+    max_args: int | None
+    lowering_kind: GMLFunctionLoweringKind
+    lowering_target: str
+    issue_number: int
+    docs_url: str
+
+    @property
+    def issue_url(self) -> str:
+        return f"https://github.com/Infiland/GM2Godot/issues/{self.issue_number}"
+
+    def arity_description(self) -> str:
+        if self.max_args is None:
+            return f"at least {self.min_args}"
+        if self.min_args == self.max_args:
+            return str(self.min_args)
+        return f"{self.min_args} to {self.max_args}"
+
+
+_DEFAULT_CATEGORY = "Runtime Function Dispatch"
+_DEFAULT_ISSUE_NUMBER = 483
+_DEFAULT_DOCS_URL = (
+    "https://manual.gamemaker.io/monthly/en/"
+    "GameMaker_Language/GML_Reference/GML_Reference.htm"
+)
+
+_STRUCT_ARITY: dict[str, tuple[int, int | None]] = {
+    "struct_exists": (2, 2),
+    "struct_get": (2, 2),
+    "struct_get_names": (1, 1),
+    "struct_names_count": (1, 1),
+    "struct_set": (3, 3),
+    "struct_remove": (2, 2),
+    "struct_foreach": (2, 2),
+    "static_get": (1, 1),
+    "static_set": (2, 2),
+    "is_instanceof": (2, 2),
+    "instanceof": (1, 1),
+    "variable_get_hash": (1, 1),
+    "struct_get_from_hash": (2, 2),
+    "struct_set_from_hash": (3, 3),
+    "struct_exists_from_hash": (2, 2),
+    "struct_remove_from_hash": (2, 2),
+}
+
+_VARIABLE_ARITY: dict[str, tuple[int, int | None]] = {
+    "method_call": (1, 4),
+    "method": (2, 2),
+    "ref_create": (2, 3),
+    "variable_clone": (1, 2),
+    "variable_instance_exists": (2, 2),
+    "variable_instance_get": (2, 2),
+    "variable_instance_set": (3, 3),
+    "variable_instance_get_names": (1, 1),
+    "variable_instance_names_count": (1, 1),
+    "variable_global_exists": (1, 1),
+    "variable_global_get": (1, 1),
+    "variable_global_set": (2, 2),
+    "variable_struct_get": (2, 2),
+}
+
+_DS_MAP_ARITY: dict[str, tuple[int, int | None]] = {
+    "ds_map_exists": (2, 2),
+    "ds_map_find_value": (2, 2),
+}
+
+_ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
+    "array_equals": (2, 2),
+    "array_push": (2, None),
+}
+
+
+def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
+    return _GML_FUNCTION_DESCRIPTORS.get(name)
+
+
+def iter_gml_function_descriptors() -> tuple[GMLFunctionDescriptor, ...]:
+    return tuple(_GML_FUNCTION_DESCRIPTORS.values())
+
+
+def validate_gml_function_arity(
+    descriptor: GMLFunctionDescriptor,
+    arg_count: int,
+) -> str | None:
+    if arg_count < descriptor.min_args:
+        return _arity_error(descriptor, arg_count)
+    if descriptor.max_args is not None and arg_count > descriptor.max_args:
+        return _arity_error(descriptor, arg_count)
+    return None
+
+
+def _arity_error(descriptor: GMLFunctionDescriptor, arg_count: int) -> str:
+    return (
+        f"GML API '{descriptor.name}' expects {descriptor.arity_description()} "
+        f"argument(s), got {arg_count}; tracked by #{descriptor.issue_number}."
+    )
+
+
+def _descriptor(
+    name: str,
+    min_args: int,
+    max_args: int | None,
+    lowering_kind: GMLFunctionLoweringKind,
+    lowering_target: str,
+) -> GMLFunctionDescriptor:
+    manifest_entry = get_gml_api_entry(name)
+    return GMLFunctionDescriptor(
+        name=name,
+        category=manifest_entry.category if manifest_entry is not None else _DEFAULT_CATEGORY,
+        min_args=min_args,
+        max_args=max_args,
+        lowering_kind=lowering_kind,
+        lowering_target=lowering_target,
+        issue_number=(
+            manifest_entry.issue_number if manifest_entry is not None else _DEFAULT_ISSUE_NUMBER
+        ),
+        docs_url=manifest_entry.docs_url if manifest_entry is not None else _DEFAULT_DOCS_URL,
+    )
+
+
+def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
+    descriptors: dict[str, GMLFunctionDescriptor] = {}
+
+    for name, target in _RUNTIME_FUNCTIONS.items():
+        if name == "with_targets":
+            continue
+        descriptors[name] = _descriptor(name, 1, 1, "runtime", target)
+
+    for name, target in _STRUCT_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _STRUCT_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _VARIABLE_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _VARIABLE_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _DS_MAP_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _DS_MAP_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _ARRAY_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _ARRAY_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    descriptors["keyboard_check"] = _descriptor(
+        "keyboard_check",
+        1,
+        1,
+        "keyboard_check",
+        "Input",
+    )
+    descriptors["method"] = _descriptor("method", 2, 2, "method", "gml_method")
+    descriptors["with_targets"] = _descriptor(
+        "with_targets",
+        1,
+        1,
+        "with_targets",
+        "gml_with_targets",
+    )
+    descriptors["show_debug_message"] = _descriptor(
+        "show_debug_message",
+        1,
+        1,
+        "print",
+        "print",
+    )
+
+    for name in (
+        "variable_instance_exists",
+        "variable_instance_get",
+        "variable_instance_set",
+        "variable_instance_get_names",
+        "variable_instance_names_count",
+    ):
+        current = descriptors[name]
+        descriptors[name] = _descriptor(
+            current.name,
+            current.min_args,
+            current.max_args,
+            "runtime_instance_keyword_first_arg",
+            current.lowering_target,
+        )
+
+    return descriptors
+
+
+_GML_FUNCTION_DESCRIPTORS = _build_function_descriptors()

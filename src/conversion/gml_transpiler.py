@@ -22,6 +22,12 @@ from src.conversion.gml_transpiler_parts.gml_api_manifest import (
     is_known_gml_api,
     iter_gml_api_entries,
 )
+from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
+    GMLFunctionDescriptor,
+    get_gml_function_descriptor,
+    iter_gml_function_descriptors,
+    validate_gml_function_arity,
+)
 from src.conversion.gml_transpiler_parts.model import (
     GMLTranspileError,
     _ArrayLiteral,
@@ -55,6 +61,7 @@ __all__ = [
     "GMLTranspileError",
     "GMLAPICategoryReport",
     "GMLAPIEntry",
+    "GMLFunctionDescriptor",
     "_ArrayLiteral",
     "_Binary",
     "_BuiltinVariableMetadata",
@@ -88,10 +95,13 @@ __all__ = [
     "diagnostic_for_unimplemented_gml_api",
     "generate_gml_api_compatibility_report",
     "get_gml_api_entry",
+    "get_gml_function_descriptor",
     "godot_docs_root",
     "is_known_gml_api",
     "iter_gml_api_entries",
+    "iter_gml_function_descriptors",
     "transpile_gml_code",
     "transpile_gml_condition",
     "transpile_gml_expression",
+    "validate_gml_function_arity",
 ]

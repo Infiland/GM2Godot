@@ -278,6 +278,38 @@ RUNTIME_VALUE_PARITY_CASES = (
         'GMRuntime.gml_instance_furthest(position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
     ),
     RuntimeValueParityCase("instance_id_get(0)", "GMRuntime.gml_instance_id_get(0)"),
+    RuntimeValueParityCase(
+        "place_meeting(x, y, o_enemy)",
+        'GMRuntime.gml_place_meeting(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "position_meeting(target_x, target_y, all)",
+        "GMRuntime.gml_position_meeting(self, target_x, target_y, GMRuntime.gml_instance_all())",
+    ),
+    RuntimeValueParityCase(
+        "instance_place(x, y, o_enemy)",
+        'GMRuntime.gml_instance_place(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_position(target_x, target_y, o_enemy)",
+        'GMRuntime.gml_instance_position(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "collision_point(target_x, target_y, o_enemy, true, true)",
+        'GMRuntime.gml_collision_point(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_enemy"), true, true)',
+    ),
+    RuntimeValueParityCase(
+        "collision_rectangle(0, 0, 10, 10, o_enemy, false, true)",
+        'GMRuntime.gml_collision_rectangle(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_enemy"), false, true)',
+    ),
+    RuntimeValueParityCase(
+        "collision_line(0, 0, 10, 10, o_enemy)",
+        'GMRuntime.gml_collision_line(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "collision_circle(4, 5, 8, o_enemy, false, false)",
+        'GMRuntime.gml_collision_circle(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_enemy"), false, false)',
+    ),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_selector_get(mystruct, "a")'),
@@ -541,6 +573,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_instance_create_layer",
             "gml_instance_create_depth",
             "gml_with_targets",
+            "gml_place_meeting",
+            "gml_position_meeting",
+            "gml_instance_place",
+            "gml_instance_position",
+            "gml_collision_point",
+            "gml_collision_rectangle",
+            "gml_collision_line",
+            "gml_collision_circle",
             "gml_selector_get",
             "gml_selector_exists",
             "gml_selector_set",
@@ -807,6 +847,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_collision_queries_use_generated_shape_bounds(self):
+        self.assertIn("static func gml_place_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_position_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_place(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_position(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_point(current_self, x, y, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_rectangle(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_line(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_circle(current_self, x, y, radius, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("push_warning(\"GML precise collision masks are approximated with generated collision shape bounds\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("if node is CollisionShape2D:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if shape is RectangleShape2D:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if shape is CircleShape2D:", GML_RUNTIME_SCRIPT)
+        self.assertIn("if query_rect.intersects(target_rect, true):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_collision_segments_intersect(start, finish, top_left, top_right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return center.distance_squared_to(Vector2(nearest_x, nearest_y)) <= radius * radius", GML_RUNTIME_SCRIPT)
 
     def test_runtime_converts_and_parses_handle_strings(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)

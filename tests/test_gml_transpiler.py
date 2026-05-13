@@ -2127,6 +2127,42 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_selector_set(enemy_id, "hp", 10)',
         )
 
+    def test_collision_queries_pass_self_and_selector_arguments(self):
+        asset_names = {"o_wall"}
+
+        self.assertEqual(
+            transpile_gml_expression("place_meeting(x, y, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_place_meeting(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("position_meeting(target_x, target_y, all)", asset_names=asset_names),
+            "GMRuntime.gml_position_meeting(self, target_x, target_y, GMRuntime.gml_instance_all())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_place(x + 1, y, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_instance_place(self, GMRuntime.gml_add(position.x, 1), position.y, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_position(target_x, target_y, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_instance_position(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_point(target_x, target_y, o_wall, true, true)", asset_names=asset_names),
+            'GMRuntime.gml_collision_point(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_wall"), true, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_rectangle(0, 0, 10, 10, o_wall, false, true)", asset_names=asset_names),
+            'GMRuntime.gml_collision_rectangle(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_wall"), false, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_line(0, 0, 10, 10, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_collision_line(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_circle(4, 5, 8, o_wall, false, false)", asset_names=asset_names),
+            'GMRuntime.gml_collision_circle(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false)',
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

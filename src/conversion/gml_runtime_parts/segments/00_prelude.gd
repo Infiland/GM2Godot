@@ -113,6 +113,7 @@ static var _gml_instance_handles_by_node_id = {}
 static var _gml_instance_ids_by_object = {}
 static var _gml_instance_ids_by_object_name = {}
 static var _gml_instance_creation_counter = 0
+static var _gml_collision_precise_warning_emitted = false
 static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_static_named_scopes = {}

@@ -7,6 +7,7 @@ from typing import Literal, TypeAlias
 from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
+    _COLLISION_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
@@ -21,6 +22,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "print",
     "runtime",
     "runtime_append_self",
+    "runtime_collision_api",
     "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
     "runtime_self_default",
@@ -124,6 +126,17 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
     "instance_id_get": (1, 1),
 }
 
+_COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
+    "place_meeting": (3, 3),
+    "position_meeting": (3, 3),
+    "instance_place": (3, 3),
+    "instance_position": (3, 3),
+    "collision_point": (3, 5),
+    "collision_rectangle": (5, 7),
+    "collision_line": (5, 7),
+    "collision_circle": (4, 6),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -209,6 +222,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         elif name == "instance_destroy":
             lowering_kind = "runtime_self_default"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
+
+    for name, target in _COLLISION_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _COLLISION_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime_collision_api", target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

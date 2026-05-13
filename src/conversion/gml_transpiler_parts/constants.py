@@ -412,3 +412,14 @@ _INSTANCE_RUNTIME_FUNCTIONS = {
     "instance_furthest": "gml_instance_furthest",
     "instance_id_get": "gml_instance_id_get",
 }
+
+_COLLISION_RUNTIME_FUNCTIONS = {
+    "place_meeting": "gml_place_meeting",
+    "position_meeting": "gml_position_meeting",
+    "instance_place": "gml_instance_place",
+    "instance_position": "gml_instance_position",
+    "collision_point": "gml_collision_point",
+    "collision_rectangle": "gml_collision_rectangle",
+    "collision_line": "gml_collision_line",
+    "collision_circle": "gml_collision_circle",
+}

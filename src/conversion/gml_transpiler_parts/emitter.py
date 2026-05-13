@@ -455,6 +455,7 @@ def _emit_descriptor_call(
         "runtime_append_self",
         "runtime_collision_api",
         "runtime_instance_api",
+        "runtime_motion_api",
         "runtime_self_default",
     }:
         emitted_args = _emit_instance_api_args(
@@ -464,6 +465,8 @@ def _emit_descriptor_call(
             scope_context=scope_context,
         )
         if descriptor.lowering_kind == "runtime_collision_api":
+            emitted_args.insert(0, scope_context.self_expression)
+        if descriptor.lowering_kind == "runtime_motion_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_append_self":
             emitted_args.append(scope_context.self_expression)

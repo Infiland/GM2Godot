@@ -10,6 +10,7 @@ from .constants import (
     _COLLISION_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
+    _MOTION_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
@@ -25,6 +26,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_collision_api",
     "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
+    "runtime_motion_api",
     "runtime_self_default",
     "with_targets",
 ]
@@ -137,6 +139,19 @@ _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
     "collision_circle": (4, 6),
 }
 
+_MOTION_ARITY: dict[str, tuple[int, int | None]] = {
+    "motion_set": (2, 2),
+    "motion_add": (2, 2),
+    "move_towards_point": (3, 3),
+    "move_contact_solid": (2, 2),
+    "move_contact_all": (2, 2),
+    "move_bounce_solid": (1, 1),
+    "move_bounce_all": (1, 1),
+    "move_random": (2, 2),
+    "move_snap": (2, 2),
+    "place_snapped": (2, 2),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -226,6 +241,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _COLLISION_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _COLLISION_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_collision_api", target)
+
+    for name, target in _MOTION_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _MOTION_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime_motion_api", target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

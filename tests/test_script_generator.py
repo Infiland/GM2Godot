@@ -49,7 +49,12 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
         self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
+        self.assertIn("var solid = false", content)
+        self.assertIn("var speed = 0.0", content)
+        self.assertIn("func _gm_apply_motion_step():\n\tGMRuntime.gml_motion_step(self)", content)
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
+        self.assertIn("\t_gm_initialize_motion_runtime()", content)
+        self.assertIn("func _process(delta):\n\t_gm_apply_motion_step()", content)
         self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
 
     def test_object_runtime_preserves_inherited_lifecycle_when_no_local_event(self):
@@ -69,8 +74,21 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\n\nvar id =", content)
         self.assertNotIn("\nvar object_index =", content)
         self.assertNotIn("\nvar depth = 0", content)
-        self.assertIn("func _ready():\n\t_gm_register_instance()\n\tsuper._ready()", content)
+        self.assertIn(
+            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
+            content,
+        )
         self.assertIn("func _exit_tree():\n\tsuper._exit_tree()\n\t_gm_unregister_instance()", content)
+
+    def test_object_runtime_records_solid_metadata_for_motion_contact(self):
+        content = generate_script_content(
+            [],
+            object_runtime=ObjectRuntimeConfig(object_name="o_wall", solid=True),
+        )
+
+        self.assertIn("var solid = true", content)
+        self.assertIn("\tsolid = true", content)
+        self.assertIn('GMRuntime.gml_variable_instance_set(self, "solid", solid)', content)
 
 
 class TestScriptGeneratorEvents(unittest.TestCase):

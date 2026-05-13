@@ -54,6 +54,9 @@ from .utils import (
     _unwrap_grouped_expression,
 )
 
+_MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
+
+
 def _transpile_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
@@ -214,6 +217,14 @@ def _transpile_statement(
             return [
                 f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
+            ]
+        motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
+        if motion_target is not None:
+            instance_target, member_name = motion_target
+            current_value = _motion_current_value(instance_target, member_name, scope_context)
+            return [
+                f"GMRuntime.gml_motion_set_{member_name}("
+                f"{instance_target}, GMRuntime.{helper}({current_value}, 1))"
             ]
         scoped_target = _scoped_instance_assignment_parts(
             target_expr,
@@ -477,6 +488,16 @@ def _transpile_statement(
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
             raise GMLTranspileError("Unsupported global assignment operator")
+        motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
+        if motion_target is not None:
+            instance_target, member_name = motion_target
+            return _motion_assignment_lines(
+                instance_target,
+                member_name,
+                operator,
+                value,
+                scope_context,
+            )
         if scoped_target is not None:
             instance_target, member_name = scoped_target
             if operator in ("=", ":="):
@@ -792,6 +813,56 @@ def _scoped_instance_assignment_parts(
     return scope_context.instance_target, json.dumps(name)
 
 
+def _motion_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if not isinstance(target_expr, _Name):
+        return None
+    name = target_expr.value
+    if name in local_names or name not in _MOTION_SYNCHRONIZED_BUILTINS:
+        return None
+    instance_target = scope_context.instance_target or scope_context.self_expression
+    return instance_target, name
+
+
+def _motion_current_value(
+    instance_target: str,
+    member_name: str,
+    scope_context: _ScopeContext | None = None,
+) -> str:
+    scope_context = _normalize_scope_context(scope_context)
+    if scope_context.instance_target is not None:
+        return f"GMRuntime.gml_variable_instance_get({instance_target}, {json.dumps(member_name)})"
+    return _sanitize_gdscript_identifier(member_name)
+
+
+def _motion_assignment_lines(
+    instance_target: str,
+    member_name: str,
+    operator: str,
+    value: str,
+    scope_context: _ScopeContext | None = None,
+) -> list[str]:
+    if operator in ("=", ":="):
+        return [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"]
+    current_value = _motion_current_value(instance_target, member_name, scope_context)
+    if operator == "??=":
+        return [
+            f"if GMRuntime.gml_is_nullish({current_value}):",
+            f"\tGMRuntime.gml_motion_set_{member_name}({instance_target}, {value})",
+        ]
+    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+        return [
+            f"GMRuntime.gml_motion_set_{member_name}("
+            f"{instance_target}, GMRuntime.{helper}({current_value}, {value}))"
+        ]
+    raise GMLTranspileError("Unsupported motion assignment operator")
+
+
 def _static_scope_assignment_parts(
     target_expr: _Expression,
     scope_context: _ScopeContext | None = None,
@@ -977,6 +1048,10 @@ def _transpile_assignment_to_emitted_value(
     if global_target is not None:
         global_scope, member_name = global_target
         return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
+    motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
+    if motion_target is not None:
+        instance_target, member_name = motion_target
+        return [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"]
     scoped_target = _scoped_instance_assignment_parts(
         target_expr,
         local_names,

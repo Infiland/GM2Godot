@@ -59,17 +59,20 @@ class TestGMLAPIManifest(unittest.TestCase):
         asset_get_index = get_gml_api_entry("asset_get_index")
         instance_create_layer = get_gml_api_entry("instance_create_layer")
         place_meeting = get_gml_api_entry("place_meeting")
+        motion_set = get_gml_api_entry("motion_set")
         draw_sprite = get_gml_api_entry("draw_sprite")
 
         self.assertIsNotNone(array_push)
         self.assertIsNotNone(asset_get_index)
         self.assertIsNotNone(instance_create_layer)
         self.assertIsNotNone(place_meeting)
+        self.assertIsNotNone(motion_set)
         self.assertIsNotNone(draw_sprite)
         assert array_push is not None
         assert asset_get_index is not None
         assert instance_create_layer is not None
         assert place_meeting is not None
+        assert motion_set is not None
         assert draw_sprite is not None
 
         self.assertEqual(array_push.status, "implemented")
@@ -80,6 +83,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(instance_create_layer.issue_number, 485)
         self.assertEqual(place_meeting.status, "partial")
         self.assertEqual(place_meeting.issue_number, 487)
+        self.assertEqual(motion_set.status, "implemented")
+        self.assertEqual(motion_set.issue_number, 488)
         self.assertEqual(draw_sprite.status, "planned")
         self.assertEqual(draw_sprite.issue_number, 491)
         self.assertTrue(is_known_gml_api("draw_sprite"))
@@ -118,6 +123,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             "instance_destroy",
             "place_meeting",
             "collision_rectangle",
+            "motion_set",
+            "move_contact_solid",
             "keyboard_check",
             "method",
             "show_debug_message",

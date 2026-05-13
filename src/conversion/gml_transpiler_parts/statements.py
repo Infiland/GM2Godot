@@ -11,7 +11,12 @@ from .constants import (
     _COMPOUND_RUNTIME_FUNCTIONS,
     _GML_LITERAL_IDENTIFIERS,
 )
-from .emitter import _emit_expression, _name_resolves_to_global, _uses_direct_member_access
+from .emitter import (
+    _emit_expression,
+    _emit_instance_keyword_argument,
+    _name_resolves_to_global,
+    _uses_direct_member_access,
+)
 from .enum_helpers import (
     _reject_constant_assignment_target_name,
     _reject_constant_declaration_name,
@@ -222,6 +227,31 @@ def _transpile_statement(
                 "GMRuntime.gml_variable_instance_set("
                 f"{instance_target}, {member_name}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
+            ]
+        selector_target = _selector_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
+        if selector_target is not None:
+            container, key = selector_target
+            prelude_lines: list[str] = []
+            if isinstance(target_expr, _Member):
+                container = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.target,
+                    container,
+                    generated_counter,
+                    "_gml_selector_target",
+                )
+            current_value = _next_generated_name_from_counter(
+                generated_counter,
+                "_gml_selector_value",
+            )
+            return [
+                *prelude_lines,
+                f"GMRuntime.gml_selector_update({container}, {key}, "
+                f"func({current_value}): return GMRuntime.{helper}({current_value}, 1))",
             ]
         if isinstance(target_expr, _Index):
             container = _emit_expression(
@@ -555,6 +585,42 @@ def _transpile_statement(
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
             raise GMLTranspileError("Unsupported DS map accessor assignment operator")
+        selector_target = _selector_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
+        if selector_target is not None:
+            container, key = selector_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_selector_set({container}, {key}, {value})"]
+            prelude_lines = []
+            if isinstance(target_expr, _Member):
+                container = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.target,
+                    container,
+                    generated_counter,
+                    "_gml_selector_target",
+                )
+            if operator == "??=":
+                return [
+                    *prelude_lines,
+                    f"GMRuntime.gml_selector_set_if_nullish({container}, {key}, "
+                    f"func(): return {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = _next_generated_name_from_counter(
+                    generated_counter,
+                    "_gml_selector_value",
+                )
+                return [
+                    *prelude_lines,
+                    f"GMRuntime.gml_selector_update({container}, {key}, "
+                    f"func({current_value}): return GMRuntime.{helper}({current_value}, {value}))",
+                ]
+            raise GMLTranspileError("Unsupported selector member assignment operator")
         struct_target = _struct_assignment_parts(
             target_expr,
             local_names,
@@ -943,6 +1009,14 @@ def _transpile_assignment_to_emitted_value(
     if ds_map_target is not None:
         container, key = ds_map_target
         return [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
+    selector_target = _selector_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if selector_target is not None:
+        container, key = selector_target
+        return [f"GMRuntime.gml_selector_set({container}, {key}, {value})"]
     struct_target = _struct_assignment_parts(
         target_expr,
         local_names,
@@ -957,3 +1031,22 @@ def _transpile_assignment_to_emitted_value(
         scope_context=scope_context,
     )[0]
     return [f"{emitted_target} = {value}"]
+
+
+def _selector_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if not isinstance(target_expr, _Member) or _uses_direct_member_access(
+        target_expr,
+        scope_context=scope_context,
+    ):
+        return None
+    container = _emit_instance_keyword_argument(
+        target_expr.target,
+        local_names,
+        scope_context=scope_context,
+    )
+    return container, json.dumps(target_expr.member)

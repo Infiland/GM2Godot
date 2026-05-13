@@ -22,6 +22,19 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         content = generate_script_content([{"eventType": 0, "eventNum": 0}])
         self.assertTrue(content.startswith("extends Node2D"))
 
+    def test_parent_script_path_replaces_node_base(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+
+    def test_parent_script_path_preserved_without_local_events(self):
+        self.assertEqual(
+            generate_script_content([], base_script_path="res://objects/o_parent/o_parent.gd"),
+            'extends "res://objects/o_parent/o_parent.gd"\n',
+        )
+
 
 class TestScriptGeneratorEvents(unittest.TestCase):
     """Test that events produce correct function stubs."""
@@ -139,6 +152,25 @@ class TestScriptGeneratorEvents(unittest.TestCase):
     def test_unknown_event(self):
         content = generate_script_content([{"eventType": 99, "eventNum": 5}])
         self.assertIn("func _on_event_99_5():", content)
+
+    def test_generated_callbacks_keep_any_values_untyped(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+            code_bodies={
+                "_ready": '\tpayload = GMRuntime.gml_struct({"items": [1, "x"]})',
+                "_process": "\tlast_delta = delta",
+            },
+            instance_variables=["payload", "last_delta"],
+        )
+
+        self.assertIn("var payload\n", content)
+        self.assertIn("var last_delta\n", content)
+        self.assertIn("func _ready():", content)
+        self.assertIn("func _process(delta):", content)
+        self.assertNotIn("var payload:", content)
+        self.assertNotIn("var last_delta:", content)
+        self.assertNotIn("func _process(delta:", content)
+        self.assertNotIn(" -> ", content)
 
 
 class TestScriptGeneratorInputMerging(unittest.TestCase):

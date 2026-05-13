@@ -119,7 +119,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
             self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
             self.assertIn("\t\tfaster = true", content)
             self.assertIn("\telse:\n\t\tfaster = false", content)
-            self.assertIn("\tif faster == true:", content)
+            self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
             self.assertIn("\t\tsuperSpeed = 20", content)
             self.assertIn("position.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
             self.assertIn("position.x = GMRuntime.gml_add(position.x, superSpeed)", content)

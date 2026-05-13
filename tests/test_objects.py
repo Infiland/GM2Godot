@@ -16,7 +16,8 @@ from src.conversion.type_defs import JsonDict
 
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             parent_path: str = "folders/Objects.yy",
-                            event_list: list[JsonDict] | None = None) -> str:
+                            event_list: list[JsonDict] | None = None,
+                            parent_object_name: str | None = None) -> str:
     """Build a GameMaker object .yy file string."""
     if sprite_name is not None:
         sprite_id = (
@@ -25,6 +26,14 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         ).format(sprite_name=sprite_name)
     else:
         sprite_id = "null"
+
+    if parent_object_name is None:
+        parent_object_id = "null"
+    else:
+        parent_object_id = (
+            '{{"name": "{parent_object_name}", '
+            '"path": "objects/{parent_object_name}/{parent_object_name}.yy",}}'
+        ).format(parent_object_name=parent_object_name)
 
     if event_list is None:
         event_list = []
@@ -57,7 +66,7 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "name": "{name}",\n'
         '  "overriddenProperties": [],\n'
         '  "parent": {{"name": "Objects", "path": "{parent_path}",}},\n'
-        '  "parentObjectId": null,\n'
+        '  "parentObjectId": {parent_object_id},\n'
         '  "persistent": false,\n'
         '  "physicsObject": false,\n'
         '  "properties": [],\n'
@@ -68,7 +77,13 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "spriteMaskId": null,\n'
         '  "visible": true,\n'
         '}}'
-    ).format(name=name, sprite_id=sprite_id, parent_path=parent_path, event_list_str=event_list_str)
+    ).format(
+        name=name,
+        sprite_id=sprite_id,
+        parent_path=parent_path,
+        parent_object_id=parent_object_id,
+        event_list_str=event_list_str,
+    )
 
 
 def _create_fake_sprite_scene(godot_dir: str, sprite_name: str, subfolder: str = "") -> None:
@@ -271,6 +286,15 @@ class TestParseObjectYY(unittest.TestCase):
         assert result is not None
         self.assertIsNone(result["sprite_name"])
 
+    def test_parses_parent_object_name(self):
+        content = _make_object_yy_content("o_child", parent_object_name="o_parent")
+        self._write_object_yy("o_child", content)
+
+        result = self.converter._parse_object_yy("o_child")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result["parent_object_name"], "o_parent")
+
     def test_returns_none_for_missing(self):
         result = self.converter._parse_object_yy("nonexistent_object")
         self.assertIsNone(result)
@@ -443,10 +467,16 @@ class TestScriptGeneration(unittest.TestCase):
         )
 
     def _setup_object(self, name: str, sprite_name: str | None = None,
-                      event_list: list[JsonDict] | None = None) -> None:
+                      event_list: list[JsonDict] | None = None,
+                      parent_object_name: str | None = None) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
-        yy_content = _make_object_yy_content(name, sprite_name=sprite_name, event_list=event_list)
+        yy_content = _make_object_yy_content(
+            name,
+            sprite_name=sprite_name,
+            event_list=event_list,
+            parent_object_name=parent_object_name,
+        )
         with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
             f.write(yy_content)
         if sprite_name:
@@ -511,7 +541,7 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _ready():", content)
         self.assertIn("\tvar speed = GMRuntime.gml_mul(base_speed, 2)", content)
-        self.assertIn("\tif GMRuntime.is_undefined(score):\n\t\tscore = 0", content)
+        self.assertIn("\tif GMRuntime.gml_is_nullish(score):\n\t\tscore = 0", content)
         self.assertIn("\tscore = GMRuntime.gml_add(score, GMRuntime.gml_int_div(speed, 2))", content)
         self.assertNotIn("\tpass", content)
 
@@ -560,6 +590,69 @@ class TestScriptGeneration(unittest.TestCase):
             content,
         )
         self.assertIn("\tshow_debug_message(label)", content)
+
+    def test_child_event_inherited_preserves_parent_exit_boundary(self):
+        """exit in an inherited parent event should not abort the child event."""
+        self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_parent", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("parent_ran = true; exit; parent_after_exit = true;")
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("child_before = true; event_inherited(); child_after = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        parent_gd_path = os.path.join(self.godot_dir, "objects", "o_parent", "o_parent.gd")
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(parent_gd_path, "r", encoding="utf-8") as f:
+            parent_content = f.read()
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("func _ready():", parent_content)
+        self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
+        self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertIn(
+            "\tchild_before = true\n\tsuper._ready()\n\tchild_after = true",
+            child_content,
+        )
+
+    def test_event_inherited_noops_when_parent_lacks_matching_event(self):
+        self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("event_inherited(); child_after = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("\tpass\n\tchild_after = true", child_content)
+        self.assertNotIn("super._ready()", child_content)
 
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce func _process(delta)."""
@@ -644,7 +737,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
         self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
-        self.assertIn("\tif faster == true:", content)
+        self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 

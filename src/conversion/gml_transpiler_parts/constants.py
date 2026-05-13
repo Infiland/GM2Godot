@@ -1,0 +1,393 @@
+# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+from __future__ import annotations
+
+from .model import _AssignmentOperator, _BuiltinVariableMetadata, _Token
+
+_EOF = _Token("EOF", "")
+
+_MULTI_CHAR_OPERATORS = (
+    "??=",
+    "<<=",
+    ">>=",
+    ":=",
+    "??",
+    "<=",
+    ">=",
+    "==",
+    "!=",
+    "&&",
+    "||",
+    "^^",
+    "++",
+    "--",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "&=",
+    "|=",
+    "^=",
+    "<<",
+    ">>",
+)
+
+_ASSIGNMENT_OPERATORS: tuple[_AssignmentOperator, ...] = (
+    "??=",
+    "<<=",
+    ">>=",
+    ":=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "&=",
+    "|=",
+    "^=",
+    "=",
+)
+
+_BINARY_PRECEDENCE = {
+    "??": 10,
+    "or": 20,
+    "||": 20,
+    "^^": 20,
+    "and": 30,
+    "&&": 30,
+    "|": 40,
+    "^": 50,
+    "&": 60,
+    "=": 70,
+    "==": 70,
+    "!=": 70,
+    "<": 70,
+    "<=": 70,
+    ">": 70,
+    ">=": 70,
+    "<<": 80,
+    ">>": 80,
+    "+": 90,
+    "-": 90,
+    "*": 100,
+    "/": 100,
+    "%": 100,
+    "div": 100,
+    "mod": 100,
+}
+
+_UNARY_PRECEDENCE = 110
+_POSTFIX_PRECEDENCE = 120
+_PRIMARY_PRECEDENCE = 130
+_TERNARY_PRECEDENCE = 5
+_GML_IDENTIFIER_MAX_LENGTH = 64
+_GENERATED_IDENTIFIER_PREFIX = "_gml_"
+
+_RIGHT_ASSOCIATIVE = {"??"}
+
+_GDSCRIPT_RESERVED_IDENTIFIERS = frozenset({
+    "as",
+    "break",
+    "class",
+    "class_name",
+    "const",
+    "continue",
+    "elif",
+    "else",
+    "enum",
+    "extends",
+    "false",
+    "for",
+    "func",
+    "if",
+    "in",
+    "is",
+    "match",
+    "null",
+    "pass",
+    "return",
+    "self",
+    "signal",
+    "static",
+    "super",
+    "true",
+    "var",
+    "void",
+    "when",
+    "while",
+})
+_GML_LITERAL_IDENTIFIERS = frozenset({
+    "false",
+    "null",
+    "self",
+    "super",
+    "true",
+})
+_GML_BUILTIN_CONSTANT_IDENTIFIERS = frozenset({
+    "NaN",
+    "all",
+    "false",
+    "infinity",
+    "nan",
+    "noone",
+    "null",
+    "pi",
+    "pointer_invalid",
+    "pointer_null",
+    "true",
+    "undefined",
+})
+_DIRECT_MEMBER_TARGETS = frozenset({
+    "global",
+    "other",
+    "self",
+    "super",
+})
+
+_BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
+    "&&",
+    "||",
+    "^^",
+    "and",
+    "or",
+    "=",
+    "==",
+    "!=",
+    "<",
+    "<=",
+    ">",
+    ">=",
+})
+
+_BOOLEAN_RESULT_FUNCTIONS = frozenset({
+    "bool",
+    "is_array",
+    "is_bool",
+    "is_callable",
+    "is_handle",
+    "is_infinity",
+    "is_int32",
+    "is_int64",
+    "is_method",
+    "is_nan",
+    "is_numeric",
+    "is_ptr",
+    "is_real",
+    "is_string",
+    "is_struct",
+    "struct_exists",
+    "is_undefined",
+    "keyboard_check",
+})
+
+_ARITHMETIC_RUNTIME_FUNCTIONS = {
+    "+": "gml_add",
+    "-": "gml_sub",
+    "*": "gml_mul",
+    "%": "gml_mod",
+    "mod": "gml_mod",
+}
+
+_BITWISE_RUNTIME_FUNCTIONS = {
+    "&": "gml_bit_and",
+    "|": "gml_bit_or",
+    "^": "gml_bit_xor",
+    "<<": "gml_shift_left",
+    ">>": "gml_shift_right",
+}
+
+_COMPOUND_RUNTIME_FUNCTIONS: dict[_AssignmentOperator, str] = {
+    "&=": "gml_bit_and",
+    "+=": "gml_add",
+    "-=": "gml_sub",
+    "*=": "gml_mul",
+    "/=": "gml_div",
+    "%=": "gml_mod",
+    "<<=": "gml_shift_left",
+    ">>=": "gml_shift_right",
+    "|=": "gml_bit_or",
+    "^=": "gml_bit_xor",
+}
+
+_OPERATOR_REPLACEMENTS = {
+    "&&": "and",
+    "||": "or",
+    "=": "==",
+    "mod": "%",
+}
+
+_NAME_REPLACEMENTS = {
+    "all": "GMRuntime.gml_instance_all()",
+    "global": "GMRuntime.gml_global_scope()",
+    "infinity": "INF",
+    "NaN": "NAN",
+    "nan": "NAN",
+    "noone": "GMRuntime.gml_instance_noone()",
+    "pi": "PI",
+    "pointer_invalid": "GMRuntime.gml_pointer_invalid()",
+    "pointer_null": "GMRuntime.gml_pointer_null()",
+    "undefined": "GMRuntime.gml_undefined()",
+}
+
+_BLOCK_DELIMITER_REPLACEMENTS = {
+    "begin": "{",
+    "end": "}",
+}
+
+_INSTANCE_NAME_REPLACEMENTS = {
+    "x": "position.x",
+    "y": "position.y",
+}
+
+_LEGACY_GLOBAL_BUILTINS = frozenset({"health", "lives", "score"})
+
+_BUILTIN_VARIABLE_REGISTRY = {
+    "argument": _BuiltinVariableMetadata("global", "[]", False, False, "script_arguments"),
+    "argument_count": _BuiltinVariableMetadata("global", "0", False, False, "script_arguments"),
+    "async_load": _BuiltinVariableMetadata("global", "{}", False, False, "async_event"),
+    "bbox_bottom": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_left": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_right": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "bbox_top": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "depth": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
+    "direction": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "event_data": _BuiltinVariableMetadata("global", "{}", False, False, "event"),
+    "fps": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "id": _BuiltinVariableMetadata("instance", "undefined", False, False, "identity"),
+    "image_index": _BuiltinVariableMetadata("instance", "0", True, False, "sprite"),
+    "image_number": _BuiltinVariableMetadata("instance", "0", False, False, "sprite"),
+    "instance_count": _BuiltinVariableMetadata("global", "0", False, False, "instances"),
+    "layer": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
+    "object_index": _BuiltinVariableMetadata("instance", "undefined", False, False, "identity"),
+    "path_index": _BuiltinVariableMetadata("instance", "undefined", True, False, "path"),
+    "path_position": _BuiltinVariableMetadata("instance", "0", True, False, "path"),
+    "path_scale": _BuiltinVariableMetadata("instance", "1", True, False, "path"),
+    "path_speed": _BuiltinVariableMetadata("instance", "0", True, False, "path"),
+    "room": _BuiltinVariableMetadata("global", "undefined", False, False, "room"),
+    "room_height": _BuiltinVariableMetadata("global", "0", False, False, "room"),
+    "room_width": _BuiltinVariableMetadata("global", "0", False, False, "room"),
+    "speed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "sprite_index": _BuiltinVariableMetadata("instance", "undefined", True, False, "sprite"),
+    "view_angle": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_camera": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_current": _BuiltinVariableMetadata("global", "undefined", False, True, "view"),
+    "view_enabled": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hborder": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hspeed": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_hview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_object": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_surface_id": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_vborder": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_visible": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_vspeed": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_wport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_wview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_xport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_xview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_yport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "view_yview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
+    "visible": _BuiltinVariableMetadata("instance", "true", True, False, "rendering"),
+    "x": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+    "y": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+}
+
+_BUILTIN_GLOBAL_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.scope == "global" and not metadata.is_array
+)
+_BUILTIN_ARRAY_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.is_array
+)
+_READ_ONLY_BUILTIN_VARIABLES = frozenset(
+    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+    if not metadata.mutable
+)
+_BUILTIN_INSTANCE_VARIABLES = frozenset(_BUILTIN_VARIABLE_REGISTRY)
+
+_VIRTUAL_KEY_ACTIONS = {
+    "vk_left": "ui_left",
+    "vk_right": "ui_right",
+    "vk_up": "ui_up",
+    "vk_down": "ui_down",
+}
+
+_VIRTUAL_KEY_CONSTANTS = {
+    "vk_shift": "KEY_SHIFT",
+}
+
+_RUNTIME_FUNCTIONS = {
+    "int64": "gml_int64",
+    "is_array": "is_array",
+    "is_bool": "is_bool",
+    "is_callable": "is_callable",
+    "is_handle": "is_handle",
+    "is_infinity": "is_infinity",
+    "is_int32": "is_int32",
+    "is_int64": "is_int64",
+    "is_method": "is_method",
+    "is_nan": "is_nan_value",
+    "is_numeric": "is_numeric",
+    "is_ptr": "is_ptr",
+    "is_real": "is_real",
+    "is_string": "is_string",
+    "is_struct": "is_struct",
+    "is_undefined": "is_undefined",
+    "handle_parse": "gml_handle_parse",
+    "method_get_index": "gml_method_get_index",
+    "method_get_self": "gml_method_get_self",
+    "real": "gml_real",
+    "ptr": "gml_ptr",
+    "sqrt": "gml_sqrt",
+    "typeof": "gml_typeof",
+    "with_targets": "gml_with_targets",
+    "string": "gml_string",
+    "bool": "gml_bool",
+}
+
+_STRUCT_RUNTIME_FUNCTIONS = {
+    "struct_exists": "gml_struct_exists",
+    "struct_get": "gml_struct_get",
+    "struct_get_names": "gml_struct_get_names",
+    "struct_names_count": "gml_struct_names_count",
+    "struct_set": "gml_struct_set",
+    "struct_remove": "gml_struct_remove",
+    "struct_foreach": "gml_struct_foreach",
+    "static_get": "gml_static_get",
+    "static_set": "gml_static_set",
+    "is_instanceof": "gml_is_instanceof",
+    "instanceof": "gml_instanceof",
+    "variable_get_hash": "gml_variable_get_hash",
+    "struct_get_from_hash": "gml_struct_get_from_hash",
+    "struct_set_from_hash": "gml_struct_set_from_hash",
+    "struct_exists_from_hash": "gml_struct_exists_from_hash",
+    "struct_remove_from_hash": "gml_struct_remove_from_hash",
+}
+
+_VARIABLE_RUNTIME_FUNCTIONS = {
+    "method_call": "gml_method_call",
+    "method": "gml_method",
+    "ref_create": "gml_ref_create",
+    "variable_clone": "gml_variable_clone",
+    "variable_instance_exists": "gml_variable_instance_exists",
+    "variable_instance_get": "gml_variable_instance_get",
+    "variable_instance_set": "gml_variable_instance_set",
+    "variable_instance_get_names": "gml_variable_instance_get_names",
+    "variable_instance_names_count": "gml_variable_instance_names_count",
+    "variable_global_exists": "gml_variable_global_exists",
+    "variable_global_get": "gml_variable_global_get",
+    "variable_global_set": "gml_variable_global_set",
+    "variable_struct_get": "gml_variable_struct_get",
+}
+
+_DS_MAP_RUNTIME_FUNCTIONS = {
+    "ds_map_exists": "gml_ds_map_exists",
+    "ds_map_find_value": "gml_ds_map_find_value",
+}
+
+_ARRAY_RUNTIME_FUNCTIONS = {
+    "array_equals": "gml_array_equals",
+    "array_push": "gml_array_push",
+}

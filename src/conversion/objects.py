@@ -11,7 +11,7 @@ from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
-from src.conversion.script_generator import SpriteRuntimeConfig, generate_script_content
+from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -315,6 +315,27 @@ class ObjectConverter(BaseConverter):
                 function_names.add(mapping.godot_func)
         return function_names
 
+    def _event_function_names(self, event_list: list[JsonDict]) -> set[str]:
+        function_names: set[str] = set()
+        for event in event_list:
+            mapping = map_event(event)
+            if mapping is not None:
+                function_names.add(mapping.godot_func)
+        return function_names
+
+    def _parent_object_chain(self, object_name: str, seen: set[str] | None = None) -> tuple[str, ...]:
+        seen = set(seen or set())
+        if object_name in seen:
+            return ()
+        seen.add(object_name)
+
+        parsed = self._parse_object_yy(object_name)
+        if parsed is None or parsed["parent_object_name"] is None:
+            return ()
+
+        parent_name = parsed["parent_object_name"]
+        return (parent_name, *self._parent_object_chain(parent_name, seen))
+
     def _process_object(
         self,
         object_name: str,
@@ -344,6 +365,7 @@ class ObjectConverter(BaseConverter):
             parent_subfolder = self._get_object_subfolder(parent_object_name)
             parent_script_res_path = self._object_script_res_path(parent_object_name, parent_subfolder)
             inherited_event_functions = self._parent_event_function_names(parent_object_name)
+        local_event_functions = self._event_function_names(event_list)
 
         if sprite_name is not None:
             sprite_subfolder = self._get_sprite_subfolder(sprite_name)
@@ -371,6 +393,12 @@ class ObjectConverter(BaseConverter):
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name=object_name,
+                parent_object_names=self._parent_object_chain(object_name),
+                inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
+                inherit_exit_tree="_exit_tree" in inherited_event_functions and "_exit_tree" not in local_event_functions,
             ),
             base_script_path=parent_script_res_path,
         )

@@ -33,6 +33,10 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("with_targets(other)", "GMRuntime.gml_with_targets(other)"),
     RuntimeValueParityCase("with_targets(all)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_all())"),
     RuntimeValueParityCase("with_targets(noone)", "GMRuntime.gml_with_targets(GMRuntime.gml_instance_noone())"),
+    RuntimeValueParityCase(
+        "with_targets(o_enemy)",
+        'GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
@@ -239,6 +243,37 @@ RUNTIME_VALUE_PARITY_CASES = (
         'asset_has_any_tag("s_player", ["player"])',
         'GMRuntime.gml_asset_has_any_tag("s_player", ["player"])',
     ),
+    RuntimeValueParityCase(
+        'instance_create_layer(x, y, "Instances", o_enemy)',
+        'GMRuntime.gml_instance_create_layer(position.x, position.y, "Instances", GMRuntime.gml_asset_get_index("o_enemy"), self)',
+    ),
+    RuntimeValueParityCase(
+        "instance_create_depth(x, y, -10, o_enemy)",
+        'GMRuntime.gml_instance_create_depth(position.x, position.y, -10, GMRuntime.gml_asset_get_index("o_enemy"), self)',
+    ),
+    RuntimeValueParityCase("instance_destroy()", "GMRuntime.gml_instance_destroy(self)"),
+    RuntimeValueParityCase("instance_destroy(other)", "GMRuntime.gml_instance_destroy(other)"),
+    RuntimeValueParityCase(
+        "instance_exists(o_enemy)",
+        'GMRuntime.gml_instance_exists(GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_find(o_enemy, 0)",
+        'GMRuntime.gml_instance_find(GMRuntime.gml_asset_get_index("o_enemy"), 0)',
+    ),
+    RuntimeValueParityCase(
+        "instance_number(o_enemy)",
+        'GMRuntime.gml_instance_number(GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_nearest(x, y, o_enemy)",
+        'GMRuntime.gml_instance_nearest(position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_furthest(x, y, o_enemy)",
+        'GMRuntime.gml_instance_furthest(position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase("instance_id_get(0)", "GMRuntime.gml_instance_id_get(0)"),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
@@ -490,6 +525,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_handle_invalid",
             "gml_instance_noone",
             "gml_instance_all",
+            "gml_instance_register",
+            "gml_instance_unregister",
+            "gml_instance_destroy",
+            "gml_instance_exists",
+            "gml_instance_find",
+            "gml_instance_number",
+            "gml_instance_id_get",
+            "gml_instance_nearest",
+            "gml_instance_furthest",
+            "gml_instance_create_layer",
+            "gml_instance_create_depth",
             "gml_with_targets",
             "gml_handle_is_valid",
             "gml_handle_parse",
@@ -708,9 +754,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if keyword_index == GML_INSTANCE_INVALID_INDEX:\n\t\treturn []", GML_RUNTIME_SCRIPT)
         self.assertIn("return null", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_all_instance_targets():", GML_RUNTIME_SCRIPT)
-        self.assertIn("for handle in _gml_handle_registry.values():", GML_RUNTIME_SCRIPT)
-        self.assertIn("if handle.kind == GML_INSTANCE_HANDLE_KIND and gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("targets.append(handle.reference)", GML_RUNTIME_SCRIPT)
+        self.assertIn("for entry in _gml_live_instance_entries():", GML_RUNTIME_SCRIPT)
+        self.assertIn('targets.append(entry["instance"])', GML_RUNTIME_SCRIPT)
         self.assertIn("gml_handle_invalidate(handle)", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle_kind, handle_index):", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.reference = null", GML_RUNTIME_SCRIPT)
@@ -722,6 +767,21 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return left.kind == right.kind and left.index == right.index", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn gml_handle_is_valid(value)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_tracks_instance_registry_and_object_selectors(self):
+        self.assertIn("static var _gml_instance_entries = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_instance_ids_by_object = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_register(instance, object_selector = null, parent_selectors = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn('"selector_ids": selector_ids,', GML_RUNTIME_SCRIPT)
+        self.assertIn('"selector_names": selector_names,', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_unregister(instance_or_handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_instance_selector_targets(selector):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_converts_and_parses_handle_strings(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)
@@ -767,7 +827,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_method_call(method, array_args = null, offset = 0, num_args = null):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_call", method)', GML_RUNTIME_SCRIPT)
         self.assertIn("var call_args = _gml_method_call_args(array_args, offset, num_args)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return method.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return method.gml_callv(call_args)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_method_call_args(array_args, offset, num_args):", GML_RUNTIME_SCRIPT)
         self.assertIn("var source = [] if array_args == null else array_args", GML_RUNTIME_SCRIPT)
         self.assertIn("if typeof(source) != TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
@@ -784,7 +844,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("bound_self = method_self", GML_RUNTIME_SCRIPT)
         self.assertIn("function_value = method_function", GML_RUNTIME_SCRIPT)
         self.assertIn("is_constructor = bool(method_is_constructor)", GML_RUNTIME_SCRIPT)
-        self.assertIn("func callv(args):", GML_RUNTIME_SCRIPT)
+        self.assertIn("func gml_callv(args):", GML_RUNTIME_SCRIPT)
         self.assertIn("return function_value.callv(args)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_method(scope, func_or_method, method_is_constructor = false):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method", func_or_method)', GML_RUNTIME_SCRIPT)
@@ -1407,7 +1467,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy"}),
                     parity_case.gdscript_expression,
                 )
 

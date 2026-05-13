@@ -58,10 +58,241 @@ static func _gml_legacy_instance_keyword_targets(keyword_index, current_self, cu
 
 static func _gml_all_instance_targets():
 	var targets = []
-	for handle in _gml_handle_registry.values():
-		if handle.kind == GML_INSTANCE_HANDLE_KIND and gml_handle_is_valid(handle):
-			targets.append(handle.reference)
+	for entry in _gml_live_instance_entries():
+		targets.append(entry["instance"])
 	return targets
+
+
+static func _gml_live_instance_entries():
+	var entries = []
+	for entry in _gml_instance_entries.values():
+		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
+			entries.append(entry)
+	entries.sort_custom(_gml_instance_entry_order_less)
+	return entries
+
+
+static func _gml_instance_entry_order_less(left, right):
+	return int(left["creation_order"]) < int(right["creation_order"])
+
+
+static func _gml_instance_entry(instance_or_handle):
+	if typeof(instance_or_handle) == TYPE_DICTIONARY and instance_or_handle.has("handle"):
+		return instance_or_handle
+	if is_handle(instance_or_handle):
+		if instance_or_handle.kind == GML_INSTANCE_HANDLE_KIND and _gml_instance_entries.has(instance_or_handle.index):
+			return _gml_instance_entries[instance_or_handle.index]
+		return null
+	if is_numeric(instance_or_handle) or is_string(instance_or_handle):
+		var handle = gml_handle_from_value(GML_INSTANCE_HANDLE_KIND, instance_or_handle)
+		if gml_handle_is_valid(handle) and _gml_instance_entries.has(handle.index):
+			return _gml_instance_entries[handle.index]
+		return null
+	if instance_or_handle is Object:
+		var node_id = instance_or_handle.get_instance_id()
+		if _gml_instance_handles_by_node_id.has(node_id):
+			var handle = _gml_instance_handles_by_node_id[node_id]
+			if _gml_instance_entries.has(handle.index):
+				return _gml_instance_entries[handle.index]
+	return null
+
+
+static func _gml_instance_handle_for_node(instance):
+	if instance is Object:
+		var node_id = instance.get_instance_id()
+		if _gml_instance_handles_by_node_id.has(node_id):
+			return _gml_instance_handles_by_node_id[node_id]
+	return gml_instance_noone()
+
+
+static func _gml_instance_selector_targets(selector):
+	if is_handle(selector) and selector.kind == GML_INSTANCE_HANDLE_KIND:
+		var keyword_targets = _gml_instance_keyword_targets(selector)
+		if keyword_targets != null:
+			return keyword_targets
+	if is_numeric(selector):
+		var keyword_index = _to_int64_value(selector)
+		var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, null, null)
+		if keyword_targets != null:
+			return keyword_targets
+	var entry: Variant = _gml_instance_entry(selector)
+	if entry != null:
+		if entry["destroyed"]:
+			return []
+		return [entry["instance"]]
+	var object_id = _gml_object_selector_id(selector)
+	if object_id != -1 and _gml_instance_ids_by_object.has(object_id):
+		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])
+	var object_name = _gml_object_selector_name(selector)
+	if object_name != "" and _gml_instance_ids_by_object_name.has(object_name):
+		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])
+	return null
+
+
+static func _gml_instance_targets_from_indices(indices):
+	var targets = []
+	for handle_index in indices:
+		if not _gml_instance_entries.has(handle_index):
+			continue
+		var entry = _gml_instance_entries[handle_index]
+		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
+			targets.append(entry["instance"])
+	return targets
+
+
+static func _gml_instance_index_add(index_map, selector, handle_index):
+	if selector == null:
+		return
+	if is_numeric(selector) and _to_int64_value(selector) == -1:
+		return
+	if is_string(selector) and str(selector) == "":
+		return
+	if not index_map.has(selector):
+		index_map[selector] = []
+	if not index_map[selector].has(handle_index):
+		index_map[selector].append(handle_index)
+
+
+static func _gml_instance_index_remove(index_map, selector, handle_index):
+	if selector == null or not index_map.has(selector):
+		return
+	index_map[selector].erase(handle_index)
+	if index_map[selector].is_empty():
+		index_map.erase(selector)
+
+
+static func _gml_object_selector_id(selector):
+	var entry: Variant = _gml_object_asset_entry(selector)
+	if entry != null:
+		return int(entry["id"])
+	if is_numeric(selector):
+		return _to_int64_value(selector)
+	return -1
+
+
+static func _gml_object_selector_name(selector):
+	var entry: Variant = _gml_object_asset_entry(selector)
+	if entry != null:
+		return str(entry["name"])
+	if is_string(selector):
+		return str(selector)
+	return ""
+
+
+static func _gml_object_selector_id_array(selectors):
+	var ids = []
+	for selector in selectors:
+		var selector_id = _gml_object_selector_id(selector)
+		if selector_id != -1 and not ids.has(selector_id):
+			ids.append(selector_id)
+	return ids
+
+
+static func _gml_object_selector_name_array(selectors):
+	var names = []
+	for selector in selectors:
+		var selector_name = _gml_object_selector_name(selector)
+		if selector_name != "" and not names.has(selector_name):
+			names.append(selector_name)
+	return names
+
+
+static func _gml_object_asset_entry(selector):
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(selector)
+	if entry == null:
+		return null
+	if str(entry["type"]) != "object":
+		return null
+	return entry
+
+
+static func _gml_instance_distance_extreme(x, y, target, nearest):
+	var targets = gml_with_targets(target)
+	if targets.is_empty():
+		return gml_instance_noone()
+	var origin = Vector2(_to_real(x), _to_real(y))
+	var best_entry = null
+	var best_distance = 0.0
+	for instance in targets:
+		var entry: Variant = _gml_instance_entry(instance)
+		if entry == null:
+			continue
+		var distance = origin.distance_squared_to(_gml_instance_position(instance))
+		if best_entry == null or (nearest and distance < best_distance) or ((not nearest) and distance > best_distance):
+			best_entry = entry
+			best_distance = distance
+	if best_entry == null:
+		return gml_instance_noone()
+	return best_entry["handle"]
+
+
+static func _gml_instance_position(instance):
+	if instance is Node2D:
+		return instance.global_position
+	if instance is Object:
+		var x_value = gml_variable_instance_get(instance, "x")
+		var y_value = gml_variable_instance_get(instance, "y")
+		if is_numeric(x_value) and is_numeric(y_value):
+			return Vector2(_to_real(x_value), _to_real(y_value))
+	return Vector2.ZERO
+
+
+static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null):
+	var entry: Variant = _gml_object_asset_entry(object_selector)
+	if entry == null:
+		return gml_instance_noone()
+	if not entry.has("godot_path"):
+		return gml_instance_noone()
+	var godot_path = str(entry["godot_path"])
+	if godot_path == "":
+		return gml_instance_noone()
+	var scene = load(godot_path)
+	if scene == null or not scene.has_method("instantiate"):
+		return gml_instance_noone()
+	var instance = scene.instantiate()
+	if instance is Node2D:
+		instance.position = Vector2(_to_real(x), _to_real(y))
+	if depth_value != null:
+		_gml_instance_apply_depth(instance, depth_value)
+	var parent = _gml_instance_creation_parent(current_self, layer)
+	if parent == null:
+		return gml_instance_noone()
+	parent.add_child(instance)
+	var handle = _gml_instance_handle_for_node(instance)
+	if not gml_handle_is_valid(handle):
+		handle = gml_instance_register(instance, int(entry["id"]), [])
+	return handle
+
+
+static func _gml_instance_creation_parent(current_self, layer):
+	if current_self is Node:
+		var tree = current_self.get_tree()
+		if layer != null and tree != null and tree.current_scene != null:
+			var layer_node = tree.current_scene.find_child(str(layer), true, false)
+			if layer_node is Node:
+				return layer_node
+		if tree != null and tree.current_scene != null:
+			return tree.current_scene
+		var current_parent = current_self.get_parent()
+		if current_parent != null:
+			return current_parent
+		return current_self
+	return null
+
+
+static func _gml_instance_apply_depth(instance, depth_value):
+	var resolved_depth = int(_to_real(depth_value))
+	if instance is CanvasItem:
+		instance.z_index = -resolved_depth
+	if instance is Object:
+		if _object_has_property(instance, "depth"):
+			instance.set("depth", resolved_depth)
+
+
+static func _gml_instance_set_meta(instance, key, value):
+	if instance is Object and instance.has_method("set_meta"):
+		instance.set_meta(str(key), value)
 
 
 static func _gml_is_invalid_handle_index(kind, index):
@@ -161,5 +392,3 @@ static func _object_has_property(object_value, property_name):
 		if property.get("name") == property_name:
 			return true
 	return false
-
-

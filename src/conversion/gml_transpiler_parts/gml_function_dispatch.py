@@ -8,6 +8,7 @@ from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
+    _INSTANCE_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
@@ -19,7 +20,10 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "method",
     "print",
     "runtime",
+    "runtime_append_self",
+    "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
+    "runtime_self_default",
     "with_targets",
 ]
 
@@ -108,6 +112,18 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
     "asset_has_any_tag": (2, 2),
 }
 
+_INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
+    "instance_create_layer": (4, 4),
+    "instance_create_depth": (4, 4),
+    "instance_destroy": (0, 1),
+    "instance_exists": (1, 1),
+    "instance_find": (2, 2),
+    "instance_number": (1, 1),
+    "instance_nearest": (3, 3),
+    "instance_furthest": (3, 3),
+    "instance_id_get": (1, 1),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -184,6 +200,15 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ASSET_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _INSTANCE_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _INSTANCE_ARITY[name]
+        lowering_kind: GMLFunctionLoweringKind = "runtime_instance_api"
+        if name in ("instance_create_layer", "instance_create_depth"):
+            lowering_kind = "runtime_append_self"
+        elif name == "instance_destroy":
+            lowering_kind = "runtime_self_default"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

@@ -6,7 +6,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.script_generator import SpriteRuntimeConfig, generate_script_content
+from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 
 
 class TestScriptGeneratorBasic(unittest.TestCase):
@@ -34,6 +34,43 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             generate_script_content([], base_script_path="res://objects/o_parent/o_parent.gd"),
             'extends "res://objects/o_parent/o_parent.gd"\n',
         )
+
+    def test_object_runtime_registers_and_unregisters_instances(self):
+        content = generate_script_content(
+            [],
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+            ),
+        )
+
+        self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
+        self.assertIn("var id = GMRuntime.gml_instance_noone()", content)
+        self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
+        self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
+        self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
+        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
+        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+
+    def test_object_runtime_preserves_inherited_lifecycle_when_no_local_event(self):
+        content = generate_script_content(
+            [],
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+                inherit_ready=True,
+                inherit_exit_tree=True,
+            ),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertNotIn("const GMRuntime = preload", content)
+        self.assertNotIn("\n\nvar id =", content)
+        self.assertNotIn("\nvar object_index =", content)
+        self.assertNotIn("\nvar depth = 0", content)
+        self.assertIn("func _ready():\n\t_gm_register_instance()\n\tsuper._ready()", content)
+        self.assertIn("func _exit_tree():\n\tsuper._exit_tree()\n\t_gm_unregister_instance()", content)
 
 
 class TestScriptGeneratorEvents(unittest.TestCase):

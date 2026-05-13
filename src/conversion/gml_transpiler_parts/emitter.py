@@ -60,6 +60,18 @@ from .model import (
 )
 from .utils import _normalize_local_names, _normalize_scope_context, _unwrap_grouped_expression
 
+_INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
+    "instance_create_layer": frozenset({3}),
+    "instance_create_depth": frozenset({3}),
+    "instance_destroy": frozenset({0}),
+    "instance_exists": frozenset({0}),
+    "instance_find": frozenset({0}),
+    "instance_number": frozenset({0}),
+    "instance_nearest": frozenset({2}),
+    "instance_furthest": frozenset({2}),
+}
+
+
 def _emit_name(
     value: str,
     local_names: Iterable[str],
@@ -429,6 +441,23 @@ def _emit_descriptor_call(
         emitted_args = ", ".join([first_arg, *remaining_args])
         return f"GMRuntime.{descriptor.lowering_target}({emitted_args})"
 
+    if descriptor.lowering_kind in {
+        "runtime_append_self",
+        "runtime_instance_api",
+        "runtime_self_default",
+    }:
+        emitted_args = _emit_instance_api_args(
+            descriptor,
+            args,
+            local_names,
+            scope_context=scope_context,
+        )
+        if descriptor.lowering_kind == "runtime_append_self":
+            emitted_args.append(scope_context.self_expression)
+        if descriptor.lowering_kind == "runtime_self_default" and not emitted_args:
+            emitted_args.append(scope_context.self_expression)
+        return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
+
     emitted_args = ", ".join(
         _emit_expression(arg, local_names, scope_context=scope_context)[0]
         for arg in args
@@ -451,7 +480,31 @@ def _emit_instance_keyword_argument(
         return "GMRuntime.gml_instance_all()"
     if legacy_keyword == -4:
         return "GMRuntime.gml_instance_noone()"
+    if isinstance(expr, _Name) and expr.value in scope_context.asset_names:
+        return f"GMRuntime.gml_asset_get_index({json.dumps(expr.value)})"
     return _emit_expression(expr, local_names, scope_context=scope_context)[0]
+
+
+def _emit_instance_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    selector_indices = _INSTANCE_SELECTOR_ARG_INDICES.get(descriptor.name, frozenset())
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in selector_indices:
+            emitted_args.append(
+                _emit_instance_keyword_argument(
+                    arg,
+                    local_names,
+                    scope_context=scope_context,
+                )
+            )
+        else:
+            emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
 
 
 def _legacy_instance_keyword_value(expr: _Expression) -> int | None:

@@ -270,4 +270,3 @@ static func _gml_asset_tag_array(tags):
 	for tag in tags:
 		tag_values.append(str(tag))
 	return tag_values
-

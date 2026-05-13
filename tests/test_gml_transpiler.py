@@ -2059,6 +2059,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "self.Script1 = Script1",
         )
 
+    def test_instance_object_selector_arguments_use_asset_registry_ids(self):
+        asset_names = {"o_enemy"}
+
+        self.assertEqual(
+            transpile_gml_expression("instance_exists(o_enemy)", asset_names=asset_names),
+            'GMRuntime.gml_instance_exists(GMRuntime.gml_asset_get_index("o_enemy"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('instance_create_layer(x, y, "Instances", o_enemy)', asset_names=asset_names),
+            'GMRuntime.gml_instance_create_layer(position.x, position.y, "Instances", '
+            'GMRuntime.gml_asset_get_index("o_enemy"), self)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_destroy()"),
+            "GMRuntime.gml_instance_destroy(self)",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

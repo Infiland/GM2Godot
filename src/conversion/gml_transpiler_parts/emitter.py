@@ -286,13 +286,12 @@ def _emit_expression(
             scope_context=scope_context,
         )
         return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
-    target = _emit_child(
+    target = _emit_instance_keyword_argument(
         expr.target,
-        _POSTFIX_PRECEDENCE,
-        local_names=local_names,
+        local_names,
         scope_context=scope_context,
     )
-    return f"GMRuntime.gml_struct_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
+    return f"GMRuntime.gml_selector_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
 
 
 def _uses_direct_member_access(
@@ -494,8 +493,9 @@ def _emit_instance_keyword_argument(
         return "GMRuntime.gml_instance_all()"
     if legacy_keyword == -4:
         return "GMRuntime.gml_instance_noone()"
-    if isinstance(expr, _Name) and expr.value in scope_context.asset_names:
-        return f"GMRuntime.gml_asset_get_index({json.dumps(expr.value)})"
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    if isinstance(unwrapped_expr, _Name) and unwrapped_expr.value in scope_context.asset_names:
+        return f"GMRuntime.gml_asset_get_index({json.dumps(unwrapped_expr.value)})"
     return _emit_expression(expr, local_names, scope_context=scope_context)[0]
 
 

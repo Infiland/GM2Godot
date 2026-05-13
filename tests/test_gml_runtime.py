@@ -37,6 +37,10 @@ RUNTIME_VALUE_PARITY_CASES = (
         "with_targets(o_enemy)",
         'GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"))',
     ),
+    RuntimeValueParityCase(
+        "o_enemy.hp",
+        'GMRuntime.gml_selector_get(GMRuntime.gml_asset_get_index("o_enemy"), "hp")',
+    ),
     RuntimeValueParityCase("pointer_null", "GMRuntime.gml_pointer_null()"),
     RuntimeValueParityCase("pointer_invalid", "GMRuntime.gml_pointer_invalid()"),
     RuntimeValueParityCase("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
@@ -308,7 +312,7 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
-    RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
+    RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_selector_get(mystruct, "a")'),
     RuntimeValueParityCase('mystruct[$ "x"]', 'GMRuntime.gml_struct_get(mystruct, "x")'),
     RuntimeValueParityCase('struct_exists(mystruct, "x")', 'GMRuntime.gml_struct_exists(mystruct, "x")'),
     RuntimeValueParityCase('struct_get(mystruct, "x")', 'GMRuntime.gml_struct_get(mystruct, "x")'),
@@ -351,7 +355,7 @@ RUNTIME_VALUE_PARITY_CASES = (
         'GMRuntime.gml_variable_instance_set(GMRuntime.gml_instance_noone(), "hp", 10)',
     ),
     RuntimeValueParityCase("global", "GMRuntime.gml_global_scope()"),
-    RuntimeValueParityCase("global.score", 'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")'),
+    RuntimeValueParityCase("global.score", 'GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "score")'),
     RuntimeValueParityCase(
         'variable_instance_get(global, "score")',
         'GMRuntime.gml_variable_instance_get(GMRuntime.gml_global_scope(), "score")',
@@ -577,6 +581,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_collision_rectangle",
             "gml_collision_line",
             "gml_collision_circle",
+            "gml_selector_get",
+            "gml_selector_exists",
+            "gml_selector_set",
+            "gml_selector_update",
+            "gml_selector_set_if_nullish",
+            "gml_selector_get_names",
+            "gml_selector_names_count",
             "gml_handle_is_valid",
             "gml_handle_parse",
             "gml_ref_create",
@@ -798,6 +809,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('targets.append(entry["instance"])', GML_RUNTIME_SCRIPT)
         self.assertIn("gml_handle_invalidate(handle)", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle_kind, handle_index):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_selector_helpers_use_with_targets(self):
+        self.assertIn("static func gml_selector_get(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_get(targets[0], member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_exists(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if gml_struct_exists(instance, member_name):\n\t\t\treturn true", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_update(target, member_name, update_callable, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("result = update_callable.call(gml_struct_get(instance, member_name))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_set_if_nullish(target, member_name, value_callable, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("result = gml_struct_set(instance, member_name, value_callable.call())", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_get_names(target, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_selector_names_count(target, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.reference = null", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.index = _gml_invalid_handle_index(handle.kind)", GML_RUNTIME_SCRIPT)
         self.assertIn("handle.value = _gml_encode_handle_value(handle.type_id, handle.index)", GML_RUNTIME_SCRIPT)
@@ -1192,8 +1217,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_struct_get(struct_value, member_name):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_get(struct_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_get(instance_value, member_name):", GML_RUNTIME_SCRIPT)
-        self.assertIn("var resolved_instance = _gml_resolve_instance(instance_value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_get(instance_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_map_find_value(map_value, key):", GML_RUNTIME_SCRIPT)
         self.assertIn("var resolved_map = _gml_resolve_ds_map(map_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if resolved_map.has(key):\n\t\t\treturn resolved_map[key]", GML_RUNTIME_SCRIPT)
@@ -1210,17 +1235,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn("if resolved_map.has(key):\n\t\t\treturn resolved_map[key]", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_variable_helpers_resolve_instances_and_invalid_ids(self):
         self.assertIn("static func gml_variable_instance_exists(instance_value, member_name):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_struct_exists(resolved_instance, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_exists(instance_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_set(instance_value, member_name, value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_struct_set(resolved_instance, member_name, value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn false", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_set(instance_value, member_name, value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("for instance in gml_with_targets(target, current_self, current_other):", GML_RUNTIME_SCRIPT)
+        self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_scope_is_a_shared_struct_for_instance_apis(self):
         self.assertIn("static var _gml_global_scope = {", GML_RUNTIME_SCRIPT)
@@ -1275,12 +1300,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("var resolved_instance = _gml_resolve_instance(instance_value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_struct_get_names(resolved_instance)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_get_names(instance_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_struct_names_count(resolved_instance)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn []", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_instance == null:\n\t\treturn -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_names_count(instance_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn []", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn -1", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_variable_helpers_use_shared_global_scope(self):
         self.assertIn("static func gml_variable_global_exists(member_name):", GML_RUNTIME_SCRIPT)

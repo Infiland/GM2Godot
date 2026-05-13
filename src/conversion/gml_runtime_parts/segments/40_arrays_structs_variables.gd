@@ -78,38 +78,85 @@ static func gml_variable_struct_get(struct_value, member_name):
 
 
 static func gml_variable_instance_get(instance_value, member_name):
-	var resolved_instance = _gml_resolve_instance(instance_value)
-	if resolved_instance == null:
-		return gml_undefined()
-	return gml_struct_get(resolved_instance, member_name)
+	return gml_selector_get(instance_value, member_name)
 
 
 static func gml_variable_instance_exists(instance_value, member_name):
-	var resolved_instance = _gml_resolve_instance(instance_value)
-	if resolved_instance == null:
-		return false
-	return gml_struct_exists(resolved_instance, member_name)
+	return gml_selector_exists(instance_value, member_name)
 
 
 static func gml_variable_instance_set(instance_value, member_name, value):
-	var resolved_instance = _gml_resolve_instance(instance_value)
-	if resolved_instance == null:
-		return gml_undefined()
-	return gml_struct_set(resolved_instance, member_name, value)
+	return gml_selector_set(instance_value, member_name, value)
 
 
 static func gml_variable_instance_get_names(instance_value):
-	var resolved_instance = _gml_resolve_instance(instance_value)
-	if resolved_instance == null:
-		return []
-	return gml_struct_get_names(resolved_instance)
+	return gml_selector_get_names(instance_value)
 
 
 static func gml_variable_instance_names_count(instance_value):
-	var resolved_instance = _gml_resolve_instance(instance_value)
-	if resolved_instance == null:
+	return gml_selector_names_count(instance_value)
+
+
+static func gml_selector_get(target, member_name, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return gml_undefined()
+	return gml_struct_get(targets[0], member_name)
+
+
+static func gml_selector_exists(target, member_name, current_self = null, current_other = null):
+	for instance in gml_with_targets(target, current_self, current_other):
+		if gml_struct_exists(instance, member_name):
+			return true
+	return false
+
+
+static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return gml_undefined()
+	for instance in targets:
+		gml_struct_set(instance, member_name, value)
+	return value
+
+
+static func gml_selector_update(target, member_name, update_callable, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return gml_undefined()
+	var result = gml_undefined()
+	for instance in targets:
+		result = update_callable.call(gml_struct_get(instance, member_name))
+		gml_struct_set(instance, member_name, result)
+	return result
+
+
+static func gml_selector_set_if_nullish(target, member_name, value_callable, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return gml_undefined()
+	var result = gml_undefined()
+	for instance in targets:
+		var current_value = gml_struct_get(instance, member_name)
+		if gml_is_nullish(current_value):
+			result = gml_struct_set(instance, member_name, value_callable.call())
+		else:
+			result = current_value
+	return result
+
+
+static func gml_selector_get_names(target, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return []
+	return gml_struct_get_names(targets[0])
+
+
+static func gml_selector_names_count(target, current_self = null, current_other = null):
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return -1
-	return gml_struct_names_count(resolved_instance)
+	return gml_struct_names_count(targets[0])
 
 
 static func gml_variable_global_exists(member_name):
@@ -239,5 +286,3 @@ static func gml_struct_remove_from_hash(struct_value, member_hash):
 	if is_undefined(member_name):
 		return member_name
 	return gml_struct_remove(struct_value, member_name)
-
-

@@ -752,7 +752,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("enum RAINBOW { RED, ORANGE, GREEN }\ncolour = RAINBOW.GREEN", indent=""),
             'var RAINBOW = GMRuntime.gml_enum({"RED": 0, "ORANGE": 1, "GREEN": 2})\n'
-            'colour = GMRuntime.gml_struct_get(RAINBOW, "GREEN")',
+            'colour = GMRuntime.gml_selector_get(RAINBOW, "GREEN")',
         )
         self.assertEqual(
             transpile_gml_code(
@@ -854,7 +854,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("enum RAINBOW { GREEN }\nitems[RAINBOW.GREEN] = 2", indent=""),
             'var RAINBOW = GMRuntime.gml_enum({"GREEN": 0})\n'
-            'GMRuntime.gml_array_set(items, GMRuntime.gml_struct_get(RAINBOW, "GREEN"), 2)',
+            'GMRuntime.gml_array_set(items, GMRuntime.gml_selector_get(RAINBOW, "GREEN"), 2)',
         )
 
     def test_transpiles_nullish_operator(self):
@@ -979,11 +979,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_struct_member_access_through_runtime(self):
         self.assertEqual(
             transpile_gml_expression("mystruct.a"),
-            'GMRuntime.gml_struct_get(mystruct, "a")',
+            'GMRuntime.gml_selector_get(mystruct, "a")',
         )
         self.assertEqual(
             transpile_gml_expression("{a: 1}.a"),
-            'GMRuntime.gml_struct_get(GMRuntime.gml_struct({"a": 1}), "a")',
+            'GMRuntime.gml_selector_get(GMRuntime.gml_struct({"a": 1}), "a")',
         )
         self.assertEqual(
             transpile_gml_expression('mystruct[$ "x"]'),
@@ -1090,11 +1090,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("global"), "GMRuntime.gml_global_scope()")
         self.assertEqual(
             transpile_gml_expression("global.score"),
-            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")',
+            'GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "score")',
         )
         self.assertEqual(
             transpile_gml_code("global.score = 10", indent=""),
-            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "score", 10)',
+            'GMRuntime.gml_selector_set(GMRuntime.gml_global_scope(), "score", 10)',
         )
         self.assertEqual(
             transpile_gml_expression('variable_instance_get(global, "score")'),
@@ -1243,7 +1243,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("new factory.Point(name, )"),
-            'GMRuntime.gml_new(GMRuntime.gml_struct_get(factory, "Point"), '
+            'GMRuntime.gml_new(GMRuntime.gml_selector_get(factory, "Point"), '
             "[name, GMRuntime.gml_undefined()])",
         )
 
@@ -1529,7 +1529,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
             "\tvar err = GMRuntime.gml_exception_struct(_gml_try_exception_0)\n"
             "\t_gml_try_exception_0 = (func():\n"
-            '\t\tmessage = GMRuntime.gml_struct_get(err, "message")\n'
+            '\t\tmessage = GMRuntime.gml_selector_get(err, "message")\n'
             "\t\treturn GMRuntime.gml_undefined()\n"
             "\t).call()\n"
             "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
@@ -1562,7 +1562,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertIn("\t\t\treturn GMRuntime.gml_throw(inner)", output)
         self.assertIn("\treturn _gml_try_exception_1", output)
         self.assertIn("var outer = GMRuntime.gml_exception_struct(_gml_try_exception_0)", output)
-        self.assertIn('message = GMRuntime.gml_struct_get(outer, "message")', output)
+        self.assertIn('message = GMRuntime.gml_selector_get(outer, "message")', output)
 
     def test_rejects_control_flow_inside_finally_blocks(self):
         cases = (
@@ -1662,10 +1662,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", '
             'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"), '
             'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "damage")))\n'
-            '\tGMRuntime.gml_struct_set(self, "total", '
-            'GMRuntime.gml_add(GMRuntime.gml_struct_get(self, "total"), '
+            '\tGMRuntime.gml_selector_update(self, "total", '
+            'func(_gml_selector_value_1): return GMRuntime.gml_add(_gml_selector_value_1, '
             'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp")))\n'
-            '\tGMRuntime.gml_struct_set(_gml_with_target_0, "flag", true)',
+            '\tGMRuntime.gml_selector_set(_gml_with_target_0, "flag", true)',
         )
 
     def test_with_preserves_enclosing_local_mutation(self):
@@ -1679,6 +1679,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             '\ttotal = GMRuntime.gml_add(total, GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"))\n'
             "\tvar seen = total\n"
             '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", seen)',
+        )
+
+    def test_nested_with_preserves_self_other_and_outer_locals_for_selectors(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var total = 0; "
+                "with (o_parent) begin "
+                "with (o_enemy) begin "
+                "total += other.hp + self.hp; "
+                "other.hp = total; "
+                "self.hp = other.hp; "
+                "end end",
+                indent="",
+                asset_names={"o_parent", "o_enemy"},
+            ),
+            "var total = 0\n"
+            'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_parent"), self, other):\n'
+            '\tfor _gml_with_target_1 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"), _gml_with_target_0, self):\n'
+            '\t\ttotal = GMRuntime.gml_add(total, GMRuntime.gml_add(GMRuntime.gml_selector_get(_gml_with_target_0, "hp"), '
+            'GMRuntime.gml_selector_get(_gml_with_target_1, "hp")))\n'
+            '\t\tGMRuntime.gml_selector_set(_gml_with_target_0, "hp", total)\n'
+            '\t\tGMRuntime.gml_selector_set(_gml_with_target_1, "hp", GMRuntime.gml_selector_get(_gml_with_target_0, "hp"))',
         )
 
     def test_delete_clears_only_named_struct_reference(self):
@@ -2075,6 +2097,35 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("instance_destroy()"),
             "GMRuntime.gml_instance_destroy(self)",
         )
+        self.assertEqual(
+            transpile_gml_code("with (o_enemy) hp = 0;", indent="", asset_names=asset_names),
+            'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"), self, other):\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", 0)',
+        )
+
+    def test_cross_instance_dot_access_uses_selector_helpers(self):
+        asset_names = {"o_enemy", "o_parent"}
+
+        self.assertEqual(
+            transpile_gml_expression("o_enemy.hp", asset_names=asset_names),
+            'GMRuntime.gml_selector_get(GMRuntime.gml_asset_get_index("o_enemy"), "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("(o_parent).hp", asset_names=asset_names),
+            'GMRuntime.gml_selector_get(GMRuntime.gml_asset_get_index("o_parent"), "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("enemy_id.hp", local_names={"enemy_id"}),
+            'GMRuntime.gml_selector_get(enemy_id, "hp")',
+        )
+        self.assertEqual(
+            transpile_gml_code("o_enemy.hp = 0;", indent="", asset_names=asset_names),
+            'GMRuntime.gml_selector_set(GMRuntime.gml_asset_get_index("o_enemy"), "hp", 0)',
+        )
+        self.assertEqual(
+            transpile_gml_code("enemy_id.hp = 10;", indent=""),
+            'GMRuntime.gml_selector_set(enemy_id, "hp", 10)',
+        )
 
     def test_collision_queries_pass_self_and_selector_arguments(self):
         asset_names = {"o_wall"}
@@ -2138,7 +2189,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_struct_member_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("mystruct.a = 20;", indent=""),
-            'GMRuntime.gml_struct_set(mystruct, "a", 20)',
+            'GMRuntime.gml_selector_set(mystruct, "a", 20)',
         )
         self.assertEqual(
             transpile_gml_code('mystruct[$ "x"] = score + 1;', indent=""),
@@ -2146,24 +2197,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_code("mystruct.a += 1;", indent=""),
-            'GMRuntime.gml_struct_set(mystruct, "a", '
-            'GMRuntime.gml_add(GMRuntime.gml_struct_get(mystruct, "a"), 1))',
+            'GMRuntime.gml_selector_update(mystruct, "a", '
+            'func(_gml_selector_value_0): return GMRuntime.gml_add(_gml_selector_value_0, 1))',
         )
         self.assertEqual(
             transpile_gml_code("mystruct.a ??= 1;", indent=""),
-            'if GMRuntime.gml_is_nullish(GMRuntime.gml_struct_get(mystruct, "a")):\n'
-            '\tGMRuntime.gml_struct_set(mystruct, "a", 1)',
+            'GMRuntime.gml_selector_set_if_nullish(mystruct, "a", func(): return 1)',
         )
         self.assertEqual(
             transpile_gml_code("mystruct.a++;", indent=""),
-            'GMRuntime.gml_struct_set(mystruct, "a", '
-            'GMRuntime.gml_add(GMRuntime.gml_struct_get(mystruct, "a"), 1))',
+            'GMRuntime.gml_selector_update(mystruct, "a", '
+            'func(_gml_selector_value_0): return GMRuntime.gml_add(_gml_selector_value_0, 1))',
         )
         self.assertEqual(
             transpile_gml_code("get_struct().a += 1;", indent=""),
-            'var _gml_struct_target_0 = get_struct()\n'
-            'GMRuntime.gml_struct_set(_gml_struct_target_0, "a", '
-            'GMRuntime.gml_add(GMRuntime.gml_struct_get(_gml_struct_target_0, "a"), 1))',
+            'var _gml_selector_target_0 = get_struct()\n'
+            'GMRuntime.gml_selector_update(_gml_selector_target_0, "a", '
+            'func(_gml_selector_value_1): return GMRuntime.gml_add(_gml_selector_value_1, 1))',
         )
 
     def test_array_assignment_aliases_preserve_reference_mutation(self):
@@ -2179,8 +2229,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("mystruct = {a: 1}; alias = mystruct; alias.a = 2; value = mystruct.a;", indent=""),
             'mystruct = GMRuntime.gml_struct({"a": 1})\n'
             "alias = mystruct\n"
-            'GMRuntime.gml_struct_set(alias, "a", 2)\n'
-            'value = GMRuntime.gml_struct_get(mystruct, "a")',
+            'GMRuntime.gml_selector_set(alias, "a", 2)\n'
+            'value = GMRuntime.gml_selector_get(mystruct, "a")',
         )
 
     def test_struct_function_arguments_pass_reference_without_clone(self):
@@ -2188,7 +2238,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("mystruct = {a: 1}; mutate_struct(mystruct); value = mystruct.a;", indent=""),
             'mystruct = GMRuntime.gml_struct({"a": 1})\n'
             "mutate_struct(mystruct)\n"
-            'value = GMRuntime.gml_struct_get(mystruct, "a")',
+            'value = GMRuntime.gml_selector_get(mystruct, "a")',
         )
 
     def test_function_argument_reassignment_does_not_mutate_caller_value(self):

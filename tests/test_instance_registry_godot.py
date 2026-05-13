@@ -138,6 +138,32 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_instance_furthest(0, 20, enemy_selector).index == handle_b.index, "furthest picked the wrong instance"):
         \t\treturn
 
+        \tGMRuntime.gml_selector_set(enemy_selector, "hp", 7, self, null)
+        \tif not _check(first.hp == 7 and second.hp == 7, "object selector write did not update every child instance"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_selector_get(enemy_selector, "hp", self, null) == 7, "object selector read did not return first matching value"):
+        \t\treturn
+        \tGMRuntime.gml_selector_set(parent_selector, "hp", 9, self, null)
+        \tif not _check(first.hp == 9 and second.hp == 9, "parent selector write did not update inherited child instances"):
+        \t\treturn
+        \tGMRuntime.gml_variable_instance_set(parent_selector, "hp", 13)
+        \tif not _check(first.hp == 13 and second.hp == 13, "variable_instance_set did not update parent selector matches"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_variable_instance_get(parent_selector, "hp") == 13, "variable_instance_get did not read parent selector match"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_variable_instance_exists(parent_selector, "hp"), "variable_instance_exists did not inspect parent selector matches"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_variable_instance_get_names(parent_selector).has("hp"), "variable_instance_get_names did not inspect parent selector matches"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_variable_instance_names_count(parent_selector) > 0, "variable_instance_names_count did not inspect parent selector matches"):
+        \t\treturn
+        \tGMRuntime.gml_selector_set(handle_b, "hp", 11, self, null)
+        \tif not _check(first.hp == 13 and second.hp == 11, "handle selector write affected the wrong instances"):
+        \t\treturn
+        \tGMRuntime.gml_selector_set(raw_a, "hp", 5, self, null)
+        \tif not _check(first.hp == 5 and second.hp == 11, "raw instance id selector write affected the wrong instances"):
+        \t\treturn
+
         \tGMRuntime.gml_instance_destroy(handle_a)
         \tif not _check(not GMRuntime.gml_instance_exists(raw_a), "destroyed raw instance id still exists"):
         \t\treturn
@@ -183,7 +209,11 @@ class TestInstanceRegistryGodotSmoke(unittest.TestCase):
             _write_object(
                 project_dir,
                 "o_parent",
-                generate_script_content([], object_runtime=ObjectRuntimeConfig(object_name="o_parent")),
+                generate_script_content(
+                    [],
+                    instance_variables=["hp"],
+                    object_runtime=ObjectRuntimeConfig(object_name="o_parent"),
+                ),
             )
             _write_object(
                 project_dir,

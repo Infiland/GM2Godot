@@ -5,7 +5,9 @@ import json
 from typing import Iterable, MutableMapping, MutableSet
 
 from .constants import _EOF
+from .emitter import _emit_instance_keyword_argument
 from .enum_helpers import _evaluate_enum_value_tokens
+from .expression_parser import _parse_gml_expression
 from .expression_service import transpile_gml_condition, transpile_gml_expression
 from .identifiers import _sanitize_gdscript_identifier, _validate_gml_identifier, _reject_asset_identifier_name
 from .model import GMLTranspileError, _ScopeContext, _Token
@@ -256,13 +258,17 @@ class _StatementParser:
         if not target_tokens:
             raise GMLTranspileError("Expected with target")
 
-        target = transpile_gml_expression(
+        target_expr = _parse_gml_expression(
             _tokens_to_source(target_tokens),
-            local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
-            scope_context=self.scope_context,
             macro_values=self.macro_values,
+            scope_context=self.scope_context,
+        )
+        target = _emit_instance_keyword_argument(
+            target_expr,
+            self.local_names,
+            scope_context=self.scope_context,
         )
         with_target = self._next_generated_name("_gml_with_target")
         outer_scope_context = self.scope_context

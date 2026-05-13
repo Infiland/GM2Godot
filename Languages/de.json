@@ -127,6 +127,8 @@
 "Console_Convertor_Rooms_Complete" : "Raum-Konvertierung abgeschlossen.",
 "Console_Convertor_Rooms_Stopped" : "Raum-Konvertierung gestoppt.",
 
+"Console_Convertor_AssetRegistry" : "Asset-Registry wird generiert...",
+
 "Console_Convertor_Notes" : "Notizen werden konvertiert...",
 "Console_Convertor_Notes_Copied" : "Notiz kopiert: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Notiz-Konvertierung gestoppt.",

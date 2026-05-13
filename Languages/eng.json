@@ -127,6 +127,8 @@
 "Console_Convertor_Rooms_Complete" : "Room conversion completed.",
 "Console_Convertor_Rooms_Stopped" : "Room conversion stopped.",
 
+"Console_Convertor_AssetRegistry" : "Generating asset registry...",
+
 "Console_Convertor_Notes" : "Converting notes...",
 "Console_Convertor_Notes_Copied" : "Copied note: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Note conversion stopped.",

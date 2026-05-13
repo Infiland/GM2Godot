@@ -254,6 +254,10 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "direction": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "event_data": _BuiltinVariableMetadata("global", "{}", False, False, "event"),
     "fps": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "friction": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "gravity": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "gravity_direction": _BuiltinVariableMetadata("instance", "270", True, False, "motion"),
+    "hspeed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "id": _BuiltinVariableMetadata("instance", "undefined", False, False, "identity"),
     "image_index": _BuiltinVariableMetadata("instance", "0", True, False, "sprite"),
     "image_number": _BuiltinVariableMetadata("instance", "0", False, False, "sprite"),
@@ -267,6 +271,7 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "room": _BuiltinVariableMetadata("global", "undefined", False, False, "room"),
     "room_height": _BuiltinVariableMetadata("global", "0", False, False, "room"),
     "room_width": _BuiltinVariableMetadata("global", "0", False, False, "room"),
+    "solid": _BuiltinVariableMetadata("instance", "false", True, False, "collision"),
     "speed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "sprite_index": _BuiltinVariableMetadata("instance", "undefined", True, False, "sprite"),
     "view_angle": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
@@ -289,8 +294,13 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "view_yport": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
     "view_yview": _BuiltinVariableMetadata("global", "undefined", True, True, "view"),
     "visible": _BuiltinVariableMetadata("instance", "true", True, False, "rendering"),
+    "vspeed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "x": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+    "xprevious": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "xstart": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "y": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
+    "yprevious": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
+    "ystart": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
 }
 
 _BUILTIN_GLOBAL_VARIABLES = frozenset(
@@ -422,4 +432,17 @@ _COLLISION_RUNTIME_FUNCTIONS = {
     "collision_rectangle": "gml_collision_rectangle",
     "collision_line": "gml_collision_line",
     "collision_circle": "gml_collision_circle",
+}
+
+_MOTION_RUNTIME_FUNCTIONS = {
+    "motion_set": "gml_motion_set",
+    "motion_add": "gml_motion_add",
+    "move_towards_point": "gml_move_towards_point",
+    "move_contact_solid": "gml_move_contact_solid",
+    "move_contact_all": "gml_move_contact_all",
+    "move_bounce_solid": "gml_move_bounce_solid",
+    "move_bounce_all": "gml_move_bounce_all",
+    "move_random": "gml_move_random",
+    "move_snap": "gml_move_snap",
+    "place_snapped": "gml_place_snapped",
 }

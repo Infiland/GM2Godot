@@ -24,7 +24,22 @@ _is_input_event = cast(_IsInputEvent, is_input_event)
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(r"\b(?:sprite_index|image_index)\b")
-_SCRIPT_BUILTIN_VARIABLES = frozenset({"sprite_index", "image_index"})
+_SCRIPT_BUILTIN_VARIABLES = frozenset({
+    "direction",
+    "friction",
+    "gravity",
+    "gravity_direction",
+    "hspeed",
+    "image_index",
+    "solid",
+    "speed",
+    "sprite_index",
+    "vspeed",
+    "xprevious",
+    "xstart",
+    "yprevious",
+    "ystart",
+})
 _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "AnimatedSprite2D",
     "GMRuntime",
@@ -85,6 +100,7 @@ class SpriteRuntimeConfig:
 class ObjectRuntimeConfig:
     object_name: str
     parent_object_names: tuple[str, ...] = ()
+    solid: bool = False
     inherit_ready: bool = False
     inherit_exit_tree: bool = False
 
@@ -108,6 +124,10 @@ def _uses_sprite_runtime(
 
 
 def _uses_object_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
+    return object_runtime is not None
+
+
+def _uses_motion_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
     return object_runtime is not None
 
 
@@ -283,6 +303,7 @@ def _emit_object_runtime_prelude(
         "\n\nvar id = GMRuntime.gml_instance_noone()"
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         "\nvar depth = 0"
+        f"\nvar solid = {str(object_runtime.solid).lower()}"
         if declare_members
         else ""
     )
@@ -293,9 +314,11 @@ def _emit_object_runtime_prelude(
         "\n\t\treturn"
         f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
+        f"\n\tsolid = {str(object_runtime.solid).lower()}"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"
+        "\n\tGMRuntime.gml_variable_instance_set(self, \"solid\", solid)"
         "\n\tif has_meta(\"gamemaker_instance_object_name\"):"
         "\n\t\tGMRuntime.gml_variable_instance_set(self, \"object_index\", GMRuntime.gml_asset_get_index(get_meta(\"gamemaker_instance_object_name\")))"
         "\n\tif has_meta(\"gamemaker_instance_name\"):"
@@ -305,8 +328,34 @@ def _emit_object_runtime_prelude(
     )
 
 
+def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> None:
+    if not declare_members:
+        return
+    lines.append(
+        "\n\nvar direction = 0.0"
+        "\nvar speed = 0.0"
+        "\nvar hspeed = 0.0"
+        "\nvar vspeed = 0.0"
+        "\nvar friction = 0.0"
+        "\nvar gravity = 0.0"
+        "\nvar gravity_direction = 270.0"
+        "\nvar xprevious = 0.0"
+        "\nvar yprevious = 0.0"
+        "\nvar xstart = 0.0"
+        "\nvar ystart = 0.0"
+        "\n\nfunc _gm_initialize_motion_runtime():"
+        "\n\txstart = position.x"
+        "\n\tystart = position.y"
+        "\n\txprevious = position.x"
+        "\n\typrevious = position.y"
+        "\n\tGMRuntime.gml_motion_sync_from_speed_direction(self)"
+        "\n\nfunc _gm_apply_motion_step():"
+        "\n\tGMRuntime.gml_motion_step(self)\n"
+    )
+
+
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    init_lines = ["\t_gm_register_instance()"]
+    init_lines = ["\t_gm_register_instance()", "\t_gm_initialize_motion_runtime()"]
     if object_runtime.inherit_ready and body.strip() == "pass":
         init_lines.append("\tsuper._ready()")
         return "\n".join(init_lines)
@@ -323,6 +372,13 @@ def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntime
         cleanup_lines.append(body)
     cleanup_lines.append("\t_gm_unregister_instance()")
     return "\n".join(cleanup_lines)
+
+
+def _wrap_motion_process_body(body: str) -> str:
+    motion_line = "\t_gm_apply_motion_step()"
+    if body.strip() == "pass":
+        return motion_line
+    return f"{body}\n{motion_line}"
 
 
 def generate_script_content(
@@ -357,6 +413,7 @@ def generate_script_content(
     """
     uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
     uses_object_runtime = _uses_object_runtime(object_runtime)
+    uses_motion_runtime = _uses_motion_runtime(object_runtime)
     if not event_list and not uses_sprite_runtime and not uses_object_runtime:
         return _extends_line(base_script_path)
 
@@ -386,6 +443,8 @@ def generate_script_content(
             required_functions.append(EventMapping("_ready", "", 0, ""))
         if "_exit_tree" not in function_names:
             required_functions.append(EventMapping("_exit_tree", "", 5, ""))
+        if uses_motion_runtime and "_process" not in function_names and base_script_path is None:
+            required_functions.append(EventMapping("_process", "delta", 1, ""))
         if required_functions:
             unique_functions = _deduplicate_functions(unique_functions + required_functions)
             function_names = {func.godot_func for func in unique_functions}
@@ -425,6 +484,11 @@ def generate_script_content(
             object_runtime,
             declare_members=base_script_path is None,
         )
+    if uses_motion_runtime:
+        _emit_motion_runtime_prelude(
+            lines,
+            declare_members=base_script_path is None,
+        )
     for variable_name in _valid_instance_variables(instance_variables):
         lines.append(f"\n\nvar {variable_name}\n")
 
@@ -440,6 +504,8 @@ def generate_script_content(
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
             body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
+        if uses_motion_runtime and func.godot_func == "_process":
+            body = _wrap_motion_process_body(body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

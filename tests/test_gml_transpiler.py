@@ -780,7 +780,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 "speed = DOUBLE + 1",
                 indent="",
             ),
-            "speed = GMRuntime.gml_add(GMRuntime.gml_mul(4, 2), 1)",
+            "GMRuntime.gml_motion_set_speed(self, GMRuntime.gml_add(GMRuntime.gml_mul(4, 2), 1))",
         )
         self.assertEqual(
             transpile_gml_code(
@@ -2161,6 +2161,44 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("collision_circle(4, 5, 8, o_wall, false, false)", asset_names=asset_names),
             'GMRuntime.gml_collision_circle(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false)',
+        )
+
+    def test_motion_helpers_pass_self_and_sync_motion_assignments(self):
+        self.assertEqual(
+            transpile_gml_expression("motion_set(180, 4)"),
+            "GMRuntime.gml_motion_set(self, 180, 4)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("motion_add(90, 2)"),
+            "GMRuntime.gml_motion_add(self, 90, 2)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_towards_point(target_x, target_y, 3)"),
+            "GMRuntime.gml_move_towards_point(self, target_x, target_y, 3)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_contact_solid(0, 100)"),
+            "GMRuntime.gml_move_contact_solid(self, 0, 100)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_bounce_all(true)"),
+            "GMRuntime.gml_move_bounce_all(self, true)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("place_snapped(16, 16)"),
+            "GMRuntime.gml_place_snapped(self, 16, 16)",
+        )
+        self.assertEqual(
+            transpile_gml_code("speed = 5; direction = 90; hspeed += 2; vspeed--;", indent=""),
+            "GMRuntime.gml_motion_set_speed(self, 5)\n"
+            "GMRuntime.gml_motion_set_direction(self, 90)\n"
+            "GMRuntime.gml_motion_set_hspeed(self, GMRuntime.gml_add(hspeed, 2))\n"
+            "GMRuntime.gml_motion_set_vspeed(self, GMRuntime.gml_sub(vspeed, 1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) speed = 3;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            "\tGMRuntime.gml_motion_set_speed(_gml_with_target_0, 3)",
         )
 
     def test_transpiles_array_assignments_through_runtime(self):

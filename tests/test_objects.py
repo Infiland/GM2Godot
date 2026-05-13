@@ -528,7 +528,10 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
-        self.assertIn("func _ready():\n\t_gm_register_instance()\n\tsuper._ready()", content)
+        self.assertIn(
+            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
+            content,
+        )
 
     def test_script_with_create_event(self):
         """eventType 0 should produce func _ready()."""

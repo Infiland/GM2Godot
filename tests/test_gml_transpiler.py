@@ -871,8 +871,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
     def test_transpiles_calls_indexes_and_members(self):
         self.assertEqual(
-            transpile_gml_expression("choose(items[index + 1], other.value)"),
-            "choose(GMRuntime.gml_array_get(items, GMRuntime.gml_add(index, 1)), other.value)",
+            transpile_gml_expression("project_choose(items[index + 1], other.value)"),
+            "project_choose(GMRuntime.gml_array_get(items, GMRuntime.gml_add(index, 1)), other.value)",
         )
 
     def test_parses_array_literals(self):
@@ -1270,13 +1270,13 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", output)
         self.assertIn('[["n", func(): return 0]]', output)
         self.assertIn(
-            "show_debug_message(GMRuntime.gml_struct_get(_gml_static_scope_",
+            "print(GMRuntime.gml_struct_get(_gml_static_scope_",
             output,
         )
         self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", output)
         self.assertLess(
             output.index("GMRuntime.gml_static_initialize"),
-            output.index("show_debug_message"),
+            output.index("print"),
         )
 
     def test_rejects_static_declarations_outside_functions(self):
@@ -2214,7 +2214,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_expression_statements(self):
         self.assertEqual(
             transpile_gml_code("show_debug_message(score ?? 0);", indent=""),
-            "show_debug_message(score if not GMRuntime.gml_is_nullish(score) else 0)",
+            "print(score if not GMRuntime.gml_is_nullish(score) else 0)",
         )
 
     def test_local_vars_shadow_instance_position_builtins(self):

@@ -568,7 +568,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn("\tvar limit = INF", content)
         self.assertIn("\tvar ratio = GMRuntime.gml_div(1, 0)", content)
-        self.assertIn("\tshow_debug_message(GMRuntime.gml_string(limit))", content)
+        self.assertIn("\tprint(GMRuntime.gml_string(limit))", content)
 
     def test_script_transpiles_string_runtime_support(self):
         """String conversion and concatenation should use the shared runtime."""
@@ -589,7 +589,7 @@ class TestScriptGeneration(unittest.TestCase):
             '\tvar label = GMRuntime.gml_add("Score: ", GMRuntime.gml_string(score))',
             content,
         )
-        self.assertIn("\tshow_debug_message(label)", content)
+        self.assertIn("\tprint(label)", content)
 
     def test_child_event_inherited_preserves_parent_exit_boundary(self):
         """exit in an inherited parent event should not abort the child event."""

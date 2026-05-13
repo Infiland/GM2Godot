@@ -32,6 +32,7 @@ from .constants import (
     _VIRTUAL_KEY_ACTIONS,
     _VIRTUAL_KEY_CONSTANTS,
 )
+from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
 from .identifiers import _is_plain_identifier, _sanitize_gdscript_identifier
 from .model import (
     _ArrayLiteral,
@@ -41,6 +42,7 @@ from .model import (
     _Expression,
     _FunctionLiteral,
     _FunctionParameter,
+    GMLTranspileError,
     _Grouped,
     _Index,
     _Literal,
@@ -375,6 +377,13 @@ def _emit_builtin_call(
             scope_context=scope_context,
         )
         return f"GMRuntime.gml_with_targets({target})"
+    if (
+        isinstance(expr.callee, _Name)
+        and expr.callee.value == "show_debug_message"
+        and len(expr.args) == 1
+    ):
+        arg = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
+        return f"print({arg})"
     if isinstance(expr.callee, _Name) and expr.callee.value in _STRUCT_RUNTIME_FUNCTIONS:
         args = ", ".join(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
@@ -423,6 +432,10 @@ def _emit_builtin_call(
     ):
         arg = _emit_expression(expr.args[0], local_names, scope_context=scope_context)[0]
         return f"GMRuntime.{_RUNTIME_FUNCTIONS[expr.callee.value]}({arg})"
+    if isinstance(expr.callee, _Name):
+        diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
+        if diagnostic is not None:
+            raise GMLTranspileError(diagnostic)
     return None
 
 

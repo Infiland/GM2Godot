@@ -11,6 +11,17 @@ from src.conversion.gml_transpiler_parts.expression_service import (
     transpile_gml_condition,
     transpile_gml_expression,
 )
+from src.conversion.gml_transpiler_parts.gml_api_manifest import (
+    GMLAPICategoryReport,
+    GMLAPIEntry,
+    category_issue_numbers,
+    diagnostic_for_unimplemented_gml_api,
+    generate_gml_api_compatibility_report,
+    get_gml_api_entry,
+    godot_docs_root,
+    is_known_gml_api,
+    iter_gml_api_entries,
+)
 from src.conversion.gml_transpiler_parts.model import (
     GMLTranspileError,
     _ArrayLiteral,
@@ -42,6 +53,8 @@ from src.conversion.gml_transpiler_parts.tokens import _expression_tokens, _toke
 
 __all__ = [
     "GMLTranspileError",
+    "GMLAPICategoryReport",
+    "GMLAPIEntry",
     "_ArrayLiteral",
     "_Binary",
     "_BuiltinVariableMetadata",
@@ -71,6 +84,13 @@ __all__ = [
     "_expression_tokens",
     "_parse_gml_expression",
     "_tokenize",
+    "category_issue_numbers",
+    "diagnostic_for_unimplemented_gml_api",
+    "generate_gml_api_compatibility_report",
+    "get_gml_api_entry",
+    "godot_docs_root",
+    "is_known_gml_api",
+    "iter_gml_api_entries",
     "transpile_gml_code",
     "transpile_gml_condition",
     "transpile_gml_expression",

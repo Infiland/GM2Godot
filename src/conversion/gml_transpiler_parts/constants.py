@@ -446,3 +446,19 @@ _MOTION_RUNTIME_FUNCTIONS = {
     "move_snap": "gml_move_snap",
     "place_snapped": "gml_place_snapped",
 }
+
+_PATH_RUNTIME_FUNCTIONS = {
+    "path_start": "gml_path_start",
+    "path_end": "gml_path_end",
+    "path_get_length": "gml_path_get_length",
+}
+
+_MP_GRID_RUNTIME_FUNCTIONS = {
+    "mp_grid_create": "gml_mp_grid_create",
+    "mp_grid_destroy": "gml_mp_grid_destroy",
+    "mp_grid_clear_all": "gml_mp_grid_clear_all",
+    "mp_grid_add_cell": "gml_mp_grid_add_cell",
+    "mp_grid_clear_cell": "gml_mp_grid_clear_cell",
+    "mp_grid_add_rectangle": "gml_mp_grid_add_rectangle",
+    "mp_grid_path": "gml_mp_grid_path",
+}

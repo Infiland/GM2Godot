@@ -2201,6 +2201,33 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tGMRuntime.gml_motion_set_speed(_gml_with_target_0, 3)",
         )
 
+    def test_path_and_mp_grid_helpers_lower_asset_arguments(self):
+        asset_names = {"path_patrol"}
+
+        self.assertEqual(
+            transpile_gml_expression("path_start(path_patrol, 4, 0, false)", asset_names=asset_names),
+            'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 0, false)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("path_end()"),
+            "GMRuntime.gml_path_end(self)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("path_get_length(path_patrol)", asset_names=asset_names),
+            'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("mp_grid_create(0, 0, 4, 4, 16, 16)"),
+            "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)",
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "mp_grid_path(grid, path_patrol, 0, 0, 48, 48, false)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_mp_grid_path(grid, GMRuntime.gml_asset_get_index("path_patrol"), 0, 0, 48, 48, false)',
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

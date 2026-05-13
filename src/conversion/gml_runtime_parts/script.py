@@ -11,6 +11,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "40_arrays_structs_variables.gd",
     "45_collision_queries.gd",
     "46_motion_helpers.gd",
+    "47_paths_motion_planning.gd",
     "50_static_types_and_clone.gd",
     "60_conversion_helpers.gd",
     "70_handle_string_helpers.gd",

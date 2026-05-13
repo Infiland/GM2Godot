@@ -31,6 +31,10 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "gravity_direction",
     "hspeed",
     "image_index",
+    "path_index",
+    "path_position",
+    "path_scale",
+    "path_speed",
     "solid",
     "speed",
     "sprite_index",
@@ -339,6 +343,10 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
         "\nvar friction = 0.0"
         "\nvar gravity = 0.0"
         "\nvar gravity_direction = 270.0"
+        "\nvar path_index = GMRuntime.gml_undefined()"
+        "\nvar path_position = 0.0"
+        "\nvar path_speed = 0.0"
+        "\nvar path_scale = 1.0"
         "\nvar xprevious = 0.0"
         "\nvar yprevious = 0.0"
         "\nvar xstart = 0.0"
@@ -350,6 +358,7 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
         "\n\typrevious = position.y"
         "\n\tGMRuntime.gml_motion_sync_from_speed_direction(self)"
         "\n\nfunc _gm_apply_motion_step():"
+        "\n\tGMRuntime.gml_path_step(self)"
         "\n\tGMRuntime.gml_motion_step(self)\n"
     )
 

@@ -391,3 +391,12 @@ _ARRAY_RUNTIME_FUNCTIONS = {
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",
 }
+
+_ASSET_RUNTIME_FUNCTIONS = {
+    "asset_get_index": "gml_asset_get_index",
+    "asset_get_type": "gml_asset_get_type",
+    "asset_get_ids": "gml_asset_get_ids",
+    "asset_get_type_name": "gml_asset_get_type_name",
+    "asset_get_index_from_id": "gml_asset_get_index_from_id",
+    "asset_has_any_tag": "gml_asset_has_any_tag",
+}

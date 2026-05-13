@@ -6,6 +6,7 @@ from typing import Literal, TypeAlias
 
 from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
+    _ASSET_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
@@ -98,6 +99,15 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_push": (2, None),
 }
 
+_ASSET_ARITY: dict[str, tuple[int, int | None]] = {
+    "asset_get_index": (1, 1),
+    "asset_get_type": (1, 1),
+    "asset_get_ids": (0, 1),
+    "asset_get_type_name": (1, 1),
+    "asset_get_index_from_id": (1, 1),
+    "asset_has_any_tag": (2, 2),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -169,6 +179,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _ARRAY_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ARRAY_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _ASSET_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _ASSET_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     descriptors["keyboard_check"] = _descriptor(

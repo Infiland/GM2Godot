@@ -56,15 +56,20 @@ class TestGMLAPIManifest(unittest.TestCase):
 
     def test_manifest_exposes_implemented_and_planned_apis(self):
         array_push = get_gml_api_entry("array_push")
+        asset_get_index = get_gml_api_entry("asset_get_index")
         draw_sprite = get_gml_api_entry("draw_sprite")
 
         self.assertIsNotNone(array_push)
+        self.assertIsNotNone(asset_get_index)
         self.assertIsNotNone(draw_sprite)
         assert array_push is not None
+        assert asset_get_index is not None
         assert draw_sprite is not None
 
         self.assertEqual(array_push.status, "implemented")
         self.assertEqual(array_push.issue_number, 502)
+        self.assertEqual(asset_get_index.status, "implemented")
+        self.assertEqual(asset_get_index.issue_number, 484)
         self.assertEqual(draw_sprite.status, "planned")
         self.assertEqual(draw_sprite.issue_number, 491)
         self.assertTrue(is_known_gml_api("draw_sprite"))
@@ -96,6 +101,8 @@ class TestGMLAPIManifest(unittest.TestCase):
 
         for name in (
             "array_push",
+            "asset_get_index",
+            "asset_get_ids",
             "bool",
             "keyboard_check",
             "method",

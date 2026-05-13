@@ -4,6 +4,7 @@ from pathlib import Path
 
 _RUNTIME_SEGMENT_NAMES = (
     "00_prelude.gd",
+    "15_asset_registry.gd",
     "10_handles_and_instances.gd",
     "20_methods_and_exceptions.gd",
     "30_numeric_arithmetic.gd",

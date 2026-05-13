@@ -226,6 +226,19 @@ RUNTIME_VALUE_PARITY_CASES = (
     ),
     RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
     RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, 2, 3)"),
+    RuntimeValueParityCase('asset_get_index("s_player")', 'GMRuntime.gml_asset_get_index("s_player")'),
+    RuntimeValueParityCase("asset_get_type(sprite_index)", "GMRuntime.gml_asset_get_type(sprite_index)"),
+    RuntimeValueParityCase("asset_get_ids()", "GMRuntime.gml_asset_get_ids()"),
+    RuntimeValueParityCase('asset_get_ids("sprite")', 'GMRuntime.gml_asset_get_ids("sprite")'),
+    RuntimeValueParityCase('asset_get_type_name("sprite")', 'GMRuntime.gml_asset_get_type_name("sprite")'),
+    RuntimeValueParityCase(
+        'asset_get_index_from_id("sprites/s_player/s_player.yy")',
+        'GMRuntime.gml_asset_get_index_from_id("sprites/s_player/s_player.yy")',
+    ),
+    RuntimeValueParityCase(
+        'asset_has_any_tag("s_player", ["player"])',
+        'GMRuntime.gml_asset_has_any_tag("s_player", ["player"])',
+    ),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_struct_get(mystruct, "a")'),
@@ -504,6 +517,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_array_set",
             "gml_array_push",
             "gml_array_equals",
+            "gml_asset_registry_set",
+            "gml_asset_registry_entries",
+            "gml_asset_get_index",
+            "gml_asset_get_type",
+            "gml_asset_get_ids",
+            "gml_asset_get_type_name",
+            "gml_asset_get_index_from_id",
+            "gml_asset_has_any_tag",
+            "gml_asset_register_dynamic",
+            "gml_asset_release",
             "gml_struct",
             "gml_enum",
             "gml_struct_exists",
@@ -1116,6 +1139,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if _gml_builtin_globals.has(key):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_builtin_globals[key]", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_asset_registry_helpers_lazy_load_generated_registry(self):
+        self.assertIn('const GML_ASSET_REGISTRY_PATH = "res://gm2godot/gml_asset_registry.gd"', GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_DYNAMIC_ASSET_ID_START = 1073741824", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_asset_registry_loaded = false", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_asset_by_name = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_asset_by_legacy_id = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_asset_registry_ensure_loaded():", GML_RUNTIME_SCRIPT)
+        self.assertIn("ResourceLoader.exists(GML_ASSET_REGISTRY_PATH)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_asset_registry_set(registry_script.gml_asset_registry_entries())", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_asset_get_index(asset_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_asset_get_ids(asset_type = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_asset_register_dynamic(asset_name, asset_type, godot_resource = null, tags = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_asset_release(asset):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_asset_dynamic_ids[asset_id] = true", GML_RUNTIME_SCRIPT)
+        self.assertIn("return false", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)

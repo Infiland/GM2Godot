@@ -5,6 +5,7 @@ from typing import Callable, Mapping, Protocol, TypeAlias
 from src.conversion.sprites import SpriteConverter
 from src.conversion.sounds import SoundConverter
 from src.conversion.fonts import FontConverter
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
 from src.conversion.objects import ObjectConverter
@@ -18,7 +19,7 @@ from src.localization import get_localized
 
 
 CONVERSION_CATEGORIES: dict[str, list[str]] = {
-    "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"],
+    "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms", "asset_registry"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
     "wip": ["shaders", "tilesets"],
 }
@@ -126,10 +127,19 @@ class Converter:
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_Rooms"),
+            ("asset_registry", lambda: AssetRegistryConverter(
+                gm_path, godot_path, self.log_callback,
+                self.progress_callback, self.conversion_running.is_set,
+                update_log_callback=self.update_log_callback,
+                compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
+                organize_sounds_by_audio_group=group_sounds_by_audio_group,
+            ).convert_all(), "Console_Convertor_AssetRegistry"),
         ]
 
         for setting_key, converter_fn, log_key in converters:
-            if settings[setting_key].get() and self.conversion_running.is_set():
+            setting = settings.get(setting_key)
+            if setting is not None and setting.get() and self.conversion_running.is_set():
                 log_message = get_localized(log_key)
                 self.log_callback(log_message)
                 self.status_callback(log_message)

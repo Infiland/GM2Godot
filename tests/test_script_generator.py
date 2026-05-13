@@ -51,7 +51,10 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn("var solid = false", content)
         self.assertIn("var speed = 0.0", content)
-        self.assertIn("func _gm_apply_motion_step():\n\tGMRuntime.gml_motion_step(self)", content)
+        self.assertIn(
+            "func _gm_apply_motion_step():\n\tGMRuntime.gml_path_step(self)\n\tGMRuntime.gml_motion_step(self)",
+            content,
+        )
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
         self.assertIn("\t_gm_initialize_motion_runtime()", content)
         self.assertIn("func _process(delta):\n\t_gm_apply_motion_step()", content)

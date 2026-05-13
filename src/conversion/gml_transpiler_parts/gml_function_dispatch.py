@@ -11,6 +11,8 @@ from .constants import (
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
+    _MP_GRID_RUNTIME_FUNCTIONS,
+    _PATH_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
@@ -27,6 +29,8 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
     "runtime_motion_api",
+    "runtime_path_api",
+    "runtime_path_asset_api",
     "runtime_self_default",
     "with_targets",
 ]
@@ -152,6 +156,22 @@ _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
     "place_snapped": (2, 2),
 }
 
+_PATH_ARITY: dict[str, tuple[int, int | None]] = {
+    "path_start": (4, 4),
+    "path_end": (0, 0),
+    "path_get_length": (1, 1),
+}
+
+_MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
+    "mp_grid_create": (6, 6),
+    "mp_grid_destroy": (1, 1),
+    "mp_grid_clear_all": (1, 1),
+    "mp_grid_add_cell": (3, 3),
+    "mp_grid_clear_cell": (3, 3),
+    "mp_grid_add_rectangle": (5, 5),
+    "mp_grid_path": (7, 7),
+}
+
 
 def get_gml_function_descriptor(name: str) -> GMLFunctionDescriptor | None:
     return _GML_FUNCTION_DESCRIPTORS.get(name)
@@ -245,6 +265,22 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _MOTION_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MOTION_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_motion_api", target)
+
+    for name, target in _PATH_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _PATH_ARITY[name]
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name in ("path_start", "path_end"):
+            lowering_kind = "runtime_path_api"
+        elif name == "path_get_length":
+            lowering_kind = "runtime_path_asset_api"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
+
+    for name, target in _MP_GRID_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _MP_GRID_ARITY[name]
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name == "mp_grid_path":
+            lowering_kind = "runtime_path_asset_api"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

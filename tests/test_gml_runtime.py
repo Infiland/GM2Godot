@@ -329,6 +329,21 @@ RUNTIME_VALUE_PARITY_CASES = (
     RuntimeValueParityCase("move_random(16, 16)", "GMRuntime.gml_move_random(self, 16, 16)"),
     RuntimeValueParityCase("move_snap(16, 16)", "GMRuntime.gml_move_snap(self, 16, 16)"),
     RuntimeValueParityCase("place_snapped(16, 16)", "GMRuntime.gml_place_snapped(self, 16, 16)"),
+    RuntimeValueParityCase(
+        "path_start(path_patrol, 4, 0, false)",
+        'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 0, false)',
+    ),
+    RuntimeValueParityCase("path_end()", "GMRuntime.gml_path_end(self)"),
+    RuntimeValueParityCase(
+        "path_get_length(path_patrol)",
+        'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',
+    ),
+    RuntimeValueParityCase("mp_grid_create(0, 0, 4, 4, 16, 16)", "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)"),
+    RuntimeValueParityCase("mp_grid_add_cell(grid, 1, 2)", "GMRuntime.gml_mp_grid_add_cell(grid, 1, 2)"),
+    RuntimeValueParityCase(
+        "mp_grid_path(grid, path_patrol, 0, 0, 48, 48, false)",
+        'GMRuntime.gml_mp_grid_path(grid, GMRuntime.gml_asset_get_index("path_patrol"), 0, 0, 48, 48, false)',
+    ),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_selector_get(mystruct, "a")'),
@@ -616,6 +631,18 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_move_random",
             "gml_move_snap",
             "gml_place_snapped",
+            "gml_path_registry_set",
+            "gml_path_start",
+            "gml_path_end",
+            "gml_path_step",
+            "gml_path_get_length",
+            "gml_mp_grid_create",
+            "gml_mp_grid_destroy",
+            "gml_mp_grid_clear_all",
+            "gml_mp_grid_add_cell",
+            "gml_mp_grid_clear_cell",
+            "gml_mp_grid_add_rectangle",
+            "gml_mp_grid_path",
             "gml_selector_get",
             "gml_selector_exists",
             "gml_selector_set",
@@ -1583,7 +1610,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol"}),
                     parity_case.gdscript_expression,
                 )
 

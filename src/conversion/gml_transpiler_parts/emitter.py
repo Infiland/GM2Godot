@@ -82,6 +82,12 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "collision_circle": frozenset({3}),
 }
 
+_PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "path_get_length": frozenset({0}),
+    "path_start": frozenset({0}),
+    "mp_grid_path": frozenset({1}),
+}
+
 
 def _emit_name(
     value: str,
@@ -456,6 +462,8 @@ def _emit_descriptor_call(
         "runtime_collision_api",
         "runtime_instance_api",
         "runtime_motion_api",
+        "runtime_path_api",
+        "runtime_path_asset_api",
         "runtime_self_default",
     }:
         emitted_args = _emit_instance_api_args(
@@ -467,6 +475,8 @@ def _emit_descriptor_call(
         if descriptor.lowering_kind == "runtime_collision_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_motion_api":
+            emitted_args.insert(0, scope_context.self_expression)
+        if descriptor.lowering_kind == "runtime_path_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_append_self":
             emitted_args.append(scope_context.self_expression)
@@ -511,9 +521,10 @@ def _emit_instance_api_args(
     selector_indices = _INSTANCE_SELECTOR_ARG_INDICES.get(descriptor.name)
     if selector_indices is None:
         selector_indices = _COLLISION_SELECTOR_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = _PATH_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
-        if index in selector_indices:
+        if index in selector_indices or index in asset_indices:
             emitted_args.append(
                 _emit_instance_keyword_argument(
                     arg,

@@ -13,6 +13,7 @@ from src.conversion.type_defs import (
     ProgressCallback,
     StrPath,
 )
+from src.conversion.path_registry import write_path_registry
 
 ASSET_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_asset_registry.gd")
 ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"
@@ -163,6 +164,7 @@ class AssetRegistryConverter(BaseConverter):
 
         with open(registry_path, "w", encoding="utf-8") as f:
             f.write(render_asset_registry_script(entries))
+        write_path_registry(self.gm_project_path, self.godot_project_path, entries)
 
         self.log_callback(
             "Generated GameMaker asset registry: {path} ({count} assets)".format(

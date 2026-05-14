@@ -2249,6 +2249,45 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "seen = GMRuntime.gml_draw_get_alpha()",
         )
 
+    def test_sprite_and_text_draw_helpers_lower_assets_and_state(self):
+        asset_names = {"fnt_main", "spr_player", "tiles_world"}
+
+        self.assertEqual(
+            transpile_gml_code(
+                "draw_self();"
+                "draw_sprite(spr_player, image_index, x, y);"
+                "draw_sprite_ext(spr_player, 0, x, y, image_xscale, image_yscale, image_angle, image_blend, image_alpha);"
+                "draw_sprite_part(spr_player, 0, 1, 2, 8, 9, 10, 11);"
+                "draw_sprite_pos(spr_player, 0, 0, 0, 8, 0, 8, 8, 0, 8, 0.75);"
+                "draw_sprite_tiled(spr_player, 0, 0, 0);"
+                "draw_tile(tiles_world, 3 | tile_flip, 0, 16, 24);"
+                "draw_set_font(fnt_main);"
+                "draw_set_halign(fa_center);"
+                "draw_set_valign(fa_bottom);"
+                'draw_text(16, 24, "Score");'
+                'draw_text_ext(16, 40, "Wrapped text", -1, 100);'
+                'draw_text_transformed(16, 64, "Big", 2, 2, image_angle);'
+                "w = string_width(label); h = string_height_ext(label, -1, 120);",
+                indent="",
+                asset_names=asset_names,
+            ),
+            "GMRuntime.gml_draw_self(self)\n"
+            'GMRuntime.gml_draw_sprite(GMRuntime.gml_asset_get_index("spr_player"), image_index, position.x, position.y)\n'
+            'GMRuntime.gml_draw_sprite_ext(GMRuntime.gml_asset_get_index("spr_player"), 0, position.x, position.y, image_xscale, image_yscale, image_angle, image_blend, image_alpha)\n'
+            'GMRuntime.gml_draw_sprite_part(GMRuntime.gml_asset_get_index("spr_player"), 0, 1, 2, 8, 9, 10, 11)\n'
+            'GMRuntime.gml_draw_sprite_pos(GMRuntime.gml_asset_get_index("spr_player"), 0, 0, 0, 8, 0, 8, 8, 0, 8, 0.75)\n'
+            'GMRuntime.gml_draw_sprite_tiled(GMRuntime.gml_asset_get_index("spr_player"), 0, 0, 0)\n'
+            'GMRuntime.gml_draw_tile(GMRuntime.gml_asset_get_index("tiles_world"), GMRuntime.gml_bit_or(3, 0x20000000), 0, 16, 24)\n'
+            'GMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index("fnt_main"))\n'
+            "GMRuntime.gml_draw_set_halign(1)\n"
+            "GMRuntime.gml_draw_set_valign(2)\n"
+            'GMRuntime.gml_draw_text(16, 24, "Score")\n'
+            'GMRuntime.gml_draw_text_ext(16, 40, "Wrapped text", -1, 100)\n'
+            'GMRuntime.gml_draw_text_transformed(16, 64, "Big", 2, 2, image_angle)\n'
+            "w = GMRuntime.gml_string_width(label)\n"
+            "h = GMRuntime.gml_string_height_ext(label, -1, 120)",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),
@@ -2501,13 +2540,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(
-                "sprite_index = s_enemy; image_index = 2; image_index += 1;",
+                "sprite_index = s_enemy; image_index = 2; image_index += 1; "
+                "image_xscale = 2; image_angle += 45; image_alpha = 0.5;",
                 indent="",
                 instance_variables=instance_variables,
             ),
             "sprite_index = s_enemy\n"
             "image_index = 2\n"
-            "image_index = GMRuntime.gml_add(image_index, 1)",
+            "image_index = GMRuntime.gml_add(image_index, 1)\n"
+            "image_xscale = 2\n"
+            "image_angle = GMRuntime.gml_add(image_angle, 45)\n"
+            "image_alpha = 0.5",
         )
         self.assertEqual(instance_variables, set())
 

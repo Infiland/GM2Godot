@@ -875,6 +875,10 @@ class TestGenerateSpriteScene(unittest.TestCase):
         self.assertIn('type="RectangleShape2D"', content)
         self.assertIn("size = Vector2(32, 32)", content)
         self.assertIn('type="Area2D"', content)
+        self.assertIn("metadata/gamemaker_width = 32", content)
+        self.assertIn("metadata/gamemaker_height = 32", content)
+        self.assertIn("metadata/gamemaker_origin_x = 0", content)
+        self.assertIn("metadata/gamemaker_origin_y = 0", content)
         self.assertIn('type="Sprite2D"', content)
         self.assertIn('type="CollisionShape2D"', content)
         self.assertIn('res://sprites/spr_rect/spr_rect.png', content)
@@ -892,6 +896,8 @@ class TestGenerateSpriteScene(unittest.TestCase):
         # Full bbox on 32x32: bbox_center = (0+31+1)/2 = 16, sprite_center = 16
         # offset = (0, 0) → no position line needed (but code still writes it)
         self.assertIn("position = Vector2(0.0, 0.0)", content)
+        self.assertIn("metadata/gamemaker_origin_x = 16.0", content)
+        self.assertIn("metadata/gamemaker_origin_y = 16.0", content)
 
     def test_multiframe_references_first_frame(self):
         data = self._make_collision_data(collision_kind=1)
@@ -1119,6 +1125,8 @@ class TestGenerateAnimatedScene(unittest.TestCase):
         content = self._read_tscn("spr_anim")
         self.assertIn('type="AnimatedSprite2D"', content)
         self.assertIn('type="SpriteFrames"', content)
+        self.assertIn("metadata/gamemaker_origin_x = 0", content)
+        self.assertIn("metadata/gamemaker_origin_y = 0", content)
         self.assertNotIn('type="Sprite2D"', content)
 
     def test_animated_scene_has_correct_frame_count(self):

@@ -95,19 +95,19 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(path_start.issue_number, 489)
         self.assertEqual(draw_line.status, "implemented")
         self.assertEqual(draw_line.issue_number, 490)
-        self.assertEqual(draw_sprite.status, "planned")
+        self.assertEqual(draw_sprite.status, "implemented")
         self.assertEqual(draw_sprite.issue_number, 491)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("draw_sprite")
+        diagnostic = diagnostic_for_unimplemented_gml_api("surface_create")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("draw_sprite", diagnostic)
-        self.assertIn("#491", diagnostic)
+        self.assertIn("surface_create", diagnostic)
+        self.assertIn("#492", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -162,8 +162,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "draw_sprite.*#491"):
-            transpile_gml_expression("draw_sprite(spr_player, 0, x, y)")
+        with self.assertRaisesRegex(GMLTranspileError, "surface_create.*#492"):
+            transpile_gml_expression("surface_create(320, 180)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

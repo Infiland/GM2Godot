@@ -2288,6 +2288,44 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "h = GMRuntime.gml_string_height_ext(label, -1, 120)",
         )
 
+    def test_surface_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "surf = surface_create(64, 32, surface_rgba8unorm);"
+                "exists = surface_exists(surf);"
+                "ok = surface_set_target(surf);"
+                "draw_clear(c_black);"
+                "surface_reset_target();"
+                "w = surface_get_width(surf); h = surface_get_height(surf);"
+                "draw_surface_ext(surf, 0, 0, 2, 2, 0, c_white, 1);"
+                "surface_copy(surf, 1, 2, application_surface);"
+                'surface_save(surf, "shot.png");'
+                "application_surface_enable(false);"
+                "application_surface_draw_enable(false);"
+                "app_ok = application_surface_is_enabled();"
+                "draw_ok = application_surface_is_draw_enabled();"
+                "pos = application_get_position();"
+                "surface_free(surf);",
+                indent="",
+            ),
+            "surf = GMRuntime.gml_surface_create(64, 32, 0)\n"
+            "exists = GMRuntime.gml_surface_exists(surf)\n"
+            "ok = GMRuntime.gml_surface_set_target(surf)\n"
+            "GMRuntime.gml_draw_clear(0x000000)\n"
+            "GMRuntime.gml_surface_reset_target()\n"
+            "w = GMRuntime.gml_surface_get_width(surf)\n"
+            "h = GMRuntime.gml_surface_get_height(surf)\n"
+            "GMRuntime.gml_draw_surface_ext(surf, 0, 0, 2, 2, 0, 0xffffff, 1)\n"
+            "GMRuntime.gml_surface_copy(surf, 1, 2, GMRuntime.gml_builtin_global(\"application_surface\"))\n"
+            'GMRuntime.gml_surface_save(surf, "shot.png")\n'
+            "GMRuntime.gml_application_surface_enable(false)\n"
+            "GMRuntime.gml_application_surface_draw_enable(false)\n"
+            "app_ok = GMRuntime.gml_application_surface_is_enabled()\n"
+            "draw_ok = GMRuntime.gml_application_surface_is_draw_enabled()\n"
+            "pos = GMRuntime.gml_application_get_position()\n"
+            "GMRuntime.gml_surface_free(surf)",
+        )
+
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
             transpile_gml_code("items[index] = score + 1;", indent=""),

@@ -63,6 +63,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         path_start = get_gml_api_entry("path_start")
         draw_line = get_gml_api_entry("draw_line")
         draw_sprite = get_gml_api_entry("draw_sprite")
+        surface_create = get_gml_api_entry("surface_create")
 
         self.assertIsNotNone(array_push)
         self.assertIsNotNone(asset_get_index)
@@ -72,6 +73,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIsNotNone(path_start)
         self.assertIsNotNone(draw_line)
         self.assertIsNotNone(draw_sprite)
+        self.assertIsNotNone(surface_create)
         assert array_push is not None
         assert asset_get_index is not None
         assert instance_create_layer is not None
@@ -80,6 +82,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert path_start is not None
         assert draw_line is not None
         assert draw_sprite is not None
+        assert surface_create is not None
 
         self.assertEqual(array_push.status, "implemented")
         self.assertEqual(array_push.issue_number, 502)
@@ -97,17 +100,19 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(draw_line.issue_number, 490)
         self.assertEqual(draw_sprite.status, "implemented")
         self.assertEqual(draw_sprite.issue_number, 491)
+        self.assertEqual(surface_create.status, "partial")
+        self.assertEqual(surface_create.issue_number, 492)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("surface_create")
+        diagnostic = diagnostic_for_unimplemented_gml_api("camera_create_view")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("surface_create", diagnostic)
-        self.assertIn("#492", diagnostic)
+        self.assertIn("camera_create_view", diagnostic)
+        self.assertIn("#493", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -162,8 +167,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "surface_create.*#492"):
-            transpile_gml_expression("surface_create(320, 180)")
+        with self.assertRaisesRegex(GMLTranspileError, "camera_create_view.*#493"):
+            transpile_gml_expression("camera_create_view(0, 0, 320, 180)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

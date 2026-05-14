@@ -273,6 +273,8 @@ static func gml_draw_get_line_width():
 
 
 static func gml_draw_clear(color):
+	if _gml_surface_clear_active_target(color, 1.0):
+		return null
 	var target = _gml_draw_target()
 	if target == null:
 		return null
@@ -351,6 +353,8 @@ static func gml_draw_point(x, y):
 
 static func _gml_draw_target():
 	if _gml_draw_context_stack.is_empty():
+		return null
+	if _gml_surface_has_active_target():
 		return null
 	var target = _gml_draw_context_stack[_gml_draw_context_stack.size() - 1]["target"]
 	if target is CanvasItem:

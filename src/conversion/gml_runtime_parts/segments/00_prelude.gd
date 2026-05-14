@@ -125,6 +125,7 @@ static var _gml_global_scope = {
 }
 static var _gml_builtin_arrays = {}
 static var _gml_builtin_globals = {
+	"application_surface": _gml_undefined,
 	"argument": [],
 	"argument_count": 0,
 	"async_load": {},
@@ -164,6 +165,8 @@ static func gml_builtin_array(name):
 
 static func gml_builtin_global(name):
 	var key = str(name)
+	if key == "application_surface":
+		return gml_application_surface()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()

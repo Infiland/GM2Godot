@@ -99,6 +99,7 @@ _DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "draw_sprite_tiled_ext": frozenset({0}),
     "draw_tile": frozenset({0}),
     "draw_set_font": frozenset({0}),
+    "camera_create_view": frozenset({5}),
 }
 
 

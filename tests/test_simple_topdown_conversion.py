@@ -105,7 +105,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_UP):", content)
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_DOWN):", content)
         self.assertNotIn("func _process(delta):\n\tpass", content)
-        self.assertNotIn("keyboard_check", content)
+        self.assertNotRegex(content, r"(?<!gml_)keyboard_check\(")
         self.assertNotIn("vk_left", content)
         self.assertNotIn("vk_shift", content)
 

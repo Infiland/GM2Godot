@@ -706,22 +706,22 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _process(delta):", content)
         self.assertIn(
-            "\tif Input.is_action_pressed(\"ui_left\"):\n"
+            "\tif GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif Input.is_action_pressed(\"ui_right\"):\n"
+            "\tif GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
             "\t\tposition.x = GMRuntime.gml_add(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif Input.is_action_pressed(\"ui_up\"):\n"
+            "\tif GMRuntime.gml_keyboard_check(KEY_UP):\n"
             "\t\tposition.y = GMRuntime.gml_sub(position.y, 10)",
             content,
         )
         self.assertIn(
-            "\tif Input.is_action_pressed(\"ui_down\"):\n"
+            "\tif GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
             "\t\tposition.y = GMRuntime.gml_add(position.y, 10)",
             content,
         )
@@ -756,7 +756,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var faster", content)
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
-        self.assertIn("\tif Input.is_key_pressed(KEY_SHIFT):", content)
+        self.assertIn("\tif GMRuntime.gml_keyboard_check(KEY_SHIFT):", content)
         self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))

@@ -169,6 +169,20 @@ static func gml_builtin_global(name):
 	var key = str(name)
 	if key == "application_surface":
 		return gml_application_surface()
+	if key == "keyboard_key":
+		return _gml_input_keyboard_key
+	if key == "keyboard_lastkey":
+		return _gml_input_keyboard_lastkey
+	if key == "keyboard_string":
+		return _gml_input_keyboard_string
+	if key == "mouse_x":
+		return gml_display_mouse_get_x()
+	if key == "mouse_y":
+		return gml_display_mouse_get_y()
+	if key == "mouse_wheel_up":
+		return _gml_input_mouse_wheel_up
+	if key == "mouse_wheel_down":
+		return _gml_input_mouse_wheel_down
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()

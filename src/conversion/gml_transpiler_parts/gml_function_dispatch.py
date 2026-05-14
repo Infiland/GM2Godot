@@ -10,6 +10,7 @@ from .constants import (
     _COLLISION_RUNTIME_FUNCTIONS,
     _DRAW_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
+    _INPUT_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
@@ -172,6 +173,30 @@ _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
     "mp_grid_clear_cell": (3, 3),
     "mp_grid_add_rectangle": (5, 5),
     "mp_grid_path": (7, 7),
+}
+
+_INPUT_ARITY: dict[str, tuple[int, int | None]] = {
+    "keyboard_check": (1, 1),
+    "keyboard_check_pressed": (1, 1),
+    "keyboard_check_released": (1, 1),
+    "keyboard_clear": (1, 1),
+    "keyboard_key_press": (1, 1),
+    "keyboard_key_release": (1, 1),
+    "mouse_check_button": (1, 1),
+    "mouse_check_button_pressed": (1, 1),
+    "mouse_check_button_released": (1, 1),
+    "display_mouse_get_x": (0, 0),
+    "display_mouse_get_y": (0, 0),
+    "device_mouse_x_to_gui": (1, 1),
+    "device_mouse_y_to_gui": (1, 1),
+    "gamepad_is_connected": (1, 1),
+    "gamepad_button_check": (2, 2),
+    "gamepad_button_check_pressed": (2, 2),
+    "gamepad_button_check_released": (2, 2),
+    "gamepad_axis_value": (2, 2),
+    "gamepad_set_axis_deadzone": (2, 2),
+    "gamepad_get_axis_deadzone": (1, 1),
+    "gamepad_set_vibration": (3, 3),
 }
 
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
@@ -351,6 +376,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
+    for name, target in _INPUT_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _INPUT_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
     for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime_draw_api"
@@ -358,13 +387,6 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_append_self"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    descriptors["keyboard_check"] = _descriptor(
-        "keyboard_check",
-        1,
-        1,
-        "keyboard_check",
-        "Input",
-    )
     descriptors["method"] = _descriptor("method", 2, 2, "method", "gml_method")
     descriptors["with_targets"] = _descriptor(
         "with_targets",

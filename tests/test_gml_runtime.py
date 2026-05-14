@@ -403,6 +403,25 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("display_get_gui_width()", "GMRuntime.gml_display_get_gui_width()"),
     RuntimeValueParityCase("display_get_gui_height()", "GMRuntime.gml_display_get_gui_height()"),
     RuntimeValueParityCase("display_set_gui_size(640, 360)", "GMRuntime.gml_display_set_gui_size(640, 360)"),
+    RuntimeValueParityCase("keyboard_check(vk_left)", "GMRuntime.gml_keyboard_check(KEY_LEFT)"),
+    RuntimeValueParityCase("keyboard_check_pressed(vk_space)", "GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)"),
+    RuntimeValueParityCase("keyboard_check_released(vk_escape)", "GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)"),
+    RuntimeValueParityCase("keyboard_clear(vk_anykey)", "GMRuntime.gml_keyboard_clear(0)"),
+    RuntimeValueParityCase("mouse_check_button(mb_left)", "GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)"),
+    RuntimeValueParityCase("mouse_check_button_pressed(mb_right)", "GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)"),
+    RuntimeValueParityCase("mouse_check_button_released(mb_middle)", "GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)"),
+    RuntimeValueParityCase("display_mouse_get_x()", "GMRuntime.gml_display_mouse_get_x()"),
+    RuntimeValueParityCase("display_mouse_get_y()", "GMRuntime.gml_display_mouse_get_y()"),
+    RuntimeValueParityCase("device_mouse_x_to_gui(0)", "GMRuntime.gml_device_mouse_x_to_gui(0)"),
+    RuntimeValueParityCase("device_mouse_y_to_gui(0)", "GMRuntime.gml_device_mouse_y_to_gui(0)"),
+    RuntimeValueParityCase("gamepad_is_connected(0)", "GMRuntime.gml_gamepad_is_connected(0)"),
+    RuntimeValueParityCase("gamepad_button_check(0, gp_face1)", "GMRuntime.gml_gamepad_button_check(0, JOY_BUTTON_A)"),
+    RuntimeValueParityCase("gamepad_button_check_pressed(0, gp_face2)", "GMRuntime.gml_gamepad_button_check_pressed(0, JOY_BUTTON_B)"),
+    RuntimeValueParityCase("gamepad_button_check_released(0, gp_face3)", "GMRuntime.gml_gamepad_button_check_released(0, JOY_BUTTON_X)"),
+    RuntimeValueParityCase("gamepad_axis_value(0, gp_axislh)", "GMRuntime.gml_gamepad_axis_value(0, JOY_AXIS_LEFT_X)"),
+    RuntimeValueParityCase("gamepad_set_axis_deadzone(0, 0.2)", "GMRuntime.gml_gamepad_set_axis_deadzone(0, 0.2)"),
+    RuntimeValueParityCase("gamepad_get_axis_deadzone(0)", "GMRuntime.gml_gamepad_get_axis_deadzone(0)"),
+    RuntimeValueParityCase("gamepad_set_vibration(0, 1, 0.5)", "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)"),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_selector_get(mystruct, "a")'),
@@ -619,7 +638,7 @@ TYPE_TABLE_OPERATORS = (
 
 class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_defines_shared_value_helpers(self):
-        for helper_name in (
+        helper_names: tuple[str, ...] = (
             "gml_undefined",
             "gml_pointer_null",
             "gml_pointer_invalid",
@@ -756,6 +775,27 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_display_get_gui_width",
             "gml_display_get_gui_height",
             "gml_display_set_gui_size",
+            "gml_keyboard_check",
+            "gml_keyboard_check_pressed",
+            "gml_keyboard_check_released",
+            "gml_keyboard_clear",
+            "gml_keyboard_key_press",
+            "gml_keyboard_key_release",
+            "gml_mouse_check_button",
+            "gml_mouse_check_button_pressed",
+            "gml_mouse_check_button_released",
+            "gml_display_mouse_get_x",
+            "gml_display_mouse_get_y",
+            "gml_device_mouse_x_to_gui",
+            "gml_device_mouse_y_to_gui",
+            "gml_gamepad_is_connected",
+            "gml_gamepad_button_check",
+            "gml_gamepad_button_check_pressed",
+            "gml_gamepad_button_check_released",
+            "gml_gamepad_axis_value",
+            "gml_gamepad_set_axis_deadzone",
+            "gml_gamepad_get_axis_deadzone",
+            "gml_gamepad_set_vibration",
             "gml_draw_text",
             "gml_draw_text_ext",
             "gml_draw_text_transformed",
@@ -857,7 +897,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_type_name",
             "gml_unsupported_type_error",
             "gml_unsupported_binary_type_error",
-        ):
+        )
+        for helper_name in helper_names:
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_any_values_untyped(self):

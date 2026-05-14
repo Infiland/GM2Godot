@@ -1905,11 +1905,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 'switch (keyboard_key) { case vk_left: case ord("A"): x -= 4; break; }',
                 indent="",
             ),
-            "var _gml_switch_value_0 = keyboard_key\n"
+            'var _gml_switch_value_0 = GMRuntime.gml_builtin_global("keyboard_key")\n'
             "var _gml_switch_matched_1 = false\n"
-            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, vk_left) or GMRuntime.gml_eq(_gml_switch_value_0, ord("A"))\n'
+            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT) or GMRuntime.gml_eq(_gml_switch_value_0, ord("A"))\n'
             "while true:\n"
-            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, vk_left):\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT):\n"
             "\t\t_gml_switch_matched_1 = true\n"
             "\tif _gml_switch_matched_1:\n"
             "\t\tpass\n"
@@ -2555,7 +2555,49 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_shift_keyboard_check(self):
         self.assertEqual(
             transpile_gml_code("if keyboard_check(vk_shift) { faster = true }", indent=""),
-            "if Input.is_key_pressed(KEY_SHIFT):\n\tfaster = true",
+            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n\tfaster = true",
+        )
+
+    def test_input_bridge_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "pressed = keyboard_check_pressed(vk_space);"
+                "released = keyboard_check_released(vk_escape);"
+                "keyboard_key_press(vk_left); keyboard_key_release(vk_left);"
+                "keyboard_clear(vk_anykey);"
+                "mouse_down = mouse_check_button(mb_left);"
+                "mouse_pressed = mouse_check_button_pressed(mb_right);"
+                "mouse_released = mouse_check_button_released(mb_middle);"
+                "mx = mouse_x; my = mouse_y; gx = device_mouse_x_to_gui(0); gy = device_mouse_y_to_gui(0);"
+                "pad = gamepad_is_connected(0);"
+                "pad_down = gamepad_button_check(0, gp_face1);"
+                "pad_pressed = gamepad_button_check_pressed(0, gp_face2);"
+                "pad_released = gamepad_button_check_released(0, gp_face3);"
+                "axis = gamepad_axis_value(0, gp_axislh);"
+                "gamepad_set_axis_deadzone(0, 0.2); deadzone = gamepad_get_axis_deadzone(0);"
+                "gamepad_set_vibration(0, 1, 0.5);",
+                indent="",
+            ),
+            "pressed = GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)\n"
+            "released = GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)\n"
+            "GMRuntime.gml_keyboard_key_press(KEY_LEFT)\n"
+            "GMRuntime.gml_keyboard_key_release(KEY_LEFT)\n"
+            "GMRuntime.gml_keyboard_clear(0)\n"
+            "mouse_down = GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)\n"
+            "mouse_pressed = GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)\n"
+            "mouse_released = GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)\n"
+            'mx = GMRuntime.gml_builtin_global("mouse_x")\n'
+            'my = GMRuntime.gml_builtin_global("mouse_y")\n'
+            "gx = GMRuntime.gml_device_mouse_x_to_gui(0)\n"
+            "gy = GMRuntime.gml_device_mouse_y_to_gui(0)\n"
+            "pad = GMRuntime.gml_gamepad_is_connected(0)\n"
+            "pad_down = GMRuntime.gml_gamepad_button_check(0, JOY_BUTTON_A)\n"
+            "pad_pressed = GMRuntime.gml_gamepad_button_check_pressed(0, JOY_BUTTON_B)\n"
+            "pad_released = GMRuntime.gml_gamepad_button_check_released(0, JOY_BUTTON_X)\n"
+            "axis = GMRuntime.gml_gamepad_axis_value(0, JOY_AXIS_LEFT_X)\n"
+            "GMRuntime.gml_gamepad_set_axis_deadzone(0, 0.2)\n"
+            "deadzone = GMRuntime.gml_gamepad_get_axis_deadzone(0)\n"
+            "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)",
         )
 
     def test_transpiles_keyboard_check_and_position_movement(self):
@@ -2576,13 +2618,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if Input.is_action_pressed(\"ui_left\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, 10)\n"
-            "if Input.is_action_pressed(\"ui_right\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, 10)\n"
-            "if Input.is_action_pressed(\"ui_up\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, 10)\n"
-            "if Input.is_action_pressed(\"ui_down\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, 10)",
         )
 
@@ -2666,19 +2708,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if Input.is_key_pressed(KEY_SHIFT):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n"
             "\tfaster = true\n"
             "else:\n"
             "\tfaster = false\n"
             "if GMRuntime.gml_eq(faster, true):\n"
             "\tsuperSpeed = 20\n"
-            "if Input.is_action_pressed(\"ui_left\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)\n"
-            "if Input.is_action_pressed(\"ui_right\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, superSpeed)\n"
-            "if Input.is_action_pressed(\"ui_up\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, superSpeed)\n"
-            "if Input.is_action_pressed(\"ui_down\"):\n"
+            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, superSpeed)\n"
             "superSpeed = 10",
         )

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 from .constants import (
+    _AUDIO_RUNTIME_FUNCTIONS,
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
@@ -26,6 +27,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "method",
     "print",
     "runtime",
+    "runtime_audio_api",
     "runtime_append_self",
     "runtime_collision_api",
     "runtime_draw_api",
@@ -197,6 +199,25 @@ _INPUT_ARITY: dict[str, tuple[int, int | None]] = {
     "gamepad_set_axis_deadzone": (2, 2),
     "gamepad_get_axis_deadzone": (1, 1),
     "gamepad_set_vibration": (3, 3),
+}
+
+_AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
+    "audio_play_sound": (3, 7),
+    "audio_stop_sound": (1, 1),
+    "audio_pause_sound": (1, 1),
+    "audio_resume_sound": (1, 1),
+    "audio_is_playing": (1, 1),
+    "audio_sound_gain": (2, 3),
+    "audio_sound_pitch": (2, 2),
+    "sound_play": (1, 1),
+    "sound_loop": (1, 1),
+    "sound_stop": (1, 1),
+    "sound_pause": (1, 1),
+    "sound_resume": (1, 1),
+    "sound_isplaying": (1, 1),
+    "sound_volume": (2, 2),
+    "sound_pitch": (2, 2),
+    "sound_global_volume": (1, 1),
 }
 
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
@@ -379,6 +400,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _INPUT_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INPUT_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _AUDIO_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _AUDIO_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime_audio_api", target)
 
     for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]

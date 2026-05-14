@@ -2600,6 +2600,35 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)",
         )
 
+    def test_audio_helpers_lower_sound_assets_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "handle = audio_play_sound(snd_hit, 10, false, 0.5, 0.25, 1.5);"
+                "playing = audio_is_playing(snd_hit);"
+                "audio_pause_sound(handle); audio_resume_sound(handle);"
+                "audio_sound_gain(snd_hit, 0.25, 0);"
+                "audio_sound_pitch(handle, 0.75);"
+                "sound_loop(snd_hit); sound_stop(snd_hit);"
+                "sound_volume(snd_hit, 0.1); sound_global_volume(0.8);",
+                indent="",
+                asset_names={"snd_hit"},
+            ),
+            'handle = GMRuntime.gml_audio_play_sound(GMRuntime.gml_asset_get_index("snd_hit"), 10, false, 0.5, 0.25, 1.5)\n'
+            'playing = GMRuntime.gml_audio_is_playing(GMRuntime.gml_asset_get_index("snd_hit"))\n'
+            "GMRuntime.gml_audio_pause_sound(handle)\n"
+            "GMRuntime.gml_audio_resume_sound(handle)\n"
+            'GMRuntime.gml_audio_sound_gain(GMRuntime.gml_asset_get_index("snd_hit"), 0.25, 0)\n'
+            "GMRuntime.gml_audio_sound_pitch(handle, 0.75)\n"
+            'GMRuntime.gml_sound_loop(GMRuntime.gml_asset_get_index("snd_hit"))\n'
+            'GMRuntime.gml_sound_stop(GMRuntime.gml_asset_get_index("snd_hit"))\n'
+            'GMRuntime.gml_sound_volume(GMRuntime.gml_asset_get_index("snd_hit"), 0.1)\n'
+            "GMRuntime.gml_sound_global_volume(0.8)",
+        )
+
+    def test_audio_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound.*expects 3 to 7.*got 2"):
+            transpile_gml_code("audio_play_sound(snd_hit, 10);", indent="", asset_names={"snd_hit"})
+
     def test_transpiles_keyboard_check_and_position_movement(self):
         source = """
         if keyboard_check(vk_left) {

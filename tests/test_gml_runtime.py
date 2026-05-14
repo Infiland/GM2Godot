@@ -422,6 +422,30 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gamepad_set_axis_deadzone(0, 0.2)", "GMRuntime.gml_gamepad_set_axis_deadzone(0, 0.2)"),
     RuntimeValueParityCase("gamepad_get_axis_deadzone(0)", "GMRuntime.gml_gamepad_get_axis_deadzone(0)"),
     RuntimeValueParityCase("gamepad_set_vibration(0, 1, 0.5)", "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)"),
+    RuntimeValueParityCase(
+        "audio_play_sound(snd_hit, 10, false)",
+        'GMRuntime.gml_audio_play_sound(GMRuntime.gml_asset_get_index("snd_hit"), 10, false)',
+    ),
+    RuntimeValueParityCase(
+        "audio_play_sound(snd_hit, 10, false, 0.5, 1, 2)",
+        'GMRuntime.gml_audio_play_sound(GMRuntime.gml_asset_get_index("snd_hit"), 10, false, 0.5, 1, 2)',
+    ),
+    RuntimeValueParityCase(
+        "audio_stop_sound(snd_hit)",
+        'GMRuntime.gml_audio_stop_sound(GMRuntime.gml_asset_get_index("snd_hit"))',
+    ),
+    RuntimeValueParityCase(
+        "audio_is_playing(snd_hit)",
+        'GMRuntime.gml_audio_is_playing(GMRuntime.gml_asset_get_index("snd_hit"))',
+    ),
+    RuntimeValueParityCase(
+        "audio_sound_gain(snd_hit, 0.25, 0)",
+        'GMRuntime.gml_audio_sound_gain(GMRuntime.gml_asset_get_index("snd_hit"), 0.25, 0)',
+    ),
+    RuntimeValueParityCase(
+        "sound_play(snd_hit)",
+        'GMRuntime.gml_sound_play(GMRuntime.gml_asset_get_index("snd_hit"))',
+    ),
     RuntimeValueParityCase("items == other_items", "GMRuntime.gml_eq(items, other_items)"),
     RuntimeValueParityCase("{a: 1}", 'GMRuntime.gml_struct({"a": 1})'),
     RuntimeValueParityCase("mystruct.a", 'GMRuntime.gml_selector_get(mystruct, "a")'),
@@ -796,6 +820,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_gamepad_set_axis_deadzone",
             "gml_gamepad_get_axis_deadzone",
             "gml_gamepad_set_vibration",
+            "gml_audio_play_sound",
+            "gml_audio_stop_sound",
+            "gml_audio_pause_sound",
+            "gml_audio_resume_sound",
+            "gml_audio_is_playing",
+            "gml_audio_sound_gain",
+            "gml_audio_sound_pitch",
+            "gml_sound_play",
+            "gml_sound_loop",
+            "gml_sound_stop",
+            "gml_sound_pause",
+            "gml_sound_resume",
+            "gml_sound_isplaying",
+            "gml_sound_volume",
+            "gml_sound_pitch",
+            "gml_sound_global_volume",
             "gml_draw_text",
             "gml_draw_text_ext",
             "gml_draw_text_transformed",
@@ -1527,6 +1567,26 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("_gml_asset_dynamic_ids[asset_id] = true", GML_RUNTIME_SCRIPT)
         self.assertIn("return false", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_audio_helpers_use_sound_handles_and_asset_metadata(self):
+        self.assertIn('const GML_SOUND_HANDLE_KIND = "sound"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_audio_instances = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_audio_instances_by_asset = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_play_sound(sound, priority, loop, gain = null, offset = null, pitch = null, listener_mask = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var player = AudioStreamPlayer.new()", GML_RUNTIME_SCRIPT)
+        self.assertIn("var handle = gml_handle_register(GML_SOUND_HANDLE_KIND, player, str(sound_entry[\"name\"]))", GML_RUNTIME_SCRIPT)
+        self.assertIn("player.finished.connect(func(): _gml_audio_player_finished(handle.index))", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_stop_sound(sound):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_pause_sound(sound):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_resume_sound(sound):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_is_playing(sound):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_sound_gain(sound, gain, time = 0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_audio_sound_pitch(sound, pitch):", GML_RUNTIME_SCRIPT)
+        self.assertIn('var audio_group = str(metadata["audio_group"]) if metadata.has("audio_group") else "audiogroup_default"', GML_RUNTIME_SCRIPT)
+        self.assertIn('if audio_group == "" or audio_group == "audiogroup_default":', GML_RUNTIME_SCRIPT)
+        self.assertIn('return "Master"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sound_play(sound):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sound_global_volume(volume):", GML_RUNTIME_SCRIPT)
+
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_get_names(instance_value)", GML_RUNTIME_SCRIPT)
@@ -1777,7 +1837,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit"}),
                     parity_case.gdscript_expression,
                 )
 

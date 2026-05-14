@@ -157,6 +157,7 @@ static func gml_asset_register_dynamic(asset_name, asset_type, godot_resource = 
 		"legacy_id": "dynamic:" + str(asset_id),
 		"tags": _gml_asset_tag_array(tags),
 		"dynamic": true,
+		"metadata": {},
 		"resource": godot_resource
 	}
 	_gml_asset_add_entry(entry)
@@ -211,7 +212,8 @@ static func _gml_asset_add_entry(entry):
 		"godot_path": str(entry["godot_path"]) if entry.has("godot_path") else "",
 		"legacy_id": legacy_id,
 		"tags": entry["tags"] if entry.has("tags") else [],
-		"dynamic": bool(entry["dynamic"]) if entry.has("dynamic") else false
+		"dynamic": bool(entry["dynamic"]) if entry.has("dynamic") else false,
+		"metadata": entry["metadata"] if entry.has("metadata") and typeof(entry["metadata"]) == TYPE_DICTIONARY else {}
 	}
 	if entry.has("resource"):
 		normalized_entry["resource"] = entry["resource"]

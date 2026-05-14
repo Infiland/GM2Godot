@@ -32,6 +32,7 @@ class AssetRegistryEntry:
     legacy_id: str
     tags: tuple[str, ...] = ()
     dynamic: bool = False
+    metadata: JsonDict | None = None
 
     def to_godot_dict(self) -> JsonDict:
         return {
@@ -45,6 +46,7 @@ class AssetRegistryEntry:
             "legacy_id": self.legacy_id,
             "tags": list(self.tags),
             "dynamic": self.dynamic,
+            "metadata": self.metadata or {},
         }
 
 
@@ -152,6 +154,7 @@ class AssetRegistryConverter(BaseConverter):
                 godot_path=self._godot_path(resource),
                 legacy_id=self._legacy_id(resource),
                 tags=self._extract_tags(resource.raw_data),
+                metadata=self._metadata(resource),
             )
             entries.append(entry)
 
@@ -341,6 +344,22 @@ class AssetRegistryConverter(BaseConverter):
         parts.extend([resource.name, sound_file])
         return "res://" + "/".join(parts)
 
+    def _metadata(self, resource: _ProjectResource) -> JsonDict:
+        if resource.kind != "sounds":
+            return {}
+
+        audio_group = self._reference_name(resource.raw_data.get("audioGroupId"))
+        sound_file = resource.raw_data.get("soundFile")
+        return {
+            "audio_group": audio_group or "audiogroup_default",
+            "sound_file": sound_file if isinstance(sound_file, str) else "",
+            "volume": self._metadata_float(resource.raw_data.get("volume"), 1.0),
+            "duration": self._metadata_float(resource.raw_data.get("duration"), 0.0),
+            "preload": bool(resource.raw_data.get("preload", True)),
+            "compression": self._metadata_int(resource.raw_data.get("compression"), 0),
+            "type": self._metadata_int(resource.raw_data.get("type"), 0),
+        }
+
     def _font_godot_path(self, resource: _ProjectResource) -> str:
         subfolder = self._get_subfolder_from_resource(resource)
         ttf_name = resource.raw_data.get("TTFName")
@@ -450,6 +469,24 @@ class AssetRegistryConverter(BaseConverter):
                         if isinstance(tag_name, str) and tag_name:
                             tags.add(tag_name)
         return tuple(sorted(tags))
+
+    @staticmethod
+    def _metadata_float(value: object, default: float) -> float:
+        if not isinstance(value, (str, int, float)):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _metadata_int(value: object, default: int) -> int:
+        if not isinstance(value, (str, int, float)):
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
 
 def render_asset_registry_script(entries: tuple[AssetRegistryEntry, ...]) -> str:

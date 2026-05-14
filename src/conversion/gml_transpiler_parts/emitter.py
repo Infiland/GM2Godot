@@ -102,6 +102,24 @@ _DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "camera_create_view": frozenset({5}),
 }
 
+_AUDIO_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "audio_play_sound": frozenset({0}),
+    "audio_stop_sound": frozenset({0}),
+    "audio_pause_sound": frozenset({0}),
+    "audio_resume_sound": frozenset({0}),
+    "audio_is_playing": frozenset({0}),
+    "audio_sound_gain": frozenset({0}),
+    "audio_sound_pitch": frozenset({0}),
+    "sound_play": frozenset({0}),
+    "sound_loop": frozenset({0}),
+    "sound_stop": frozenset({0}),
+    "sound_pause": frozenset({0}),
+    "sound_resume": frozenset({0}),
+    "sound_isplaying": frozenset({0}),
+    "sound_volume": frozenset({0}),
+    "sound_pitch": frozenset({0}),
+}
+
 
 def _emit_name(
     value: str,
@@ -472,6 +490,7 @@ def _emit_descriptor_call(
         return f"GMRuntime.{descriptor.lowering_target}({emitted_args})"
 
     if descriptor.lowering_kind in {
+        "runtime_audio_api",
         "runtime_append_self",
         "runtime_collision_api",
         "runtime_draw_api",
@@ -487,6 +506,13 @@ def _emit_descriptor_call(
             local_names,
             scope_context=scope_context,
         )
+        if descriptor.lowering_kind == "runtime_audio_api":
+            emitted_args = _emit_audio_api_args(
+                descriptor,
+                args,
+                local_names,
+                scope_context=scope_context,
+            )
         if descriptor.lowering_kind == "runtime_collision_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_draw_api":
@@ -566,6 +592,22 @@ def _emit_draw_api_args(
     scope_context: _ScopeContext,
 ) -> list[str]:
     asset_indices = _DRAW_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in asset_indices:
+            emitted_args.append(_emit_asset_argument(arg, local_names, scope_context=scope_context))
+        else:
+            emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
+
+
+def _emit_audio_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    asset_indices = _AUDIO_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:

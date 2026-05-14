@@ -155,6 +155,8 @@ static func gml_global_scope():
 
 static func gml_builtin_array(name):
 	var key = str(name)
+	if _gml_view_is_builtin_array(key):
+		return _gml_view_builtin_array(key)
 	if not _gml_builtin_arrays.has(key):
 		var values = []
 		for _index in range(GML_BUILTIN_ARRAY_SIZE):

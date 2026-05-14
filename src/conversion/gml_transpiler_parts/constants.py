@@ -187,6 +187,8 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "mouse_check_button",
     "mouse_check_button_pressed",
     "mouse_check_button_released",
+    "audio_is_playing",
+    "sound_isplaying",
 })
 
 _ARITHMETIC_RUNTIME_FUNCTIONS = {
@@ -592,6 +594,25 @@ _INPUT_RUNTIME_FUNCTIONS = {
     "gamepad_set_axis_deadzone": "gml_gamepad_set_axis_deadzone",
     "gamepad_get_axis_deadzone": "gml_gamepad_get_axis_deadzone",
     "gamepad_set_vibration": "gml_gamepad_set_vibration",
+}
+
+_AUDIO_RUNTIME_FUNCTIONS = {
+    "audio_play_sound": "gml_audio_play_sound",
+    "audio_stop_sound": "gml_audio_stop_sound",
+    "audio_pause_sound": "gml_audio_pause_sound",
+    "audio_resume_sound": "gml_audio_resume_sound",
+    "audio_is_playing": "gml_audio_is_playing",
+    "audio_sound_gain": "gml_audio_sound_gain",
+    "audio_sound_pitch": "gml_audio_sound_pitch",
+    "sound_play": "gml_sound_play",
+    "sound_loop": "gml_sound_loop",
+    "sound_stop": "gml_sound_stop",
+    "sound_pause": "gml_sound_pause",
+    "sound_resume": "gml_sound_resume",
+    "sound_isplaying": "gml_sound_isplaying",
+    "sound_volume": "gml_sound_volume",
+    "sound_pitch": "gml_sound_pitch",
+    "sound_global_volume": "gml_sound_global_volume",
 }
 
 _DRAW_RUNTIME_FUNCTIONS = {

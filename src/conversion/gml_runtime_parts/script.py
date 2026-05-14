@@ -16,6 +16,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "49_drawing_surfaces.gd",
     "52_cameras_display.gd",
     "53_game_input.gd",
+    "54_audio_runtime.gd",
     "50_static_types_and_clone.gd",
     "60_conversion_helpers.gd",
     "70_handle_string_helpers.gd",

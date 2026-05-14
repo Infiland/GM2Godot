@@ -107,17 +107,22 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(surface_create.issue_number, 492)
         self.assertEqual(camera_create_view.status, "partial")
         self.assertEqual(camera_create_view.issue_number, 493)
+        audio_play_sound = get_gml_api_entry("audio_play_sound")
+        self.assertIsNotNone(audio_play_sound)
+        assert audio_play_sound is not None
+        self.assertEqual(audio_play_sound.status, "implemented")
+        self.assertEqual(audio_play_sound.issue_number, 495)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("audio_play_sound")
+        diagnostic = diagnostic_for_unimplemented_gml_api("room_goto")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("audio_play_sound", diagnostic)
-        self.assertIn("#495", diagnostic)
+        self.assertIn("room_goto", diagnostic)
+        self.assertIn("#496", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -149,6 +154,7 @@ class TestGMLAPIManifest(unittest.TestCase):
             "mp_grid_path",
             "draw_line",
             "draw_set_color",
+            "audio_play_sound",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -172,8 +178,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound.*#495"):
-            transpile_gml_expression("audio_play_sound(snd_hit, 0, false)")
+        with self.assertRaisesRegex(GMLTranspileError, "room_goto.*#496"):
+            transpile_gml_expression("room_goto(r_next)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

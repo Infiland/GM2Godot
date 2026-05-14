@@ -88,6 +88,19 @@ _PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "mp_grid_path": frozenset({1}),
 }
 
+_DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "draw_sprite": frozenset({0}),
+    "draw_sprite_ext": frozenset({0}),
+    "draw_sprite_part": frozenset({0}),
+    "draw_sprite_part_ext": frozenset({0}),
+    "draw_sprite_general": frozenset({0}),
+    "draw_sprite_pos": frozenset({0}),
+    "draw_sprite_tiled": frozenset({0}),
+    "draw_sprite_tiled_ext": frozenset({0}),
+    "draw_tile": frozenset({0}),
+    "draw_set_font": frozenset({0}),
+}
+
 
 def _emit_name(
     value: str,
@@ -460,6 +473,7 @@ def _emit_descriptor_call(
     if descriptor.lowering_kind in {
         "runtime_append_self",
         "runtime_collision_api",
+        "runtime_draw_api",
         "runtime_instance_api",
         "runtime_motion_api",
         "runtime_path_api",
@@ -474,6 +488,13 @@ def _emit_descriptor_call(
         )
         if descriptor.lowering_kind == "runtime_collision_api":
             emitted_args.insert(0, scope_context.self_expression)
+        if descriptor.lowering_kind == "runtime_draw_api":
+            emitted_args = _emit_draw_api_args(
+                descriptor,
+                args,
+                local_names,
+                scope_context=scope_context,
+            )
         if descriptor.lowering_kind == "runtime_motion_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_path_api":
@@ -535,6 +556,33 @@ def _emit_instance_api_args(
         else:
             emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
     return emitted_args
+
+
+def _emit_draw_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    asset_indices = _DRAW_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in asset_indices:
+            emitted_args.append(_emit_asset_argument(arg, local_names, scope_context=scope_context))
+        else:
+            emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
+
+
+def _emit_asset_argument(
+    expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    unwrapped_expr = _unwrap_grouped_expression(expr)
+    if isinstance(unwrapped_expr, _Name) and unwrapped_expr.value in scope_context.asset_names:
+        return f"GMRuntime.gml_asset_get_index({json.dumps(unwrapped_expr.value)})"
+    return _emit_expression(expr, local_names, scope_context=scope_context)[0]
 
 
 def _legacy_instance_keyword_value(expr: _Expression) -> int | None:

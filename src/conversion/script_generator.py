@@ -23,14 +23,23 @@ _is_input_event = cast(_IsInputEvent, is_input_event)
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(r"\b(?:sprite_index|image_index)\b")
+_SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
+    r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
+)
 _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "direction",
     "friction",
     "gravity",
     "gravity_direction",
     "hspeed",
+    "image_alpha",
+    "image_angle",
+    "image_blend",
     "image_index",
+    "image_number",
+    "image_speed",
+    "image_xscale",
+    "image_yscale",
     "path_index",
     "path_position",
     "path_scale",
@@ -226,12 +235,23 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\tset(value):"
         "\n\t\timage_index = value"
         "\n\t\t_gm_apply_image_index()"
+        "\n\nvar image_number = 1"
+        "\nvar image_speed = 1.0"
+        "\nvar image_xscale = 1.0"
+        "\nvar image_yscale = 1.0"
+        "\nvar image_angle = 0.0"
+        "\nvar image_blend = 0xffffff"
+        "\nvar image_alpha = 1.0"
         "\n\nfunc _gm_initialize_sprite_runtime():"
         "\n\t_gm_apply_sprite_index()"
         "\n\tif has_meta(\"gamemaker_image_index\"):"
         "\n\t\timage_index = get_meta(\"gamemaker_image_index\")"
         "\n\telse:"
         "\n\t\t_gm_apply_image_index()"
+        "\n\tif has_meta(\"gamemaker_image_speed\"):"
+        "\n\t\timage_speed = get_meta(\"gamemaker_image_speed\")"
+        "\n\tif has_meta(\"gamemaker_colour\") and get_meta(\"gamemaker_colour\") != null:"
+        "\n\t\timage_blend = int(get_meta(\"gamemaker_colour\")) & 0xffffff"
         "\n\nfunc _gm_apply_sprite_index():"
         "\n\tif sprite_index == null:"
         "\n\t\t_gm_clear_current_sprite()"
@@ -266,6 +286,7 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\t\tvar frame_count = 0"
         "\n\t\tif sprite_node.sprite_frames != null and sprite_node.sprite_frames.has_animation(sprite_node.animation):"
         "\n\t\t\tframe_count = sprite_node.sprite_frames.get_frame_count(sprite_node.animation)"
+        "\n\t\timage_number = max(frame_count, 1)"
         "\n\t\tif frame_count > 0:"
         "\n\t\t\tframe_index = min(frame_index, frame_count - 1)"
         "\n\t\tsprite_node.frame = frame_index"
@@ -273,6 +294,7 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\t\treturn"
         "\n\tif sprite_node is Sprite2D:"
         "\n\t\tvar frame_count = sprite_node.hframes * sprite_node.vframes"
+        "\n\t\timage_number = max(frame_count, 1)"
         "\n\t\tif frame_count > 1:"
         "\n\t\t\tsprite_node.frame = min(frame_index, frame_count - 1)"
         "\n\nfunc _gm_current_sprite_scene_root():"

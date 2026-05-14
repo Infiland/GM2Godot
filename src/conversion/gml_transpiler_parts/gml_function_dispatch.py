@@ -27,6 +27,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime",
     "runtime_append_self",
     "runtime_collision_api",
+    "runtime_draw_api",
     "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
     "runtime_motion_api",
@@ -174,6 +175,17 @@ _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
+    "draw_self": (0, 0),
+    "draw_sprite": (4, 4),
+    "draw_sprite_ext": (9, 9),
+    "draw_sprite_part": (8, 8),
+    "draw_sprite_part_ext": (12, 12),
+    "draw_sprite_general": (16, 16),
+    "draw_sprite_pos": (11, 11),
+    "draw_sprite_tiled": (4, 4),
+    "draw_sprite_tiled_ext": (8, 8),
+    "draw_tile": (5, 5),
+    "draw_tilemap": (3, 3),
     "draw_set_color": (1, 1),
     "draw_get_color": (0, 0),
     "draw_set_alpha": (1, 1),
@@ -186,6 +198,19 @@ _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "draw_circle": (4, 4),
     "draw_triangle": (7, 7),
     "draw_point": (2, 2),
+    "draw_text": (3, 3),
+    "draw_text_ext": (5, 5),
+    "draw_text_transformed": (6, 6),
+    "draw_set_font": (1, 1),
+    "draw_get_font": (0, 0),
+    "draw_set_halign": (1, 1),
+    "draw_get_halign": (0, 0),
+    "draw_set_valign": (1, 1),
+    "draw_get_valign": (0, 0),
+    "string_width": (1, 1),
+    "string_height": (1, 1),
+    "string_width_ext": (3, 3),
+    "string_height_ext": (3, 3),
 }
 
 
@@ -300,7 +325,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind: GMLFunctionLoweringKind = "runtime_draw_api"
+        if name == "draw_self":
+            lowering_kind = "runtime_append_self"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     descriptors["keyboard_check"] = _descriptor(
         "keyboard_check",

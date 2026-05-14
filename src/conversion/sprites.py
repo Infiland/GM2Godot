@@ -280,7 +280,19 @@ class SpriteConverter(BaseConverter):
 
         return (sub_resource_text, shape_id, node_text)
 
-    def _write_static_scene(self, sprite_name: str, collision_sub: str | None, collision_node: str | None,
+    def _sprite_metadata_lines(self, collision_data: CollisionData | None) -> list[str]:
+        if collision_data is None:
+            return []
+        origin_x, origin_y = self._compute_origin_offset(collision_data)
+        return [
+            f"metadata/gamemaker_width = {collision_data['width']}\n",
+            f"metadata/gamemaker_height = {collision_data['height']}\n",
+            f"metadata/gamemaker_origin_x = {origin_x}\n",
+            f"metadata/gamemaker_origin_y = {origin_y}\n",
+        ]
+
+    def _write_static_scene(self, sprite_name: str, collision_data: CollisionData | None,
+                            collision_sub: str | None, collision_node: str | None,
                             subfolder: str = "") -> None:
         """Generate a Sprite2D .tscn scene file.
 
@@ -297,6 +309,7 @@ class SpriteConverter(BaseConverter):
             parts.append(f'\n{collision_sub}')
 
         parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
+        parts.extend(self._sprite_metadata_lines(collision_data))
         parts.append(f'\n[node name="Sprite2D" type="Sprite2D" parent="."]\n')
         parts.append(f'texture = ExtResource("1")\n')
 
@@ -312,7 +325,8 @@ class SpriteConverter(BaseConverter):
             f.write(tscn_content)
 
     def _write_animated_scene(self, sprite_name: str, frame_count: int, animation_data: AnimationData,
-                              collision_sub: str | None, collision_node: str | None, subfolder: str = "") -> None:
+                              collision_data: CollisionData | None, collision_sub: str | None,
+                              collision_node: str | None, subfolder: str = "") -> None:
         """Generate an AnimatedSprite2D .tscn scene file with embedded SpriteFrames.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
@@ -348,6 +362,7 @@ class SpriteConverter(BaseConverter):
             parts.append(f'\n{collision_sub}')
 
         parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
+        parts.extend(self._sprite_metadata_lines(collision_data))
 
         parts.append(f'\n[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]\n')
         parts.append(f'sprite_frames = SubResource("SpriteFrames_1")\n')
@@ -377,9 +392,9 @@ class SpriteConverter(BaseConverter):
         collision_sub, _, collision_node = self._build_collision_block(collision_data)
 
         if frame_count > 1 and animation_data is not None:
-            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_sub, collision_node, subfolder)
+            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_data, collision_sub, collision_node, subfolder)
         else:
-            self._write_static_scene(sprite_name, collision_sub, collision_node, subfolder)
+            self._write_static_scene(sprite_name, collision_data, collision_sub, collision_node, subfolder)
 
     def _parse_sprite_yy(self, sprite_name: str) -> SpriteParseResult | None:
         yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')

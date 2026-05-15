@@ -188,6 +188,7 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "mouse_check_button_pressed",
     "mouse_check_button_released",
     "audio_is_playing",
+    "room_exists",
     "sound_isplaying",
 })
 
@@ -613,6 +614,18 @@ _AUDIO_RUNTIME_FUNCTIONS = {
     "sound_volume": "gml_sound_volume",
     "sound_pitch": "gml_sound_pitch",
     "sound_global_volume": "gml_sound_global_volume",
+}
+
+_ROOM_RUNTIME_FUNCTIONS = {
+    "room_goto": "gml_room_goto",
+    "room_goto_next": "gml_room_goto_next",
+    "room_goto_previous": "gml_room_goto_previous",
+    "room_restart": "gml_room_restart",
+    "game_restart": "gml_game_restart",
+    "game_end": "gml_game_end",
+    "room_exists": "gml_room_exists",
+    "room_get_name": "gml_room_get_name",
+    "room_get_info": "gml_room_get_info",
 }
 
 _DRAW_RUNTIME_FUNCTIONS = {

@@ -12,7 +12,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.rooms import RoomConverter
+from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
     GAMEMAKER_TILE_FLIP_BIT,
@@ -327,8 +327,13 @@ class TestRoomConverter(unittest.TestCase):
         with open(tscn_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn('[gd_scene format=3]', content)
+        self.assertIn('[gd_scene format=3 load_steps=2]', content)
+        self.assertIn(
+            '[ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="gm_room_runtime"]',
+            content,
+        )
         self.assertIn('[node name="r_test" type="Node2D"]', content)
+        self.assertIn('script = ExtResource("gm_room_runtime")', content)
         self.assertIn('metadata/gamemaker_room_width = 1024', content)
         self.assertIn('metadata/gamemaker_room_height = 768', content)
         self.assertIn('metadata/gamemaker_room_persistent = true', content)
@@ -345,6 +350,9 @@ class TestRoomConverter(unittest.TestCase):
         self.assertNotIn('Camera2D', content)
         self.assertNotIn('TileMap', content)
         self.assertNotIn('ParallaxBackground', content)
+        self.assertTrue(
+            os.path.isfile(os.path.join(self.godot_dir, ROOM_RUNTIME_SCRIPT_RELATIVE_PATH))
+        )
         self.assertEqual(self.progress[-1], 100)
         self.assertTrue(any("r_test" in log for log in self.logs))
 
@@ -719,7 +727,11 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_instances")
 
-        self.assertIn('[gd_scene format=3 load_steps=2]', content)
+        self.assertIn('[gd_scene format=3 load_steps=3]', content)
+        self.assertIn(
+            '[ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="gm_room_runtime"]',
+            content,
+        )
         self.assertIn(
             '[ext_resource type="PackedScene" path="res://objects/o_player/o_player.tscn" id="1"]',
             content,
@@ -963,7 +975,7 @@ class TestRoomConverter(unittest.TestCase):
         )
         self.assertIn('metadata/gamemaker_room_creation_code_execution_phase_index = 2', content)
         self.assertNotIn('func ', content)
-        self.assertNotIn('.gd', content)
+        self.assertNotIn('RoomCreationCode.gd', content)
 
     def test_room_creation_code_missing_warns_and_marks_missing(self):
         self._write_yyp(["r_missing_code"])
@@ -1034,7 +1046,7 @@ class TestRoomConverter(unittest.TestCase):
         )
         self.assertIn('metadata/gamemaker_creation_code_execution_phase_index = 1', content)
         self.assertNotIn('func ', content)
-        self.assertNotIn('.gd', content)
+        self.assertNotIn('InstanceCreationCode_inst_player.gd', content)
 
     def test_instance_creation_code_missing_warns_and_marks_missing(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])

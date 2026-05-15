@@ -20,6 +20,7 @@ class ParsedObject(TypedDict):
     parent_object_name: str | None
     event_list: list[JsonDict]
     solid: bool
+    persistent: bool
 
 
 class ObjectProcessResult(TypedDict):
@@ -136,6 +137,7 @@ class ObjectConverter(BaseConverter):
                 "parent_object_name": parent_object_name,
                 "event_list": event_list,
                 "solid": bool(data.get("solid", False)),
+                "persistent": bool(data.get("persistent", False)),
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_ParseError").format(
@@ -360,6 +362,7 @@ class ObjectConverter(BaseConverter):
         parent_object_name = parsed["parent_object_name"]
         event_list = parsed["event_list"]
         solid = bool(parsed.get("solid", False))
+        persistent = bool(parsed.get("persistent", False))
         sprite_subfolder = ""
         parent_script_res_path = None
         inherited_event_functions: set[str] = set()
@@ -401,6 +404,7 @@ class ObjectConverter(BaseConverter):
                 object_name=object_name,
                 parent_object_names=self._parent_object_chain(object_name),
                 solid=solid,
+                persistent=persistent,
                 inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
                 inherit_exit_tree="_exit_tree" in inherited_event_functions and "_exit_tree" not in local_event_functions,
             ),

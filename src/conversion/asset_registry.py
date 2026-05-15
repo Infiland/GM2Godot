@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import ClassVar, cast
+from typing import ClassVar, Iterable, cast
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.type_defs import (
@@ -137,6 +137,7 @@ class AssetRegistryConverter(BaseConverter):
                 resource.source_path,
             ),
         )
+        room_order_indices = self._room_order_indices(resources)
         used_ids: set[int] = set()
         entries: list[AssetRegistryEntry] = []
 
@@ -154,7 +155,7 @@ class AssetRegistryConverter(BaseConverter):
                 godot_path=self._godot_path(resource),
                 legacy_id=self._legacy_id(resource),
                 tags=self._extract_tags(resource.raw_data),
-                metadata=self._metadata(resource),
+                metadata=self._metadata(resource, room_order_indices),
             )
             entries.append(entry)
 
@@ -344,7 +345,22 @@ class AssetRegistryConverter(BaseConverter):
         parts.extend([resource.name, sound_file])
         return "res://" + "/".join(parts)
 
-    def _metadata(self, resource: _ProjectResource) -> JsonDict:
+    def _metadata(
+        self,
+        resource: _ProjectResource,
+        room_order_indices: dict[str, int] | None = None,
+    ) -> JsonDict:
+        if resource.kind == "rooms":
+            room_settings = resource.raw_data.get("roomSettings")
+            settings = cast(JsonDict, room_settings) if isinstance(room_settings, dict) else {}
+            return {
+                "room_order": (room_order_indices or {}).get(resource.name, -1),
+                "width": self._metadata_int(settings.get("Width"), 1024),
+                "height": self._metadata_int(settings.get("Height"), 768),
+                "persistent": bool(settings.get("persistent", False)),
+                "volume": self._metadata_float(resource.raw_data.get("volume"), 1.0),
+            }
+
         if resource.kind != "sounds":
             return {}
 
@@ -359,6 +375,35 @@ class AssetRegistryConverter(BaseConverter):
             "compression": self._metadata_int(resource.raw_data.get("compression"), 0),
             "type": self._metadata_int(resource.raw_data.get("type"), 0),
         }
+
+    def _room_order_indices(self, resources: Iterable[_ProjectResource]) -> dict[str, int]:
+        rooms = {resource.name for resource in resources if resource.kind == "rooms"}
+        if not rooms:
+            return {}
+
+        ordered: list[str] = []
+        yyp_path = self._find_yyp_path()
+        yyp_data = self._read_yy_file(yyp_path) if yyp_path is not None else None
+        if yyp_data is not None and "RoomOrderNodes" in yyp_data:
+            for raw_node in cast(list[object], yyp_data.get("RoomOrderNodes", [])):
+                if not isinstance(raw_node, dict):
+                    continue
+                node = cast(JsonDict, raw_node)
+                room_id = node.get("roomId")
+                if not isinstance(room_id, dict):
+                    continue
+                room_ref = cast(JsonDict, room_id)
+                name = room_ref.get("name")
+                if not isinstance(name, str) or not name:
+                    path = room_ref.get("path")
+                    name = self._name_from_path(path) if isinstance(path, str) else ""
+                if name in rooms and name not in ordered:
+                    ordered.append(name)
+
+        for name in sorted(rooms):
+            if name not in ordered:
+                ordered.append(name)
+        return {name: index for index, name in enumerate(ordered)}
 
     def _font_godot_path(self, resource: _ProjectResource) -> str:
         subfolder = self._get_subfolder_from_resource(resource)

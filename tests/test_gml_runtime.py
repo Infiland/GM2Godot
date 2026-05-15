@@ -223,6 +223,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("room", 'GMRuntime.gml_builtin_global("room")'),
     RuntimeValueParityCase("room_width", 'GMRuntime.gml_builtin_global("room_width")'),
     RuntimeValueParityCase("room_height", 'GMRuntime.gml_builtin_global("room_height")'),
+    RuntimeValueParityCase("room_goto(r_next)", 'GMRuntime.gml_room_goto(GMRuntime.gml_asset_get_index("r_next"))'),
+    RuntimeValueParityCase("room_goto_next()", "GMRuntime.gml_room_goto_next()"),
+    RuntimeValueParityCase("room_goto_previous()", "GMRuntime.gml_room_goto_previous()"),
+    RuntimeValueParityCase("room_restart()", "GMRuntime.gml_room_restart()"),
+    RuntimeValueParityCase("game_restart()", "GMRuntime.gml_game_restart()"),
+    RuntimeValueParityCase("game_end()", "GMRuntime.gml_game_end()"),
+    RuntimeValueParityCase("room_exists(r_next)", 'GMRuntime.gml_room_exists(GMRuntime.gml_asset_get_index("r_next"))'),
+    RuntimeValueParityCase("room_get_name(r_next)", 'GMRuntime.gml_room_get_name(GMRuntime.gml_asset_get_index("r_next"))'),
+    RuntimeValueParityCase("room_get_info(r_next)", 'GMRuntime.gml_room_get_info(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("instance_count", 'GMRuntime.gml_builtin_global("instance_count")'),
     RuntimeValueParityCase("async_load", 'GMRuntime.gml_builtin_global("async_load")'),
     RuntimeValueParityCase("event_data", 'GMRuntime.gml_builtin_global("event_data")'),
@@ -836,6 +845,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_sound_volume",
             "gml_sound_pitch",
             "gml_sound_global_volume",
+            "gml_room_enter_scene",
+            "gml_room_goto",
+            "gml_room_goto_next",
+            "gml_room_goto_previous",
+            "gml_room_restart",
+            "gml_game_restart",
+            "gml_game_end",
+            "gml_room_exists",
+            "gml_room_get_name",
+            "gml_room_get_info",
             "gml_draw_text",
             "gml_draw_text_ext",
             "gml_draw_text_transformed",
@@ -1587,6 +1606,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_sound_play(sound):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_sound_global_volume(volume):", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_room_flow_helpers_use_registry_order_and_lifecycle(self):
+        self.assertIn('const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_enter_scene(scene, force = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_goto(room_asset):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_goto_next():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_goto_previous():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_restart():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_game_restart():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_game_end():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_exists(room_asset):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_get_info(room_asset):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_room_dispatch_lifecycle(old_scene, \"_on_room_end\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_room_dispatch_lifecycle(scene, \"_on_game_start\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_room_dispatch_lifecycle(scene, \"_on_room_start\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("node.reparent(persistent_root, true)", GML_RUNTIME_SCRIPT)
+        self.assertIn("entries.sort_custom(_gml_room_entry_order_less)", GML_RUNTIME_SCRIPT)
+
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_get_names(instance_value)", GML_RUNTIME_SCRIPT)
@@ -1837,7 +1873,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit", "r_next"}),
                     parity_case.gdscript_expression,
                 )
 

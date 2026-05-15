@@ -16,6 +16,19 @@ from src.conversion.room_creation_code import (
 from src.conversion.room_layers import godot_string, serialize_room_layers
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
+ROOM_RUNTIME_SCRIPT_RELATIVE_PATH = os.path.join("gm2godot", "gml_room_node.gd")
+ROOM_RUNTIME_SCRIPT_RESOURCE_PATH = "res://gm2godot/gml_room_node.gd"
+ROOM_RUNTIME_EXT_RESOURCE_ID = "gm_room_runtime"
+
+
+def render_room_runtime_script() -> str:
+    return (
+        "extends Node2D\n\n"
+        'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
+        "func _ready():\n"
+        "\tGMRuntime.gml_room_enter_scene(self)\n"
+    )
+
 
 class RoomProcessResult(TypedDict):
     success: bool
@@ -76,19 +89,33 @@ class RoomConverter(BaseConverter):
 
         if serialized_layers.ext_resource_lines:
             lines = [
-                f"[gd_scene format=3 load_steps={len(serialized_layers.ext_resource_lines) + 1}]",
+                f"[gd_scene format=3 load_steps={len(serialized_layers.ext_resource_lines) + 2}]",
                 "",
+                (
+                    '[ext_resource type="Script" path="{path}" id="{resource_id}"]'.format(
+                        path=ROOM_RUNTIME_SCRIPT_RESOURCE_PATH,
+                        resource_id=ROOM_RUNTIME_EXT_RESOURCE_ID,
+                    )
+                ),
             ]
             lines.extend(serialized_layers.ext_resource_lines)
             lines.append("")
         else:
             lines = [
-                "[gd_scene format=3]",
+                "[gd_scene format=3 load_steps=2]",
+                "",
+                (
+                    '[ext_resource type="Script" path="{path}" id="{resource_id}"]'.format(
+                        path=ROOM_RUNTIME_SCRIPT_RESOURCE_PATH,
+                        resource_id=ROOM_RUNTIME_EXT_RESOURCE_ID,
+                    )
+                ),
                 "",
             ]
 
         lines.extend([
             f'[node name={godot_string(room.name)} type="Node2D"]',
+            f'script = ExtResource("{ROOM_RUNTIME_EXT_RESOURCE_ID}")',
             f'metadata/gamemaker_room_width = {json.dumps(room_settings.get("Width", 1024))}',
             f'metadata/gamemaker_room_height = {json.dumps(room_settings.get("Height", 768))}',
             f'metadata/gamemaker_room_persistent = {json.dumps(bool(room_settings.get("persistent", False)))}',
@@ -190,6 +217,8 @@ class RoomConverter(BaseConverter):
             self.log_callback("Room conversion completed.")
             return
 
+        self._write_room_runtime_script()
+
         total = len(rooms)
         processed = 0
         generated_scene_paths: dict[str, str] = {}
@@ -226,3 +255,9 @@ class RoomConverter(BaseConverter):
 
     def convert_all(self) -> None:
         self.convert_rooms()
+
+    def _write_room_runtime_script(self) -> None:
+        runtime_path = os.path.join(self.godot_project_path, ROOM_RUNTIME_SCRIPT_RELATIVE_PATH)
+        os.makedirs(os.path.dirname(runtime_path), exist_ok=True)
+        with open(runtime_path, "w", encoding="utf-8") as f:
+            f.write(render_room_runtime_script())

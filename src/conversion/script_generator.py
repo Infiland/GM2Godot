@@ -124,6 +124,7 @@ class ObjectRuntimeConfig:
     object_name: str
     parent_object_names: tuple[str, ...] = ()
     solid: bool = False
+    persistent: bool = False
     inherit_ready: bool = False
     inherit_exit_tree: bool = False
 
@@ -344,6 +345,7 @@ def _emit_object_runtime_prelude(
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         "\nvar depth = 0"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
+        f"\nvar persistent = {str(object_runtime.persistent).lower()}"
         if declare_members
         else ""
     )
@@ -355,15 +357,20 @@ def _emit_object_runtime_prelude(
         f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         f"\n\tsolid = {str(object_runtime.solid).lower()}"
+        f"\n\tpersistent = {str(object_runtime.persistent).lower()}"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"solid\", solid)"
+        "\n\tGMRuntime.gml_variable_instance_set(self, \"persistent\", persistent)"
+        "\n\tset_meta(\"gamemaker_persistent\", persistent)"
         "\n\tif has_meta(\"gamemaker_instance_object_name\"):"
         "\n\t\tGMRuntime.gml_variable_instance_set(self, \"object_index\", GMRuntime.gml_asset_get_index(get_meta(\"gamemaker_instance_object_name\")))"
         "\n\tif has_meta(\"gamemaker_instance_name\"):"
         "\n\t\tGMRuntime.gml_variable_instance_set(self, \"name\", get_meta(\"gamemaker_instance_name\"))"
         "\n\nfunc _gm_unregister_instance():"
+        "\n\tif has_meta(\"_gm2godot_room_preserving_persistent\") and get_meta(\"_gm2godot_room_preserving_persistent\"):"
+        "\n\t\treturn"
         "\n\tGMRuntime.gml_instance_unregister(id)\n"
     )
 

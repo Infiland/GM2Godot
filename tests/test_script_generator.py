@@ -93,6 +93,18 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("\tsolid = true", content)
         self.assertIn('GMRuntime.gml_variable_instance_set(self, "solid", solid)', content)
 
+    def test_object_runtime_records_persistent_metadata_for_room_transitions(self):
+        content = generate_script_content(
+            [],
+            object_runtime=ObjectRuntimeConfig(object_name="o_runner", persistent=True),
+        )
+
+        self.assertIn("var persistent = true", content)
+        self.assertIn("\tpersistent = true", content)
+        self.assertIn('GMRuntime.gml_variable_instance_set(self, "persistent", persistent)', content)
+        self.assertIn('set_meta("gamemaker_persistent", persistent)', content)
+        self.assertIn('has_meta("_gm2godot_room_preserving_persistent")', content)
+
 
 class TestScriptGeneratorEvents(unittest.TestCase):
     """Test that events produce correct function stubs."""

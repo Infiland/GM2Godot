@@ -17,7 +17,8 @@ from src.conversion.type_defs import JsonDict
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             parent_path: str = "folders/Objects.yy",
                             event_list: list[JsonDict] | None = None,
-                            parent_object_name: str | None = None) -> str:
+                            parent_object_name: str | None = None,
+                            persistent: bool = False) -> str:
     """Build a GameMaker object .yy file string."""
     if sprite_name is not None:
         sprite_id = (
@@ -67,7 +68,7 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "overriddenProperties": [],\n'
         '  "parent": {{"name": "Objects", "path": "{parent_path}",}},\n'
         '  "parentObjectId": {parent_object_id},\n'
-        '  "persistent": false,\n'
+        '  "persistent": {persistent},\n'
         '  "physicsObject": false,\n'
         '  "properties": [],\n'
         '  "resourceType": "GMObject",\n'
@@ -83,6 +84,7 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         parent_path=parent_path,
         parent_object_id=parent_object_id,
         event_list_str=event_list_str,
+        persistent=str(persistent).lower(),
     )
 
 
@@ -468,7 +470,8 @@ class TestScriptGeneration(unittest.TestCase):
 
     def _setup_object(self, name: str, sprite_name: str | None = None,
                       event_list: list[JsonDict] | None = None,
-                      parent_object_name: str | None = None) -> None:
+                      parent_object_name: str | None = None,
+                      persistent: bool = False) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
         yy_content = _make_object_yy_content(
@@ -476,6 +479,7 @@ class TestScriptGeneration(unittest.TestCase):
             sprite_name=sprite_name,
             event_list=event_list,
             parent_object_name=parent_object_name,
+            persistent=persistent,
         )
         with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
             f.write(yy_content)
@@ -515,6 +519,20 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
         self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+
+    def test_script_records_persistent_object_state(self):
+        self._setup_object("o_persist", event_list=[], persistent=True)
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_persist", "o_persist.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertIn("var persistent = true", content)
+        self.assertIn("\tpersistent = true", content)
+        self.assertIn('GMRuntime.gml_variable_instance_set(self, "persistent", persistent)', content)
+        self.assertIn('set_meta("gamemaker_persistent", persistent)', content)
 
     def test_script_registers_parent_object_chain(self):
         self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])

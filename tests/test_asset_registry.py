@@ -154,6 +154,13 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(sound_metadata["sound_file"], "snd_jump.ogg")
         self.assertEqual(sound_metadata["volume"], 1.0)
         self.assertEqual(by_name["r_title"].godot_path, "res://rooms/Menus/r_title/r_title.tscn")
+        room_metadata = by_name["r_title"].metadata
+        self.assertIsNotNone(room_metadata)
+        assert room_metadata is not None
+        self.assertEqual(room_metadata["room_order"], 0)
+        self.assertEqual(room_metadata["width"], 1024)
+        self.assertEqual(room_metadata["height"], 768)
+        self.assertFalse(room_metadata["persistent"])
         self.assertEqual(by_name["o_player"].godot_path, "res://objects/Actors/o_player/o_player.tscn")
         self.assertEqual(by_name["scr_spawn"].godot_path, "res://scripts/Game/scr_spawn.gd")
         self.assertEqual(by_name["fnt_ui"].godot_path, "res://fonts/UI/fnt_ui.tres")

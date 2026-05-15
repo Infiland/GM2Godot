@@ -16,6 +16,7 @@ from .constants import (
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
+    _ROOM_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
@@ -36,6 +37,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_motion_api",
     "runtime_path_api",
     "runtime_path_asset_api",
+    "runtime_room_api",
     "runtime_self_default",
     "with_targets",
 ]
@@ -218,6 +220,18 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
     "sound_volume": (2, 2),
     "sound_pitch": (2, 2),
     "sound_global_volume": (1, 1),
+}
+
+_ROOM_ARITY: dict[str, tuple[int, int | None]] = {
+    "room_goto": (1, 1),
+    "room_goto_next": (0, 0),
+    "room_goto_previous": (0, 0),
+    "room_restart": (0, 0),
+    "game_restart": (0, 0),
+    "game_end": (0, 0),
+    "room_exists": (1, 1),
+    "room_get_name": (1, 1),
+    "room_get_info": (1, 1),
 }
 
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
@@ -404,6 +418,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _AUDIO_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _AUDIO_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_audio_api", target)
+
+    for name, target in _ROOM_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _ROOM_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime_room_api", target)
 
     for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]

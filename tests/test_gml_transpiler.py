@@ -2629,6 +2629,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound.*expects 3 to 7.*got 2"):
             transpile_gml_code("audio_play_sound(snd_hit, 10);", indent="", asset_names={"snd_hit"})
 
+    def test_room_flow_helpers_lower_room_assets_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "room_goto(r_next);"
+                "ok = room_exists(r_next);"
+                "name = room_get_name(r_next);"
+                "info = room_get_info(r_next);"
+                "room_goto_next(); room_goto_previous(); room_restart(); game_restart(); game_end();",
+                indent="",
+                asset_names={"r_next"},
+            ),
+            'GMRuntime.gml_room_goto(GMRuntime.gml_asset_get_index("r_next"))\n'
+            'ok = GMRuntime.gml_room_exists(GMRuntime.gml_asset_get_index("r_next"))\n'
+            'name = GMRuntime.gml_room_get_name(GMRuntime.gml_asset_get_index("r_next"))\n'
+            'info = GMRuntime.gml_room_get_info(GMRuntime.gml_asset_get_index("r_next"))\n'
+            "GMRuntime.gml_room_goto_next()\n"
+            "GMRuntime.gml_room_goto_previous()\n"
+            "GMRuntime.gml_room_restart()\n"
+            "GMRuntime.gml_game_restart()\n"
+            "GMRuntime.gml_game_end()",
+        )
+
+    def test_room_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "room_goto.*expects 1.*got 0"):
+            transpile_gml_code("room_goto();", indent="", asset_names={"r_next"})
+
     def test_transpiles_keyboard_check_and_position_movement(self):
         source = """
         if keyboard_check(vk_left) {

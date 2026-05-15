@@ -120,6 +120,13 @@ _AUDIO_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "sound_pitch": frozenset({0}),
 }
 
+_ROOM_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "room_goto": frozenset({0}),
+    "room_exists": frozenset({0}),
+    "room_get_name": frozenset({0}),
+    "room_get_info": frozenset({0}),
+}
+
 
 def _emit_name(
     value: str,
@@ -498,6 +505,7 @@ def _emit_descriptor_call(
         "runtime_motion_api",
         "runtime_path_api",
         "runtime_path_asset_api",
+        "runtime_room_api",
         "runtime_self_default",
     }:
         emitted_args = _emit_instance_api_args(
@@ -517,6 +525,13 @@ def _emit_descriptor_call(
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_draw_api":
             emitted_args = _emit_draw_api_args(
+                descriptor,
+                args,
+                local_names,
+                scope_context=scope_context,
+            )
+        if descriptor.lowering_kind == "runtime_room_api":
+            emitted_args = _emit_room_api_args(
                 descriptor,
                 args,
                 local_names,
@@ -608,6 +623,22 @@ def _emit_audio_api_args(
     scope_context: _ScopeContext,
 ) -> list[str]:
     asset_indices = _AUDIO_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in asset_indices:
+            emitted_args.append(_emit_asset_argument(arg, local_names, scope_context=scope_context))
+        else:
+            emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
+
+
+def _emit_room_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    asset_indices = _ROOM_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:

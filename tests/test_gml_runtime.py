@@ -587,7 +587,13 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "score ?? fallback",
         "score if not GMRuntime.gml_is_nullish(score) else fallback",
     ),
+    RuntimeValueParityCase(
+        gml_expression="list[| 0]",
+        gdscript_expression="GMRuntime.gml_ds_list_find_value(list, 0)",
+    ),
+
 )
+
 
 
 TYPE_TABLE_VALUES = (
@@ -955,6 +961,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_variable_global_get",
             "gml_variable_global_set",
             "gml_ds_map_find_value",
+    "gml_ds_list_find_value", "gml_ds_list_set",
             "gml_ds_map_exists",
             "gml_ds_map_set",
             "gml_variable_clone",

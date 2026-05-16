@@ -87,14 +87,14 @@ static func gml_time_source_create(parent, period, units, callback, args = null,
 
 static func gml_time_source_start(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return
 	ts["state"] = GML_TIME_SOURCE_STATE_ACTIVE
 	ts["elapsed"] = 0.0
 	ts["reps_done"] = 0
 	for child_id in ts["children"]:
 		var child = _gml_time_sources.get(child_id)
-		if child != null and child["state"] == GML_TIME_SOURCE_STATE_INITIAL:
+		if typeof(child) == TYPE_DICTIONARY and child["state"] == GML_TIME_SOURCE_STATE_INITIAL:
 			child["state"] = GML_TIME_SOURCE_STATE_ACTIVE
 			child["elapsed"] = 0.0
 			child["reps_done"] = 0
@@ -102,46 +102,46 @@ static func gml_time_source_start(handle):
 
 static func gml_time_source_stop(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return
 	ts["state"] = GML_TIME_SOURCE_STATE_STOPPED
 	for child_id in ts["children"]:
 		var child = _gml_time_sources.get(child_id)
-		if child != null:
+		if typeof(child) == TYPE_DICTIONARY:
 			child["state"] = GML_TIME_SOURCE_STATE_STOPPED
 
 
 static func gml_time_source_pause(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return
 	if ts["state"] == GML_TIME_SOURCE_STATE_ACTIVE:
 		ts["state"] = GML_TIME_SOURCE_STATE_PAUSED
 	for child_id in ts["children"]:
 		var child = _gml_time_sources.get(child_id)
-		if child != null and child["state"] == GML_TIME_SOURCE_STATE_ACTIVE:
+		if typeof(child) == TYPE_DICTIONARY and child["state"] == GML_TIME_SOURCE_STATE_ACTIVE:
 			child["state"] = GML_TIME_SOURCE_STATE_PAUSED
 
 
 static func gml_time_source_resume(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return
 	if ts["state"] == GML_TIME_SOURCE_STATE_PAUSED:
 		ts["state"] = GML_TIME_SOURCE_STATE_ACTIVE
 	for child_id in ts["children"]:
 		var child = _gml_time_sources.get(child_id)
-		if child != null and child["state"] == GML_TIME_SOURCE_STATE_PAUSED:
+		if typeof(child) == TYPE_DICTIONARY and child["state"] == GML_TIME_SOURCE_STATE_PAUSED:
 			child["state"] = GML_TIME_SOURCE_STATE_ACTIVE
 
 
 static func gml_time_source_destroy(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return
 	for child_id in ts["children"]:
 		var child = _gml_time_sources.get(child_id)
-		if child != null:
+		if typeof(child) == TYPE_DICTIONARY:
 			_gml_time_sources.erase(child_id)
 	_gml_time_sources.erase(ts["id"])
 	gml_handle_invalidate(handle)
@@ -149,28 +149,28 @@ static func gml_time_source_destroy(handle):
 
 static func gml_time_source_get_state(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return GML_TIME_SOURCE_STATE_STOPPED
 	return ts["state"]
 
 
 static func gml_time_source_get_period(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return 0
 	return ts["period"]
 
 
 static func gml_time_source_get_reps_completed(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return 0
 	return ts["reps_done"]
 
 
 static func gml_time_source_get_reps_remaining(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return 0
 	var total = ts["reps"]
 	if total < 0:
@@ -180,7 +180,7 @@ static func gml_time_source_get_reps_remaining(handle):
 
 static func gml_time_source_get_time_remaining(handle):
 	var ts = _gml_time_source_resolve(handle)
-	if ts == null:
+	if typeof(ts) != TYPE_DICTIONARY:
 		return 0
 	return max(0.0, ts["period"] - ts["elapsed"])
 

@@ -168,6 +168,12 @@ class _DSMapAccess:
 
 
 @dataclass(frozen=True)
+class _DSListAccess:
+    target: _Expression
+    index: _Expression
+
+
+@dataclass(frozen=True)
 class _Member:
     target: _Expression
     member: str
@@ -195,6 +201,7 @@ _Expression: TypeAlias = (
     | _Index
     | _StructAccess
     | _DSMapAccess
+    | _DSListAccess
     | _Member
     | _Grouped
 )

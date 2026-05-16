@@ -12,6 +12,7 @@ from .constants import (
     _DRAW_RUNTIME_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INPUT_RUNTIME_FUNCTIONS,
+    _DS_COLLECTIONS_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
@@ -41,6 +42,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_room_api",
     "runtime_self_default",
     "runtime_time_api",
+    "runtime_variadic_1",
     "with_targets",
 ]
 
@@ -222,6 +224,72 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
     "sound_volume": (2, 2),
     "sound_pitch": (2, 2),
     "sound_global_volume": (1, 1),
+}
+
+_DS_COLLECTIONS_ARITY: dict[str, tuple[int, int | None]] = {
+    "ds_list_create": (0, 0),
+    "ds_list_destroy": (1, 1),
+    "ds_list_clear": (1, 1),
+    "ds_list_empty": (1, 1),
+    "ds_list_size": (1, 1),
+    "ds_list_add": (2, None),
+    "ds_list_set": (3, 3),
+    "ds_list_delete": (2, 2),
+    "ds_list_find_index": (2, 2),
+    "ds_list_find_value": (2, 2),
+    "ds_list_insert": (3, 3),
+    "ds_list_replace": (3, 3),
+    "ds_list_shuffle": (1, 1),
+    "ds_list_sort": (2, 2),
+    "ds_list_copy": (2, 2),
+    "ds_list_read": (2, 2),
+    "ds_list_write": (1, 1),
+    "ds_list_mark_as_list": (2, 2),
+    "ds_list_mark_as_map": (2, 2),
+    "ds_list_is_list": (2, 2),
+    "ds_list_is_map": (2, 2),
+
+    "ds_stack_create": (0, 0),
+    "ds_stack_destroy": (1, 1),
+    "ds_stack_clear": (1, 1),
+    "ds_stack_empty": (1, 1),
+    "ds_stack_size": (1, 1),
+    "ds_stack_push": (2, None),
+    "ds_stack_pop": (1, 1),
+    "ds_stack_top": (1, 1),
+    "ds_stack_copy": (2, 2),
+    "ds_stack_read": (2, 2),
+    "ds_stack_write": (1, 1),
+
+    "ds_queue_create": (0, 0),
+    "ds_queue_destroy": (1, 1),
+    "ds_queue_clear": (1, 1),
+    "ds_queue_empty": (1, 1),
+    "ds_queue_size": (1, 1),
+    "ds_queue_enqueue": (2, None),
+    "ds_queue_dequeue": (1, 1),
+    "ds_queue_head": (1, 1),
+    "ds_queue_tail": (1, 1),
+    "ds_queue_copy": (2, 2),
+    "ds_queue_read": (2, 2),
+    "ds_queue_write": (1, 1),
+
+    "ds_priority_create": (0, 0),
+    "ds_priority_destroy": (1, 1),
+    "ds_priority_clear": (1, 1),
+    "ds_priority_empty": (1, 1),
+    "ds_priority_size": (1, 1),
+    "ds_priority_add": (3, 3),
+    "ds_priority_change_priority": (3, 3),
+    "ds_priority_delete_max": (1, 1),
+    "ds_priority_delete_min": (1, 1),
+    "ds_priority_delete_value": (2, 2),
+    "ds_priority_find_max": (1, 1),
+    "ds_priority_find_min": (1, 1),
+    "ds_priority_find_priority": (2, 2),
+    "ds_priority_copy": (2, 2),
+    "ds_priority_read": (2, 2),
+    "ds_priority_write": (1, 1),
 }
 
 _TIME_ARITY: dict[str, tuple[int, int | None]] = {
@@ -442,6 +510,13 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _ROOM_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ROOM_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_room_api", target)
+
+    for name, target in _DS_COLLECTIONS_FUNCTIONS.items():
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name in ("ds_list_add", "ds_stack_push", "ds_queue_enqueue"):
+            lowering_kind = "runtime_variadic_1"
+        min_args, max_args = _DS_COLLECTIONS_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _TIME_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _TIME_ARITY[name]

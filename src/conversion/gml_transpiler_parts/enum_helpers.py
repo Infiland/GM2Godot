@@ -11,6 +11,7 @@ from .model import (
     _Binary,
     _Call,
     _DSMapAccess,
+    _DSListAccess,
     _Expression,
     _Grouped,
     _Index,
@@ -253,6 +254,10 @@ def _reject_enum_mutation_expression(
         _reject_enum_mutation_expression(expr.target, enum_name_set)
         _reject_enum_mutation_expression(expr.key, enum_name_set)
         return
+    if isinstance(expr, _DSListAccess):
+        _reject_enum_mutation_expression(expr.target, enum_name_set)
+        _reject_enum_mutation_expression(expr.index, enum_name_set)
+        return
     if isinstance(expr, _Member):
         _reject_enum_mutation_expression(expr.target, enum_name_set)
 
@@ -263,7 +268,7 @@ def _is_enum_reference(expr: _Expression, enum_names: Iterable[str]) -> bool:
 
 def _target_chain_starts_with_enum(expr: _Expression, enum_names: Iterable[str]) -> bool:
     unwrapped_expr = _unwrap_grouped_expression(expr)
-    if isinstance(unwrapped_expr, _Member | _StructAccess | _DSMapAccess | _Index):
+    if isinstance(unwrapped_expr, _Member | _StructAccess | _DSMapAccess | _DSListAccess | _Index):
         return _is_enum_reference(unwrapped_expr.target, enum_names) or _target_chain_starts_with_enum(
             unwrapped_expr.target,
             enum_names,

@@ -39,6 +39,7 @@ from .model import (
     _Binary,
     _Call,
     _DSMapAccess,
+    _DSListAccess,
     _Expression,
     _FunctionLiteral,
     _FunctionParameter,
@@ -323,6 +324,10 @@ def _emit_expression(
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         key = _emit_expression(expr.key, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_ds_map_find_value({target}, {key})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _DSListAccess):
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
+        return f"GMRuntime.gml_ds_list_find_value({target}, {index})", _POSTFIX_PRECEDENCE
     if _uses_direct_member_access(expr, scope_context=scope_context):
         target = _emit_child(
             expr.target,
@@ -549,6 +554,14 @@ def _emit_descriptor_call(
         if descriptor.lowering_kind == "runtime_self_default" and not emitted_args:
             emitted_args.append(scope_context.self_expression)
         return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
+
+    if descriptor.lowering_kind == "runtime_variadic_1":
+        emitted_first = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
+        emitted_rest = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args[1:]
+        )
+        return f"GMRuntime.{descriptor.lowering_target}({emitted_first}, [{emitted_rest}])"
 
     emitted_args = ", ".join(
         _emit_expression(arg, local_names, scope_context=scope_context)[0]
@@ -797,6 +810,8 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
     if isinstance(expr, _DSMapAccess):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
+    if isinstance(expr, _DSListAccess):
+        return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
     if isinstance(expr, _Member):
         return _contains_gml_undefined(expr.target)
     return False
@@ -835,6 +850,8 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
     if isinstance(expr, _DSMapAccess):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
+    if isinstance(expr, _DSListAccess):
+        return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
     if isinstance(expr, _Member):
         return _contains_gml_nan(expr.target)
     return False
@@ -876,6 +893,8 @@ def _contains_gml_pointer(expr: _Expression) -> bool:
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
     if isinstance(expr, _DSMapAccess):
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
+    if isinstance(expr, _DSListAccess):
+        return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.index)
     if isinstance(expr, _Member):
         return _contains_gml_pointer(expr.target)
     return False
@@ -914,6 +933,8 @@ def _contains_gml_handle(expr: _Expression) -> bool:
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
     if isinstance(expr, _DSMapAccess):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
+    if isinstance(expr, _DSListAccess):
+        return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.index)
     if isinstance(expr, _Member):
         return _contains_gml_handle(expr.target)
     return False
@@ -924,7 +945,7 @@ def _may_need_gml_reference_equality(expr: _Expression) -> bool:
         return expr.value not in {"true", "false", "INF", "NAN"}
     if isinstance(expr, (_ArrayLiteral, _StructLiteral, _FunctionLiteral)):
         return True
-    if isinstance(expr, (_Call, _NewCall, _Index, _StructAccess, _DSMapAccess, _Member)):
+    if isinstance(expr, (_Call, _NewCall, _Index, _StructAccess, _DSMapAccess, _DSListAccess, _Member)):
         return True
     if isinstance(expr, _Grouped):
         return _may_need_gml_reference_equality(expr.expr)

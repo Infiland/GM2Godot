@@ -36,6 +36,7 @@ from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
 from .identifiers import _is_plain_identifier, _sanitize_gdscript_identifier
 from .model import (
     _ArrayLiteral,
+    _ArrayRefAccess,
     _Binary,
     _Call,
     _DSGridAccess,
@@ -334,6 +335,10 @@ def _emit_expression(
         x_index = _emit_expression(expr.x_index, local_names, scope_context=scope_context)[0]
         y_index = _emit_expression(expr.y_index, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_ds_grid_get({target}, {x_index}, {y_index})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _ArrayRefAccess):
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
+        return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
     if _uses_direct_member_access(expr, scope_context=scope_context):
         target = _emit_child(
             expr.target,

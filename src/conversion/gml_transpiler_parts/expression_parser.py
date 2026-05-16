@@ -15,6 +15,7 @@ from .identifiers import _reject_asset_identifier_name, _validate_gml_identifier
 from .model import (
     GMLTranspileError,
     _ArrayLiteral,
+    _ArrayRefAccess,
     _Binary,
     _Call,
     _DSGridAccess,
@@ -143,6 +144,11 @@ class _ExpressionParser:
                     y_index = self._parse_expression()
                     self._consume("]")
                     expr = _DSGridAccess(expr, x_index, y_index)
+                    continue
+                if self._match("@"):
+                    index = self._parse_expression()
+                    self._consume("]")
+                    expr = _ArrayRefAccess(expr, index)
                     continue
                 index = self._parse_expression()
                 self._consume("]")

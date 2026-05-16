@@ -33,6 +33,7 @@ from .identifiers import (
 )
 from .model import (
     GMLTranspileError,
+    _ArrayRefAccess,
     _Call,
     _DSGridAccess,
     _DSMapAccess,
@@ -267,6 +268,38 @@ def _transpile_statement(
                 f"func({current_value}): return GMRuntime.{helper}({current_value}, 1))",
             ]
         if isinstance(target_expr, _Index):
+            container = _emit_expression(
+                target_expr.target,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            index = _emit_expression(
+                target_expr.index,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            prelude_lines: list[str] = []
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_array_target",
+            )
+            index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.index,
+                index,
+                generated_counter,
+                "_gml_array_index",
+            )
+            current_value = f"GMRuntime.gml_array_get({container}, {index})"
+            return [
+                *prelude_lines,
+                f"GMRuntime.gml_array_set({container}, {index}, "
+                f"GMRuntime.{helper}({current_value}, 1))",
+            ]
+        if isinstance(target_expr, _ArrayRefAccess):
             container = _emit_expression(
                 target_expr.target,
                 local_names,
@@ -590,6 +623,49 @@ def _transpile_statement(
         _record_instance_assignment(target, local_names, instance_variables)
         target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         if isinstance(target_expr, _Index):
+            container = _emit_expression(
+                target_expr.target,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            index = _emit_expression(
+                target_expr.index,
+                local_names,
+                scope_context=scope_context,
+            )[0]
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
+            prelude_lines: list[str] = []
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_array_target",
+            )
+            index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.index,
+                index,
+                generated_counter,
+                "_gml_array_index",
+            )
+            if operator == "??=":
+                current_value = f"GMRuntime.gml_array_get({container}, {index})"
+                return [
+                    *prelude_lines,
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    f"\tGMRuntime.gml_array_set({container}, {index}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = f"GMRuntime.gml_array_get({container}, {index})"
+                return [
+                    *prelude_lines,
+                    f"GMRuntime.gml_array_set({container}, {index}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+        if isinstance(target_expr, _ArrayRefAccess):
             container = _emit_expression(
                 target_expr.target,
                 local_names,
@@ -969,6 +1045,27 @@ def _ds_list_assignment_parts(
     return None
 
 
+def _array_ref_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if isinstance(target_expr, _ArrayRefAccess):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(
+            target_expr.index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return container, index
+    return None
+
+
 def _ds_grid_assignment_parts(
     target_expr: _Expression,
     local_names: Iterable[str],
@@ -1212,7 +1309,7 @@ def _parse_increment_expression(statement: str) -> tuple[str, _IncrementDelta, _
 
 
 def _is_increment_target_expression(expr: _Expression) -> bool:
-    return isinstance(expr, _Name | _Index | _Member | _StructAccess | _DSMapAccess | _DSListAccess)
+    return isinstance(expr, _Name | _Index | _ArrayRefAccess | _Member | _StructAccess | _DSMapAccess | _DSListAccess)
 
 
 def _transpile_assignment_to_emitted_value(
@@ -1268,6 +1365,18 @@ def _transpile_assignment_to_emitted_value(
         ]
     _record_instance_assignment(target, local_names, instance_variables)
     if isinstance(target_expr, _Index):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(
+            target_expr.index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
+    if isinstance(target_expr, _ArrayRefAccess):
         container = _emit_expression(
             target_expr.target,
             local_names,

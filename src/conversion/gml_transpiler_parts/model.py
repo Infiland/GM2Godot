@@ -181,6 +181,12 @@ class _DSGridAccess:
 
 
 @dataclass(frozen=True)
+class _ArrayRefAccess:
+    target: _Expression
+    index: _Expression
+
+
+@dataclass(frozen=True)
 class _Member:
     target: _Expression
     member: str
@@ -210,6 +216,7 @@ _Expression: TypeAlias = (
     | _DSMapAccess
     | _DSListAccess
     | _DSGridAccess
+    | _ArrayRefAccess
     | _Member
     | _Grouped
 )

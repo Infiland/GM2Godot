@@ -2651,6 +2651,124 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_game_end()",
         )
 
+    def test_ds_list_collection_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "list = ds_list_create();"
+                "ds_list_add(list, 1, 2, 3);"
+                "ds_list_set(list, 0, 10);"
+                "val = ds_list_find_value(list, 0);"
+                "idx = ds_list_find_index(list, 10);"
+                "ds_list_insert(list, 0, -1);"
+                "ds_list_replace(list, 1, 99);"
+                "ds_list_delete(list, 2);"
+                "size = ds_list_size(list);"
+                "empty = ds_list_empty(list);"
+                "ds_list_shuffle(list);"
+                "ds_list_sort(list, true);"
+                "ds_list_clear(list);"
+                "ds_list_destroy(list);",
+                indent="",
+            ),
+            "list = GMRuntime.gml_ds_list_create()\n"
+            "GMRuntime.gml_ds_list_add(list, [1, 2, 3])\n"
+            "GMRuntime.gml_ds_list_set(list, 0, 10)\n"
+            "val = GMRuntime.gml_ds_list_find_value(list, 0)\n"
+            "idx = GMRuntime.gml_ds_list_find_index(list, 10)\n"
+            "GMRuntime.gml_ds_list_insert(list, 0, -1)\n"
+            "GMRuntime.gml_ds_list_replace(list, 1, 99)\n"
+            "GMRuntime.gml_ds_list_delete(list, 2)\n"
+            "size = GMRuntime.gml_ds_list_size(list)\n"
+            "empty = GMRuntime.gml_ds_list_empty(list)\n"
+            "GMRuntime.gml_ds_list_shuffle(list)\n"
+            "GMRuntime.gml_ds_list_sort(list, true)\n"
+            "GMRuntime.gml_ds_list_clear(list)\n"
+            "GMRuntime.gml_ds_list_destroy(list)",
+        )
+
+    def test_ds_stack_collection_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "stack = ds_stack_create();"
+                "ds_stack_push(stack, 1, 2, 3);"
+                "top = ds_stack_top(stack);"
+                "pop = ds_stack_pop(stack);"
+                "size = ds_stack_size(stack);"
+                "empty = ds_stack_empty(stack);"
+                "ds_stack_clear(stack);"
+                "ds_stack_destroy(stack);",
+                indent="",
+            ),
+            "stack = GMRuntime.gml_ds_stack_create()\n"
+            "GMRuntime.gml_ds_stack_push(stack, [1, 2, 3])\n"
+            "top = GMRuntime.gml_ds_stack_top(stack)\n"
+            "pop = GMRuntime.gml_ds_stack_pop(stack)\n"
+            "size = GMRuntime.gml_ds_stack_size(stack)\n"
+            "empty = GMRuntime.gml_ds_stack_empty(stack)\n"
+            "GMRuntime.gml_ds_stack_clear(stack)\n"
+            "GMRuntime.gml_ds_stack_destroy(stack)",
+        )
+
+    def test_ds_queue_collection_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'queue = ds_queue_create();'
+                "ds_queue_enqueue(queue, 'a', 'b', 'c');"
+                "head = ds_queue_head(queue);"
+                "tail = ds_queue_tail(queue);"
+                "deq = ds_queue_dequeue(queue);"
+                "size = ds_queue_size(queue);"
+                "empty = ds_queue_empty(queue);"
+                "ds_queue_clear(queue);"
+                "ds_queue_destroy(queue);",
+                indent="",
+            ),
+            "queue = GMRuntime.gml_ds_queue_create()\n"
+            "GMRuntime.gml_ds_queue_enqueue(queue, ['a', 'b', 'c'])\n"
+            "head = GMRuntime.gml_ds_queue_head(queue)\n"
+            "tail = GMRuntime.gml_ds_queue_tail(queue)\n"
+            "deq = GMRuntime.gml_ds_queue_dequeue(queue)\n"
+            "size = GMRuntime.gml_ds_queue_size(queue)\n"
+            "empty = GMRuntime.gml_ds_queue_empty(queue)\n"
+            "GMRuntime.gml_ds_queue_clear(queue)\n"
+            "GMRuntime.gml_ds_queue_destroy(queue)",
+        )
+
+    def test_ds_priority_collection_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "prio = ds_priority_create();"
+                "ds_priority_add(prio, 'apple', 5);"
+                "ds_priority_add(prio, 'banana', 1);"
+                "ds_priority_change_priority(prio, 'apple', 3);"
+                "max_val = ds_priority_find_max(prio);"
+                "min_val = ds_priority_find_min(prio);"
+                "p = ds_priority_find_priority(prio, 'apple');"
+                "pop_max = ds_priority_delete_max(prio);"
+                "pop_min = ds_priority_delete_min(prio);"
+                "ds_priority_delete_value(prio, 'apple');"
+                "size = ds_priority_size(prio);"
+                "empty = ds_priority_empty(prio);"
+                "ds_priority_clear(prio);"
+                "ds_priority_destroy(prio);",
+                indent="",
+            ),
+            "prio = GMRuntime.gml_ds_priority_create()\n"
+            "GMRuntime.gml_ds_priority_add(prio, 'apple', 5)\n"
+            "GMRuntime.gml_ds_priority_add(prio, 'banana', 1)\n"
+            "GMRuntime.gml_ds_priority_change_priority(prio, 'apple', 3)\n"
+            "max_val = GMRuntime.gml_ds_priority_find_max(prio)\n"
+            "min_val = GMRuntime.gml_ds_priority_find_min(prio)\n"
+            "p = GMRuntime.gml_ds_priority_find_priority(prio, 'apple')\n"
+            "pop_max = GMRuntime.gml_ds_priority_delete_max(prio)\n"
+            "pop_min = GMRuntime.gml_ds_priority_delete_min(prio)\n"
+            "GMRuntime.gml_ds_priority_delete_value(prio, 'apple')\n"
+            "size = GMRuntime.gml_ds_priority_size(prio)\n"
+            "empty = GMRuntime.gml_ds_priority_empty(prio)\n"
+            "GMRuntime.gml_ds_priority_clear(prio)\n"
+            "GMRuntime.gml_ds_priority_destroy(prio)",
+        )
+
     def test_room_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "room_goto.*expects 1.*got 0"):
             transpile_gml_code("room_goto();", indent="", asset_names={"r_next"})

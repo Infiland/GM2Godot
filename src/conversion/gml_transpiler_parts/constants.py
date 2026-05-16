@@ -569,8 +569,33 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
 }
 
 _DS_MAP_RUNTIME_FUNCTIONS = {
+    "ds_map_create": "gml_ds_map_create",
+    "ds_map_destroy": "gml_ds_map_destroy",
+    "ds_map_clear": "gml_ds_map_clear",
+    "ds_map_empty": "gml_ds_map_empty",
+    "ds_map_size": "gml_ds_map_size",
+    "ds_map_add": "gml_ds_map_add",
+    "ds_map_set": "gml_ds_map_set",
+    "ds_map_replace": "gml_ds_map_replace",
+    "ds_map_delete": "gml_ds_map_delete",
     "ds_map_exists": "gml_ds_map_exists",
     "ds_map_find_value": "gml_ds_map_find_value",
+    "ds_map_find_first": "gml_ds_map_find_first",
+    "ds_map_find_last": "gml_ds_map_find_last",
+    "ds_map_find_next": "gml_ds_map_find_next",
+    "ds_map_find_previous": "gml_ds_map_find_previous",
+    "ds_map_keys": "gml_ds_map_keys",
+    "ds_map_values": "gml_ds_map_values",
+    "ds_map_copy": "gml_ds_map_copy",
+    "ds_map_merge": "gml_ds_map_merge",
+    "ds_map_read": "gml_ds_map_read",
+    "ds_map_write": "gml_ds_map_write",
+    "ds_map_add_list": "gml_ds_map_add_list",
+    "ds_map_add_map": "gml_ds_map_add_map",
+    "ds_map_replace_list": "gml_ds_map_replace_list",
+    "ds_map_replace_map": "gml_ds_map_replace_map",
+    "ds_map_is_list": "gml_ds_map_is_list",
+    "ds_map_is_map": "gml_ds_map_is_map",
 }
 
 _ARRAY_RUNTIME_FUNCTIONS = {

@@ -174,6 +174,13 @@ class _DSListAccess:
 
 
 @dataclass(frozen=True)
+class _DSGridAccess:
+    target: _Expression
+    x_index: _Expression
+    y_index: _Expression
+
+
+@dataclass(frozen=True)
 class _Member:
     target: _Expression
     member: str
@@ -202,6 +209,7 @@ _Expression: TypeAlias = (
     | _StructAccess
     | _DSMapAccess
     | _DSListAccess
+    | _DSGridAccess
     | _Member
     | _Grouped
 )

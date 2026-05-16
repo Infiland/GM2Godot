@@ -34,6 +34,7 @@ from .identifiers import (
 from .model import (
     GMLTranspileError,
     _Call,
+    _DSGridAccess,
     _DSMapAccess,
     _DSListAccess,
     _Expression,
@@ -392,6 +393,42 @@ def _transpile_statement(
                 f"GMRuntime.gml_ds_list_set({container}, {index}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
             ]
+        ds_grid_target = _ds_grid_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
+        if ds_grid_target is not None:
+            container, x_index, y_index = ds_grid_target
+            prelude_lines = []
+            if isinstance(target_expr, _DSGridAccess):
+                container = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.target,
+                    container,
+                    generated_counter,
+                    "_gml_grid_target",
+                )
+                x_index = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.x_index,
+                    x_index,
+                    generated_counter,
+                    "_gml_grid_x",
+                )
+                y_index = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.y_index,
+                    y_index,
+                    generated_counter,
+                    "_gml_grid_y",
+                )
+            current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
+            return [
+                *prelude_lines,
+                f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
+            ]
         target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
@@ -676,6 +713,54 @@ def _transpile_statement(
                     f"GMRuntime.gml_ds_list_set({container}, {index}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
+        ds_grid_target = _ds_grid_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )
+        if ds_grid_target is not None:
+            container, x_index, y_index = ds_grid_target
+            if operator in ("=", ":="):
+                return [f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"]
+            prelude_lines = []
+            if isinstance(target_expr, _DSGridAccess):
+                container = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.target,
+                    container,
+                    generated_counter,
+                    "_gml_grid_target",
+                )
+                x_index = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.x_index,
+                    x_index,
+                    generated_counter,
+                    "_gml_grid_x",
+                )
+                y_index = _cache_assignment_part(
+                    prelude_lines,
+                    target_expr.y_index,
+                    y_index,
+                    generated_counter,
+                    "_gml_grid_y",
+                )
+            if operator == "??=":
+                current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
+                return [
+                    *prelude_lines,
+                    f"if GMRuntime.gml_is_nullish({current_value}):",
+                    f"\tGMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})",
+                ]
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
+                return [
+                    *prelude_lines,
+                    f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported DS grid accessor assignment operator")
             raise GMLTranspileError("Unsupported DS list accessor assignment operator")
         selector_target = _selector_assignment_parts(
             target_expr,
@@ -881,6 +966,32 @@ def _ds_list_assignment_parts(
             scope_context=scope_context,
         )[0]
         return container, index
+    return None
+
+
+def _ds_grid_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if isinstance(target_expr, _DSGridAccess):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        x_index = _emit_expression(
+            target_expr.x_index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        y_index = _emit_expression(
+            target_expr.y_index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return container, x_index, y_index
     return None
 
 
@@ -1184,6 +1295,14 @@ def _transpile_assignment_to_emitted_value(
     if ds_list_target is not None:
         container, index = ds_list_target
         return [f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"]
+    ds_grid_target = _ds_grid_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if ds_grid_target is not None:
+        container, x_index, y_index = ds_grid_target
+        return [f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"]
     selector_target = _selector_assignment_parts(
         target_expr,
         local_names,

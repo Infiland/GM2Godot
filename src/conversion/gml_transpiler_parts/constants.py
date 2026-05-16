@@ -598,6 +598,30 @@ _DS_MAP_RUNTIME_FUNCTIONS = {
     "ds_map_is_map": "gml_ds_map_is_map",
 }
 
+_DS_GRID_FUNCTIONS = {
+    "ds_grid_create": "gml_ds_grid_create",
+    "ds_grid_destroy": "gml_ds_grid_destroy",
+    "ds_grid_width": "gml_ds_grid_width",
+    "ds_grid_height": "gml_ds_grid_height",
+    "ds_grid_clear": "gml_ds_grid_clear",
+    "ds_grid_resize": "gml_ds_grid_resize",
+    "ds_grid_set": "gml_ds_grid_set",
+    "ds_grid_get": "gml_ds_grid_get",
+    "ds_grid_add": "gml_ds_grid_add",
+    "ds_grid_multiply": "gml_ds_grid_multiply",
+    "ds_grid_set_region": "gml_ds_grid_set_region",
+    "ds_grid_get_region": "gml_ds_grid_get_region",
+    "ds_grid_clear_region": "gml_ds_grid_clear_region",
+    "ds_grid_add_region": "gml_ds_grid_add_region",
+    "ds_grid_multiply_region": "gml_ds_grid_multiply_region",
+    "ds_grid_value_exists": "gml_ds_grid_value_exists",
+    "ds_grid_value_x": "gml_ds_grid_value_x",
+    "ds_grid_value_y": "gml_ds_grid_value_y",
+    "ds_grid_copy": "gml_ds_grid_copy",
+    "ds_grid_read": "gml_ds_grid_read",
+    "ds_grid_write": "gml_ds_grid_write",
+}
+
 _ARRAY_RUNTIME_FUNCTIONS = {
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",

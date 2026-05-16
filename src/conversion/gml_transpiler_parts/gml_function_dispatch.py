@@ -10,9 +10,10 @@ from .constants import (
     _ASSET_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
     _DRAW_RUNTIME_FUNCTIONS,
+    _DS_COLLECTIONS_FUNCTIONS,
+    _DS_GRID_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INPUT_RUNTIME_FUNCTIONS,
-    _DS_COLLECTIONS_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
@@ -140,6 +141,30 @@ _DS_MAP_ARITY: dict[str, tuple[int, int | None]] = {
     "ds_map_replace_map": (3, 3),
     "ds_map_is_list": (2, 2),
     "ds_map_is_map": (2, 2),
+}
+
+_DS_GRID_ARITY: dict[str, tuple[int, int | None]] = {
+    "ds_grid_create": (2, 2),
+    "ds_grid_destroy": (1, 1),
+    "ds_grid_width": (1, 1),
+    "ds_grid_height": (1, 1),
+    "ds_grid_clear": (1, 2),
+    "ds_grid_resize": (3, 4),
+    "ds_grid_set": (4, 4),
+    "ds_grid_get": (3, 3),
+    "ds_grid_add": (4, 4),
+    "ds_grid_multiply": (4, 4),
+    "ds_grid_set_region": (6, 6),
+    "ds_grid_get_region": (5, 5),
+    "ds_grid_clear_region": (5, 6),
+    "ds_grid_add_region": (6, 6),
+    "ds_grid_multiply_region": (6, 6),
+    "ds_grid_value_exists": (6, 6),
+    "ds_grid_value_x": (6, 6),
+    "ds_grid_value_y": (6, 6),
+    "ds_grid_copy": (2, 2),
+    "ds_grid_read": (2, 2),
+    "ds_grid_write": (1, 1),
 }
 
 _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
@@ -542,6 +567,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_variadic_1"
         min_args, max_args = _DS_COLLECTIONS_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
+
+    for name, target in _DS_GRID_FUNCTIONS.items():
+        min_args, max_args = _DS_GRID_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _TIME_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _TIME_ARITY[name]

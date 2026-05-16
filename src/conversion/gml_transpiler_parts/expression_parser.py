@@ -17,6 +17,7 @@ from .model import (
     _ArrayLiteral,
     _Binary,
     _Call,
+    _DSGridAccess,
     _DSListAccess,
     _DSMapAccess,
     _Expression,
@@ -135,6 +136,13 @@ class _ExpressionParser:
                     index = self._parse_expression()
                     self._consume("]")
                     expr = _DSListAccess(expr, index)
+                    continue
+                if self._match("#"):
+                    x_index = self._parse_expression()
+                    self._consume(",")
+                    y_index = self._parse_expression()
+                    self._consume("]")
+                    expr = _DSGridAccess(expr, x_index, y_index)
                     continue
                 index = self._parse_expression()
                 self._consume("]")

@@ -15,6 +15,7 @@ from .constants import (
     _DS_MAP_RUNTIME_FUNCTIONS,
     _INPUT_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
+    _MATH_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
@@ -211,6 +212,59 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "chr": (1, 1),
     "ord": (1, 1),
     "ansi_char": (1, 1),
+}
+
+_MATH_ARITY: dict[str, tuple[int, int | None]] = {
+    "abs": (1, 1),
+    "sign": (1, 1),
+    "floor": (1, 1),
+    "ceil": (1, 1),
+    "round": (1, 1),
+    "frac": (1, 1),
+    "sqr": (1, 1),
+    "power": (2, 2),
+    "exp": (1, 1),
+    "ln": (1, 1),
+    "log2": (1, 1),
+    "log10": (1, 1),
+    "clamp": (3, 3),
+    "lerp": (3, 3),
+    "min": (1, None),
+    "max": (1, None),
+    "sin": (1, 1),
+    "cos": (1, 1),
+    "tan": (1, 1),
+    "arcsin": (1, 1),
+    "arccos": (1, 1),
+    "arctan": (1, 1),
+    "arctan2": (2, 2),
+    "dsin": (1, 1),
+    "dcos": (1, 1),
+    "dtan": (1, 1),
+    "darcsin": (1, 1),
+    "darccos": (1, 1),
+    "darctan": (1, 1),
+    "darctan2": (2, 2),
+    "degtorad": (1, 1),
+    "radtodeg": (1, 1),
+    "point_distance": (4, 4),
+    "point_direction": (4, 4),
+    "lengthdir_x": (2, 2),
+    "lengthdir_y": (2, 2),
+    "angle_difference": (2, 2),
+    "dot_product": (4, 4),
+    "dot_product_3d": (6, 6),
+    "dot_product_normalised": (4, 4),
+    "dot_product_3d_normalised": (6, 6),
+    "random": (1, 1),
+    "irandom": (1, 1),
+    "random_range": (2, 2),
+    "irandom_range": (2, 2),
+    "choose": (1, None),
+    "randomize": (0, 0),
+    "randomise": (0, 0),
+    "random_set_seed": (1, 1),
+    "random_get_seed": (0, 0),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -555,6 +609,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _STRING_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRING_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _MATH_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _MATH_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

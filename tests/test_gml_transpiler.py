@@ -3009,6 +3009,50 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_ds_priority_destroy(prio)",
         )
 
+    def test_math_number_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "a = clamp(abs(-5), 0, 3);"
+                "b = lerp(10, 20, 0.25);"
+                "c = point_direction(0, 0, 0, -10);"
+                "d = lengthdir_y(8, 90);"
+                "e = angle_difference(10, 350);"
+                "f = dot_product(1, 2, 3, 4);"
+                "g = dcos(180);",
+                indent="",
+            ),
+            "a = GMRuntime.gml_clamp(GMRuntime.gml_abs(-5), 0, 3)\n"
+            "b = GMRuntime.gml_lerp(10, 20, 0.25)\n"
+            "c = GMRuntime.gml_point_direction(0, 0, 0, -10)\n"
+            "d = GMRuntime.gml_lengthdir_y(8, 90)\n"
+            "e = GMRuntime.gml_angle_difference(10, 350)\n"
+            "f = GMRuntime.gml_dot_product(1, 2, 3, 4)\n"
+            "g = GMRuntime.gml_dcos(180)",
+        )
+
+    def test_random_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "random_set_seed(123);"
+                "a = random(10);"
+                "b = irandom_range(2, 5);"
+                "c = choose('a', 'b', 'c');"
+                "d = random_get_seed();",
+                indent="",
+            ),
+            "GMRuntime.gml_random_set_seed(123)\n"
+            "a = GMRuntime.gml_random(10)\n"
+            "b = GMRuntime.gml_irandom_range(2, 5)\n"
+            "c = GMRuntime.gml_choose('a', 'b', 'c')\n"
+            "d = GMRuntime.gml_random_get_seed()",
+        )
+
+    def test_math_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
+            transpile_gml_code("clamp(1, 2);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "choose.*at least 1.*got 0"):
+            transpile_gml_code("choose();", indent="")
+
     def test_room_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "room_goto.*expects 1.*got 0"):
             transpile_gml_code("room_goto();", indent="", asset_names={"r_next"})

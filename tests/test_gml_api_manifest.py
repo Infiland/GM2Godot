@@ -127,6 +127,16 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert time_source_create is not None
         self.assertEqual(time_source_create.status, "implemented")
         self.assertEqual(time_source_create.issue_number, 497)
+        random_entry = get_gml_api_entry("random")
+        self.assertIsNotNone(random_entry)
+        assert random_entry is not None
+        self.assertEqual(random_entry.status, "implemented")
+        self.assertEqual(random_entry.issue_number, 504)
+        point_direction = get_gml_api_entry("point_direction")
+        self.assertIsNotNone(point_direction)
+        assert point_direction is not None
+        self.assertEqual(point_direction.status, "implemented")
+        self.assertEqual(point_direction.issue_number, 504)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
@@ -176,6 +186,15 @@ class TestGMLAPIManifest(unittest.TestCase):
             "time_source_create",
             "call_later",
             "call_cancel",
+            "abs",
+            "clamp",
+            "point_direction",
+            "lengthdir_y",
+            "random",
+            "irandom_range",
+            "choose",
+            "random_set_seed",
+            "random_get_seed",
             "keyboard_check",
             "method",
             "show_debug_message",

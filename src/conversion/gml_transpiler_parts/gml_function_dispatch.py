@@ -13,6 +13,7 @@ from .constants import (
     _DS_COLLECTIONS_FUNCTIONS,
     _DS_GRID_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
+    _FILE_RUNTIME_FUNCTIONS,
     _INPUT_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MATH_RUNTIME_FUNCTIONS,
@@ -265,6 +266,44 @@ _MATH_ARITY: dict[str, tuple[int, int | None]] = {
     "randomise": (0, 0),
     "random_set_seed": (1, 1),
     "random_get_seed": (0, 0),
+}
+
+_FILE_ARITY: dict[str, tuple[int, int | None]] = {
+    "file_exists": (1, 1),
+    "file_delete": (1, 1),
+    "directory_exists": (1, 1),
+    "directory_create": (1, 1),
+    "directory_destroy": (1, 1),
+    "file_text_open_read": (1, 1),
+    "file_text_open_write": (1, 1),
+    "file_text_open_append": (1, 1),
+    "file_text_close": (1, 1),
+    "file_text_eof": (1, 1),
+    "file_text_read_string": (1, 1),
+    "file_text_readln": (1, 1),
+    "file_text_read_real": (1, 1),
+    "file_text_write_string": (2, 2),
+    "file_text_write_real": (2, 2),
+    "file_text_writeln": (1, 1),
+    "filename_name": (1, 1),
+    "filename_ext": (1, 1),
+    "filename_dir": (1, 1),
+    "filename_path": (1, 1),
+    "filename_change_ext": (2, 2),
+    "ini_open": (1, 1),
+    "ini_close": (0, 0),
+    "ini_read_string": (3, 3),
+    "ini_read_real": (3, 3),
+    "ini_write_string": (3, 3),
+    "ini_write_real": (3, 3),
+    "ini_section_exists": (1, 1),
+    "ini_key_exists": (2, 2),
+    "ini_key_delete": (2, 2),
+    "ini_section_delete": (1, 1),
+    "json_encode": (1, 1),
+    "json_decode": (1, 1),
+    "json_stringify": (1, 1),
+    "json_parse": (1, 1),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -613,6 +652,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _MATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MATH_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _FILE_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _FILE_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

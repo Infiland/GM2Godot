@@ -137,7 +137,23 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert point_direction is not None
         self.assertEqual(point_direction.status, "implemented")
         self.assertEqual(point_direction.issue_number, 504)
+        file_exists = get_gml_api_entry("file_exists")
+        self.assertIsNotNone(file_exists)
+        assert file_exists is not None
+        self.assertEqual(file_exists.status, "implemented")
+        self.assertEqual(file_exists.issue_number, 505)
+        ini_open = get_gml_api_entry("ini_open")
+        self.assertIsNotNone(ini_open)
+        assert ini_open is not None
+        self.assertEqual(ini_open.status, "implemented")
+        self.assertEqual(ini_open.issue_number, 505)
+        json_encode = get_gml_api_entry("json_encode")
+        self.assertIsNotNone(json_encode)
+        assert json_encode is not None
+        self.assertEqual(json_encode.status, "implemented")
+        self.assertEqual(json_encode.issue_number, 505)
         self.assertTrue(is_known_gml_api("draw_sprite"))
+        self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
@@ -195,6 +211,13 @@ class TestGMLAPIManifest(unittest.TestCase):
             "choose",
             "random_set_seed",
             "random_get_seed",
+            "file_exists",
+            "file_text_open_read",
+            "file_text_write_string",
+            "ini_open",
+            "ini_read_string",
+            "json_encode",
+            "json_decode",
             "keyboard_check",
             "method",
             "show_debug_message",

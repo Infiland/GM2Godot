@@ -113,8 +113,33 @@ _VARIABLE_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _DS_MAP_ARITY: dict[str, tuple[int, int | None]] = {
+    "ds_map_create": (0, 0),
+    "ds_map_destroy": (1, 1),
+    "ds_map_clear": (1, 1),
+    "ds_map_empty": (1, 1),
+    "ds_map_size": (1, 1),
+    "ds_map_add": (3, 3),
+    "ds_map_set": (3, 3),
+    "ds_map_replace": (3, 3),
+    "ds_map_delete": (2, 2),
     "ds_map_exists": (2, 2),
     "ds_map_find_value": (2, 2),
+    "ds_map_find_first": (1, 1),
+    "ds_map_find_last": (1, 1),
+    "ds_map_find_next": (2, 2),
+    "ds_map_find_previous": (2, 2),
+    "ds_map_keys": (1, 1),
+    "ds_map_values": (1, 1),
+    "ds_map_copy": (2, 2),
+    "ds_map_merge": (2, 2),
+    "ds_map_read": (2, 2),
+    "ds_map_write": (1, 1),
+    "ds_map_add_list": (3, 3),
+    "ds_map_add_map": (3, 3),
+    "ds_map_replace_list": (3, 3),
+    "ds_map_replace_map": (3, 3),
+    "ds_map_is_list": (2, 2),
+    "ds_map_is_map": (2, 2),
 }
 
 _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {

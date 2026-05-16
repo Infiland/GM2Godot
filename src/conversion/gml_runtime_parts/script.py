@@ -20,6 +20,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "55_room_game_flow.gd",
     "56_time_alarms.gd",
     "57_ds_lists_stacks_queues.gd",
+    "58_ds_maps.gd",
     "50_static_types_and_clone.gd",
     "60_conversion_helpers.gd",
     "70_handle_string_helpers.gd",

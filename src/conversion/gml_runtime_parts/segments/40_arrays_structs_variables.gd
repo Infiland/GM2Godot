@@ -171,29 +171,6 @@ static func gml_variable_global_set(member_name, value):
 	return gml_struct_set(gml_global_scope(), member_name, value)
 
 
-static func gml_ds_map_find_value(map_value, key):
-	var resolved_map = _gml_resolve_ds_map(map_value)
-	if typeof(resolved_map) == TYPE_DICTIONARY:
-		if resolved_map.has(key):
-			return resolved_map[key]
-		return gml_undefined()
-	return gml_unsupported_type_error("GML ds_map access", resolved_map)
-
-
-static func gml_ds_map_exists(map_value, key):
-	var resolved_map = _gml_resolve_ds_map(map_value)
-	if typeof(resolved_map) == TYPE_DICTIONARY:
-		return resolved_map.has(key)
-	return false
-
-
-static func gml_ds_map_set(map_value, key, value):
-	var resolved_map = _gml_resolve_ds_map(map_value)
-	if typeof(resolved_map) == TYPE_DICTIONARY:
-		resolved_map[key] = value
-		return value
-	return gml_unsupported_type_error("GML ds_map access", resolved_map)
-
 
 static func gml_struct_exists(struct_value, member_name):
 	var key = str(member_name)

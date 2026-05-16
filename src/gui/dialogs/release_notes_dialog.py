@@ -5,7 +5,7 @@ from typing import Any, cast
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QMessageBox, QWidget
 
 from src.gui.theme import THEME
-from src.localization import get_localized
+from src.localization import get_localized, get_localized_list
 
 
 class ReleaseNotesDialog:
@@ -17,7 +17,7 @@ class ReleaseNotesDialog:
         if notes:
             self._display(notes)
         else:
-            errors = get_localized("ReleaseNotes_Error_NoInternet")
+            errors = get_localized_list("ReleaseNotes_Error_NoInternet")
             QMessageBox.critical(self._parent, errors[0], errors[1])
 
     def _fetch(self) -> str | None:

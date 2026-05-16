@@ -23,7 +23,7 @@ from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
 from src.gui.dialogs.language_dialog import LanguageDialog
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.version import get_version
-from src.localization import get_localized
+from src.localization import get_localized, get_localized_list
 from src.update_checker import UpdateChecker
 from src.update_checker import UpdateInfo
 from src.gui.dialogs.update_dialog import UpdateDialog
@@ -202,14 +202,14 @@ class MainWindow(QMainWindow):
         except OSError:
             return
         if not files:
-            errors = get_localized("Console_Error_InvalidProject")
+            errors = get_localized_list("Console_Error_InvalidProject")
             QMessageBox.warning(
                 self,
                 errors[0].format(file_name=file_name),
                 errors[1].format(file_name=file_name, file_extension=file_extension),
             )
         elif len(files) > 1:
-            errors = get_localized("Console_Error_MultipleGenericFiles")
+            errors = get_localized_list("Console_Error_MultipleGenericFiles")
             QMessageBox.warning(
                 self,
                 errors[0].format(file_extension=file_extension),

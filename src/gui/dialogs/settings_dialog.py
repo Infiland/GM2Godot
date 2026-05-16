@@ -1,6 +1,4 @@
 import multiprocessing
-from typing import cast
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -10,7 +8,7 @@ from PySide6.QtWidgets import (
 from src.gui.theme import THEME
 from src.gui.setting_value import SettingValue
 from src.conversion.converter import CONVERSION_CATEGORIES
-from src.localization import get_localized
+from src.localization import get_localized, get_localized_dict, get_localized_list
 
 
 class SettingsDialog(QDialog):
@@ -51,14 +49,18 @@ class SettingsDialog(QDialog):
         grid = QGridLayout(categories_widget)
         grid.setSpacing(20)
 
-        labels = cast(dict[str, str], get_localized("Settings_Labels"))
-        headings = cast(list[str], get_localized("Settings_Categories_Headings"))
+        labels = get_localized_dict("Settings_Labels")
+        headings = get_localized_list("Settings_Categories_Headings")
+        if not headings:
+            headings = [key.replace("_", " ").title() for key in CONVERSION_CATEGORIES.keys()]
+
         categories_items = list(CONVERSION_CATEGORIES.items())
 
         for col, (_cat_key, setting_keys) in enumerate(categories_items):
             col_layout = QVBoxLayout()
 
-            cat_heading = QLabel(headings[col])
+            heading_text = headings[col] if col < len(headings) else _cat_key.replace("_", " ").title()
+            cat_heading = QLabel(heading_text)
             cat_heading.setStyleSheet(
                 f"font-size: {THEME['font_size_large']}pt; font-weight: bold;"
             )

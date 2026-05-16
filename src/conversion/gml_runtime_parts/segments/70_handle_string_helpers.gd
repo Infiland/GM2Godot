@@ -392,3 +392,188 @@ static func _object_has_property(object_value, property_name):
 		if property.get("name") == property_name:
 			return true
 	return false
+
+
+static func _gml_one_based_index(value):
+	var resolved = int(_to_real(value))
+	return resolved - 1
+
+
+static func gml_string_length(value):
+	var s = gml_string(value)
+	return s.length()
+
+
+static func gml_string_char_at(value, index):
+	var s = gml_string(value)
+	var pos = _gml_one_based_index(index)
+	if pos < 0 or pos >= s.length():
+		return ""
+	return s[pos]
+
+
+static func gml_string_ord_at(value, index):
+	var s = gml_string(value)
+	var pos = _gml_one_based_index(index)
+	if pos < 0 or pos >= s.length():
+		return 0
+	return s.unicode_at(pos)
+
+
+static func gml_string_copy(value, index, count):
+	var s = gml_string(value)
+	var pos = _gml_one_based_index(index)
+	var length = int(_to_real(count))
+	if pos < 0:
+		pos = 0
+	if pos >= s.length() or length <= 0:
+		return ""
+	return s.substr(pos, length)
+
+
+static func gml_string_pos(subvalue, value):
+	var s = gml_string(value)
+	var sub = gml_string(subvalue)
+	var found = s.find(sub)
+	if found == -1:
+		return 0
+	return found + 1
+
+
+static func gml_string_replace(value, old_char, new_str):
+	var s = gml_string(value)
+	var old = gml_string(old_char)
+	var new_s = gml_string(new_str)
+	return s.replace(old, new_s)
+
+
+static func gml_string_replace_all(value, old_char, new_str):
+	var s = gml_string(value)
+	var old = gml_string(old_char)
+	var new_s = gml_string(new_str)
+	return s.replace(old, new_s)
+
+
+static func gml_string_delete(value, index, count):
+	var s = gml_string(value)
+	var pos = _gml_one_based_index(index)
+	var length = int(_to_real(count))
+	if pos < 0:
+		pos = 0
+	if pos >= s.length() or length <= 0:
+		return s
+	return s.left(pos) + s.substr(pos + length)
+
+
+static func gml_string_insert(subvalue, value, index):
+	var s = gml_string(value)
+	var sub = gml_string(subvalue)
+	var pos = _gml_one_based_index(index)
+	if pos < 0:
+		pos = 0
+	if pos >= s.length():
+		return s + sub
+	return s.left(pos) + sub + s.substr(pos)
+
+
+static func gml_string_lower(value):
+	var s = gml_string(value)
+	return s.to_lower()
+
+
+static func gml_string_upper(value):
+	var s = gml_string(value)
+	return s.to_upper()
+
+
+static func gml_string_trim(value):
+	var s = gml_string(value)
+	return s.strip_edges()
+
+
+static func gml_string_repeat(value, count):
+	var s = gml_string(value)
+	var n = int(_to_real(count))
+	if n <= 0:
+		return ""
+	var result = ""
+	for i in range(n):
+		result += s
+	return result
+
+
+static func gml_string_digits(value):
+	var s = gml_string(value)
+	var result = ""
+	for i in range(s.length()):
+		var c = s[i]
+		if c >= "0" and c <= "9":
+			result += c
+	return result
+
+
+static func gml_string_letters(value):
+	var s = gml_string(value)
+	var result = ""
+	for i in range(s.length()):
+		var c = s[i]
+		if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z"):
+			result += c
+	return result
+
+
+static func gml_string_lettersdigits(value):
+	var s = gml_string(value)
+	var result = ""
+	for i in range(s.length()):
+		var c = s[i]
+		if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9"):
+			result += c
+	return result
+
+
+static func gml_string_split(value, delimiter):
+	var s = gml_string(value)
+	var delim = gml_string(delimiter)
+	var result = []
+	var start = 0
+	while true:
+		var found = s.find(delim, start)
+		if found == -1:
+			result.append(s.substr(start))
+			break
+		result.append(s.substr(start, found - start))
+		start = found + delim.length()
+	return result
+
+
+static func gml_string_join(array_value, delimiter):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML string_join array", array_value)
+	var delim = gml_string(delimiter)
+	var parts = []
+	for i in range(array_value.size()):
+		parts.append(gml_string(array_value[i]))
+	return delim.join(parts)
+
+
+static func gml_chr(code):
+	var n = int(_to_real(code))
+	if n < 0 or n > 0x10FFFF:
+		return ""
+	return char(n)
+
+
+static func gml_ord(value):
+	var s = gml_string(value)
+	if s.is_empty():
+		return 0
+	return s.unicode_at(0)
+
+
+static func gml_ansi_char(code):
+	var n = int(_to_real(code))
+	if n < 0 or n > 255:
+		return ""
+	return char(n)
+

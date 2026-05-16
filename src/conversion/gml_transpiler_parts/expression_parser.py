@@ -17,6 +17,7 @@ from .model import (
     _ArrayLiteral,
     _Binary,
     _Call,
+    _DSListAccess,
     _DSMapAccess,
     _Expression,
     _FunctionLiteral,
@@ -129,6 +130,11 @@ class _ExpressionParser:
                     key = self._parse_expression()
                     self._consume("]")
                     expr = _DSMapAccess(expr, key)
+                    continue
+                if self._match("|"):
+                    index = self._parse_expression()
+                    self._consume("]")
+                    expr = _DSListAccess(expr, index)
                     continue
                 index = self._parse_expression()
                 self._consume("]")

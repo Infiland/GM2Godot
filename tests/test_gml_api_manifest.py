@@ -132,12 +132,12 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("ds_list_create")
+        diagnostic = diagnostic_for_unimplemented_gml_api("ds_map_create")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("ds_list_create", diagnostic)
-        self.assertIn("#498", diagnostic)
+        self.assertIn("ds_map_create", diagnostic)
+        self.assertIn("#499", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -199,8 +199,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "ds_list_create.*#498"):
-            transpile_gml_expression("ds_list_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "ds_map_create.*#499"):
+            transpile_gml_expression("ds_map_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

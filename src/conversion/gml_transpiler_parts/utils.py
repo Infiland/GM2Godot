@@ -11,6 +11,7 @@ from .model import (
     _Call,
     _DEFAULT_SCOPE_CONTEXT,
     _DSMapAccess,
+    _DSListAccess,
     _Expression,
     _FunctionLiteral,
     _Grouped,
@@ -126,6 +127,11 @@ def _expression_needs_assignment_cache(expr: _Expression) -> bool:
         return (
             _expression_needs_assignment_cache(expr.target)
             or _expression_needs_assignment_cache(expr.key)
+        )
+    if isinstance(expr, _DSListAccess):
+        return (
+            _expression_needs_assignment_cache(expr.target)
+            or _expression_needs_assignment_cache(expr.index)
         )
     if isinstance(expr, _Member):
         return _expression_needs_assignment_cache(expr.target)

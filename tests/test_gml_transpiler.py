@@ -3047,6 +3047,54 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "d = GMRuntime.gml_random_get_seed()",
         )
 
+    def test_file_ini_json_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "if file_exists('save.txt') { file_delete('save.txt'); }"
+                "f = file_text_open_write('save.txt');"
+                "file_text_write_string(f, 'ok');"
+                "file_text_close(f);"
+                "ini_open('settings.ini');"
+                "ini_write_real('audio', 'volume', 0.5);"
+                "volume = ini_read_real('audio', 'volume', 1);"
+                "ini_close();"
+                "payload = json_encode({volume: volume});"
+                "decoded = json_decode(payload);",
+                indent="",
+            ),
+            "if GMRuntime.gml_file_exists('save.txt'):\n"
+            "\tGMRuntime.gml_file_delete('save.txt')\n"
+            "f = GMRuntime.gml_file_text_open_write('save.txt')\n"
+            "GMRuntime.gml_file_text_write_string(f, 'ok')\n"
+            "GMRuntime.gml_file_text_close(f)\n"
+            "GMRuntime.gml_ini_open('settings.ini')\n"
+            "GMRuntime.gml_ini_write_real('audio', 'volume', 0.5)\n"
+            "volume = GMRuntime.gml_ini_read_real('audio', 'volume', 1)\n"
+            "GMRuntime.gml_ini_close()\n"
+            'payload = GMRuntime.gml_json_encode(GMRuntime.gml_struct({"volume": volume}))\n'
+            "decoded = GMRuntime.gml_json_decode(payload)",
+        )
+
+    def test_file_path_builtins_lower_to_runtime_globals(self):
+        self.assertEqual(
+            transpile_gml_expression("working_directory"),
+            'GMRuntime.gml_builtin_global("working_directory")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("program_directory"),
+            'GMRuntime.gml_builtin_global("program_directory")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("temp_directory"),
+            'GMRuntime.gml_builtin_global("temp_directory")',
+        )
+
+    def test_file_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "file_text_write_string.*expects 2.*got 1"):
+            transpile_gml_code("file_text_write_string(f);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "ini_read_string.*expects 3.*got 2"):
+            transpile_gml_code("ini_read_string('section', 'key');", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

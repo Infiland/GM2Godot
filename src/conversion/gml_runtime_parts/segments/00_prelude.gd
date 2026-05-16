@@ -188,6 +188,12 @@ static func gml_builtin_global(name):
 		return _gml_input_mouse_wheel_up
 	if key == "mouse_wheel_down":
 		return _gml_input_mouse_wheel_down
+	if key == "program_directory":
+		return gml_program_directory()
+	if key == "temp_directory":
+		return gml_temp_directory()
+	if key == "working_directory":
+		return gml_working_directory()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()

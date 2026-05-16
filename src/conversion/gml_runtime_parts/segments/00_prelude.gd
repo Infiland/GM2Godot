@@ -28,6 +28,7 @@ const GML_DS_LIST_HANDLE_KIND = "ds_list"
 const GML_DS_STACK_HANDLE_KIND = "ds_stack"
 const GML_DS_QUEUE_HANDLE_KIND = "ds_queue"
 const GML_DS_PRIORITY_HANDLE_KIND = "ds_priority"
+const GML_DS_GRID_HANDLE_KIND = "ds_grid"
 const GML_REFERENCE_HANDLE_KIND = "dbgref"
 const GML_VARIABLE_HASH_ALGORITHM = "fnv1a32"
 const GML_BUILTIN_ARRAY_SIZE = 8

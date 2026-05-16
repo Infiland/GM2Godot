@@ -38,6 +38,7 @@ from .model import (
     _ArrayLiteral,
     _Binary,
     _Call,
+    _DSGridAccess,
     _DSMapAccess,
     _DSListAccess,
     _Expression,
@@ -328,6 +329,11 @@ def _emit_expression(
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_ds_list_find_value({target}, {index})", _POSTFIX_PRECEDENCE
+    if isinstance(expr, _DSGridAccess):
+        target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
+        x_index = _emit_expression(expr.x_index, local_names, scope_context=scope_context)[0]
+        y_index = _emit_expression(expr.y_index, local_names, scope_context=scope_context)[0]
+        return f"GMRuntime.gml_ds_grid_get({target}, {x_index}, {y_index})", _POSTFIX_PRECEDENCE
     if _uses_direct_member_access(expr, scope_context=scope_context):
         target = _emit_child(
             expr.target,

@@ -132,12 +132,12 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("ds_grid_create")
+        diagnostic = diagnostic_for_unimplemented_gml_api("array_create")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("ds_grid_create", diagnostic)
-        self.assertIn("#500", diagnostic)
+        self.assertIn("array_create", diagnostic)
+        self.assertIn("#502", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -191,6 +191,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             "ds_map_add",
             "ds_map_add_list",
             "ds_map_add_map",
+            "ds_grid_create",
+            "ds_grid_destroy",
+            "ds_grid_set",
+            "ds_grid_get",
+            "ds_grid_width",
+            "ds_grid_height",
         ):
             with self.subTest(name=name):
                 self.assertIn(name, descriptor_names)
@@ -209,8 +215,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "ds_grid_create.*#500"):
-            transpile_gml_expression("ds_grid_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "array_create.*#502"):
+            transpile_gml_expression("array_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

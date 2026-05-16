@@ -8,6 +8,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "10_handles_and_instances.gd",
     "20_methods_and_exceptions.gd",
     "30_numeric_arithmetic.gd",
+    "35_maths_numbers.gd",
     "40_arrays_structs_variables.gd",
     "45_collision_queries.gd",
     "46_motion_helpers.gd",

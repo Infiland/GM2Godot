@@ -2468,6 +2468,120 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "items = [1, 2]\nitems = GMRuntime.gml_undefined()",
         )
 
+    def test_transpiles_array_create(self):
+        self.assertEqual(
+            transpile_gml_code("arr = array_create(5);", indent=""),
+            "arr = GMRuntime.gml_array_create(5)",
+        )
+        self.assertEqual(
+            transpile_gml_code("arr = array_create(5, 0);", indent=""),
+            "arr = GMRuntime.gml_array_create(5, 0)",
+        )
+
+    def test_transpiles_array_length_1d(self):
+        self.assertEqual(
+            transpile_gml_code("n = array_length_1d(arr);", indent=""),
+            "n = GMRuntime.gml_array_length_1d(arr)",
+        )
+
+    def test_transpiles_array_resize(self):
+        self.assertEqual(
+            transpile_gml_code("array_resize(arr, 10);", indent=""),
+            "GMRuntime.gml_array_resize(arr, 10)",
+        )
+
+    def test_transpiles_array_pop(self):
+        self.assertEqual(
+            transpile_gml_code("val = array_pop(arr);", indent=""),
+            "val = GMRuntime.gml_array_pop(arr)",
+        )
+
+    def test_transpiles_array_push_back(self):
+        self.assertEqual(
+            transpile_gml_code("array_push_back(arr, 42);", indent=""),
+            "GMRuntime.gml_array_push_back(arr, 42)",
+        )
+
+    def test_transpiles_array_insert(self):
+        self.assertEqual(
+            transpile_gml_code("array_insert(arr, 0, 42);", indent=""),
+            "GMRuntime.gml_array_insert(arr, 0, 42)",
+        )
+
+    def test_transpiles_array_delete(self):
+        self.assertEqual(
+            transpile_gml_code("array_delete(arr, 0);", indent=""),
+            "GMRuntime.gml_array_delete(arr, 0)",
+        )
+
+    def test_transpiles_array_sort(self):
+        self.assertEqual(
+            transpile_gml_code("array_sort(arr);", indent=""),
+            "GMRuntime.gml_array_sort(arr)",
+        )
+
+    def test_transpiles_array_shuffle(self):
+        self.assertEqual(
+            transpile_gml_code("array_shuffle(arr);", indent=""),
+            "GMRuntime.gml_array_shuffle(arr)",
+        )
+
+    def test_transpiles_array_copy(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "array_copy(dest, 0, src, 0, 5);", indent=""
+            ),
+            "GMRuntime.gml_array_copy(dest, 0, src, 0, 5)",
+        )
+
+    def test_transpiles_array_concat(self):
+        self.assertEqual(
+            transpile_gml_code("result = array_concat(a, b);", indent=""),
+            "result = GMRuntime.gml_array_concat(a, b)",
+        )
+
+    def test_transpiles_array_contains(self):
+        self.assertEqual(
+            transpile_gml_code("found = array_contains(arr, 42);", indent=""),
+            "found = GMRuntime.gml_array_contains(arr, 42)",
+        )
+
+    def test_transpiles_array_find_index(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, 42);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, 42)",
+        )
+
+    def test_transpiles_array_map(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "result = array_map(arr, double);", indent=""
+            ),
+            "result = GMRuntime.gml_array_map(arr, double)",
+        )
+
+    def test_transpiles_array_filter(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "result = array_filter(arr, is_odd);", indent=""
+            ),
+            "result = GMRuntime.gml_array_filter(arr, is_odd)",
+        )
+
+    def test_transpiles_array_reduce(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "result = array_reduce(arr, add, 0);", indent=""
+            ),
+            "result = GMRuntime.gml_array_reduce(arr, add, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "result = array_reduce(arr, add);", indent=""
+            ),
+            "result = GMRuntime.gml_array_reduce(arr, add)",
+        )
+
     def test_transpiles_newline_separated_statements(self):
         self.assertEqual(
             transpile_gml_code("superSpeed = 0\nfaster = false;", indent=""),

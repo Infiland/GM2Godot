@@ -42,6 +42,174 @@ static func gml_array_equals(left, right):
 	return true
 
 
+static func gml_array_create(size, value = null):
+	var resolved_size = int(_to_real(size))
+	if resolved_size < 0:
+		return gml_error("GML array_create requires a non-negative size, got " + str(resolved_size))
+	var arr = []
+	if resolved_size > 0:
+		arr.resize(resolved_size)
+		if value != null:
+			for i in range(resolved_size):
+				arr[i] = value
+	return arr
+
+
+static func gml_array_length_1d(array_value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_length_1d", array_value)
+	return array_value.size()
+
+
+static func gml_array_resize(array_value, size):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_resize", array_value)
+	var resolved_size = int(_to_real(size))
+	if resolved_size < 0:
+		return gml_error("GML array_resize requires a non-negative size")
+	array_value.resize(resolved_size)
+	return resolved_size
+
+
+static func gml_array_push_back(array_value, value):
+	return gml_array_push(array_value, value)
+
+
+static func gml_array_pop(array_value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_pop", array_value)
+	if array_value.is_empty():
+		return gml_undefined()
+	return array_value.pop_back()
+
+
+static func gml_array_insert(array_value, index, value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_insert", array_value)
+	var resolved_index = int(_to_real(index))
+	if resolved_index < 0:
+		resolved_index = max(0, array_value.size() + resolved_index)
+	array_value.insert(resolved_index, value)
+	return value
+
+
+static func gml_array_delete(array_value, index):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_delete", array_value)
+	var resolved_index = _to_array_index(index)
+	if resolved_index < 0:
+		return gml_undefined()
+	if resolved_index >= array_value.size():
+		return gml_undefined()
+	array_value.remove_at(resolved_index)
+	return array_value
+
+
+static func gml_array_sort(array_value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_sort", array_value)
+	array_value.sort()
+	return array_value
+
+
+static func gml_array_shuffle(array_value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_shuffle", array_value)
+	array_value.shuffle()
+	return array_value
+
+
+static func gml_array_copy(dest, dest_index, src, src_index, length):
+	if typeof(dest) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_copy dest", dest)
+	if typeof(src) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_copy src", src)
+	var resolved_dest_index = int(_to_real(dest_index))
+	var resolved_src_index = int(_to_real(src_index))
+	var resolved_length = int(_to_real(length))
+	if resolved_dest_index < 0:
+		resolved_dest_index = max(0, dest.size() + resolved_dest_index)
+	if resolved_src_index < 0:
+		resolved_src_index = max(0, src.size() + resolved_src_index)
+	for i in range(resolved_length):
+		var src_idx = resolved_src_index + i
+		var dest_idx = resolved_dest_index + i
+		if src_idx >= src.size():
+			break
+		if dest_idx >= dest.size():
+			dest.resize(dest_idx + 1)
+		dest[dest_idx] = src[src_idx]
+	return dest
+
+
+static func gml_array_concat(array1, array2):
+	if typeof(array1) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_concat array1", array1)
+	if typeof(array2) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_concat array2", array2)
+	var result = []
+	for i in range(array1.size()):
+		result.append(array1[i])
+	for i in range(array2.size()):
+		result.append(array2[i])
+	return result
+
+
+static func gml_array_contains(array_value, value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return false
+	return array_value.has(value)
+
+
+static func gml_array_find_index(array_value, value):
+	if typeof(array_value) != TYPE_ARRAY:
+		return -1
+	return array_value.find(value)
+
+
+static func gml_array_filter(array_value, callback):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_filter", array_value)
+	if not is_method(callback):
+		return gml_unsupported_type_error("GML array_filter callback", callback)
+	var result = []
+	for i in range(array_value.size()):
+		var element = array_value[i]
+		if gml_method_call(callback, [element, i, array_value]):
+			result.append(element)
+	return result
+
+
+static func gml_array_map(array_value, callback):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_map", array_value)
+	if not is_method(callback):
+		return gml_unsupported_type_error("GML array_map callback", callback)
+	var result = []
+	for i in range(array_value.size()):
+		var element = array_value[i]
+		result.append(gml_method_call(callback, [element, i, array_value]))
+	return result
+
+
+static func gml_array_reduce(array_value, callback, initial_value = null):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_reduce", array_value)
+	if not is_method(callback):
+		return gml_unsupported_type_error("GML array_reduce callback", callback)
+	var has_initial = initial_value != null
+	if array_value.is_empty():
+		if has_initial:
+			return initial_value
+		return gml_error("GML array_reduce requires initial_value for empty array")
+	var accumulator = initial_value if has_initial else array_value[0]
+	var start_index = 0 if has_initial else 1
+	for i in range(start_index, array_value.size()):
+		var element = array_value[i]
+		accumulator = gml_method_call(callback, [accumulator, element, i, array_value])
+	return accumulator
+
+
 static func gml_struct(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML struct literal", fields)

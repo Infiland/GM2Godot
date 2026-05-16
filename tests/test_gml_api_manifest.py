@@ -132,12 +132,12 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("array_create")
+        diagnostic = diagnostic_for_unimplemented_gml_api("collision_point_list")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("array_create", diagnostic)
-        self.assertIn("#502", diagnostic)
+        self.assertIn("collision_point_list", diagnostic)
+        self.assertIn("#487", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -215,8 +215,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "array_create.*#502"):
-            transpile_gml_expression("array_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "collision_point_list.*planned"):
+            transpile_gml_expression("collision_point_list()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

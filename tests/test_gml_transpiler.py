@@ -615,6 +615,132 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression('typeof("abc")'), 'GMRuntime.gml_typeof("abc")')
         self.assertEqual(transpile_gml_expression('is_string("abc")'), 'GMRuntime.is_string("abc")')
 
+    def test_transpiles_string_length(self):
+        self.assertEqual(
+            transpile_gml_expression("string_length(s)"),
+            "GMRuntime.gml_string_length(s)",
+        )
+
+    def test_transpiles_string_char_at(self):
+        self.assertEqual(
+            transpile_gml_expression('string_char_at(s, 1)'),
+            'GMRuntime.gml_string_char_at(s, 1)',
+        )
+
+    def test_transpiles_string_ord_at(self):
+        self.assertEqual(
+            transpile_gml_expression('string_ord_at(s, 1)'),
+            'GMRuntime.gml_string_ord_at(s, 1)',
+        )
+
+    def test_transpiles_string_copy(self):
+        self.assertEqual(
+            transpile_gml_expression('string_copy(s, 1, 3)'),
+            'GMRuntime.gml_string_copy(s, 1, 3)',
+        )
+
+    def test_transpiles_string_pos(self):
+        self.assertEqual(
+            transpile_gml_expression('string_pos("x", s)'),
+            'GMRuntime.gml_string_pos("x", s)',
+        )
+
+    def test_transpiles_string_replace(self):
+        self.assertEqual(
+            transpile_gml_expression('string_replace(s, "a", "b")'),
+            'GMRuntime.gml_string_replace(s, "a", "b")',
+        )
+
+    def test_transpiles_string_replace_all(self):
+        self.assertEqual(
+            transpile_gml_expression('string_replace_all(s, "a", "b")'),
+            'GMRuntime.gml_string_replace_all(s, "a", "b")',
+        )
+
+    def test_transpiles_string_delete(self):
+        self.assertEqual(
+            transpile_gml_expression('string_delete(s, 1, 3)'),
+            'GMRuntime.gml_string_delete(s, 1, 3)',
+        )
+
+    def test_transpiles_string_insert(self):
+        self.assertEqual(
+            transpile_gml_expression('string_insert("x", s, 1)'),
+            'GMRuntime.gml_string_insert("x", s, 1)',
+        )
+
+    def test_transpiles_string_lower(self):
+        self.assertEqual(
+            transpile_gml_expression('string_lower(s)'),
+            'GMRuntime.gml_string_lower(s)',
+        )
+
+    def test_transpiles_string_upper(self):
+        self.assertEqual(
+            transpile_gml_expression('string_upper(s)'),
+            'GMRuntime.gml_string_upper(s)',
+        )
+
+    def test_transpiles_string_trim(self):
+        self.assertEqual(
+            transpile_gml_expression('string_trim(s)'),
+            'GMRuntime.gml_string_trim(s)',
+        )
+
+    def test_transpiles_string_repeat(self):
+        self.assertEqual(
+            transpile_gml_expression('string_repeat(s, 3)'),
+            'GMRuntime.gml_string_repeat(s, 3)',
+        )
+
+    def test_transpiles_string_digits(self):
+        self.assertEqual(
+            transpile_gml_expression('string_digits(s)'),
+            'GMRuntime.gml_string_digits(s)',
+        )
+
+    def test_transpiles_string_letters(self):
+        self.assertEqual(
+            transpile_gml_expression('string_letters(s)'),
+            'GMRuntime.gml_string_letters(s)',
+        )
+
+    def test_transpiles_string_lettersdigits(self):
+        self.assertEqual(
+            transpile_gml_expression('string_lettersdigits(s)'),
+            'GMRuntime.gml_string_lettersdigits(s)',
+        )
+
+    def test_transpiles_string_split(self):
+        self.assertEqual(
+            transpile_gml_expression('string_split(s, ",")'),
+            'GMRuntime.gml_string_split(s, ",")',
+        )
+
+    def test_transpiles_string_join(self):
+        self.assertEqual(
+            transpile_gml_expression('string_join(arr, ",")'),
+            'GMRuntime.gml_string_join(arr, ",")',
+        )
+
+    def test_transpiles_chr(self):
+        self.assertEqual(
+            transpile_gml_expression('chr(65)'),
+            'GMRuntime.gml_chr(65)',
+        )
+
+    def test_transpiles_ord(self):
+        self.assertEqual(
+            transpile_gml_expression('ord("A")'),
+            'GMRuntime.gml_ord("A")',
+        )
+
+    def test_transpiles_ansi_char(self):
+        self.assertEqual(
+            transpile_gml_expression('ansi_char(65)'),
+            'GMRuntime.gml_ansi_char(65)',
+        )
+
     def test_transpiles_typeof_return_string_categories(self):
         cases = (
             ("typeof(undefined)", "GMRuntime.gml_typeof(GMRuntime.gml_undefined())"),
@@ -1907,13 +2033,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ),
             'var _gml_switch_value_0 = GMRuntime.gml_builtin_global("keyboard_key")\n'
             "var _gml_switch_matched_1 = false\n"
-            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT) or GMRuntime.gml_eq(_gml_switch_value_0, ord("A"))\n'
+            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT) or GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A"))\n'
             "while true:\n"
             "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT):\n"
             "\t\t_gml_switch_matched_1 = true\n"
             "\tif _gml_switch_matched_1:\n"
             "\t\tpass\n"
-            '\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, ord("A")):\n'
+            '\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A")):\n'
             "\t\t_gml_switch_matched_1 = true\n"
             "\tif _gml_switch_matched_1:\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 4)\n"

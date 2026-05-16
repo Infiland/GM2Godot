@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 from .constants import (
-    _AUDIO_RUNTIME_FUNCTIONS,
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
+    _AUDIO_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
     _DRAW_RUNTIME_FUNCTIONS,
     _DS_COLLECTIONS_FUNCTIONS,
@@ -20,6 +20,7 @@ from .constants import (
     _PATH_RUNTIME_FUNCTIONS,
     _ROOM_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
+    _STRING_RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
     _TIME_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
@@ -186,6 +187,30 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_filter": (2, 2),
     "array_map": (2, 2),
     "array_reduce": (2, 3),
+}
+
+_STRING_ARITY: dict[str, tuple[int, int | None]] = {
+    "string_length": (1, 1),
+    "string_char_at": (2, 2),
+    "string_ord_at": (2, 2),
+    "string_copy": (3, 3),
+    "string_pos": (2, 2),
+    "string_replace": (3, 3),
+    "string_replace_all": (3, 3),
+    "string_delete": (3, 3),
+    "string_insert": (3, 3),
+    "string_lower": (1, 1),
+    "string_upper": (1, 1),
+    "string_trim": (1, 1),
+    "string_repeat": (2, 2),
+    "string_digits": (1, 1),
+    "string_letters": (1, 1),
+    "string_lettersdigits": (1, 1),
+    "string_split": (2, 2),
+    "string_join": (2, 2),
+    "chr": (1, 1),
+    "ord": (1, 1),
+    "ansi_char": (1, 1),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -526,6 +551,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _ARRAY_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ARRAY_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _STRING_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _STRING_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

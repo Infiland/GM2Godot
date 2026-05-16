@@ -622,6 +622,30 @@ _DS_GRID_FUNCTIONS = {
     "ds_grid_write": "gml_ds_grid_write",
 }
 
+_STRING_RUNTIME_FUNCTIONS = {
+    "string_length": "gml_string_length",
+    "string_char_at": "gml_string_char_at",
+    "string_ord_at": "gml_string_ord_at",
+    "string_copy": "gml_string_copy",
+    "string_pos": "gml_string_pos",
+    "string_replace": "gml_string_replace",
+    "string_replace_all": "gml_string_replace_all",
+    "string_delete": "gml_string_delete",
+    "string_insert": "gml_string_insert",
+    "string_lower": "gml_string_lower",
+    "string_upper": "gml_string_upper",
+    "string_trim": "gml_string_trim",
+    "string_repeat": "gml_string_repeat",
+    "string_digits": "gml_string_digits",
+    "string_letters": "gml_string_letters",
+    "string_lettersdigits": "gml_string_lettersdigits",
+    "string_split": "gml_string_split",
+    "string_join": "gml_string_join",
+    "chr": "gml_chr",
+    "ord": "gml_ord",
+    "ansi_char": "gml_ansi_char",
+}
+
 _ARRAY_RUNTIME_FUNCTIONS = {
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",

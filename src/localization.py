@@ -10,14 +10,13 @@ def get_base_path() -> str:
         return cast(str, getattr(sys, '_MEIPASS'))
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def _load_language_value(path: str, key: str) -> str | None:
+def _load_language_value(path: str, key: str) -> object | None:
     with open(path, 'r', encoding='utf-8') as file:
         data = cast(dict[str, Any], json.load(file))
-    value = data.get(key)
-    return value if isinstance(value, str) else None
+    return data.get(key)
 
 
-def get_localized(key: str) -> str:
+def _get_localized_raw(key: str) -> object | None:
     base_path = get_base_path()
     lang_file = os.path.join(base_path, 'Current Language')
     with open(lang_file, 'r', encoding='utf-8') as file:
@@ -31,10 +30,32 @@ def get_localized(key: str) -> str:
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         pass
 
-    # If an exception is thrown, the script will attempt to load the key from eng.json
     try:
-        value = _load_language_value(os.path.join(base_path, 'Languages', 'eng.json'), key)
-        return value or ""
+        return _load_language_value(os.path.join(base_path, 'Languages', 'eng.json'), key)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return ""
-    # Finally, if eng.json fails, the script will return a blank string
+        return None
+
+
+def get_localized(key: str) -> str:
+    value = _get_localized_raw(key)
+    return value if isinstance(value, str) else ""
+
+
+def get_localized_list(key: str) -> list[str]:
+    value = _get_localized_raw(key)
+    if isinstance(value, list):
+        value_list = cast(list[object], value)
+        return [item for item in value_list if isinstance(item, str)]
+    return []
+
+
+def get_localized_dict(key: str) -> dict[str, str]:
+    value = _get_localized_raw(key)
+    if isinstance(value, dict):
+        value_dict = cast(dict[object, object], value)
+        return {
+            str(item_key): str(item_value)
+            for item_key, item_value in value_dict.items()
+            if isinstance(item_key, str) and isinstance(item_value, str)
+        }
+    return {}

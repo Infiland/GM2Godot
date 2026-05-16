@@ -507,6 +507,7 @@ def _emit_descriptor_call(
         "runtime_path_asset_api",
         "runtime_room_api",
         "runtime_self_default",
+        "runtime_time_api",
     }:
         emitted_args = _emit_instance_api_args(
             descriptor,
@@ -537,6 +538,8 @@ def _emit_descriptor_call(
                 local_names,
                 scope_context=scope_context,
             )
+        if descriptor.lowering_kind == "runtime_time_api":
+            emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_motion_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_path_api":

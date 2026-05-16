@@ -117,17 +117,27 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert room_goto is not None
         self.assertEqual(room_goto.status, "implemented")
         self.assertEqual(room_goto.issue_number, 496)
+        alarm_set = get_gml_api_entry("alarm_set")
+        self.assertIsNotNone(alarm_set)
+        assert alarm_set is not None
+        self.assertEqual(alarm_set.status, "implemented")
+        self.assertEqual(alarm_set.issue_number, 497)
+        time_source_create = get_gml_api_entry("time_source_create")
+        self.assertIsNotNone(time_source_create)
+        assert time_source_create is not None
+        self.assertEqual(time_source_create.status, "implemented")
+        self.assertEqual(time_source_create.issue_number, 497)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("alarm_set")
+        diagnostic = diagnostic_for_unimplemented_gml_api("ds_list_create")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("alarm_set", diagnostic)
-        self.assertIn("#497", diagnostic)
+        self.assertIn("ds_list_create", diagnostic)
+        self.assertIn("#498", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -161,6 +171,11 @@ class TestGMLAPIManifest(unittest.TestCase):
             "draw_set_color",
             "audio_play_sound",
             "room_goto",
+            "alarm_set",
+            "alarm_get",
+            "time_source_create",
+            "call_later",
+            "call_cancel",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -184,8 +199,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "alarm_set.*#497"):
-            transpile_gml_expression("alarm_set(0, 30)")
+        with self.assertRaisesRegex(GMLTranspileError, "ds_list_create.*#498"):
+            transpile_gml_expression("ds_list_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

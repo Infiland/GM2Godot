@@ -19,6 +19,7 @@ from .constants import (
     _ROOM_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRUCT_RUNTIME_FUNCTIONS,
+    _TIME_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
 )
 from .gml_api_manifest import get_gml_api_entry
@@ -39,6 +40,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_path_asset_api",
     "runtime_room_api",
     "runtime_self_default",
+    "runtime_time_api",
     "with_targets",
 ]
 
@@ -220,6 +222,24 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
     "sound_volume": (2, 2),
     "sound_pitch": (2, 2),
     "sound_global_volume": (1, 1),
+}
+
+_TIME_ARITY: dict[str, tuple[int, int | None]] = {
+    "alarm_get": (1, 1),
+    "alarm_set": (2, 2),
+    "time_source_create": (4, 7),
+    "time_source_start": (1, 1),
+    "time_source_stop": (1, 1),
+    "time_source_pause": (1, 1),
+    "time_source_resume": (1, 1),
+    "time_source_destroy": (1, 1),
+    "time_source_get_state": (1, 1),
+    "time_source_get_period": (1, 1),
+    "time_source_get_reps_completed": (1, 1),
+    "time_source_get_reps_remaining": (1, 1),
+    "time_source_get_time_remaining": (1, 1),
+    "call_later": (3, 4),
+    "call_cancel": (1, 1),
 }
 
 _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
@@ -422,6 +442,13 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _ROOM_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ROOM_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_room_api", target)
+
+    for name, target in _TIME_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _TIME_ARITY[name]
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name in ("alarm_get", "alarm_set"):
+            lowering_kind = "runtime_time_api"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]

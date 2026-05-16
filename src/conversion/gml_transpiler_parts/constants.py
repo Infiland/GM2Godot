@@ -625,6 +625,22 @@ _DS_GRID_FUNCTIONS = {
 _ARRAY_RUNTIME_FUNCTIONS = {
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",
+    "array_push_back": "gml_array_push_back",
+    "array_create": "gml_array_create",
+    "array_length_1d": "gml_array_length_1d",
+    "array_resize": "gml_array_resize",
+    "array_pop": "gml_array_pop",
+    "array_insert": "gml_array_insert",
+    "array_delete": "gml_array_delete",
+    "array_sort": "gml_array_sort",
+    "array_shuffle": "gml_array_shuffle",
+    "array_copy": "gml_array_copy",
+    "array_concat": "gml_array_concat",
+    "array_contains": "gml_array_contains",
+    "array_find_index": "gml_array_find_index",
+    "array_filter": "gml_array_filter",
+    "array_map": "gml_array_map",
+    "array_reduce": "gml_array_reduce",
 }
 
 _ASSET_RUNTIME_FUNCTIONS = {

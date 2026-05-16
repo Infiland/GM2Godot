@@ -170,6 +170,22 @@ _DS_GRID_ARITY: dict[str, tuple[int, int | None]] = {
 _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_equals": (2, 2),
     "array_push": (2, None),
+    "array_push_back": (2, 2),
+    "array_create": (1, 2),
+    "array_length_1d": (1, 1),
+    "array_resize": (2, 2),
+    "array_pop": (1, 1),
+    "array_insert": (3, 3),
+    "array_delete": (2, 2),
+    "array_sort": (1, 1),
+    "array_shuffle": (1, 1),
+    "array_copy": (5, 5),
+    "array_concat": (2, 2),
+    "array_contains": (2, 2),
+    "array_find_index": (2, 2),
+    "array_filter": (2, 2),
+    "array_map": (2, 2),
+    "array_reduce": (2, 3),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {

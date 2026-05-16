@@ -232,6 +232,21 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("room_exists(r_next)", 'GMRuntime.gml_room_exists(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("room_get_name(r_next)", 'GMRuntime.gml_room_get_name(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("room_get_info(r_next)", 'GMRuntime.gml_room_get_info(GMRuntime.gml_asset_get_index("r_next"))'),
+    RuntimeValueParityCase("alarm_get(0)", "GMRuntime.gml_alarm_get(self, 0)"),
+    RuntimeValueParityCase("alarm_set(0, 30)", "GMRuntime.gml_alarm_set(self, 0, 30)"),
+    RuntimeValueParityCase("time_source_create(null, 60, 0, cb)", "GMRuntime.gml_time_source_create(null, 60, 0, cb)"),
+    RuntimeValueParityCase("time_source_start(ts)", "GMRuntime.gml_time_source_start(ts)"),
+    RuntimeValueParityCase("time_source_stop(ts)", "GMRuntime.gml_time_source_stop(ts)"),
+    RuntimeValueParityCase("time_source_pause(ts)", "GMRuntime.gml_time_source_pause(ts)"),
+    RuntimeValueParityCase("time_source_resume(ts)", "GMRuntime.gml_time_source_resume(ts)"),
+    RuntimeValueParityCase("time_source_destroy(ts)", "GMRuntime.gml_time_source_destroy(ts)"),
+    RuntimeValueParityCase("time_source_get_state(ts)", "GMRuntime.gml_time_source_get_state(ts)"),
+    RuntimeValueParityCase("time_source_get_period(ts)", "GMRuntime.gml_time_source_get_period(ts)"),
+    RuntimeValueParityCase("time_source_get_reps_completed(ts)", "GMRuntime.gml_time_source_get_reps_completed(ts)"),
+    RuntimeValueParityCase("time_source_get_reps_remaining(ts)", "GMRuntime.gml_time_source_get_reps_remaining(ts)"),
+    RuntimeValueParityCase("time_source_get_time_remaining(ts)", "GMRuntime.gml_time_source_get_time_remaining(ts)"),
+    RuntimeValueParityCase("call_later(60, 0, cb)", "GMRuntime.gml_call_later(60, 0, cb)"),
+    RuntimeValueParityCase("call_cancel(handle)", "GMRuntime.gml_call_cancel(handle)"),
     RuntimeValueParityCase("instance_count", 'GMRuntime.gml_builtin_global("instance_count")'),
     RuntimeValueParityCase("async_load", 'GMRuntime.gml_builtin_global("async_load")'),
     RuntimeValueParityCase("event_data", 'GMRuntime.gml_builtin_global("event_data")'),
@@ -956,6 +971,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_type_name",
             "gml_unsupported_type_error",
             "gml_unsupported_binary_type_error",
+            "gml_alarm_get",
+            "gml_alarm_set",
+            "gml_alarm_tick",
+            "gml_time_source_create",
+            "gml_time_source_start",
+            "gml_time_source_stop",
+            "gml_time_source_pause",
+            "gml_time_source_resume",
+            "gml_time_source_destroy",
+            "gml_time_source_get_state",
+            "gml_time_source_get_period",
+            "gml_time_source_get_reps_completed",
+            "gml_time_source_get_reps_remaining",
+            "gml_time_source_get_time_remaining",
+            "gml_call_later",
+            "gml_call_cancel",
+            "gml_time_source_tick_all",
         )
         for helper_name in helper_names:
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
@@ -1622,6 +1654,29 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("_gml_room_dispatch_lifecycle(scene, \"_on_room_start\")", GML_RUNTIME_SCRIPT)
         self.assertIn("node.reparent(persistent_root, true)", GML_RUNTIME_SCRIPT)
         self.assertIn("entries.sort_custom(_gml_room_entry_order_less)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_time_alarm_scheduler_helpers(self):
+        self.assertIn("const GML_ALARM_COUNT = 12", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_FRAMES = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_SECONDS = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_STATE_INITIAL = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_STATE_ACTIVE = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_STATE_PAUSED = 2", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_STATE_STOPPED = 3", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_alarm_get(inst, index):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_alarm_set(inst, index, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_alarm_tick(inst, delta_frames):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_start(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_stop(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_pause(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_resume(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_destroy(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_call_later(period, units, callback, repeat = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_call_cancel(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn('inst.call(method_name)', GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_name_helpers_enumerate_visible_names_and_invalid_instances(self):
         self.assertIn("static func gml_variable_instance_get_names(instance_value):", GML_RUNTIME_SCRIPT)

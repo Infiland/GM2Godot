@@ -616,6 +616,24 @@ _AUDIO_RUNTIME_FUNCTIONS = {
     "sound_global_volume": "gml_sound_global_volume",
 }
 
+_TIME_RUNTIME_FUNCTIONS = {
+    "alarm_get": "gml_alarm_get",
+    "alarm_set": "gml_alarm_set",
+    "time_source_create": "gml_time_source_create",
+    "time_source_start": "gml_time_source_start",
+    "time_source_stop": "gml_time_source_stop",
+    "time_source_pause": "gml_time_source_pause",
+    "time_source_resume": "gml_time_source_resume",
+    "time_source_destroy": "gml_time_source_destroy",
+    "time_source_get_state": "gml_time_source_get_state",
+    "time_source_get_period": "gml_time_source_get_period",
+    "time_source_get_reps_completed": "gml_time_source_get_reps_completed",
+    "time_source_get_reps_remaining": "gml_time_source_get_reps_remaining",
+    "time_source_get_time_remaining": "gml_time_source_get_time_remaining",
+    "call_later": "gml_call_later",
+    "call_cancel": "gml_call_cancel",
+}
+
 _ROOM_RUNTIME_FUNCTIONS = {
     "room_goto": "gml_room_goto",
     "room_goto_next": "gml_room_goto_next",

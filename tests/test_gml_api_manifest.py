@@ -282,6 +282,31 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert flexpanel_measure is not None
         self.assertEqual(flexpanel_measure.status, "unsupported")
         self.assertEqual(flexpanel_measure.issue_number, 514)
+        os_type = get_gml_api_entry("os_type")
+        self.assertIsNotNone(os_type)
+        assert os_type is not None
+        self.assertEqual(os_type.status, "implemented")
+        self.assertEqual(os_type.issue_number, 515)
+        show_debug_message_ext = get_gml_api_entry("show_debug_message_ext")
+        self.assertIsNotNone(show_debug_message_ext)
+        assert show_debug_message_ext is not None
+        self.assertEqual(show_debug_message_ext.status, "implemented")
+        self.assertEqual(show_debug_message_ext.issue_number, 515)
+        show_question = get_gml_api_entry("show_question")
+        self.assertIsNotNone(show_question)
+        assert show_question is not None
+        self.assertEqual(show_question.status, "unsupported")
+        self.assertEqual(show_question.issue_number, 515)
+        weak_ref_create = get_gml_api_entry("weak_ref_create")
+        self.assertIsNotNone(weak_ref_create)
+        assert weak_ref_create is not None
+        self.assertEqual(weak_ref_create.status, "partial")
+        self.assertEqual(weak_ref_create.issue_number, 515)
+        gml_pragma = get_gml_api_entry("gml_pragma")
+        self.assertIsNotNone(gml_pragma)
+        assert gml_pragma is not None
+        self.assertEqual(gml_pragma.status, "unsupported")
+        self.assertEqual(gml_pragma.issue_number, 515)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -396,6 +421,15 @@ class TestGMLAPIManifest(unittest.TestCase):
             "flexpanel_node_style_set_flex_direction",
             "flexpanel_node_style_get_position",
             "flexpanel_node_set_measure_function",
+            "os_get_info",
+            "os_get_language",
+            "environment_get_variable",
+            "show_debug_message_ext",
+            "code_is_compiled",
+            "gc_collect",
+            "gc_get_stats",
+            "weak_ref_create",
+            "weak_ref_any_alive",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -500,6 +534,30 @@ class TestGMLAPIManifest(unittest.TestCase):
 
         self.assertEqual(set(flex_entries), expected_names)
         self.assertTrue(all(entry.issue_number == 514 for entry in flex_entries.values()))
+
+    def test_os_debug_gc_manifest_classifies_safe_and_unsupported_surfaces(self):
+        entries = {
+            entry.name: entry
+            for entry in iter_gml_api_entries()
+            if entry.category == "OS Compiler Debug GC"
+        }
+
+        for name in (
+            "os_type",
+            "os_get_info",
+            "debug_mode",
+            "fps_real",
+            "show_debug_message_ext",
+            "gc_collect",
+            "weak_ref_alive",
+            "show_question",
+            "gml_pragma",
+            "GM_runtime_version",
+            "clipboard_get_text",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, entries)
+                self.assertEqual(entries[name].issue_number, 515)
 
     def test_function_descriptor_arity_validation_is_deterministic(self):
         descriptor = get_gml_function_descriptor("struct_set")

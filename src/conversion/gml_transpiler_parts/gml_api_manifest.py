@@ -249,6 +249,142 @@ def _flexpanel_entries() -> tuple[GMLAPIEntry, ...]:
     return implemented_entries + partial_entries + unsupported_entries
 
 
+_OS_DEBUG_GC_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.72_os_debug_gc"
+_OS_DEBUG_DOCS_PATH = "GameMaker_Language/GML_Reference/Debugging/Debugging.htm"
+_OS_COMPILER_DOCS_PATH = "GameMaker_Language/GML_Reference/OS_And_Compiler/OS_And_Compiler.htm"
+_GC_DOCS_PATH = "GameMaker_Language/GML_Reference/Garbage_Collection/Garbage_Collection.htm"
+_OS_DEBUG_GC_IMPLEMENTED_APIS = (
+    ("show_debug_message", _OS_DEBUG_DOCS_PATH, "src.conversion.gml_transpiler_parts.emitter", "Lowers to Godot print for baseline debug output."),
+    ("debug_mode", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Godot's debug-build flag through GMRuntime built-in globals."),
+    ("fps", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
+    ("fps_real", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
+    ("os_browser", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns browser_not_a_browser outside web exports and a deterministic web fallback."),
+    ("os_device", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Provides the deprecated device variable with a deterministic unknown fallback."),
+    ("os_type", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Maps Godot OS.get_name values to GameMaker OS compatibility constants."),
+    ("os_version", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Maps Godot OS.get_version into a GameMaker-style numeric version where possible."),
+    ("os_is_paused", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns a deterministic false value because Godot pause/focus state is event-driven."),
+    ("os_is_network_connected", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns a deterministic true value; active OS connection prompts are not attempted."),
+    ("os_get_config", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads an optional project setting for converted configuration names."),
+    ("os_get_language", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Maps TranslationServer locale to a two-letter language code."),
+    ("os_get_region", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Maps TranslationServer locale to a region code when available."),
+    ("os_get_info", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns a struct with Godot-backed OS, version, locale, and processor metadata."),
+    ("parameter_count", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Godot command-line arguments."),
+    ("parameter_string", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Godot command-line arguments by index."),
+    ("environment_get_variable", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Uses OS.get_environment with GameMaker's empty-string fallback behavior."),
+    ("show_debug_message_ext", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Formats placeholder values and prints to the Godot output log."),
+    ("code_is_compiled", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns whether the project is running outside the Godot editor feature set."),
+    ("gc_enable", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Tracks the requested GameMaker GC enabled state for compatibility checks."),
+    ("gc_is_enabled", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns the tracked compatibility GC enabled state."),
+    ("gc_collect", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Records an explicit compatibility collection request without forcing Godot memory reclamation."),
+    ("gc_target_frame_time", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Tracks the requested GameMaker GC target frame time."),
+    ("gc_get_target_frame_time", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns the tracked compatibility GC target frame time."),
+    ("gc_get_stats", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns deterministic Godot compatibility GC stats."),
+)
+_OS_DEBUG_GC_PARTIAL_APIS = (
+    ("debug_get_callstack", _OS_DEBUG_DOCS_PATH, "Uses Godot stack frames where available and appends GameMaker's trailing 0 sentinel."),
+    ("exception_unhandled_handler", _OS_DEBUG_DOCS_PATH, "Stores and returns the requested handler, but Godot fatal exception interception is not equivalent."),
+    ("show_message", _OS_DEBUG_DOCS_PATH, "Prints the message to Godot output instead of opening a blocking native modal dialog."),
+    ("show_error", _OS_DEBUG_DOCS_PATH, "Reports through push_error and warns for abort requests instead of terminating automatically."),
+    ("weak_ref_create", _GC_DOCS_PATH, "Uses Godot WeakRef for Objects and a compatibility wrapper for dictionary-backed GML structs."),
+    ("weak_ref_alive", _GC_DOCS_PATH, "Checks compatibility weak references; dictionary-backed GML structs cannot be weakly referenced by Godot."),
+    ("weak_ref_any_alive", _GC_DOCS_PATH, "Checks compatibility weak references; dictionary-backed GML structs cannot be weakly referenced by Godot."),
+)
+_OS_DEBUG_GC_PLANNED_APIS = (
+    ("GM_build_date", _OS_COMPILER_DOCS_PATH, "Requires generated build metadata from the converted project/export pipeline."),
+    ("GM_build_type", _OS_COMPILER_DOCS_PATH, "Requires generated build metadata from the converted project/export pipeline."),
+    ("GM_version", _OS_COMPILER_DOCS_PATH, "Requires generated GameMaker project version metadata."),
+    ("GM_runtime_version", _OS_COMPILER_DOCS_PATH, "Requires an explicit compatibility policy for reporting GameMaker runtime versions under Godot."),
+    ("GM_project_filename", _OS_COMPILER_DOCS_PATH, "Requires generated source project metadata."),
+    ("GM_is_sandboxed", _OS_COMPILER_DOCS_PATH, "Requires an explicit export-target sandbox policy."),
+    ("gml_release_mode", _OS_COMPILER_DOCS_PATH, "Requires generated compile/export mode metadata."),
+    ("clipboard_has_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
+    ("clipboard_get_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
+    ("clipboard_set_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
+)
+_OS_DEBUG_GC_UNSUPPORTED_APIS = (
+    ("gml_pragma", _OS_COMPILER_DOCS_PATH, "GameMaker compile-time pragmas have no runtime equivalent after conversion."),
+    ("os_powersave_enable", _OS_COMPILER_DOCS_PATH, "Godot does not expose GameMaker's platform power-save toggle in portable GDScript."),
+    ("os_lock_orientation", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
+    ("os_set_orientation_lock", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
+    ("os_check_permission", _OS_COMPILER_DOCS_PATH, "Runtime permission APIs require platform plugins or export-template integration."),
+    ("os_request_permission", _OS_COMPILER_DOCS_PATH, "Runtime permission APIs require platform plugins or export-template integration."),
+    ("scheduler_resolution_get", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
+    ("scheduler_resolution_set", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
+    ("debug_event", _OS_DEBUG_DOCS_PATH, "GameMaker debugger event injection has no Godot runtime equivalent."),
+    ("get_integer", _OS_DEBUG_DOCS_PATH, "Blocking debug input dialogs are unsupported in converted runtime code."),
+    ("get_string", _OS_DEBUG_DOCS_PATH, "Blocking debug input dialogs are unsupported in converted runtime code."),
+    ("show_question", _OS_DEBUG_DOCS_PATH, "Blocking debug question dialogs are unsupported in converted runtime code."),
+    ("show_debug_overlay", _OS_DEBUG_DOCS_PATH, "GameMaker's debug overlay is runner-specific."),
+    ("debug_input_record", _OS_DEBUG_DOCS_PATH, "GameMaker debug input recording is runner-specific."),
+    ("debug_input_save", _OS_DEBUG_DOCS_PATH, "GameMaker debug input recording is runner-specific."),
+    ("debug_input_playback", _OS_DEBUG_DOCS_PATH, "GameMaker debug input playback is runner-specific."),
+)
+
+
+def _os_debug_gc_entries() -> tuple[GMLAPIEntry, ...]:
+    implemented_entries = tuple(
+        _entry(
+            name,
+            "OS Compiler Debug GC",
+            "implemented",
+            owner_module,
+            "n/a",
+            "yes",
+            "yes" if owner_module == _OS_DEBUG_GC_OWNER_MODULE else "n/a",
+            "yes" if name in {"os_type", "os_get_info", "show_debug_message_ext", "gc_collect", "weak_ref_alive"} else "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, owner_module, notes in _OS_DEBUG_GC_IMPLEMENTED_APIS
+    )
+    partial_entries = tuple(
+        _entry(
+            name,
+            "OS Compiler Debug GC",
+            "partial",
+            _OS_DEBUG_GC_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "partial",
+            "yes" if name in {"show_message", "show_error", "weak_ref_create"} else "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, notes in _OS_DEBUG_GC_PARTIAL_APIS
+    )
+    planned_entries = tuple(
+        _entry(
+            name,
+            "OS Compiler Debug GC",
+            "planned",
+            "src.conversion.gml_runtime_parts",
+            "n/a",
+            "no",
+            "no",
+            "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, notes in _OS_DEBUG_GC_PLANNED_APIS
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "OS Compiler Debug GC",
+            "unsupported",
+            "src.conversion.gml_runtime_parts",
+            "n/a",
+            "no",
+            "no",
+            "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, notes in _OS_DEBUG_GC_UNSUPPORTED_APIS
+    )
+    return implemented_entries + partial_entries + planned_entries + unsupported_entries
+
+
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "gml_api_compatibility_report",
@@ -5451,42 +5587,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Import/include-style directives are rejected with source-line diagnostics until multi-file include policy is explicit.",
     ),
     *_flexpanel_entries(),
-    _entry(
-        "show_debug_message",
-        "OS Compiler Debug GC",
-        "implemented",
-        "src.conversion.gml_transpiler_parts.emitter",
-        "n/a",
-        "yes",
-        "n/a",
-        "no",
-        "GameMaker_Language/GML_Reference/Debugging/Debugging.htm",
-        "Lowers to Godot print for baseline debug output.",
-    ),
-    _entry(
-        "os_type",
-        "OS Compiler Debug GC",
-        "planned",
-        "src.conversion.gml_runtime_parts",
-        "n/a",
-        "no",
-        "no",
-        "no",
-        "GameMaker_Language/GML_Reference/OS_And_Compiler/OS_And_Compiler.htm",
-        "Requires explicit GameMaker-to-Godot platform constant mapping.",
-    ),
-    _entry(
-        "gc_collect",
-        "OS Compiler Debug GC",
-        "planned",
-        "src.conversion.gml_runtime_parts",
-        "n/a",
-        "no",
-        "no",
-        "no",
-        "GameMaker_Language/GML_Reference/Garbage_Collection/Garbage_Collection.htm",
-        "Requires Godot reference/GC compatibility policy.",
-    ),
+    *_os_debug_gc_entries(),
     _entry(
         "steam_is_initialized",
         "Platform Services",

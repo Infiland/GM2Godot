@@ -194,6 +194,22 @@ static func gml_builtin_global(name):
 		return gml_temp_directory()
 	if key == "working_directory":
 		return gml_working_directory()
+	if key == "current_time":
+		return Time.get_ticks_msec()
+	if key == "debug_mode":
+		return OS.is_debug_build()
+	if key == "fps":
+		return int(Engine.get_frames_per_second())
+	if key == "fps_real":
+		return Engine.get_frames_per_second()
+	if key == "os_browser":
+		return gml_os_browser()
+	if key == "os_device":
+		return gml_os_device()
+	if key == "os_type":
+		return gml_os_type()
+	if key == "os_version":
+		return gml_os_version()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()

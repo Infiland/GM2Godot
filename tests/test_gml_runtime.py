@@ -2358,6 +2358,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("push_error", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_contains_flex_panel_compatibility_helpers(self):
+        self.assertIn("static func gml_flexpanel_create_node", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_flexpanel_calculate_layout", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_flexpanel_node_style_set_width", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_flexpanel_wrap", GML_RUNTIME_SCRIPT)
+        self.assertIn("GM2Godot Flex Panel compatibility runtime", GML_RUNTIME_SCRIPT)
+
     def test_write_gml_runtime_writes_support_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime_path = write_gml_runtime(tmpdir)

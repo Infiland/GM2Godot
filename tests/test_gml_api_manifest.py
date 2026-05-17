@@ -267,6 +267,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert import_directive is not None
         self.assertEqual(import_directive.status, "unsupported")
         self.assertEqual(import_directive.issue_number, 513)
+        flexpanel_create_node = get_gml_api_entry("flexpanel_create_node")
+        self.assertIsNotNone(flexpanel_create_node)
+        assert flexpanel_create_node is not None
+        self.assertEqual(flexpanel_create_node.status, "implemented")
+        self.assertEqual(flexpanel_create_node.issue_number, 514)
+        flexpanel_calculate_layout = get_gml_api_entry("flexpanel_calculate_layout")
+        self.assertIsNotNone(flexpanel_calculate_layout)
+        assert flexpanel_calculate_layout is not None
+        self.assertEqual(flexpanel_calculate_layout.status, "partial")
+        self.assertEqual(flexpanel_calculate_layout.issue_number, 514)
+        flexpanel_measure = get_gml_api_entry("flexpanel_node_set_measure_function")
+        self.assertIsNotNone(flexpanel_measure)
+        assert flexpanel_measure is not None
+        self.assertEqual(flexpanel_measure.status, "unsupported")
+        self.assertEqual(flexpanel_measure.issue_number, 514)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -375,6 +390,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             "script_get_name",
             "script_get_callable",
             "global_function",
+            "flexpanel_create_node",
+            "flexpanel_calculate_layout",
+            "flexpanel_node_style_set_width",
+            "flexpanel_node_style_set_flex_direction",
+            "flexpanel_node_style_get_position",
+            "flexpanel_node_set_measure_function",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -399,6 +420,86 @@ class TestGMLAPIManifest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertIn(name, descriptor_names)
+
+    def test_flex_panel_manifest_classifies_full_api_surface(self):
+        flex_entries = {
+            entry.name: entry
+            for entry in iter_gml_api_entries()
+            if entry.category == "Flex Panels"
+        }
+
+        expected_names = {
+            "flexpanel_create_node",
+            "flexpanel_delete_node",
+            "flexpanel_node_insert_child",
+            "flexpanel_node_remove_child",
+            "flexpanel_node_remove_all_children",
+            "flexpanel_calculate_layout",
+            "flexpanel_node_set_name",
+            "flexpanel_node_layout_get_position",
+            "flexpanel_node_get_num_children",
+            "flexpanel_node_get_child",
+            "flexpanel_node_get_child_hash",
+            "flexpanel_node_get_parent",
+            "flexpanel_node_get_name",
+            "flexpanel_node_get_data",
+            "flexpanel_node_get_struct",
+            "flexpanel_node_set_measure_function",
+            "flexpanel_node_get_measure_function",
+            "flexpanel_node_style_set_width",
+            "flexpanel_node_style_set_height",
+            "flexpanel_node_style_set_min_width",
+            "flexpanel_node_style_set_max_width",
+            "flexpanel_node_style_set_min_height",
+            "flexpanel_node_style_set_max_height",
+            "flexpanel_node_style_set_aspect_ratio",
+            "flexpanel_node_style_set_position",
+            "flexpanel_node_style_set_position_type",
+            "flexpanel_node_style_set_margin",
+            "flexpanel_node_style_set_padding",
+            "flexpanel_node_style_set_border",
+            "flexpanel_node_style_set_gap",
+            "flexpanel_node_style_set_direction",
+            "flexpanel_node_style_set_flex_direction",
+            "flexpanel_node_style_set_flex_wrap",
+            "flexpanel_node_style_set_flex_basis",
+            "flexpanel_node_style_set_flex_grow",
+            "flexpanel_node_style_set_flex_shrink",
+            "flexpanel_node_style_set_flex",
+            "flexpanel_node_style_set_justify_content",
+            "flexpanel_node_style_set_align_items",
+            "flexpanel_node_style_set_align_self",
+            "flexpanel_node_style_set_align_content",
+            "flexpanel_node_style_set_display",
+            "flexpanel_node_style_get_width",
+            "flexpanel_node_style_get_height",
+            "flexpanel_node_style_get_min_width",
+            "flexpanel_node_style_get_max_width",
+            "flexpanel_node_style_get_min_height",
+            "flexpanel_node_style_get_max_height",
+            "flexpanel_node_style_get_aspect_ratio",
+            "flexpanel_node_style_get_position",
+            "flexpanel_node_style_get_position_type",
+            "flexpanel_node_style_get_margin",
+            "flexpanel_node_style_get_padding",
+            "flexpanel_node_style_get_border",
+            "flexpanel_node_style_get_gap",
+            "flexpanel_node_style_get_direction",
+            "flexpanel_node_style_get_flex_direction",
+            "flexpanel_node_style_get_flex_wrap",
+            "flexpanel_node_style_get_flex_basis",
+            "flexpanel_node_style_get_flex_grow",
+            "flexpanel_node_style_get_flex_shrink",
+            "flexpanel_node_style_get_flex",
+            "flexpanel_node_style_get_justify_content",
+            "flexpanel_node_style_get_align_items",
+            "flexpanel_node_style_get_align_self",
+            "flexpanel_node_style_get_align_content",
+            "flexpanel_node_style_get_display",
+        }
+
+        self.assertEqual(set(flex_entries), expected_names)
+        self.assertTrue(all(entry.issue_number == 514 for entry in flex_entries.values()))
 
     def test_function_descriptor_arity_validation_is_deterministic(self):
         descriptor = get_gml_function_descriptor("struct_set")

@@ -3338,9 +3338,40 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "legacy = GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1)), GMRuntime.gml_builtin_global(\"argument_count\"))",
         )
 
+    def test_flex_panel_helpers_lower_to_runtime_and_enum_structs(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "root = flexpanel_create_node();"
+                "child = flexpanel_create_node({name: 'slot'});"
+                "flexpanel_node_style_set_width(root, 100, flexpanel_unit.percent);"
+                "flexpanel_node_style_set_height(root, 80, flexpanel_unit.point);"
+                "flexpanel_node_style_set_flex_direction(root, flexpanel_flex_direction.row);"
+                "flexpanel_node_style_set_gap(root, flexpanel_gutter.all_gutters, 4);"
+                "flexpanel_node_insert_child(root, child, 0);"
+                "flexpanel_calculate_layout(root, 320, 180, flexpanel_direction.LTR);"
+                "pos = flexpanel_node_layout_get_position(child, false);",
+                indent="",
+            ),
+            "root = GMRuntime.gml_flexpanel_create_node()\n"
+            "child = GMRuntime.gml_flexpanel_create_node(GMRuntime.gml_struct({\"name\": 'slot'}))\n"
+            "GMRuntime.gml_flexpanel_node_style_set_width(root, 100, GMRuntime.gml_selector_get(GMRuntime.gml_flexpanel_unit(), \"percent\"))\n"
+            "GMRuntime.gml_flexpanel_node_style_set_height(root, 80, GMRuntime.gml_selector_get(GMRuntime.gml_flexpanel_unit(), \"point\"))\n"
+            "GMRuntime.gml_flexpanel_node_style_set_flex_direction(root, GMRuntime.gml_selector_get(GMRuntime.gml_flexpanel_flex_direction(), \"row\"))\n"
+            "GMRuntime.gml_flexpanel_node_style_set_gap(root, GMRuntime.gml_selector_get(GMRuntime.gml_flexpanel_gutter(), \"all_gutters\"), 4)\n"
+            "GMRuntime.gml_flexpanel_node_insert_child(root, child, 0)\n"
+            "GMRuntime.gml_flexpanel_calculate_layout(root, 320, 180, GMRuntime.gml_selector_get(GMRuntime.gml_flexpanel_direction(), \"LTR\"))\n"
+            "pos = GMRuntime.gml_flexpanel_node_layout_get_position(child, false)",
+        )
+
     def test_script_execute_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "script_execute.*at least 1.*got 0"):
             transpile_gml_code("script_execute();", indent="")
+
+    def test_flex_panel_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "flexpanel_node_style_set_width.*expects 3.*got 2"):
+            transpile_gml_code("flexpanel_node_style_set_width(node, 100);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "flexpanel_calculate_layout.*expects 4.*got 3"):
+            transpile_gml_code("flexpanel_calculate_layout(root, 320, 180);", indent="")
 
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):

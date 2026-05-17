@@ -7,6 +7,7 @@ from typing import Literal, TypeAlias
 from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
+    _ASYNC_RUNTIME_FUNCTIONS,
     _AUDIO_RUNTIME_FUNCTIONS,
     _BUFFER_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
@@ -332,6 +333,12 @@ _BUFFER_ARITY: dict[str, tuple[int, int | None]] = {
     "buffer_sha1": (3, 3),
     "buffer_sha256": (3, 3),
     "buffer_crc32": (3, 3),
+}
+
+_ASYNC_ARITY: dict[str, tuple[int, int | None]] = {
+    "http_get": (1, 1),
+    "http_post_string": (2, 2),
+    "http_request": (4, 4),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -688,6 +695,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _BUFFER_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _BUFFER_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _ASYNC_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _ASYNC_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

@@ -214,23 +214,23 @@ static func gml_buffer_save_async(buffer_id, path, offset = 0, size = -1):
 			file.store_buffer(bytes)
 			file.close()
 			status = 0
-	_gml_builtin_globals["async_load"] = {
+	gml_async_dispatch("save_load", {
 		"id": async_id,
 		"status": status,
 		"filename": gml_string(path)
-	}
+	}, "_on_async_save_load")
 	return async_id
 
 
 static func gml_buffer_load_async(path):
 	var async_id = _gml_buffer_next_async_id()
 	var buffer = gml_buffer_load(path)
-	_gml_builtin_globals["async_load"] = {
+	gml_async_dispatch("save_load", {
 		"id": async_id,
 		"status": 0 if gml_buffer_exists(buffer) else -1,
 		"filename": gml_string(path),
 		"buffer": buffer
-	}
+	}, "_on_async_save_load")
 	return async_id
 
 

@@ -4853,29 +4853,44 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "buffer_crc32",
         )
     ),
-    _entry(
-        "http_get",
-        "Asynchronous Functions",
-        "planned",
-        "src.conversion.events.mappings.other_async_http",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm",
-        "Async HTTP event mapping exists, but request runtime is planned.",
+    *(
+        _entry(
+            name,
+            "Asynchronous Functions",
+            "implemented",
+            "src.conversion.gml_runtime_parts.segments.67_async_runtime",
+            "n/a",
+            "yes",
+            "yes",
+            "yes",
+            "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm",
+            "Uses a GMRuntime HTTPRequest bridge with request ids, async_load payloads, and generated Async HTTP handler dispatch.",
+        )
+        for name in (
+            "http_get",
+            "http_post_string",
+            "http_request",
+        )
     ),
-    _entry(
-        "http_post_string",
-        "Asynchronous Functions",
-        "planned",
-        "src.conversion.events.mappings.other_async_http",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm",
-        "Requires HTTPRequest bridge and async_load dispatch.",
+    *(
+        _entry(
+            name,
+            "Asynchronous Functions",
+            "unsupported",
+            "src.conversion.gml_transpiler_parts.gml_api_manifest",
+            "n/a",
+            "no",
+            "no",
+            "n/a",
+            "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm",
+            "Dialog async APIs require platform UI integration and intentionally emit diagnostics instead of no-op success.",
+        )
+        for name in (
+            "get_open_filename",
+            "get_save_filename",
+            "show_message_async",
+            "show_question_async",
+        )
     ),
     _entry(
         "network_create_socket",

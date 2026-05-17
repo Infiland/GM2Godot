@@ -162,6 +162,16 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert buffer_save_async is not None
         self.assertEqual(buffer_save_async.status, "partial")
         self.assertEqual(buffer_save_async.issue_number, 506)
+        http_get = get_gml_api_entry("http_get")
+        self.assertIsNotNone(http_get)
+        assert http_get is not None
+        self.assertEqual(http_get.status, "implemented")
+        self.assertEqual(http_get.issue_number, 507)
+        show_message_async = get_gml_api_entry("show_message_async")
+        self.assertIsNotNone(show_message_async)
+        assert show_message_async is not None
+        self.assertEqual(show_message_async.status, "unsupported")
+        self.assertEqual(show_message_async.issue_number, 507)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -234,6 +244,9 @@ class TestGMLAPIManifest(unittest.TestCase):
             "buffer_seek",
             "buffer_base64_encode",
             "buffer_md5",
+            "http_get",
+            "http_post_string",
+            "http_request",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -275,6 +288,8 @@ class TestGMLAPIManifest(unittest.TestCase):
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
         with self.assertRaisesRegex(GMLTranspileError, "collision_point_list.*planned"):
             transpile_gml_expression("collision_point_list()")
+        with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):
+            transpile_gml_expression('show_message_async("Hello")')
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

@@ -9,6 +9,14 @@ const GML_TILE_MIRROR = 0x10000000
 const GML_TILE_FLIP = 0x20000000
 const GML_TILE_ROTATE = 0x40000000
 const GML_TILE_INDEX_MASK = 0x000fffff
+const GML_TEXTURE_HANDLE_KIND = "texture"
+const GML_BLEND_NORMAL = 0
+const GML_BLEND_ADD = 1
+const GML_BLEND_SUBTRACT = 2
+const GML_BLEND_MULTIPLY = 3
+const GML_CULL_NO_CULLING = 0
+const GML_CULL_CLOCKWISE = 1
+const GML_CULL_COUNTERCLOCKWISE = 2
 
 static var _gml_draw_context_stack = []
 static var _gml_draw_sprite_cache = {}
@@ -21,7 +29,14 @@ static var _gml_draw_state = {
 	"font": -1,
 	"halign": GML_FA_LEFT,
 	"valign": GML_FA_TOP,
-	"blend_mode": 0
+	"blend_mode": GML_BLEND_NORMAL,
+	"blend_mode_ext": [GML_BLEND_NORMAL, GML_BLEND_NORMAL],
+	"texture_filter": false,
+	"texture_repeat": false,
+	"color_write": [true, true, true, true],
+	"cull_mode": GML_CULL_NO_CULLING,
+	"alpha_test_enabled": false,
+	"alpha_test_ref": 0.0
 }
 
 
@@ -33,6 +48,7 @@ static func gml_draw_begin(target, context_name = "draw"):
 	})
 	if str(context_name) == "_draw":
 		_gml_draw_hide_default_sprite(target)
+	_gml_draw_apply_gpu_state(target)
 	return null
 
 
@@ -41,6 +57,7 @@ static func gml_draw_end():
 		return null
 	var context = _gml_draw_context_stack.pop_back()
 	_gml_draw_state = context["state"]
+	_gml_draw_apply_gpu_state(context["target"])
 	return null
 
 
@@ -272,6 +289,129 @@ static func gml_draw_get_line_width():
 	return _gml_draw_state["line_width"]
 
 
+static func gml_gpu_set_blendmode(mode):
+	_gml_draw_state["blend_mode"] = int(_to_real(mode))
+	_gml_draw_apply_gpu_state()
+	return null
+
+
+static func gml_gpu_get_blendmode():
+	return int(_gml_draw_state["blend_mode"])
+
+
+static func gml_draw_set_blend_mode(mode):
+	return gml_gpu_set_blendmode(mode)
+
+
+static func gml_draw_get_blend_mode():
+	return gml_gpu_get_blendmode()
+
+
+static func gml_gpu_set_texfilter(linear):
+	_gml_draw_state["texture_filter"] = gml_bool(linear)
+	_gml_draw_apply_gpu_state()
+	return null
+
+
+static func gml_gpu_get_texfilter():
+	return bool(_gml_draw_state["texture_filter"])
+
+
+static func gml_texture_set_interpolation(linear):
+	return gml_gpu_set_texfilter(linear)
+
+
+static func gml_texture_get_interpolation():
+	return gml_gpu_get_texfilter()
+
+
+static func gml_gpu_set_texrepeat(repeat):
+	_gml_draw_state["texture_repeat"] = gml_bool(repeat)
+	_gml_draw_apply_gpu_state()
+	return null
+
+
+static func gml_gpu_get_texrepeat():
+	return bool(_gml_draw_state["texture_repeat"])
+
+
+static func gml_texture_set_repeat(repeat):
+	return gml_gpu_set_texrepeat(repeat)
+
+
+static func gml_texture_get_repeat():
+	return gml_gpu_get_texrepeat()
+
+
+static func gml_gpu_set_colorwriteenable(red, green, blue, alpha):
+	_gml_draw_state["color_write"] = [gml_bool(red), gml_bool(green), gml_bool(blue), gml_bool(alpha)]
+	return null
+
+
+static func gml_gpu_get_colorwriteenable():
+	var state = _gml_draw_state["color_write"]
+	return [bool(state[0]), bool(state[1]), bool(state[2]), bool(state[3])]
+
+
+static func gml_gpu_set_cullmode(mode):
+	_gml_draw_state["cull_mode"] = int(_to_real(mode))
+	return null
+
+
+static func gml_gpu_get_cullmode():
+	return int(_gml_draw_state["cull_mode"])
+
+
+static func gml_gpu_set_alphatestenable(enable):
+	_gml_draw_state["alpha_test_enabled"] = gml_bool(enable)
+	return null
+
+
+static func gml_gpu_get_alphatestenable():
+	return bool(_gml_draw_state["alpha_test_enabled"])
+
+
+static func gml_gpu_set_alphatestref(reference):
+	_gml_draw_state["alpha_test_ref"] = clamp(_to_real(reference), 0.0, 255.0) / 255.0
+	return null
+
+
+static func gml_gpu_get_alphatestref():
+	return int(round(_to_real(_gml_draw_state["alpha_test_ref"]) * 255.0))
+
+
+static func gml_sprite_get_texture(sprite, subimg):
+	var frame = _gml_draw_sprite_frame(sprite, subimg)
+	if frame == null:
+		return gml_handle_invalid(GML_TEXTURE_HANDLE_KIND)
+	return gml_handle_register(GML_TEXTURE_HANDLE_KIND, frame["texture"])
+
+
+static func gml_surface_get_texture(surface):
+	var resolved_surface = _gml_surface_resolve(surface)
+	if resolved_surface == null:
+		return gml_handle_invalid(GML_TEXTURE_HANDLE_KIND)
+	return gml_handle_register(GML_TEXTURE_HANDLE_KIND, resolved_surface["texture"])
+
+
+static func gml_texture_exists(texture):
+	return _gml_texture_resolve(texture) != null
+
+
+static func gml_texture_get_width(texture):
+	var resolved_texture = _gml_texture_resolve(texture)
+	if resolved_texture == null:
+		return 0
+	return int(resolved_texture.get_width())
+
+
+static func gml_texture_get_height(texture):
+	var resolved_texture = _gml_texture_resolve(texture)
+	if resolved_texture == null:
+		return 0
+	return int(resolved_texture.get_height())
+
+
 static func gml_draw_clear(color):
 	if _gml_surface_clear_active_target(color, 1.0):
 		return null
@@ -358,6 +498,7 @@ static func _gml_draw_target():
 		return null
 	var target = _gml_draw_context_stack[_gml_draw_context_stack.size() - 1]["target"]
 	if target is CanvasItem:
+		_gml_draw_apply_gpu_state(target)
 		return target
 	return null
 
@@ -378,14 +519,29 @@ static func _gml_draw_color(color):
 
 static func _gml_draw_modulate(color, alpha):
 	var resolved_alpha = clamp(_to_real(alpha) * _to_real(_gml_draw_state["alpha"]), 0.0, 1.0)
+	var color_write = _gml_draw_state["color_write"]
 	if color is Color:
 		var color_value = color
-		color_value.a = resolved_alpha
+		if not bool(color_write[0]):
+			color_value.r = 0.0
+		if not bool(color_write[1]):
+			color_value.g = 0.0
+		if not bool(color_write[2]):
+			color_value.b = 0.0
+		color_value.a = resolved_alpha if bool(color_write[3]) else 0.0
 		return color_value
 	var value = int(_to_real(color))
 	var red = float(value & 0xff) / 255.0
 	var green = float((value >> 8) & 0xff) / 255.0
 	var blue = float((value >> 16) & 0xff) / 255.0
+	if not bool(color_write[0]):
+		red = 0.0
+	if not bool(color_write[1]):
+		green = 0.0
+	if not bool(color_write[2]):
+		blue = 0.0
+	if not bool(color_write[3]):
+		resolved_alpha = 0.0
 	return Color(red, green, blue, resolved_alpha)
 
 
@@ -412,6 +568,8 @@ static func _gml_draw_texture_part(texture, source, x, y, xscale, yscale, rot, c
 	var target = _gml_draw_target()
 	if target == null or texture == null:
 		return null
+	if not _gml_draw_alpha_test_allows(_to_real(alpha)):
+		return null
 	var scale = Vector2(_to_real(xscale), _to_real(yscale))
 	if abs(scale.x) <= 0.00001 or abs(scale.y) <= 0.00001:
 		return null
@@ -420,9 +578,52 @@ static func _gml_draw_texture_part(texture, source, x, y, xscale, yscale, rot, c
 		draw_origin = Vector2.ZERO
 	var rect = Rect2(-draw_origin, source.size)
 	target.draw_set_transform(Vector2(_to_real(x), _to_real(y)), deg_to_rad(-_to_real(rot)), scale)
-	target.draw_texture_rect_region(texture, rect, source, _gml_draw_modulate(colour, alpha), false, true)
+	target.draw_texture_rect_region(texture, rect, source, _gml_draw_modulate(colour, alpha), bool(_gml_draw_state["texture_repeat"]), true)
 	target.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	return null
+
+
+static func _gml_texture_resolve(texture):
+	if texture is Texture2D:
+		return texture
+	var handle = gml_handle_from_value(GML_TEXTURE_HANDLE_KIND, texture)
+	if gml_handle_is_valid(handle) and handle.reference is Texture2D:
+		return handle.reference
+	return null
+
+
+static func _gml_draw_apply_gpu_state(target = null):
+	var resolved_target = target if target != null else _gml_draw_current_context_target()
+	if not (resolved_target is CanvasItem):
+		return null
+	if _object_has_property(resolved_target, "texture_filter"):
+		resolved_target.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR if bool(_gml_draw_state["texture_filter"]) else CanvasItem.TEXTURE_FILTER_NEAREST
+	if _object_has_property(resolved_target, "texture_repeat"):
+		resolved_target.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED if bool(_gml_draw_state["texture_repeat"]) else CanvasItem.TEXTURE_REPEAT_DISABLED
+	var material: Variant = resolved_target.material
+	if not (material is CanvasItemMaterial):
+		material = CanvasItemMaterial.new()
+		resolved_target.material = material
+	material.blend_mode = _gml_draw_canvas_blend_mode(_gml_draw_state["blend_mode"])
+	return null
+
+
+static func _gml_draw_canvas_blend_mode(blend_mode):
+	var resolved = int(_to_real(blend_mode))
+	if resolved == GML_BLEND_ADD:
+		return CanvasItemMaterial.BLEND_MODE_ADD
+	if resolved == GML_BLEND_SUBTRACT:
+		return CanvasItemMaterial.BLEND_MODE_SUB
+	if resolved == GML_BLEND_MULTIPLY:
+		return CanvasItemMaterial.BLEND_MODE_MUL
+	return CanvasItemMaterial.BLEND_MODE_MIX
+
+
+static func _gml_draw_alpha_test_allows(alpha):
+	if not bool(_gml_draw_state["alpha_test_enabled"]):
+		return true
+	var resolved_alpha = clamp(_to_real(alpha) * _to_real(_gml_draw_state["alpha"]), 0.0, 1.0)
+	return resolved_alpha >= _to_real(_gml_draw_state["alpha_test_ref"])
 
 
 static func _gml_draw_source_rect(left, top, width, height, frame_size):
@@ -775,6 +976,8 @@ static func _gml_draw_room_size():
 
 
 static func _gml_draw_state_copy():
+	var color_write = _gml_draw_state["color_write"]
+	var blend_ext = _gml_draw_state["blend_mode_ext"]
 	return {
 		"color": _gml_draw_state["color"],
 		"alpha": _gml_draw_state["alpha"],
@@ -782,5 +985,12 @@ static func _gml_draw_state_copy():
 		"font": _gml_draw_state["font"],
 		"halign": _gml_draw_state["halign"],
 		"valign": _gml_draw_state["valign"],
-		"blend_mode": _gml_draw_state["blend_mode"]
+		"blend_mode": _gml_draw_state["blend_mode"],
+		"blend_mode_ext": [blend_ext[0], blend_ext[1]],
+		"texture_filter": _gml_draw_state["texture_filter"],
+		"texture_repeat": _gml_draw_state["texture_repeat"],
+		"color_write": [color_write[0], color_write[1], color_write[2], color_write[3]],
+		"cull_mode": _gml_draw_state["cull_mode"],
+		"alpha_test_enabled": _gml_draw_state["alpha_test_enabled"],
+		"alpha_test_ref": _gml_draw_state["alpha_test_ref"]
 	}

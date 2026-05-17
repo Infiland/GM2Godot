@@ -252,6 +252,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert external_call is not None
         self.assertEqual(external_call.status, "unsupported")
         self.assertEqual(external_call.issue_number, 512)
+        region = get_gml_api_entry("#region")
+        self.assertIsNotNone(region)
+        assert region is not None
+        self.assertEqual(region.status, "implemented")
+        self.assertEqual(region.issue_number, 513)
+        define = get_gml_api_entry("#define")
+        self.assertIsNotNone(define)
+        assert define is not None
+        self.assertEqual(define.status, "implemented")
+        self.assertEqual(define.issue_number, 513)
+        import_directive = get_gml_api_entry("#import")
+        self.assertIsNotNone(import_directive)
+        assert import_directive is not None
+        self.assertEqual(import_directive.status, "unsupported")
+        self.assertEqual(import_directive.issue_number, 513)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))

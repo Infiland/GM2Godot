@@ -4,9 +4,9 @@ from __future__ import annotations
 from typing import Iterable, MutableSet
 
 from .constants import _LEGACY_GLOBAL_BUILTINS
+from .preprocessor import preprocess_gml_source
 from .statement_parser import _StatementParser
 from .tokens import _tokenize
-from .utils import _join_macro_continuation_lines, _strip_comments
 
 
 def transpile_gml_code(
@@ -23,8 +23,9 @@ def transpile_gml_code(
     return_depth: int = 0,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
+    preprocessed = preprocess_gml_source(source, macro_configuration=macro_configuration)
     parser = _StatementParser(
-        _tokenize(_join_macro_continuation_lines(_strip_comments(source))),
+        _tokenize(preprocessed.source),
         local_names=local_names,
         instance_variables=instance_variables,
         inherited_event_call=inherited_event_call,

@@ -55,6 +55,11 @@ from src.conversion.gml_transpiler_parts.model import (
     _Token,
     _Unary,
 )
+from src.conversion.gml_transpiler_parts.preprocessor import (
+    GMLPreprocessResult,
+    GMLPreprocessorDiagnostic,
+    preprocess_gml_source,
+)
 from src.conversion.gml_transpiler_parts.tokens import _expression_tokens, _tokenize
 
 __all__ = [
@@ -62,6 +67,8 @@ __all__ = [
     "GMLAPICategoryReport",
     "GMLAPIEntry",
     "GMLFunctionDescriptor",
+    "GMLPreprocessResult",
+    "GMLPreprocessorDiagnostic",
     "_ArrayLiteral",
     "_Binary",
     "_BuiltinVariableMetadata",
@@ -100,6 +107,7 @@ __all__ = [
     "is_known_gml_api",
     "iter_gml_api_entries",
     "iter_gml_function_descriptors",
+    "preprocess_gml_source",
     "transpile_gml_code",
     "transpile_gml_condition",
     "transpile_gml_expression",

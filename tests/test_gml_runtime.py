@@ -2365,6 +2365,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_flexpanel_wrap", GML_RUNTIME_SCRIPT)
         self.assertIn("GM2Godot Flex Panel compatibility runtime", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_contains_os_debug_gc_compatibility_helpers(self):
+        self.assertIn("static func gml_os_type", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_show_debug_message_ext", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_gc_collect", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_weak_ref_create", GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
+
     def test_write_gml_runtime_writes_support_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime_path = write_gml_runtime(tmpdir)

@@ -32,6 +32,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "69_physics.gd",
     "70_handle_string_helpers.gd",
     "71_flex_panels.gd",
+    "72_os_debug_gc.gd",
     "80_static_hash_clone_error.gd",
 )
 _RUNTIME_SEGMENT_DIR = Path(__file__).with_name("segments")

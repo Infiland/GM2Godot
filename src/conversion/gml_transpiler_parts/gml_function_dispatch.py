@@ -23,6 +23,7 @@ from .constants import (
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
     _NETWORK_RUNTIME_FUNCTIONS,
+    _OS_DEBUG_GC_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
     _PHYSICS_RUNTIME_FUNCTIONS,
     _ROOM_RUNTIME_FUNCTIONS,
@@ -659,6 +660,33 @@ _FLEXPANEL_ARITY: dict[str, tuple[int, int | None]] = {
     "flexpanel_node_style_get_display": (1, 1),
 }
 
+_OS_DEBUG_GC_ARITY: dict[str, tuple[int, int | None]] = {
+    "os_is_paused": (0, 0),
+    "os_is_network_connected": (0, 1),
+    "os_get_config": (0, 0),
+    "os_get_language": (0, 0),
+    "os_get_region": (0, 0),
+    "os_get_info": (0, 0),
+    "parameter_count": (0, 0),
+    "parameter_string": (1, 1),
+    "environment_get_variable": (1, 1),
+    "debug_get_callstack": (0, 1),
+    "exception_unhandled_handler": (1, 1),
+    "show_debug_message_ext": (2, 2),
+    "show_message": (1, 1),
+    "show_error": (2, 2),
+    "code_is_compiled": (0, 0),
+    "gc_enable": (1, 1),
+    "gc_is_enabled": (0, 0),
+    "gc_collect": (0, 0),
+    "gc_target_frame_time": (1, 1),
+    "gc_get_target_frame_time": (0, 0),
+    "gc_get_stats": (0, 0),
+    "weak_ref_create": (1, 1),
+    "weak_ref_alive": (1, 1),
+    "weak_ref_any_alive": (1, 3),
+}
+
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "draw_self": (0, 0),
     "draw_sprite": (4, 4),
@@ -927,6 +955,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _FLEXPANEL_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _FLEXPANEL_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _OS_DEBUG_GC_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _DS_COLLECTIONS_FUNCTIONS.items():

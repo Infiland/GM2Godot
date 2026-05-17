@@ -3373,6 +3373,35 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "flexpanel_calculate_layout.*expects 4.*got 3"):
             transpile_gml_code("flexpanel_calculate_layout(root, 320, 180);", indent="")
 
+    def test_os_debug_gc_helpers_lower_to_runtime_and_builtins(self):
+        self.assertEqual(
+            transpile_gml_expression("os_type == os_macosx"),
+            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), "macosx")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("fps_real"),
+            'GMRuntime.gml_builtin_global("fps_real")',
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                'info = os_get_info();'
+                'show_debug_message_ext("{0}:{1}", [os_get_language(), os_type]);'
+                'gc_collect();'
+                'alive = weak_ref_alive(weak_ref_create({a: 1}));',
+                indent="",
+            ),
+            "info = GMRuntime.gml_os_get_info()\n"
+            'GMRuntime.gml_show_debug_message_ext("{0}:{1}", [GMRuntime.gml_os_get_language(), GMRuntime.gml_builtin_global("os_type")])\n'
+            "GMRuntime.gml_gc_collect()\n"
+            'alive = GMRuntime.gml_weak_ref_alive(GMRuntime.gml_weak_ref_create(GMRuntime.gml_struct({"a": 1})))',
+        )
+
+    def test_os_debug_gc_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "environment_get_variable.*expects 1.*got 0"):
+            transpile_gml_code("environment_get_variable();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "weak_ref_any_alive.*expects 1 to 3.*got 4"):
+            transpile_gml_code("weak_ref_any_alive(items, 0, 1, true);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

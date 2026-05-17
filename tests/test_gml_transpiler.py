@@ -3220,6 +3220,31 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_f.*2 to 5.*got 6"):
             transpile_gml_code("shader_set_uniform_f(u, 1, 2, 3, 4, 5);", indent="")
 
+    def test_physics_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "physics_world_create(0.1);"
+                "physics_world_gravity(0, 9.8);"
+                "fix = physics_fixture_create();"
+                "physics_fixture_set_box_shape(fix, 8, 4);"
+                "physics_fixture_bind(fix, id);"
+                "physics_apply_force(0, 0, 2, 0);"
+                "physics_apply_impulse(0, 0, 10, 0);",
+                indent="",
+            ),
+            "GMRuntime.gml_physics_world_create(0.1)\n"
+            "GMRuntime.gml_physics_world_gravity(0, 9.8)\n"
+            "fix = GMRuntime.gml_physics_fixture_create()\n"
+            "GMRuntime.gml_physics_fixture_set_box_shape(fix, 8, 4)\n"
+            "GMRuntime.gml_physics_fixture_bind(fix, id)\n"
+            "GMRuntime.gml_physics_apply_force(0, 0, 2, 0, self)\n"
+            "GMRuntime.gml_physics_apply_impulse(0, 0, 10, 0, self)",
+        )
+
+    def test_physics_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "physics_apply_force.*expects 4.*got 3"):
+            transpile_gml_code("physics_apply_force(0, 0, 1);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

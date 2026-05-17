@@ -29,6 +29,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "66_buffers.gd",
     "67_async_runtime.gd",
     "68_networking.gd",
+    "69_physics.gd",
     "70_handle_string_helpers.gd",
     "80_static_hash_clone_error.gd",
 )

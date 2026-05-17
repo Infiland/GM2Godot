@@ -27,6 +27,7 @@ _RUNTIME_SEGMENT_NAMES = (
     "60_conversion_helpers.gd",
     "65_files_ini_json.gd",
     "66_buffers.gd",
+    "67_async_runtime.gd",
     "70_handle_string_helpers.gd",
     "80_static_hash_clone_error.gd",
 )

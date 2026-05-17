@@ -679,6 +679,12 @@ _BUFFER_RUNTIME_FUNCTIONS = {
     "buffer_crc32": "gml_buffer_crc32",
 }
 
+_ASYNC_RUNTIME_FUNCTIONS = {
+    "http_get": "gml_http_get",
+    "http_post_string": "gml_http_post_string",
+    "http_request": "gml_http_request",
+}
+
 _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_exists": "gml_struct_exists",
     "struct_get": "gml_struct_get",

@@ -3126,6 +3126,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "buffer_poke.*expects 4.*got 3"):
             transpile_gml_code("buffer_poke(buf, 0, buffer_u8);", indent="")
 
+    def test_async_http_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "a = http_get('https://example.test/data');"
+                "b = http_post_string('https://example.test/post', 'x=1');"
+                "c = http_request('https://example.test/api', 'PUT', ['X-Test: 1'], 'body');",
+                indent="",
+            ),
+            "a = GMRuntime.gml_http_get('https://example.test/data')\n"
+            "b = GMRuntime.gml_http_post_string('https://example.test/post', 'x=1')\n"
+            "c = GMRuntime.gml_http_request('https://example.test/api', 'PUT', ['X-Test: 1'], 'body')",
+        )
+
+    def test_async_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "http_request.*expects 4.*got 3"):
+            transpile_gml_code("http_request('url', 'GET', []);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

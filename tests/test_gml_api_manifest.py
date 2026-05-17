@@ -187,6 +187,26 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert network_send_broadcast is not None
         self.assertEqual(network_send_broadcast.status, "unsupported")
         self.assertEqual(network_send_broadcast.issue_number, 508)
+        gpu_set_blendmode = get_gml_api_entry("gpu_set_blendmode")
+        self.assertIsNotNone(gpu_set_blendmode)
+        assert gpu_set_blendmode is not None
+        self.assertEqual(gpu_set_blendmode.status, "implemented")
+        self.assertEqual(gpu_set_blendmode.issue_number, 509)
+        sprite_get_texture = get_gml_api_entry("sprite_get_texture")
+        self.assertIsNotNone(sprite_get_texture)
+        assert sprite_get_texture is not None
+        self.assertEqual(sprite_get_texture.status, "implemented")
+        self.assertEqual(sprite_get_texture.issue_number, 509)
+        part_system_create = get_gml_api_entry("part_system_create")
+        self.assertIsNotNone(part_system_create)
+        assert part_system_create is not None
+        self.assertEqual(part_system_create.status, "planned")
+        self.assertEqual(part_system_create.issue_number, 509)
+        effect_create_above = get_gml_api_entry("effect_create_above")
+        self.assertIsNotNone(effect_create_above)
+        assert effect_create_above is not None
+        self.assertEqual(effect_create_above.status, "unsupported")
+        self.assertEqual(effect_create_above.issue_number, 509)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -269,6 +289,15 @@ class TestGMLAPIManifest(unittest.TestCase):
             "network_send_packet",
             "network_send_udp_raw",
             "network_destroy",
+            "gpu_set_blendmode",
+            "gpu_get_blendmode",
+            "gpu_set_texfilter",
+            "gpu_set_texrepeat",
+            "gpu_set_colorwriteenable",
+            "gpu_set_alphatestref",
+            "sprite_get_texture",
+            "surface_get_texture",
+            "texture_get_width",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -314,6 +343,10 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression('show_message_async("Hello")')
         with self.assertRaisesRegex(GMLTranspileError, "network_send_broadcast.*unsupported"):
             transpile_gml_expression("network_send_broadcast(sock, 6502, buf, 4)")
+        with self.assertRaisesRegex(GMLTranspileError, "part_system_create.*planned"):
+            transpile_gml_expression("part_system_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "effect_create_above.*unsupported"):
+            transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

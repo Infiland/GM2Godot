@@ -3168,6 +3168,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "network_send_udp_raw.*expects 5.*got 4"):
             transpile_gml_code("network_send_udp_raw(sock, '127.0.0.1', 6502, buf);", indent="")
 
+    def test_gpu_texture_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "gpu_set_blendmode(bm_add);"
+                "draw_set_blend_mode(bm_subtract);"
+                "gpu_set_texfilter(true);"
+                "texture_set_repeat(false);"
+                "gpu_set_colorwriteenable(true, false, true, true);"
+                "gpu_set_alphatestref(128);"
+                "tex = sprite_get_texture(spr_player, 0);"
+                "w = texture_get_width(tex);",
+                indent="",
+                asset_names={"spr_player"},
+            ),
+            "GMRuntime.gml_gpu_set_blendmode(1)\n"
+            "GMRuntime.gml_draw_set_blend_mode(2)\n"
+            "GMRuntime.gml_gpu_set_texfilter(true)\n"
+            "GMRuntime.gml_texture_set_repeat(false)\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(true, false, true, true)\n"
+            "GMRuntime.gml_gpu_set_alphatestref(128)\n"
+            "tex = GMRuntime.gml_sprite_get_texture(GMRuntime.gml_asset_get_index(\"spr_player\"), 0)\n"
+            "w = GMRuntime.gml_texture_get_width(tex)",
+        )
+
+    def test_gpu_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 4.*got 3"):
+            transpile_gml_code("gpu_set_colorwriteenable(true, true, true);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

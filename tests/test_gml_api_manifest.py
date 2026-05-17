@@ -207,6 +207,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert effect_create_above is not None
         self.assertEqual(effect_create_above.status, "unsupported")
         self.assertEqual(effect_create_above.issue_number, 509)
+        shader_set = get_gml_api_entry("shader_set")
+        self.assertIsNotNone(shader_set)
+        assert shader_set is not None
+        self.assertEqual(shader_set.status, "implemented")
+        self.assertEqual(shader_set.issue_number, 510)
+        shader_set_uniform_f = get_gml_api_entry("shader_set_uniform_f")
+        self.assertIsNotNone(shader_set_uniform_f)
+        assert shader_set_uniform_f is not None
+        self.assertEqual(shader_set_uniform_f.status, "implemented")
+        self.assertEqual(shader_set_uniform_f.issue_number, 510)
+        shader_set_uniform_matrix = get_gml_api_entry("shader_set_uniform_matrix")
+        self.assertIsNotNone(shader_set_uniform_matrix)
+        assert shader_set_uniform_matrix is not None
+        self.assertEqual(shader_set_uniform_matrix.status, "planned")
+        self.assertEqual(shader_set_uniform_matrix.issue_number, 510)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -298,6 +313,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             "sprite_get_texture",
             "surface_get_texture",
             "texture_get_width",
+            "shader_set",
+            "shader_reset",
+            "shader_get_uniform",
+            "shader_set_uniform_f",
+            "shader_set_uniform_i",
+            "texture_set_stage",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -347,6 +368,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("part_system_create()")
         with self.assertRaisesRegex(GMLTranspileError, "effect_create_above.*unsupported"):
             transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
+        with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_matrix.*planned"):
+            transpile_gml_expression("shader_set_uniform_matrix(u, matrix)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

@@ -295,6 +295,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gpu_set_alphatestref(128)", "GMRuntime.gml_gpu_set_alphatestref(128)"),
     RuntimeValueParityCase("surface_get_texture(surf)", "GMRuntime.gml_surface_get_texture(surf)"),
     RuntimeValueParityCase("texture_get_width(tex)", "GMRuntime.gml_texture_get_width(tex)"),
+    RuntimeValueParityCase("shader_set(shd_wave)", 'GMRuntime.gml_shader_set(GMRuntime.gml_asset_get_index("shd_wave"))'),
+    RuntimeValueParityCase("shader_reset()", "GMRuntime.gml_shader_reset()"),
+    RuntimeValueParityCase(
+        "shader_get_uniform(shd_wave, 'amount')",
+        'GMRuntime.gml_shader_get_uniform(GMRuntime.gml_asset_get_index("shd_wave"), \'amount\')',
+    ),
+    RuntimeValueParityCase("shader_set_uniform_f(u, 1, 2, 3, 4)", "GMRuntime.gml_shader_set_uniform_f(u, 1, 2, 3, 4)"),
+    RuntimeValueParityCase("shader_set_uniform_i(u, 1)", "GMRuntime.gml_shader_set_uniform_i(u, 1)"),
+    RuntimeValueParityCase("texture_set_stage(u, tex)", "GMRuntime.gml_texture_set_stage(u, tex)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
     RuntimeValueParityCase("0xDEAD_BEEF", "0xDEADBEEF"),
     RuntimeValueParityCase("$2c8e", "0x2c8e"),
@@ -1159,6 +1168,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_texture_exists",
             "gml_texture_get_width",
             "gml_texture_get_height",
+            "gml_shader_set",
+            "gml_shader_reset",
+            "gml_shader_get_name",
+            "gml_shader_is_compiled",
+            "gml_shader_get_uniform",
+            "gml_shader_get_sampler_index",
+            "gml_shader_set_uniform_f",
+            "gml_shader_set_uniform_i",
+            "gml_shader_set_uniform_f_array",
+            "gml_shader_set_uniform_i_array",
+            "gml_texture_set_stage",
             "gml_add",
             "gml_sub",
             "gml_mul",
@@ -2287,7 +2307,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit", "r_next"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit", "shd_wave", "r_next"}),
                     parity_case.gdscript_expression,
                 )
 

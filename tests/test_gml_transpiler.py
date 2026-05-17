@@ -3143,6 +3143,31 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "http_request.*expects 4.*got 3"):
             transpile_gml_code("http_request('url', 'GET', []);", indent="")
 
+    def test_networking_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "server = network_create_server(network_socket_tcp, 6502, 4);"
+                "sock = network_create_socket(network_socket_tcp);"
+                "network_connect(sock, '127.0.0.1', 6502);"
+                "sent = network_send_raw(sock, buf, buffer_get_used_size(buf));"
+                "packet = network_send_packet(sock, buf, 4);"
+                "network_destroy(sock);",
+                indent="",
+            ),
+            "server = GMRuntime.gml_network_create_server(0, 6502, 4)\n"
+            "sock = GMRuntime.gml_network_create_socket(0)\n"
+            "GMRuntime.gml_network_connect(sock, '127.0.0.1', 6502)\n"
+            "sent = GMRuntime.gml_network_send_raw(sock, buf, GMRuntime.gml_buffer_get_used_size(buf))\n"
+            "packet = GMRuntime.gml_network_send_packet(sock, buf, 4)\n"
+            "GMRuntime.gml_network_destroy(sock)",
+        )
+
+    def test_networking_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "network_connect.*expects 3.*got 2"):
+            transpile_gml_code("network_connect(sock, '127.0.0.1');", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "network_send_udp_raw.*expects 5.*got 4"):
+            transpile_gml_code("network_send_udp_raw(sock, '127.0.0.1', 6502, buf);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

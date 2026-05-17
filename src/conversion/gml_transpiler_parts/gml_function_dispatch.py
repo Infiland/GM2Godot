@@ -21,6 +21,7 @@ from .constants import (
     _MATH_RUNTIME_FUNCTIONS,
     _MOTION_RUNTIME_FUNCTIONS,
     _MP_GRID_RUNTIME_FUNCTIONS,
+    _NETWORK_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
     _ROOM_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
@@ -339,6 +340,22 @@ _ASYNC_ARITY: dict[str, tuple[int, int | None]] = {
     "http_get": (1, 1),
     "http_post_string": (2, 2),
     "http_request": (4, 4),
+}
+
+_NETWORK_ARITY: dict[str, tuple[int, int | None]] = {
+    "network_create_socket": (1, 1),
+    "network_create_socket_ext": (2, 2),
+    "network_create_server": (2, 3),
+    "network_create_server_raw": (2, 3),
+    "network_connect": (3, 3),
+    "network_connect_async": (3, 3),
+    "network_connect_raw": (3, 3),
+    "network_connect_raw_async": (3, 3),
+    "network_send_raw": (3, 3),
+    "network_send_packet": (3, 3),
+    "network_send_udp": (5, 5),
+    "network_send_udp_raw": (5, 5),
+    "network_destroy": (1, 1),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -699,6 +716,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _ASYNC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ASYNC_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _NETWORK_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _NETWORK_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

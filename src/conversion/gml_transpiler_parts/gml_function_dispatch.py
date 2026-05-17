@@ -8,6 +8,7 @@ from .constants import (
     _ARRAY_RUNTIME_FUNCTIONS,
     _ASSET_RUNTIME_FUNCTIONS,
     _AUDIO_RUNTIME_FUNCTIONS,
+    _BUFFER_RUNTIME_FUNCTIONS,
     _COLLISION_RUNTIME_FUNCTIONS,
     _DRAW_RUNTIME_FUNCTIONS,
     _DS_COLLECTIONS_FUNCTIONS,
@@ -304,6 +305,33 @@ _FILE_ARITY: dict[str, tuple[int, int | None]] = {
     "json_decode": (1, 1),
     "json_stringify": (1, 1),
     "json_parse": (1, 1),
+}
+
+_BUFFER_ARITY: dict[str, tuple[int, int | None]] = {
+    "buffer_create": (3, 3),
+    "buffer_delete": (1, 1),
+    "buffer_exists": (1, 1),
+    "buffer_tell": (1, 1),
+    "buffer_seek": (3, 3),
+    "buffer_get_size": (1, 1),
+    "buffer_get_used_size": (1, 1),
+    "buffer_resize": (2, 2),
+    "buffer_write": (3, 3),
+    "buffer_read": (2, 2),
+    "buffer_peek": (3, 3),
+    "buffer_poke": (4, 4),
+    "buffer_fill": (5, 5),
+    "buffer_copy": (5, 5),
+    "buffer_save": (2, 2),
+    "buffer_load": (1, 1),
+    "buffer_save_async": (2, 4),
+    "buffer_load_async": (1, 1),
+    "buffer_base64_encode": (3, 3),
+    "buffer_base64_decode": (1, 1),
+    "buffer_md5": (3, 3),
+    "buffer_sha1": (3, 3),
+    "buffer_sha256": (3, 3),
+    "buffer_crc32": (3, 3),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -656,6 +684,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _FILE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _FILE_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _BUFFER_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _BUFFER_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():

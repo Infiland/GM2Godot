@@ -129,6 +129,12 @@
 
 "Console_Convertor_AssetRegistry" : "Generating asset registry...",
 
+"Console_Convertor_Scripts" : "Converting scripts...",
+"Console_Convertor_Scripts_Complete" : "Script conversion completed.",
+"Console_Convertor_Scripts_Stopped" : "Script conversion stopped.",
+"Console_Convertor_Scripts_Converted" : "Converted script: {script_name}",
+"Console_Convertor_Scripts_ParseError" : "Warning: Could not convert script {script_name}: {error}",
+
 "Console_Convertor_Notes" : "Converting notes...",
 "Console_Convertor_Notes_Copied" : "Copied note: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Note conversion stopped.",
@@ -169,7 +175,7 @@
 "Settings_Title" : "Conversion Settings",
 "Settings_Files_Heading" : "Select files to convert:",
 "Settings_Categories_Headings" : ["Assets", "Project", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "scripts", "objects", "rooms", "asset_registry"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Fonts",
@@ -184,7 +190,9 @@
     "rooms": "Rooms",
     "shaders": "Shaders",
     "tilesets": "Tilesets",
-    "included_files": "Included Files"
+    "included_files": "Included Files",
+    "scripts": "Scripts",
+    "asset_registry": "Asset Registry"
 },
 
 "Settings_Button_SelectAll" : "Select All",

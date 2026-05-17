@@ -129,6 +129,13 @@ _AUDIO_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "sound_pitch": frozenset({0}),
 }
 
+_SCRIPT_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "script_execute": frozenset({0}),
+    "script_exists": frozenset({0}),
+    "script_get_name": frozenset({0}),
+    "script_get_callable": frozenset({0}),
+}
+
 _ROOM_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "room_goto": frozenset({0}),
     "room_exists": frozenset({0}),
@@ -163,6 +170,9 @@ def _emit_name(
             return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
         if value in _BUILTIN_GLOBAL_VARIABLES:
             return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
+        legacy_argument = _legacy_argument_replacement(value)
+        if legacy_argument is not None:
+            return legacy_argument, _POSTFIX_PRECEDENCE
         if _name_resolves_to_global(value, local_names, scope_context):
             return (
                 "GMRuntime.gml_struct_get("
@@ -196,6 +206,18 @@ def _name_resolves_to_global(
         and name not in _BUILTIN_INSTANCE_VARIABLES
         and name not in _GML_BUILTIN_CONSTANT_IDENTIFIERS
     )
+
+
+def _legacy_argument_replacement(name: str) -> str | None:
+    if not name.startswith("argument"):
+        return None
+    suffix = name.removeprefix("argument")
+    if not suffix.isdigit():
+        return None
+    index = int(suffix)
+    if index < 0 or index > 15:
+        return None
+    return f"GMRuntime.gml_argument({index})"
 
 
 def _emit_expression(
@@ -573,16 +595,22 @@ def _emit_descriptor_call(
         return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
 
     if descriptor.lowering_kind == "runtime_variadic_1":
-        emitted_first = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
+        if 0 in _SCRIPT_ASSET_ARG_INDICES.get(descriptor.name, frozenset()):
+            emitted_first = _emit_asset_argument(args[0], local_names, scope_context=scope_context)
+        else:
+            emitted_first = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
         emitted_rest = ", ".join(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
             for arg in args[1:]
         )
         return f"GMRuntime.{descriptor.lowering_target}({emitted_first}, [{emitted_rest}])"
 
+    script_asset_indices = _SCRIPT_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args = ", ".join(
-        _emit_expression(arg, local_names, scope_context=scope_context)[0]
-        for arg in args
+        _emit_asset_argument(arg, local_names, scope_context=scope_context)
+        if index in script_asset_indices
+        else _emit_expression(arg, local_names, scope_context=scope_context)[0]
+        for index, arg in enumerate(args)
     )
     return f"GMRuntime.{descriptor.lowering_target}({emitted_args})"
 

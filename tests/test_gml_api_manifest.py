@@ -237,6 +237,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert physics_joint_distance_create is not None
         self.assertEqual(physics_joint_distance_create.status, "planned")
         self.assertEqual(physics_joint_distance_create.issue_number, 511)
+        script_execute = get_gml_api_entry("script_execute")
+        self.assertIsNotNone(script_execute)
+        assert script_execute is not None
+        self.assertEqual(script_execute.status, "implemented")
+        self.assertEqual(script_execute.issue_number, 512)
+        global_function = get_gml_api_entry("global_function")
+        self.assertIsNotNone(global_function)
+        assert global_function is not None
+        self.assertEqual(global_function.status, "implemented")
+        self.assertEqual(global_function.issue_number, 512)
+        external_call = get_gml_api_entry("external_call")
+        self.assertIsNotNone(external_call)
+        assert external_call is not None
+        self.assertEqual(external_call.status, "unsupported")
+        self.assertEqual(external_call.issue_number, 512)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -340,6 +355,11 @@ class TestGMLAPIManifest(unittest.TestCase):
             "physics_fixture_bind",
             "physics_apply_force",
             "physics_apply_impulse",
+            "script_execute",
+            "script_exists",
+            "script_get_name",
+            "script_get_callable",
+            "global_function",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -393,6 +413,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("shader_set_uniform_matrix(u, matrix)")
         with self.assertRaisesRegex(GMLTranspileError, "physics_joint_distance_create.*planned"):
             transpile_gml_expression("physics_joint_distance_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "external_call.*unsupported"):
+            transpile_gml_expression("external_call('native_ext', 'fn')")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

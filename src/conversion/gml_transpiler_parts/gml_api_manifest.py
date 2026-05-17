@@ -123,6 +123,132 @@ def _entry(
     )
 
 
+_FLEXPANEL_DOCS_PATH = "GameMaker_Language/GML_Reference/Flex_Panels/Flex_Panels.htm"
+_FLEXPANEL_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.71_flex_panels"
+_FLEXPANEL_IMPLEMENTED_APIS = frozenset(
+    {
+        "flexpanel_create_node",
+        "flexpanel_delete_node",
+        "flexpanel_node_insert_child",
+        "flexpanel_node_remove_child",
+        "flexpanel_node_remove_all_children",
+        "flexpanel_node_set_name",
+        "flexpanel_node_layout_get_position",
+        "flexpanel_node_get_num_children",
+        "flexpanel_node_get_child",
+        "flexpanel_node_get_child_hash",
+        "flexpanel_node_get_parent",
+        "flexpanel_node_get_name",
+        "flexpanel_node_get_data",
+        "flexpanel_node_get_struct",
+        "flexpanel_node_get_measure_function",
+    }
+)
+_FLEXPANEL_UNSUPPORTED_APIS = frozenset({"flexpanel_node_set_measure_function"})
+_FLEXPANEL_PARTIAL_APIS = (
+    "flexpanel_calculate_layout",
+    "flexpanel_node_style_set_width",
+    "flexpanel_node_style_set_height",
+    "flexpanel_node_style_set_min_width",
+    "flexpanel_node_style_set_max_width",
+    "flexpanel_node_style_set_min_height",
+    "flexpanel_node_style_set_max_height",
+    "flexpanel_node_style_set_aspect_ratio",
+    "flexpanel_node_style_set_position",
+    "flexpanel_node_style_set_position_type",
+    "flexpanel_node_style_set_margin",
+    "flexpanel_node_style_set_padding",
+    "flexpanel_node_style_set_border",
+    "flexpanel_node_style_set_gap",
+    "flexpanel_node_style_set_direction",
+    "flexpanel_node_style_set_flex_direction",
+    "flexpanel_node_style_set_flex_wrap",
+    "flexpanel_node_style_set_flex_basis",
+    "flexpanel_node_style_set_flex_grow",
+    "flexpanel_node_style_set_flex_shrink",
+    "flexpanel_node_style_set_flex",
+    "flexpanel_node_style_set_justify_content",
+    "flexpanel_node_style_set_align_items",
+    "flexpanel_node_style_set_align_self",
+    "flexpanel_node_style_set_align_content",
+    "flexpanel_node_style_set_display",
+    "flexpanel_node_style_get_width",
+    "flexpanel_node_style_get_height",
+    "flexpanel_node_style_get_min_width",
+    "flexpanel_node_style_get_max_width",
+    "flexpanel_node_style_get_min_height",
+    "flexpanel_node_style_get_max_height",
+    "flexpanel_node_style_get_aspect_ratio",
+    "flexpanel_node_style_get_position",
+    "flexpanel_node_style_get_position_type",
+    "flexpanel_node_style_get_margin",
+    "flexpanel_node_style_get_padding",
+    "flexpanel_node_style_get_border",
+    "flexpanel_node_style_get_gap",
+    "flexpanel_node_style_get_direction",
+    "flexpanel_node_style_get_flex_direction",
+    "flexpanel_node_style_get_flex_wrap",
+    "flexpanel_node_style_get_flex_basis",
+    "flexpanel_node_style_get_flex_grow",
+    "flexpanel_node_style_get_flex_shrink",
+    "flexpanel_node_style_get_flex",
+    "flexpanel_node_style_get_justify_content",
+    "flexpanel_node_style_get_align_items",
+    "flexpanel_node_style_get_align_self",
+    "flexpanel_node_style_get_align_content",
+    "flexpanel_node_style_get_display",
+)
+
+
+def _flexpanel_entries() -> tuple[GMLAPIEntry, ...]:
+    implemented_entries = tuple(
+        _entry(
+            name,
+            "Flex Panels",
+            "implemented",
+            _FLEXPANEL_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "yes",
+            "yes" if name in {"flexpanel_create_node", "flexpanel_node_insert_child", "flexpanel_node_layout_get_position"} else "no",
+            _FLEXPANEL_DOCS_PATH,
+            "Implemented through the GMRuntime Flex Panel node tree compatibility layer.",
+        )
+        for name in sorted(_FLEXPANEL_IMPLEMENTED_APIS)
+    )
+    partial_entries = tuple(
+        _entry(
+            name,
+            "Flex Panels",
+            "partial",
+            _FLEXPANEL_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "partial",
+            "yes" if name in {"flexpanel_calculate_layout", "flexpanel_node_style_set_width", "flexpanel_node_style_set_height", "flexpanel_node_style_set_gap"} else "no",
+            _FLEXPANEL_DOCS_PATH,
+            "Lowered to a deterministic custom single-line Flex Panel layout pass; full Yoga semantics remain outside this compatibility subset.",
+        )
+        for name in _FLEXPANEL_PARTIAL_APIS
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "Flex Panels",
+            "unsupported",
+            _FLEXPANEL_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "yes",
+            "no",
+            _FLEXPANEL_DOCS_PATH,
+            "Lowered to an explicit runtime diagnostic because custom measure callbacks require a full Yoga-compatible solver.",
+        )
+        for name in sorted(_FLEXPANEL_UNSUPPORTED_APIS)
+    )
+    return implemented_entries + partial_entries + unsupported_entries
+
+
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "gml_api_compatibility_report",
@@ -5324,30 +5450,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "GameMaker_Language/GML_Overview/GML_Overview.htm",
         "Import/include-style directives are rejected with source-line diagnostics until multi-file include policy is explicit.",
     ),
-    _entry(
-        "flexpanel_create_node",
-        "Flex Panels",
-        "planned",
-        "src.conversion.gml_runtime_parts",
-        "n/a",
-        "no",
-        "no",
-        "no",
-        "GameMaker_Language/GML_Reference/Flex_Panels/Flex_Panels.htm",
-        "Requires compatibility layout wrapper or Control/Container mapping.",
-    ),
-    _entry(
-        "flexpanel_node_style_set_width",
-        "Flex Panels",
-        "planned",
-        "src.conversion.gml_runtime_parts",
-        "n/a",
-        "no",
-        "no",
-        "no",
-        "GameMaker_Language/GML_Reference/Flex_Panels/Flex_Panels.htm",
-        "Requires Flex Panel style model and layout pass.",
-    ),
+    *_flexpanel_entries(),
     _entry(
         "show_debug_message",
         "OS Compiler Debug GC",

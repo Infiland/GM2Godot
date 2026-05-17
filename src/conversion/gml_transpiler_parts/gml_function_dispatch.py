@@ -16,6 +16,7 @@ from .constants import (
     _DS_GRID_FUNCTIONS,
     _DS_MAP_RUNTIME_FUNCTIONS,
     _FILE_RUNTIME_FUNCTIONS,
+    _FLEXPANEL_RUNTIME_FUNCTIONS,
     _INPUT_RUNTIME_FUNCTIONS,
     _INSTANCE_RUNTIME_FUNCTIONS,
     _MATH_RUNTIME_FUNCTIONS,
@@ -588,6 +589,76 @@ _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
     "room_get_info": (1, 1),
 }
 
+_FLEXPANEL_ARITY: dict[str, tuple[int, int | None]] = {
+    "flexpanel_create_node": (0, 1),
+    "flexpanel_delete_node": (1, 1),
+    "flexpanel_node_insert_child": (3, 3),
+    "flexpanel_node_remove_child": (2, 2),
+    "flexpanel_node_remove_all_children": (1, 1),
+    "flexpanel_calculate_layout": (4, 4),
+    "flexpanel_node_set_name": (2, 2),
+    "flexpanel_node_layout_get_position": (1, 2),
+    "flexpanel_node_get_num_children": (1, 1),
+    "flexpanel_node_get_child": (2, 2),
+    "flexpanel_node_get_child_hash": (2, 2),
+    "flexpanel_node_get_parent": (1, 1),
+    "flexpanel_node_get_name": (1, 1),
+    "flexpanel_node_get_data": (1, 1),
+    "flexpanel_node_get_struct": (1, 1),
+    "flexpanel_node_set_measure_function": (2, 2),
+    "flexpanel_node_get_measure_function": (1, 1),
+    "flexpanel_node_style_set_width": (3, 3),
+    "flexpanel_node_style_set_height": (3, 3),
+    "flexpanel_node_style_set_min_width": (3, 3),
+    "flexpanel_node_style_set_max_width": (3, 3),
+    "flexpanel_node_style_set_min_height": (3, 3),
+    "flexpanel_node_style_set_max_height": (3, 3),
+    "flexpanel_node_style_set_aspect_ratio": (2, 2),
+    "flexpanel_node_style_set_position": (4, 4),
+    "flexpanel_node_style_set_position_type": (2, 2),
+    "flexpanel_node_style_set_margin": (3, 4),
+    "flexpanel_node_style_set_padding": (3, 4),
+    "flexpanel_node_style_set_border": (3, 3),
+    "flexpanel_node_style_set_gap": (3, 3),
+    "flexpanel_node_style_set_direction": (2, 2),
+    "flexpanel_node_style_set_flex_direction": (2, 2),
+    "flexpanel_node_style_set_flex_wrap": (2, 2),
+    "flexpanel_node_style_set_flex_basis": (3, 3),
+    "flexpanel_node_style_set_flex_grow": (2, 2),
+    "flexpanel_node_style_set_flex_shrink": (2, 2),
+    "flexpanel_node_style_set_flex": (2, 2),
+    "flexpanel_node_style_set_justify_content": (2, 2),
+    "flexpanel_node_style_set_align_items": (2, 2),
+    "flexpanel_node_style_set_align_self": (2, 2),
+    "flexpanel_node_style_set_align_content": (2, 2),
+    "flexpanel_node_style_set_display": (2, 2),
+    "flexpanel_node_style_get_width": (1, 1),
+    "flexpanel_node_style_get_height": (1, 1),
+    "flexpanel_node_style_get_min_width": (1, 1),
+    "flexpanel_node_style_get_max_width": (1, 1),
+    "flexpanel_node_style_get_min_height": (1, 1),
+    "flexpanel_node_style_get_max_height": (1, 1),
+    "flexpanel_node_style_get_aspect_ratio": (1, 1),
+    "flexpanel_node_style_get_position": (2, 2),
+    "flexpanel_node_style_get_position_type": (1, 1),
+    "flexpanel_node_style_get_margin": (2, 2),
+    "flexpanel_node_style_get_padding": (2, 2),
+    "flexpanel_node_style_get_border": (2, 2),
+    "flexpanel_node_style_get_gap": (2, 2),
+    "flexpanel_node_style_get_direction": (1, 1),
+    "flexpanel_node_style_get_flex_direction": (1, 1),
+    "flexpanel_node_style_get_flex_wrap": (1, 1),
+    "flexpanel_node_style_get_flex_basis": (1, 1),
+    "flexpanel_node_style_get_flex_grow": (1, 1),
+    "flexpanel_node_style_get_flex_shrink": (1, 1),
+    "flexpanel_node_style_get_flex": (1, 1),
+    "flexpanel_node_style_get_justify_content": (1, 1),
+    "flexpanel_node_style_get_align_items": (1, 1),
+    "flexpanel_node_style_get_align_self": (1, 1),
+    "flexpanel_node_style_get_align_content": (1, 1),
+    "flexpanel_node_style_get_display": (1, 1),
+}
+
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "draw_self": (0, 0),
     "draw_sprite": (4, 4),
@@ -853,6 +924,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _ROOM_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ROOM_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_room_api", target)
+
+    for name, target in _FLEXPANEL_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _FLEXPANEL_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _DS_COLLECTIONS_FUNCTIONS.items():
         lowering_kind: GMLFunctionLoweringKind = "runtime"

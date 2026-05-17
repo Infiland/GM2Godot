@@ -152,6 +152,16 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert json_encode is not None
         self.assertEqual(json_encode.status, "implemented")
         self.assertEqual(json_encode.issue_number, 505)
+        buffer_create = get_gml_api_entry("buffer_create")
+        self.assertIsNotNone(buffer_create)
+        assert buffer_create is not None
+        self.assertEqual(buffer_create.status, "implemented")
+        self.assertEqual(buffer_create.issue_number, 506)
+        buffer_save_async = get_gml_api_entry("buffer_save_async")
+        self.assertIsNotNone(buffer_save_async)
+        assert buffer_save_async is not None
+        self.assertEqual(buffer_save_async.status, "partial")
+        self.assertEqual(buffer_save_async.issue_number, 506)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -218,6 +228,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             "ini_read_string",
             "json_encode",
             "json_decode",
+            "buffer_create",
+            "buffer_write",
+            "buffer_read",
+            "buffer_seek",
+            "buffer_base64_encode",
+            "buffer_md5",
             "keyboard_check",
             "method",
             "show_debug_message",

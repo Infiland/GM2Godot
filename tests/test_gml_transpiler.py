@@ -3095,6 +3095,37 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "ini_read_string.*expects 3.*got 2"):
             transpile_gml_code("ini_read_string('section', 'key');", indent="")
 
+    def test_buffer_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "buf = buffer_create(16, buffer_grow, 4);"
+                "buffer_write(buf, buffer_u8, 7);"
+                "buffer_write(buf, buffer_s16, -2);"
+                "buffer_seek(buf, buffer_seek_start, 0);"
+                "a = buffer_read(buf, buffer_u8);"
+                "b = buffer_peek(buf, 4, buffer_s16);"
+                "buffer_poke(buf, 8, buffer_string, 'ok');"
+                "hash = buffer_md5(buf, 0, buffer_get_used_size(buf));"
+                "buffer_delete(buf);",
+                indent="",
+            ),
+            "buf = GMRuntime.gml_buffer_create(16, 1, 4)\n"
+            "GMRuntime.gml_buffer_write(buf, 1, 7)\n"
+            "GMRuntime.gml_buffer_write(buf, 4, -2)\n"
+            "GMRuntime.gml_buffer_seek(buf, 0, 0)\n"
+            "a = GMRuntime.gml_buffer_read(buf, 1)\n"
+            "b = GMRuntime.gml_buffer_peek(buf, 4, 4)\n"
+            "GMRuntime.gml_buffer_poke(buf, 8, 10, 'ok')\n"
+            "hash = GMRuntime.gml_buffer_md5(buf, 0, GMRuntime.gml_buffer_get_used_size(buf))\n"
+            "GMRuntime.gml_buffer_delete(buf)",
+        )
+
+    def test_buffer_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "buffer_create.*expects 3.*got 2"):
+            transpile_gml_code("buffer_create(16, buffer_grow);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "buffer_poke.*expects 4.*got 3"):
+            transpile_gml_code("buffer_poke(buf, 0, buffer_u8);", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

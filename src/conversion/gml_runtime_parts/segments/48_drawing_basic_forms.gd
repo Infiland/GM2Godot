@@ -10,6 +10,7 @@ const GML_TILE_FLIP = 0x20000000
 const GML_TILE_ROTATE = 0x40000000
 const GML_TILE_INDEX_MASK = 0x000fffff
 const GML_TEXTURE_HANDLE_KIND = "texture"
+const GML_SHADER_UNIFORM_HANDLE_KIND = "shader_uniform"
 const GML_BLEND_NORMAL = 0
 const GML_BLEND_ADD = 1
 const GML_BLEND_SUBTRACT = 2
@@ -22,6 +23,8 @@ static var _gml_draw_context_stack = []
 static var _gml_draw_sprite_cache = {}
 static var _gml_draw_font_cache = {}
 static var _gml_draw_tileset_cache = {}
+static var _gml_shader_material_cache = {}
+static var _gml_shader_uniform_cache = {}
 static var _gml_draw_state = {
 	"color": 0xffffff,
 	"alpha": 1.0,
@@ -36,7 +39,9 @@ static var _gml_draw_state = {
 	"color_write": [true, true, true, true],
 	"cull_mode": GML_CULL_NO_CULLING,
 	"alpha_test_enabled": false,
-	"alpha_test_ref": 0.0
+	"alpha_test_ref": 0.0,
+	"shader": null,
+	"shader_material": null
 }
 
 
@@ -412,6 +417,71 @@ static func gml_texture_get_height(texture):
 	return int(resolved_texture.get_height())
 
 
+static func gml_shader_set(shader):
+	var material = _gml_shader_material(shader)
+	if material == null:
+		return false
+	_gml_draw_state["shader"] = _gml_shader_entry(shader)
+	_gml_draw_state["shader_material"] = material
+	_gml_draw_apply_gpu_state()
+	return true
+
+
+static func gml_shader_reset():
+	_gml_draw_state["shader"] = null
+	_gml_draw_state["shader_material"] = null
+	_gml_draw_apply_gpu_state()
+	return null
+
+
+static func gml_shader_get_name(shader):
+	var entry = _gml_shader_entry(shader)
+	if entry == null:
+		return ""
+	return str(entry["name"])
+
+
+static func gml_shader_is_compiled(shader):
+	return _gml_shader_resource(shader) != null
+
+
+static func gml_shader_get_uniform(shader, uniform_name):
+	return _gml_shader_uniform_handle(shader, uniform_name)
+
+
+static func gml_shader_get_sampler_index(shader, sampler_name):
+	return _gml_shader_uniform_handle(shader, sampler_name)
+
+
+static func gml_shader_set_uniform_f(uniform, x, y = null, z = null, w = null):
+	return _gml_shader_set_uniform_value(uniform, _gml_shader_uniform_float_value(x, y, z, w))
+
+
+static func gml_shader_set_uniform_i(uniform, x, y = null, z = null, w = null):
+	return _gml_shader_set_uniform_value(uniform, _gml_shader_uniform_int_value(x, y, z, w))
+
+
+static func gml_shader_set_uniform_f_array(uniform, values):
+	var array = PackedFloat32Array()
+	for value in _gml_shader_uniform_array(values):
+		array.append(_to_real(value))
+	return _gml_shader_set_uniform_value(uniform, array)
+
+
+static func gml_shader_set_uniform_i_array(uniform, values):
+	var array = PackedInt32Array()
+	for value in _gml_shader_uniform_array(values):
+		array.append(int(_to_real(value)))
+	return _gml_shader_set_uniform_value(uniform, array)
+
+
+static func gml_texture_set_stage(uniform, texture):
+	var resolved_texture = _gml_texture_resolve(texture)
+	if resolved_texture == null:
+		return false
+	return _gml_shader_set_uniform_value(uniform, resolved_texture)
+
+
 static func gml_draw_clear(color):
 	if _gml_surface_clear_active_target(color, 1.0):
 		return null
@@ -592,6 +662,131 @@ static func _gml_texture_resolve(texture):
 	return null
 
 
+static func _gml_shader_entry(shader):
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(shader)
+	if entry == null:
+		return null
+	if not entry.has("type") or str(entry["type"]) != "shader":
+		return null
+	return entry
+
+
+static func _gml_shader_resource(shader):
+	var entry = _gml_shader_entry(shader)
+	if entry == null:
+		return null
+	var godot_path = str(entry["godot_path"]) if entry.has("godot_path") else ""
+	if godot_path == "":
+		return null
+	if not ResourceLoader.exists(godot_path):
+		return null
+	var resource = load(godot_path)
+	if resource is Shader:
+		return resource
+	return null
+
+
+static func _gml_shader_material(shader):
+	var entry = _gml_shader_entry(shader)
+	if entry == null:
+		return null
+	var shader_id = int(entry["id"])
+	if _gml_shader_material_cache.has(shader_id):
+		var cached: Variant = _gml_shader_material_cache[shader_id]
+		if cached is ShaderMaterial and cached.shader is Shader:
+			return cached
+	var shader_resource = _gml_shader_resource(shader)
+	if shader_resource == null:
+		return null
+	var material = ShaderMaterial.new()
+	material.shader = shader_resource
+	_gml_shader_material_cache[shader_id] = material
+	return material
+
+
+static func _gml_shader_uniform_handle(shader, uniform_name):
+	var entry = _gml_shader_entry(shader)
+	if entry == null:
+		return gml_handle_invalid(GML_SHADER_UNIFORM_HANDLE_KIND)
+	var name = str(uniform_name)
+	if name == "":
+		return gml_handle_invalid(GML_SHADER_UNIFORM_HANDLE_KIND)
+	var key = str(entry["id"]) + "::" + name
+	if _gml_shader_uniform_cache.has(key):
+		var cached: Variant = _gml_shader_uniform_cache[key]
+		if gml_handle_is_valid(cached):
+			return cached
+	var uniform = {
+		"shader_id": int(entry["id"]),
+		"shader": entry,
+		"name": name
+	}
+	var handle = gml_handle_register(GML_SHADER_UNIFORM_HANDLE_KIND, uniform, name)
+	_gml_shader_uniform_cache[key] = handle
+	return handle
+
+
+static func _gml_shader_uniform_resolve(uniform):
+	var handle = gml_handle_from_value(GML_SHADER_UNIFORM_HANDLE_KIND, uniform)
+	if gml_handle_is_valid(handle) and typeof(handle.reference) == TYPE_DICTIONARY:
+		return handle.reference
+	return null
+
+
+static func _gml_shader_set_uniform_value(uniform, value):
+	var resolved_uniform: Variant = _gml_shader_uniform_resolve(uniform)
+	if resolved_uniform == null:
+		return false
+	var material = _gml_shader_material_for_uniform(resolved_uniform)
+	if material == null:
+		return false
+	material.set_shader_parameter(str(resolved_uniform["name"]), value)
+	return true
+
+
+static func _gml_shader_material_for_uniform(uniform):
+	var active_entry = _gml_draw_state["shader"]
+	var active_material = _gml_draw_state["shader_material"]
+	if active_entry != null and active_material is ShaderMaterial:
+		if int(active_entry["id"]) == int(uniform["shader_id"]):
+			return active_material
+	return _gml_shader_material(uniform["shader"])
+
+
+static func _gml_shader_uniform_float_value(x, y, z, w):
+	if w != null:
+		return Vector4(_to_real(x), _to_real(y), _to_real(z), _to_real(w))
+	if z != null:
+		return Vector3(_to_real(x), _to_real(y), _to_real(z))
+	if y != null:
+		return Vector2(_to_real(x), _to_real(y))
+	return _to_real(x)
+
+
+static func _gml_shader_uniform_int_value(x, y, z, w):
+	if w != null:
+		return Vector4i(int(_to_real(x)), int(_to_real(y)), int(_to_real(z)), int(_to_real(w)))
+	if z != null:
+		return Vector3i(int(_to_real(x)), int(_to_real(y)), int(_to_real(z)))
+	if y != null:
+		return Vector2i(int(_to_real(x)), int(_to_real(y)))
+	return int(_to_real(x))
+
+
+static func _gml_shader_uniform_array(values):
+	if typeof(values) == TYPE_ARRAY:
+		return values
+	if is_handle(values):
+		var buffer = _gml_buffer_resolve(values)
+		if buffer != null:
+			var result = []
+			for index in range(buffer.used_size):
+				result.append(_gml_buffer_read_u8(buffer, index))
+			return result
+	return []
+
+
 static func _gml_draw_apply_gpu_state(target = null):
 	var resolved_target = target if target != null else _gml_draw_current_context_target()
 	if not (resolved_target is CanvasItem):
@@ -600,6 +795,10 @@ static func _gml_draw_apply_gpu_state(target = null):
 		resolved_target.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR if bool(_gml_draw_state["texture_filter"]) else CanvasItem.TEXTURE_FILTER_NEAREST
 	if _object_has_property(resolved_target, "texture_repeat"):
 		resolved_target.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED if bool(_gml_draw_state["texture_repeat"]) else CanvasItem.TEXTURE_REPEAT_DISABLED
+	var shader_material = _gml_draw_state["shader_material"]
+	if shader_material is ShaderMaterial:
+		resolved_target.material = shader_material
+		return null
 	var material: Variant = resolved_target.material
 	if not (material is CanvasItemMaterial):
 		material = CanvasItemMaterial.new()
@@ -992,5 +1191,7 @@ static func _gml_draw_state_copy():
 		"color_write": [color_write[0], color_write[1], color_write[2], color_write[3]],
 		"cull_mode": _gml_draw_state["cull_mode"],
 		"alpha_test_enabled": _gml_draw_state["alpha_test_enabled"],
-		"alpha_test_ref": _gml_draw_state["alpha_test_ref"]
+		"alpha_test_ref": _gml_draw_state["alpha_test_ref"],
+		"shader": _gml_draw_state["shader"],
+		"shader_material": _gml_draw_state["shader_material"]
 	}

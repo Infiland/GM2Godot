@@ -5044,29 +5044,50 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "d3d_light_define_direction",
         )
     ),
-    _entry(
-        "shader_set",
-        "Shaders",
-        "planned",
-        "src.conversion.shaders",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
-        "Shader assets can be converted, but runtime shader state helpers are planned.",
+    *(
+        _entry(
+            name,
+            "Shaders",
+            "implemented",
+            "src.conversion.gml_runtime_parts.segments.48_drawing_basic_forms",
+            "n/a",
+            "yes",
+            "yes",
+            "partial",
+            "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+            "Resolves converted shader assets through the registry and applies ShaderMaterial state/uniforms through the draw runtime.",
+        )
+        for name in (
+            "shader_set",
+            "shader_reset",
+            "shader_get_name",
+            "shader_is_compiled",
+            "shader_get_uniform",
+            "shader_get_sampler_index",
+            "shader_set_uniform_f",
+            "shader_set_uniform_i",
+            "shader_set_uniform_f_array",
+            "shader_set_uniform_i_array",
+            "texture_set_stage",
+        )
     ),
-    _entry(
-        "shader_set_uniform_f",
-        "Shaders",
-        "planned",
-        "src.conversion.shaders",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
-        "Requires ShaderMaterial parameter bridge.",
+    *(
+        _entry(
+            name,
+            "Shaders",
+            "planned",
+            "src.conversion.gml_transpiler_parts.gml_api_manifest",
+            "n/a",
+            "no",
+            "no",
+            "partial",
+            "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+            "Matrix and advanced sampler helpers need additional GameMaker-to-Godot parameter shape validation.",
+        )
+        for name in (
+            "shader_set_uniform_matrix",
+            "shader_enable_corner_id",
+        )
     ),
     _entry(
         "physics_world_create",

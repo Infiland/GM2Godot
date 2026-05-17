@@ -103,6 +103,11 @@ _DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "draw_tile": frozenset({0}),
     "draw_set_font": frozenset({0}),
     "sprite_get_texture": frozenset({0}),
+    "shader_set": frozenset({0}),
+    "shader_get_name": frozenset({0}),
+    "shader_is_compiled": frozenset({0}),
+    "shader_get_uniform": frozenset({0}),
+    "shader_get_sampler_index": frozenset({0}),
     "camera_create_view": frozenset({5}),
 }
 

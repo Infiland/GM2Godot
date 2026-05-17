@@ -107,6 +107,12 @@ _STRUCT_ARITY: dict[str, tuple[int, int | None]] = {
 _VARIABLE_ARITY: dict[str, tuple[int, int | None]] = {
     "method_call": (1, 4),
     "method": (2, 2),
+    "script_execute": (1, None),
+    "script_exists": (1, 1),
+    "script_get_name": (1, 1),
+    "script_get_callable": (1, 1),
+    "global_function": (1, 1),
+    "argument_count": (0, 0),
     "ref_create": (2, 3),
     "variable_clone": (1, 2),
     "variable_instance_exists": (2, 2),
@@ -748,7 +754,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _VARIABLE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _VARIABLE_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name == "script_execute":
+            lowering_kind = "runtime_variadic_1"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _DS_MAP_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DS_MAP_ARITY[name]

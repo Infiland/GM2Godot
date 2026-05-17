@@ -88,9 +88,9 @@ class GMLMethod:
 		is_constructor = bool(method_is_constructor)
 
 	func gml_callv(args):
-		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE:
+		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():
 			var method_name = function_value.get_method()
-			if str(method_name) != "":
+			if str(method_name) != "" and bound_self.has_method(method_name):
 				return Callable(bound_self, method_name).callv(args)
 		return function_value.callv(args)
 

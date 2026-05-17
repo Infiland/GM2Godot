@@ -320,6 +320,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "physics_apply_impulse(0, 0, 10, 0)",
         "GMRuntime.gml_physics_apply_impulse(0, 0, 10, 0, self)",
     ),
+    RuntimeValueParityCase(
+        "script_execute(scr_add, 1, 2)",
+        'GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index("scr_add"), [1, 2])',
+    ),
+    RuntimeValueParityCase("script_exists(scr_add)", 'GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index("scr_add"))'),
+    RuntimeValueParityCase("script_get_name(scr_add)", 'GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index("scr_add"))'),
+    RuntimeValueParityCase("global_function('scr_add')", "GMRuntime.gml_global_function('scr_add')"),
+    RuntimeValueParityCase("argument0", "GMRuntime.gml_argument(0)"),
+    RuntimeValueParityCase("argument15", "GMRuntime.gml_argument(15)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
     RuntimeValueParityCase("0xDEAD_BEEF", "0xDEADBEEF"),
     RuntimeValueParityCase("$2c8e", "0x2c8e"),
@@ -1215,6 +1224,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_physics_apply_local_impulse",
             "gml_physics_apply_angular_impulse",
             "gml_physics_apply_torque",
+            "gml_script_execute",
+            "gml_script_call",
+            "gml_script_register",
+            "gml_script_registry_set",
+            "gml_script_registry_entries",
+            "gml_script_exists",
+            "gml_script_get_name",
+            "gml_script_get_callable",
+            "gml_global_function",
+            "gml_argument",
+            "gml_argument_count",
             "gml_add",
             "gml_sub",
             "gml_mul",
@@ -1925,6 +1945,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("_gml_asset_dynamic_ids[asset_id] = true", GML_RUNTIME_SCRIPT)
         self.assertIn("return false", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_script_registry_helpers_lazy_load_generated_registry(self):
+        self.assertIn('const GML_SCRIPT_REGISTRY_PATH = "res://gm2godot/gml_script_registry.gd"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_script_registry_loaded = false", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_script_registry = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_script_registry_ensure_loaded():", GML_RUNTIME_SCRIPT)
+        self.assertIn("ResourceLoader.exists(GML_SCRIPT_REGISTRY_PATH)", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_script_registry_set(registry_script.gml_script_registry_entries())", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_script_registry_entries():", GML_RUNTIME_SCRIPT)
+
     def test_runtime_audio_helpers_use_sound_handles_and_asset_metadata(self):
         self.assertIn('const GML_SOUND_HANDLE_KIND = "sound"', GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_audio_instances = {}", GML_RUNTIME_SCRIPT)
@@ -2343,7 +2372,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "spr_player", "snd_hit", "shd_wave", "r_next"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "scr_add", "spr_player", "snd_hit", "shd_wave", "r_next"}),
                     parity_case.gdscript_expression,
                 )
 

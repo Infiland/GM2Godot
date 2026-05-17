@@ -8,6 +8,7 @@ from src.conversion.fonts import FontConverter
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.notes import NoteConverter
 from src.conversion.tilesets import TileSetConverter
+from src.conversion.scripts import ScriptConverter
 from src.conversion.objects import ObjectConverter
 from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
@@ -19,7 +20,7 @@ from src.localization import get_localized
 
 
 CONVERSION_CATEGORIES: dict[str, list[str]] = {
-    "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms", "asset_registry"],
+    "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "scripts", "objects", "rooms", "asset_registry"],
     "project": ["game_icon", "project_name", "project_settings", "audio_buses", "notes"],
     "wip": ["shaders", "tilesets"],
 }
@@ -113,6 +114,13 @@ class Converter:
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
             ).convert_all(), "Console_Convertor_IncludedFiles"),
+            ("scripts", lambda: ScriptConverter(
+                gm_path, godot_path, self.log_callback,
+                self.progress_callback, self.conversion_running.is_set,
+                update_log_callback=self.update_log_callback,
+                compact_logging=self.compact_logging,
+                max_workers=self.max_workers,
+            ).convert_all(), "Console_Convertor_Scripts"),
             ("objects", lambda: ObjectConverter(
                 gm_path, godot_path, self.log_callback,
                 self.progress_callback, self.conversion_running.is_set,

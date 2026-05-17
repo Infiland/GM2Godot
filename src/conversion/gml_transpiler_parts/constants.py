@@ -760,6 +760,12 @@ _STRUCT_RUNTIME_FUNCTIONS = {
 _VARIABLE_RUNTIME_FUNCTIONS = {
     "method_call": "gml_method_call",
     "method": "gml_method",
+    "script_execute": "gml_script_execute",
+    "script_exists": "gml_script_exists",
+    "script_get_name": "gml_script_get_name",
+    "script_get_callable": "gml_script_get_callable",
+    "global_function": "gml_global_function",
+    "argument_count": "gml_argument_count",
     "ref_create": "gml_ref_create",
     "variable_clone": "gml_variable_clone",
     "variable_instance_exists": "gml_variable_instance_exists",

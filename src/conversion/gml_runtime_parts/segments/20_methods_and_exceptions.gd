@@ -1,10 +1,119 @@
+const GML_SCRIPT_REGISTRY_PATH = "res://gm2godot/gml_script_registry.gd"
+
+static var _gml_script_registry_loaded = false
+static var _gml_script_registry = {}
+static var _gml_script_names = {}
+static var _gml_script_argument_stack = []
+
+
 static func gml_method_call(method, array_args = null, offset = 0, num_args = null):
 	if not is_method(method):
 		return gml_unsupported_type_error("GML method_call", method)
 	var call_args = _gml_method_call_args(array_args, offset, num_args)
 	if is_undefined(call_args):
 		return call_args
-	return method.gml_callv(call_args)
+	return method.gml_callv(call_args) if method is GMLMethod else method.callv(call_args)
+
+
+static func gml_script_execute(script, args = []):
+	var descriptor: Variant = _gml_script_resolve(script)
+	if descriptor == null:
+		return gml_unsupported_type_error("GML script_execute", script)
+	return gml_script_call(descriptor, args)
+
+
+static func gml_script_call(script_or_callable, args = []):
+	var call_args = args if typeof(args) == TYPE_ARRAY else [args]
+	var callable = script_or_callable
+	var use_legacy_arguments = false
+	if typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable"):
+		callable = script_or_callable["callable"]
+		use_legacy_arguments = bool(script_or_callable.get("legacy_arguments", false))
+	if not is_method(callable):
+		return gml_unsupported_type_error("GML script callable", callable)
+	_gml_script_push_arguments(call_args)
+	var result = null
+	if use_legacy_arguments:
+		result = callable.gml_callv([]) if callable is GMLMethod else callable.callv([])
+	else:
+		result = callable.gml_callv(call_args) if callable is GMLMethod else callable.callv(call_args)
+	_gml_script_pop_arguments()
+	return result
+
+
+static func gml_script_register(script, callable, legacy_arguments = false):
+	if not is_method(callable):
+		return false
+	var key = _gml_script_key(script)
+	if key == "":
+		return false
+	var name = _gml_script_name(script)
+	_gml_script_registry[key] = {
+		"callable": callable,
+		"name": name,
+		"legacy_arguments": gml_bool(legacy_arguments)
+	}
+	_gml_script_names[name] = key
+	return true
+
+
+static func gml_script_registry_set(entries):
+	_gml_script_registry_loaded = true
+	_gml_script_registry = {}
+	_gml_script_names = {}
+	if typeof(entries) != TYPE_ARRAY:
+		return null
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY or not entry.has("callable"):
+			continue
+		var script = entry["id"] if entry.has("id") else entry.get("name", "")
+		gml_script_register(script, entry["callable"], bool(entry.get("legacy_arguments", false)))
+	return null
+
+
+static func gml_script_registry_entries():
+	_gml_script_registry_ensure_loaded()
+	var entries = []
+	for key in _gml_script_registry.keys():
+		var entry: Variant = _gml_script_registry[key]
+		entries.append({
+			"id": int(key) if is_numeric(key) else key,
+			"name": str(entry.get("name", key)),
+			"callable": entry["callable"],
+			"legacy_arguments": bool(entry.get("legacy_arguments", false))
+		})
+	return entries
+
+
+static func gml_script_exists(script):
+	return _gml_script_entry(script) != null
+
+
+static func gml_script_get_name(script):
+	return _gml_script_name(script)
+
+
+static func gml_script_get_callable(script):
+	var descriptor: Variant = _gml_script_resolve(script)
+	if descriptor == null:
+		return gml_undefined()
+	return descriptor["callable"]
+
+
+static func gml_global_function(name):
+	return gml_script_get_callable(name)
+
+
+static func gml_argument(index):
+	var args = _gml_builtin_globals["argument"] if _gml_builtin_globals.has("argument") else []
+	var resolved_index = int(_to_real(index))
+	if typeof(args) == TYPE_ARRAY and resolved_index >= 0 and resolved_index < args.size():
+		return args[resolved_index]
+	return gml_undefined()
+
+
+static func gml_argument_count():
+	return int(_gml_builtin_globals["argument_count"]) if _gml_builtin_globals.has("argument_count") else 0
 
 
 static func gml_method(scope, func_or_method, method_is_constructor = false):
@@ -135,3 +244,76 @@ static func _gml_method_call_args(array_args, offset, num_args):
 		remaining -= 1
 	return args
 
+
+static func _gml_script_resolve(script):
+	_gml_script_registry_ensure_loaded()
+	var key = _gml_script_key(script)
+	if key != "" and _gml_script_registry.has(key):
+		return _gml_script_registry[key]
+	if is_method(script):
+		return {"callable": script, "name": "", "legacy_arguments": false}
+	return null
+
+
+static func _gml_script_registry_ensure_loaded():
+	if _gml_script_registry_loaded:
+		return
+	_gml_script_registry_loaded = true
+	if not ResourceLoader.exists(GML_SCRIPT_REGISTRY_PATH):
+		return
+	var registry_script = load(GML_SCRIPT_REGISTRY_PATH)
+	if registry_script == null:
+		return
+	if registry_script.has_method("gml_script_registry_entries"):
+		gml_script_registry_set(registry_script.gml_script_registry_entries())
+
+
+static func _gml_script_entry(script):
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(script)
+	if entry != null and entry.has("type") and str(entry["type"]) == "script":
+		return entry
+	return null
+
+
+static func _gml_script_key(script):
+	var entry: Variant = _gml_script_entry(script)
+	if entry != null:
+		return str(entry["id"])
+	if is_numeric(script):
+		return str(_to_int64_value(script))
+	var name = str(script)
+	if _gml_script_names.has(name):
+		return str(_gml_script_names[name])
+	if name != "":
+		return name
+	return ""
+
+
+static func _gml_script_name(script):
+	var entry: Variant = _gml_script_entry(script)
+	if entry != null:
+		return str(entry["name"])
+	var key = _gml_script_key(script)
+	if key != "" and _gml_script_registry.has(key):
+		return str(_gml_script_registry[key].get("name", key))
+	return str(script)
+
+
+static func _gml_script_push_arguments(args):
+	_gml_script_argument_stack.append({
+		"argument": _gml_builtin_globals["argument"] if _gml_builtin_globals.has("argument") else [],
+		"argument_count": _gml_builtin_globals["argument_count"] if _gml_builtin_globals.has("argument_count") else 0
+	})
+	_gml_builtin_globals["argument"] = args
+	_gml_builtin_globals["argument_count"] = args.size()
+
+
+static func _gml_script_pop_arguments():
+	if _gml_script_argument_stack.is_empty():
+		_gml_builtin_globals["argument"] = []
+		_gml_builtin_globals["argument_count"] = 0
+		return
+	var previous: Variant = _gml_script_argument_stack.pop_back()
+	_gml_builtin_globals["argument"] = previous["argument"]
+	_gml_builtin_globals["argument_count"] = previous["argument_count"]

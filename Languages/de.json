@@ -129,6 +129,12 @@
 
 "Console_Convertor_AssetRegistry" : "Asset-Registry wird generiert...",
 
+"Console_Convertor_Scripts" : "Skripte werden konvertiert...",
+"Console_Convertor_Scripts_Complete" : "Skript-Konvertierung abgeschlossen.",
+"Console_Convertor_Scripts_Stopped" : "Skript-Konvertierung gestoppt.",
+"Console_Convertor_Scripts_Converted" : "Skript konvertiert: {script_name}",
+"Console_Convertor_Scripts_ParseError" : "Warnung: Skript {script_name} konnte nicht konvertiert werden: {error}",
+
 "Console_Convertor_Notes" : "Notizen werden konvertiert...",
 "Console_Convertor_Notes_Copied" : "Notiz kopiert: {note_name}",
 "Console_Convertor_Notes_Stopped" : "Notiz-Konvertierung gestoppt.",
@@ -169,7 +175,7 @@
 "Settings_Title" : "Konvertierungseinstellungen",
 "Settings_Files_Heading" : "Wählen Sie zu konvertierende Dateien aus:",
 "Settings_Categories_Headings" : ["Assets", "Projekt", "WIP"],
-"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "objects", "rooms"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
+"Settings_Categories_Contents" : [["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "scripts", "objects", "rooms", "asset_registry"], ["game_icon", "project_name", "project_settings", "audio_buses", "notes"], ["shaders", "tilesets"]],
 "Settings_Labels": {
     "sprites": "Sprites",
     "fonts": "Schriftarten",
@@ -184,7 +190,9 @@
     "rooms": "Raeume",
     "shaders": "Shader",
     "tilesets": "Tilesets",
-    "included_files": "Eingeschlossene Dateien"
+    "included_files": "Eingeschlossene Dateien",
+    "scripts": "Skripte",
+    "asset_registry": "Asset-Registry"
 },
 
 "Settings_Button_SelectAll" : "Alle auswählen",

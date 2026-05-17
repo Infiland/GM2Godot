@@ -3245,6 +3245,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "physics_apply_force.*expects 4.*got 3"):
             transpile_gml_code("physics_apply_force(0, 0, 1);", indent="")
 
+    def test_script_helpers_and_legacy_arguments_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "result = script_execute(scr_add, 1, 2);"
+                "ok = script_exists(scr_add);"
+                "name = script_get_name(scr_add);"
+                "fn = global_function('scr_add');"
+                "legacy = argument0 + argument1 + argument_count;",
+                indent="",
+                asset_names={"scr_add"},
+            ),
+            "result = GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index(\"scr_add\"), [1, 2])\n"
+            "ok = GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
+            "name = GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
+            "fn = GMRuntime.gml_global_function('scr_add')\n"
+            "legacy = GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1)), GMRuntime.gml_builtin_global(\"argument_count\"))",
+        )
+
+    def test_script_execute_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "script_execute.*at least 1.*got 0"):
+            transpile_gml_code("script_execute();", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

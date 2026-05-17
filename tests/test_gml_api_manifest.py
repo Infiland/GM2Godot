@@ -222,6 +222,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert shader_set_uniform_matrix is not None
         self.assertEqual(shader_set_uniform_matrix.status, "planned")
         self.assertEqual(shader_set_uniform_matrix.issue_number, 510)
+        physics_world_create = get_gml_api_entry("physics_world_create")
+        self.assertIsNotNone(physics_world_create)
+        assert physics_world_create is not None
+        self.assertEqual(physics_world_create.status, "implemented")
+        self.assertEqual(physics_world_create.issue_number, 511)
+        physics_apply_force = get_gml_api_entry("physics_apply_force")
+        self.assertIsNotNone(physics_apply_force)
+        assert physics_apply_force is not None
+        self.assertEqual(physics_apply_force.status, "implemented")
+        self.assertEqual(physics_apply_force.issue_number, 511)
+        physics_joint_distance_create = get_gml_api_entry("physics_joint_distance_create")
+        self.assertIsNotNone(physics_joint_distance_create)
+        assert physics_joint_distance_create is not None
+        self.assertEqual(physics_joint_distance_create.status, "planned")
+        self.assertEqual(physics_joint_distance_create.issue_number, 511)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -319,6 +334,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             "shader_set_uniform_f",
             "shader_set_uniform_i",
             "texture_set_stage",
+            "physics_world_create",
+            "physics_world_gravity",
+            "physics_fixture_create",
+            "physics_fixture_bind",
+            "physics_apply_force",
+            "physics_apply_impulse",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -370,6 +391,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
         with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_matrix.*planned"):
             transpile_gml_expression("shader_set_uniform_matrix(u, matrix)")
+        with self.assertRaisesRegex(GMLTranspileError, "physics_joint_distance_create.*planned"):
+            transpile_gml_expression("physics_joint_distance_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

@@ -23,6 +23,7 @@ from .constants import (
     _MP_GRID_RUNTIME_FUNCTIONS,
     _NETWORK_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
+    _PHYSICS_RUNTIME_FUNCTIONS,
     _ROOM_RUNTIME_FUNCTIONS,
     _RUNTIME_FUNCTIONS,
     _STRING_RUNTIME_FUNCTIONS,
@@ -356,6 +357,29 @@ _NETWORK_ARITY: dict[str, tuple[int, int | None]] = {
     "network_send_udp": (5, 5),
     "network_send_udp_raw": (5, 5),
     "network_destroy": (1, 1),
+}
+
+_PHYSICS_ARITY: dict[str, tuple[int, int | None]] = {
+    "physics_world_create": (0, 1),
+    "physics_world_gravity": (2, 2),
+    "physics_world_gravity_get": (0, 0),
+    "physics_world_update_speed": (1, 1),
+    "physics_pause_enable": (1, 1),
+    "physics_fixture_create": (0, 0),
+    "physics_fixture_delete": (1, 1),
+    "physics_fixture_set_box_shape": (3, 3),
+    "physics_fixture_set_circle_shape": (2, 2),
+    "physics_fixture_set_density": (2, 2),
+    "physics_fixture_set_friction": (2, 2),
+    "physics_fixture_set_restitution": (2, 2),
+    "physics_fixture_set_sensor": (2, 2),
+    "physics_fixture_bind": (2, 2),
+    "physics_apply_force": (4, 4),
+    "physics_apply_impulse": (4, 4),
+    "physics_apply_local_force": (4, 4),
+    "physics_apply_local_impulse": (4, 4),
+    "physics_apply_angular_impulse": (1, 1),
+    "physics_apply_torque": (1, 1),
 }
 
 _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
@@ -757,6 +781,20 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in _NETWORK_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _NETWORK_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _PHYSICS_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _PHYSICS_ARITY[name]
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name in (
+            "physics_apply_force",
+            "physics_apply_impulse",
+            "physics_apply_local_force",
+            "physics_apply_local_impulse",
+            "physics_apply_angular_impulse",
+            "physics_apply_torque",
+        ):
+            lowering_kind = "runtime_append_self"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _ASSET_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ASSET_ARITY[name]

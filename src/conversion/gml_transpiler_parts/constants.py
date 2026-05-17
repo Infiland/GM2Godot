@@ -715,6 +715,29 @@ _NETWORK_RUNTIME_FUNCTIONS = {
     "network_destroy": "gml_network_destroy",
 }
 
+_PHYSICS_RUNTIME_FUNCTIONS = {
+    "physics_world_create": "gml_physics_world_create",
+    "physics_world_gravity": "gml_physics_world_gravity",
+    "physics_world_gravity_get": "gml_physics_world_gravity_get",
+    "physics_world_update_speed": "gml_physics_world_update_speed",
+    "physics_pause_enable": "gml_physics_pause_enable",
+    "physics_fixture_create": "gml_physics_fixture_create",
+    "physics_fixture_delete": "gml_physics_fixture_delete",
+    "physics_fixture_set_box_shape": "gml_physics_fixture_set_box_shape",
+    "physics_fixture_set_circle_shape": "gml_physics_fixture_set_circle_shape",
+    "physics_fixture_set_density": "gml_physics_fixture_set_density",
+    "physics_fixture_set_friction": "gml_physics_fixture_set_friction",
+    "physics_fixture_set_restitution": "gml_physics_fixture_set_restitution",
+    "physics_fixture_set_sensor": "gml_physics_fixture_set_sensor",
+    "physics_fixture_bind": "gml_physics_fixture_bind",
+    "physics_apply_force": "gml_physics_apply_force",
+    "physics_apply_impulse": "gml_physics_apply_impulse",
+    "physics_apply_local_force": "gml_physics_apply_local_force",
+    "physics_apply_local_impulse": "gml_physics_apply_local_impulse",
+    "physics_apply_angular_impulse": "gml_physics_apply_angular_impulse",
+    "physics_apply_torque": "gml_physics_apply_torque",
+}
+
 _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_exists": "gml_struct_exists",
     "struct_get": "gml_struct_get",

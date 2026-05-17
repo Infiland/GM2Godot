@@ -172,6 +172,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert show_message_async is not None
         self.assertEqual(show_message_async.status, "unsupported")
         self.assertEqual(show_message_async.issue_number, 507)
+        network_create_socket = get_gml_api_entry("network_create_socket")
+        self.assertIsNotNone(network_create_socket)
+        assert network_create_socket is not None
+        self.assertEqual(network_create_socket.status, "implemented")
+        self.assertEqual(network_create_socket.issue_number, 508)
+        network_send_packet = get_gml_api_entry("network_send_packet")
+        self.assertIsNotNone(network_send_packet)
+        assert network_send_packet is not None
+        self.assertEqual(network_send_packet.status, "partial")
+        self.assertEqual(network_send_packet.issue_number, 508)
+        network_send_broadcast = get_gml_api_entry("network_send_broadcast")
+        self.assertIsNotNone(network_send_broadcast)
+        assert network_send_broadcast is not None
+        self.assertEqual(network_send_broadcast.status, "unsupported")
+        self.assertEqual(network_send_broadcast.issue_number, 508)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -247,6 +262,13 @@ class TestGMLAPIManifest(unittest.TestCase):
             "http_get",
             "http_post_string",
             "http_request",
+            "network_create_socket",
+            "network_create_server",
+            "network_connect",
+            "network_send_raw",
+            "network_send_packet",
+            "network_send_udp_raw",
+            "network_destroy",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -290,6 +312,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("collision_point_list()")
         with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):
             transpile_gml_expression('show_message_async("Hello")')
+        with self.assertRaisesRegex(GMLTranspileError, "network_send_broadcast.*unsupported"):
+            transpile_gml_expression("network_send_broadcast(sock, 6502, buf, 4)")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

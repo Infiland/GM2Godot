@@ -394,6 +394,13 @@ _NAME_REPLACEMENTS = {
     "mb_right": "MOUSE_BUTTON_RIGHT",
     "mb_middle": "MOUSE_BUTTON_MIDDLE",
     "mb_any": "-1",
+    "network_socket_tcp": "0",
+    "network_socket_udp": "1",
+    "network_socket_ws": "2",
+    "network_socket_wss": "3",
+    "network_type_connect": "1",
+    "network_type_disconnect": "2",
+    "network_type_data": "3",
     "gp_face1": "JOY_BUTTON_A",
     "gp_face2": "JOY_BUTTON_B",
     "gp_face3": "JOY_BUTTON_X",
@@ -683,6 +690,22 @@ _ASYNC_RUNTIME_FUNCTIONS = {
     "http_get": "gml_http_get",
     "http_post_string": "gml_http_post_string",
     "http_request": "gml_http_request",
+}
+
+_NETWORK_RUNTIME_FUNCTIONS = {
+    "network_create_socket": "gml_network_create_socket",
+    "network_create_socket_ext": "gml_network_create_socket_ext",
+    "network_create_server": "gml_network_create_server",
+    "network_create_server_raw": "gml_network_create_server_raw",
+    "network_connect": "gml_network_connect",
+    "network_connect_async": "gml_network_connect_async",
+    "network_connect_raw": "gml_network_connect_raw",
+    "network_connect_raw_async": "gml_network_connect_raw_async",
+    "network_send_raw": "gml_network_send_raw",
+    "network_send_packet": "gml_network_send_packet",
+    "network_send_udp": "gml_network_send_udp",
+    "network_send_udp_raw": "gml_network_send_udp_raw",
+    "network_destroy": "gml_network_destroy",
 }
 
 _STRUCT_RUNTIME_FUNCTIONS = {

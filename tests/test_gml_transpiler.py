@@ -17,6 +17,7 @@ from src.conversion.gml_transpiler import (
     _StructLiteral,
     _expression_tokens,
     _tokenize,
+    preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
 )
@@ -936,6 +937,80 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             ),
             'value = "default"',
         )
+
+    def test_preprocessor_strips_editor_only_directives(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "#region Movement\n"
+                "speed = 4\n"
+                "#endregion\n",
+                indent="",
+            ),
+            "GMRuntime.gml_motion_set_speed(self, 4)",
+        )
+
+    def test_preprocessor_define_values_feed_macro_expansion(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "#define LIMIT 10\n"
+                "score = LIMIT + 2",
+                indent="",
+            ),
+            "score = GMRuntime.gml_add(10, 2)",
+        )
+
+    def test_preprocessor_conditionals_skip_disabled_code(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "#if Windows\n"
+                "score = missing ?? ??\n"
+                "#else\n"
+                "score = 2\n"
+                "#endif\n",
+                indent="",
+                macro_configuration="Android",
+            ),
+            "score = 2",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#define FEATURE_ENABLED\n"
+                "#if defined(FEATURE_ENABLED)\n"
+                "score = 1\n"
+                "#elif Android\n"
+                "score = 2\n"
+                "#else\n"
+                "score = 3\n"
+                "#endif\n",
+                indent="",
+                macro_configuration="Android",
+            ),
+            "score = 1",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#define FEATURE_ENABLED\n"
+                "#ifdef FEATURE_ENABLED\n"
+                "score = 4\n"
+                "#endif\n",
+                indent="",
+            ),
+            "score = 4",
+        )
+
+    def test_preprocessor_reports_unsupported_directives_with_source_context(self):
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            r"Unsupported preprocessor directive #import at line 1: #import \"native.gml\"",
+        ):
+            transpile_gml_code('#import "native.gml"\nscore = 1', indent="")
+
+    def test_preprocessor_preserves_macro_lines_in_structured_result(self):
+        result = preprocess_gml_source("#region R\n#macro VALUE 7\n#endregion\nscore = VALUE")
+
+        self.assertEqual(result.diagnostics, ())
+        self.assertIn("#macro VALUE 7", result.source)
+        self.assertNotIn("#region", result.source)
 
     def test_rejects_recursive_macros(self):
         with self.assertRaisesRegex(GMLTranspileError, "Recursive macro"):

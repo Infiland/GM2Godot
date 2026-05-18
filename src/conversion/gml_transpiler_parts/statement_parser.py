@@ -10,7 +10,13 @@ from .enum_helpers import _evaluate_enum_value_tokens
 from .expression_parser import _parse_gml_expression
 from .expression_service import transpile_gml_condition, transpile_gml_expression
 from .identifiers import _sanitize_gdscript_identifier, _validate_gml_identifier, _reject_asset_identifier_name
-from .model import GMLTranspileError, _ScopeContext, _Token
+from .model import (
+    GMLExtensionFunction,
+    GMLExtensionFunctionMapping,
+    GMLTranspileError,
+    _ScopeContext,
+    _Token,
+)
 from .statements import _transpile_statement
 from .utils import (
     _indent_lines,
@@ -45,6 +51,8 @@ class _StatementParser:
         global_names: Iterable[str] | None = None,
         asset_names: Iterable[str] | None = None,
         static_scope_prefix: str | None = None,
+        extension_functions: dict[str, GMLExtensionFunction] | None = None,
+        extension_function_mappings: dict[str, GMLExtensionFunctionMapping] | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -66,6 +74,8 @@ class _StatementParser:
             top_level_global_scope=top_level_global_scope,
             asset_names=asset_names,
             static_prefix=static_scope_prefix,
+            extension_functions=extension_functions,
+            extension_function_mappings=extension_function_mappings,
         )
         self.inherited_event_call = inherited_event_call
         self.macro_values: MutableMapping[str, str] = (
@@ -281,6 +291,8 @@ class _StatementParser:
             static_scope=outer_scope_context.static_scope,
             static_names=outer_scope_context.static_names,
             static_prefix=outer_scope_context.static_prefix,
+            extension_functions=outer_scope_context.extension_functions,
+            extension_function_mappings=outer_scope_context.extension_function_mappings,
         )
         self.loop_depth += 1
         self.continue_depth += 1

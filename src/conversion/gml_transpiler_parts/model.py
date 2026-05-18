@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from dataclasses import dataclass, field
+from typing import Mapping, Literal, TypeAlias
 
 
 _AssignmentOperator: TypeAlias = Literal[
@@ -45,6 +45,30 @@ class _BuiltinVariableMetadata:
 
 
 @dataclass(frozen=True)
+class GMLExtensionFunction:
+    name: str
+    extension_name: str = ""
+    min_args: int | None = None
+    max_args: int | None = None
+
+
+@dataclass(frozen=True)
+class GMLExtensionFunctionMapping:
+    function_name: str
+    target: str
+    min_args: int | None = None
+    max_args: int | None = None
+
+
+def _empty_extension_functions() -> Mapping[str, GMLExtensionFunction]:
+    return {}
+
+
+def _empty_extension_function_mappings() -> Mapping[str, GMLExtensionFunctionMapping]:
+    return {}
+
+
+@dataclass(frozen=True)
 class _ScopeContext:
     self_expression: str = "self"
     other_expression: str = "other"
@@ -55,6 +79,8 @@ class _ScopeContext:
     static_scope: str | None = None
     static_names: frozenset[str] = frozenset()
     static_prefix: str = "gml_static"
+    extension_functions: Mapping[str, GMLExtensionFunction] = field(default_factory=_empty_extension_functions)
+    extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] = field(default_factory=_empty_extension_function_mappings)
 
 
 _DEFAULT_SCOPE_CONTEXT = _ScopeContext()

@@ -252,6 +252,11 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert external_call is not None
         self.assertEqual(external_call.status, "unsupported")
         self.assertEqual(external_call.issue_number, 512)
+        extension_mapping = get_gml_api_entry("extension_function_mapping")
+        self.assertIsNotNone(extension_mapping)
+        assert extension_mapping is not None
+        self.assertEqual(extension_mapping.status, "partial")
+        self.assertEqual(extension_mapping.issue_number, 517)
         region = get_gml_api_entry("#region")
         self.assertIsNotNone(region)
         assert region is not None
@@ -612,6 +617,28 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(entries["browser_width"].runtime_support, "partial")
         self.assertEqual(entries["iap_activate"].status, "unsupported")
         self.assertEqual(entries["xboxlive_matchmaking_create"].status, "unsupported")
+
+    def test_extensions_manifest_tracks_discovery_mapping_and_security_policy(self):
+        entries = {
+            entry.name: entry
+            for entry in iter_gml_api_entries()
+            if entry.category == "Extensions"
+        }
+
+        for name in (
+            "external_define",
+            "extension_function_discovery",
+            "extension_function_mapping",
+            "extension_unmapped_diagnostic",
+            "extension_native_security_policy",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, entries)
+                self.assertEqual(entries[name].issue_number, 517)
+
+        self.assertEqual(entries["extension_function_mapping"].status, "partial")
+        self.assertEqual(entries["extension_unmapped_diagnostic"].status, "implemented")
+        self.assertIn("native", entries["extension_native_security_policy"].notes)
 
     def test_function_descriptor_arity_validation_is_deterministic(self):
         descriptor = get_gml_function_descriptor("struct_set")

@@ -1,6 +1,8 @@
 # pyright: reportPrivateUsage=false
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +19,7 @@ from src.conversion.gml_transpiler import (
     _StructLiteral,
     _expression_tokens,
     _tokenize,
+    load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
@@ -3438,6 +3441,90 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("url_open();", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "browser_input_capture.*expects 1.*got 0"):
             transpile_gml_code("browser_input_capture();", indent="")
+
+    def test_extension_function_mappings_emit_configured_hook_calls(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'ads_show_rewarded("zone_1");'
+                'analytics_track("level_start", score + 1);'
+                'local_project_call(score);',
+                indent="",
+                extension_functions={
+                    "ads_show_rewarded": "AdSDK",
+                    "analytics_track": "AnalyticsSDK",
+                },
+                extension_function_mappings={
+                    "ads_show_rewarded": {
+                        "target": "AdBridge.show_rewarded",
+                        "min_args": 1,
+                        "max_args": 1,
+                    },
+                    "analytics_track": {
+                        "target": "AnalyticsBridge.track",
+                        "min_args": 2,
+                        "max_args": 2,
+                    },
+                },
+            ),
+            'AdBridge.show_rewarded("zone_1")\n'
+            'AnalyticsBridge.track("level_start", GMRuntime.gml_add(score, 1))\n'
+            "local_project_call(score)",
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                'analytics_event("start")',
+                extension_function_mappings={"analytics_event": "AnalyticsBridge.event"},
+            ),
+            'AnalyticsBridge.event("start")',
+        )
+
+    def test_unmapped_extension_function_reports_actionable_diagnostic(self):
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "ads_show_rewarded.*AdSDK.*gm2godot_extension_functions.json",
+        ):
+            transpile_gml_expression(
+                'ads_show_rewarded("zone_1")',
+                extension_functions={"ads_show_rewarded": "AdSDK"},
+            )
+
+    def test_extension_mapping_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "ads_show_rewarded.*expects 1.*got 0"):
+            transpile_gml_expression(
+                "ads_show_rewarded()",
+                extension_function_mappings={
+                    "ads_show_rewarded": {
+                        "target": "AdBridge.show_rewarded",
+                        "min_args": 1,
+                        "max_args": 1,
+                    }
+                },
+            )
+
+    def test_loads_extension_function_mapping_file(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as mapping_file:
+            json.dump(
+                {
+                    "functions": {
+                        "ads_show_rewarded": {
+                            "target": "AdBridge.show_rewarded",
+                            "min_args": 1,
+                            "max_args": 1,
+                        }
+                    }
+                },
+                mapping_file,
+            )
+            mapping_path = mapping_file.name
+        try:
+            mappings = load_gml_extension_function_mappings(mapping_path)
+        finally:
+            os.unlink(mapping_path)
+
+        mapping = mappings["ads_show_rewarded"]
+        self.assertEqual(mapping.target, "AdBridge.show_rewarded")
+        self.assertEqual(mapping.min_args, 1)
+        self.assertEqual(mapping.max_args, 1)
 
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):

@@ -1,10 +1,12 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .constants import _ASSIGNMENT_OPERATORS
 from .model import (
+    GMLExtensionFunction,
+    GMLExtensionFunctionMapping,
     _ArrayLiteral,
     _AssignmentOperator,
     _Binary,
@@ -162,11 +164,17 @@ def _scope_context_with_global_names(
     top_level_global_scope: bool | None = None,
     asset_names: Iterable[str] | None = None,
     static_prefix: str | None = None,
+    extension_functions: Mapping[str, GMLExtensionFunction] | None = None,
+    extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
 ) -> _ScopeContext:
     names = set(scope_context.global_names)
     names.update(global_names or [])
     assets = set(scope_context.asset_names)
     assets.update(asset_names or [])
+    extensions = dict(scope_context.extension_functions)
+    extensions.update(extension_functions or {})
+    extension_mappings = dict(scope_context.extension_function_mappings)
+    extension_mappings.update(extension_function_mappings or {})
     return _ScopeContext(
         self_expression=scope_context.self_expression,
         other_expression=scope_context.other_expression,
@@ -177,6 +185,8 @@ def _scope_context_with_global_names(
         static_scope=scope_context.static_scope,
         static_names=scope_context.static_names,
         static_prefix=scope_context.static_prefix if static_prefix is None else static_prefix,
+        extension_functions=extensions,
+        extension_function_mappings=extension_mappings,
     )
 
 

@@ -12,10 +12,15 @@ from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryE
 from src.conversion.base_converter import BaseConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
+    EXTENSION_FUNCTION_MAPPING_FILENAME,
+    GMLExtensionFunction,
+    GMLExtensionFunctionMapping,
     GMLTranspileError,
+    load_gml_extension_function_mappings,
     transpile_gml_code,
     transpile_gml_expression,
 )
+from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.gml_transpiler_parts.identifiers import (
     _sanitize_gdscript_identifier,
     _validate_gml_identifier,
@@ -219,6 +224,8 @@ class ScriptConverter(BaseConverter):
         *,
         asset_names: set[str],
         static_scope_prefix: str,
+        extension_functions: dict[str, GMLExtensionFunction],
+        extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
     ) -> str:
         local_names = {parameter.name for parameter in declaration.parameters}
         lines: list[str] = []
@@ -231,6 +238,8 @@ class ScriptConverter(BaseConverter):
                 parameter.default,
                 local_names=local_names,
                 asset_names=asset_names,
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
             )
             lines.append(
                 f"\tif {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
@@ -242,11 +251,21 @@ class ScriptConverter(BaseConverter):
             asset_names=asset_names,
             static_scope_prefix=static_scope_prefix,
             local_names=local_names,
+            extension_functions=extension_functions,
+            extension_function_mappings=extension_function_mappings,
         )
         lines.append(body)
         return "\n".join(lines)
 
-    def _render_script(self, entry: AssetRegistryEntry, source: str, *, asset_names: set[str]) -> tuple[str, bool]:
+    def _render_script(
+        self,
+        entry: AssetRegistryEntry,
+        source: str,
+        *,
+        asset_names: set[str],
+        extension_functions: dict[str, GMLExtensionFunction],
+        extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+    ) -> tuple[str, bool]:
         modern_declaration = self._modern_function_declaration(source)
         if modern_declaration is not None:
             params = ", ".join(
@@ -257,6 +276,8 @@ class ScriptConverter(BaseConverter):
                 modern_declaration,
                 asset_names=asset_names,
                 static_scope_prefix=f"{entry.name}.{modern_declaration.name}",
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
             )
             return (
                 "extends RefCounted\n\n"
@@ -274,6 +295,8 @@ class ScriptConverter(BaseConverter):
             return_depth=1,
             asset_names=asset_names,
             static_scope_prefix=f"{entry.name}.script",
+            extension_functions=extension_functions,
+            extension_function_mappings=extension_function_mappings,
         )
         return (
             "extends RefCounted\n\n"
@@ -286,7 +309,14 @@ class ScriptConverter(BaseConverter):
             True,
         )
 
-    def _write_script(self, entry: AssetRegistryEntry, *, asset_names: set[str]) -> ScriptRegistryEntry | None:
+    def _write_script(
+        self,
+        entry: AssetRegistryEntry,
+        *,
+        asset_names: set[str],
+        extension_functions: dict[str, GMLExtensionFunction],
+        extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+    ) -> ScriptRegistryEntry | None:
         source_path = self._source_gml_path(entry)
         output_path = self._output_path(entry)
         if source_path is None or output_path is None:
@@ -294,7 +324,13 @@ class ScriptConverter(BaseConverter):
         try:
             with open(source_path, "r", encoding="utf-8") as source_file:
                 source = source_file.read()
-            script_content, legacy_arguments = self._render_script(entry, source, asset_names=asset_names)
+            script_content, legacy_arguments = self._render_script(
+                entry,
+                source,
+                asset_names=asset_names,
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+            )
         except (OSError, GMLTranspileError) as exc:
             self._safe_log(
                 get_localized("Console_Convertor_Scripts_ParseError").format(
@@ -314,6 +350,36 @@ class ScriptConverter(BaseConverter):
             legacy_arguments=legacy_arguments,
         )
 
+    def _extension_functions(self) -> dict[str, GMLExtensionFunction]:
+        index = GameMakerResourceIndex(
+            self.gm_project_path,
+            self.godot_project_path,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=self.conversion_running,
+        ).build()
+        return {
+            name: GMLExtensionFunction(
+                name=function.function_name,
+                extension_name=function.extension_name,
+                min_args=function.arg_count,
+                max_args=function.arg_count,
+            )
+            for name, function in index.get_extension_functions().items()
+        }
+
+    def _extension_function_mappings(self) -> dict[str, GMLExtensionFunctionMapping]:
+        mapping_path = os.path.join(self.gm_project_path, EXTENSION_FUNCTION_MAPPING_FILENAME)
+        if not os.path.isfile(mapping_path):
+            return {}
+        try:
+            return load_gml_extension_function_mappings(mapping_path)
+        except (OSError, ValueError, TypeError) as exc:
+            self._safe_log(
+                f"Warning: Could not load {EXTENSION_FUNCTION_MAPPING_FILENAME}: {exc}"
+            )
+            return {}
+
     def convert_scripts(self) -> str | None:
         if not self.conversion_running():
             return None
@@ -326,6 +392,8 @@ class ScriptConverter(BaseConverter):
         write_gml_runtime(self.godot_project_path)
         os.makedirs(self.godot_scripts_path, exist_ok=True)
         asset_names = {entry.name for entry in entries}
+        extension_functions = self._extension_functions()
+        extension_function_mappings = self._extension_function_mappings()
         registry_entries: list[ScriptRegistryEntry] = []
         total = len(entries)
 
@@ -333,7 +401,12 @@ class ScriptConverter(BaseConverter):
             if not self.conversion_running():
                 self.log_callback(get_localized("Console_Convertor_Scripts_Stopped"))
                 return None
-            registry_entry = self._write_script(entry, asset_names=asset_names)
+            registry_entry = self._write_script(
+                entry,
+                asset_names=asset_names,
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+            )
             if registry_entry is not None:
                 registry_entries.append(registry_entry)
                 self._safe_log(

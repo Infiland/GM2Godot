@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Iterable, MutableSet
 
 from .constants import _LEGACY_GLOBAL_BUILTINS
+from .extension_functions import (
+    normalize_extension_function_mappings,
+    normalize_extension_functions,
+)
 from .preprocessor import preprocess_gml_source
 from .statement_parser import _StatementParser
 from .tokens import _tokenize
@@ -21,6 +25,8 @@ def transpile_gml_code(
     asset_names: Iterable[str] | None = None,
     static_scope_prefix: str | None = None,
     return_depth: int = 0,
+    extension_functions: object = None,
+    extension_function_mappings: object = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     preprocessed = preprocess_gml_source(source, macro_configuration=macro_configuration)
@@ -35,6 +41,8 @@ def transpile_gml_code(
         global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
         asset_names=asset_names,
         static_scope_prefix=static_scope_prefix,
+        extension_functions=normalize_extension_functions(extension_functions),
+        extension_function_mappings=normalize_extension_function_mappings(extension_function_mappings),
     )
     lines = parser.parse()
 

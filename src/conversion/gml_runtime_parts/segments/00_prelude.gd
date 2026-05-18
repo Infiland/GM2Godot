@@ -202,6 +202,12 @@ static func gml_builtin_global(name):
 		return int(Engine.get_frames_per_second())
 	if key == "fps_real":
 		return Engine.get_frames_per_second()
+	if key == "browser_height":
+		return gml_browser_height()
+	if key == "browser_width":
+		return gml_browser_width()
+	if key == "webgl_enabled":
+		return gml_webgl_enabled()
 	if key == "os_browser":
 		return gml_os_browser()
 	if key == "os_device":

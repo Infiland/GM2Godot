@@ -385,6 +385,211 @@ def _os_debug_gc_entries() -> tuple[GMLAPIEntry, ...]:
     return implemented_entries + partial_entries + planned_entries + unsupported_entries
 
 
+_PLATFORM_SERVICE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.73_platform_services"
+_PLATFORM_STEAM_DOCS_PATH = "GameMaker_Language/GML_Reference/Steam/Steam.htm"
+_PLATFORM_IAP_DOCS_PATH = "GameMaker_Language/GML_Reference/In_App_Purchases/In_App_Purchases.htm"
+_PLATFORM_WEB_DOCS_PATH = "GameMaker_Language/GML_Reference/Web_And_HTML5/Web_And_HTML5.htm"
+_PLATFORM_XBOX_DOCS_PATH = "GameMaker_Language/GML_Reference/UWP_And_XBox_Live/UWP_And_XBox_Live.htm"
+_PLATFORM_WALLPAPER_DOCS_PATH = "GameMaker_Language/GML_Reference/Live_Wallpapers/Live_Wallpapers.htm"
+_PLATFORM_ASYNC_DOCS_PATH = "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm"
+_PLATFORM_RUNTIME_HOOK_APIS: tuple[tuple[str, str, GMLAPISupportFlag, str], ...] = (
+    ("steam_is_initialized", _PLATFORM_STEAM_DOCS_PATH, "yes", "Returns false without a registered Steam hook; registered Steam addons can override the value."),
+    ("url_open", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to provide target-specific window behavior."),
+    ("url_open_ext", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target parameter."),
+    ("url_open_full", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target/options parameters."),
+    ("url_get_domain", _PLATFORM_WEB_DOCS_PATH, "yes", "Returns an empty string without a web hook; hook implementations can report the hosting domain."),
+    ("browser_height", _PLATFORM_WEB_DOCS_PATH, "yes", "Falls back to the Godot window height when no browser/web hook is registered."),
+    ("browser_width", _PLATFORM_WEB_DOCS_PATH, "yes", "Falls back to the Godot window width when no browser/web hook is registered."),
+    ("browser_input_capture", _PLATFORM_WEB_DOCS_PATH, "yes", "No-ops unless a web hook implements browser input capture policy."),
+    ("webgl_enabled", _PLATFORM_WEB_DOCS_PATH, "yes", "Matches GameMaker's non-browser true fallback unless a web hook reports otherwise."),
+    ("xboxlive_user_is_signed_in", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns false without a registered Xbox Live hook; platform addons can provide real account state."),
+    ("xboxlive_user_is_signing_in", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns false without a registered Xbox Live hook; platform addons can provide real sign-in state."),
+    ("xboxlive_gamertag_for_user", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns an empty string without a registered Xbox Live hook."),
+    ("xboxlive_show_account_picker", _PLATFORM_XBOX_DOCS_PATH, "no", "Routes through a required Xbox Live hook and reports an explicit diagnostic when unavailable."),
+    ("wallpaper_set_config", _PLATFORM_WALLPAPER_DOCS_PATH, "no", "Routes through a required live wallpaper hook and reports an explicit diagnostic when unavailable."),
+    ("wallpaper_set_subscriptions", _PLATFORM_WALLPAPER_DOCS_PATH, "no", "Routes through a required live wallpaper hook and reports an explicit diagnostic when unavailable."),
+    ("cloud_synchronise", _PLATFORM_ASYNC_DOCS_PATH, "no", "Routes through a required cloud-save hook because the built-in Android cloud API is obsolete."),
+    ("cloud_string_save", _PLATFORM_ASYNC_DOCS_PATH, "no", "Routes through a required cloud-save hook because the built-in Android cloud API is obsolete."),
+    ("cloud_file_save", _PLATFORM_ASYNC_DOCS_PATH, "no", "Routes through a required cloud-save hook because the built-in Android cloud API is obsolete."),
+)
+_PLATFORM_UNSUPPORTED_GROUPS = (
+    (
+        (
+            "steam_activate_overlay",
+            "steam_get_persona_name",
+            "steam_set_achievement",
+            "steam_get_achievement",
+            "steam_user_owns_dlc",
+            "steam_download_scores",
+            "steam_upload_score",
+            "steam_ugc_create_item",
+            "steam_ugc_publish",
+        ),
+        _PLATFORM_STEAM_DOCS_PATH,
+        "Steam APIs now live in the Steam extension and need an optional Godot Steam addon hook; GM2Godot rejects unhooked calls with this diagnostic.",
+    ),
+    (
+        (
+            "iap_data",
+            "iap_activate",
+            "iap_status",
+            "iap_enumerate_products",
+            "iap_restore_all",
+            "iap_acquire",
+            "iap_consume",
+            "iap_product_details",
+            "iap_purchase_details",
+            "mac_refresh_receipt_validation",
+        ),
+        _PLATFORM_IAP_DOCS_PATH,
+        "Store purchase APIs are deprecated or extension-backed and require a platform store addon/plugin integration.",
+    ),
+    (
+        (
+            "clickable_exists",
+            "clickable_add",
+            "clickable_add_ext",
+            "clickable_change",
+            "clickable_change_ext",
+            "clickable_set_style",
+            "clickable_delete",
+            "analytics_event",
+            "analytics_event_ext",
+            "http_get_request_crossorigin",
+            "http_set_request_crossorigin",
+        ),
+        _PLATFORM_WEB_DOCS_PATH,
+        "HTML5 DOM/CORS helpers require a web export policy and JavaScript bridge hook instead of a portable Godot runtime call.",
+    ),
+    (
+        (
+            "uwp_suspend",
+            "uwp_is_suspending",
+            "uwp_is_constrained",
+            "uwp_was_terminated",
+            "uwp_was_closed_by_user",
+            "uwp_show_help",
+            "uwp_license_trial_version",
+            "uwp_license_trial_user",
+            "uwp_license_trial_time_remaining",
+            "uwp_check_privilege",
+            "xboxlive_get_user_count",
+            "xboxlive_get_user",
+            "xboxlive_get_activating_user",
+            "xboxlive_user_is_guest",
+            "xboxlive_user_is_active",
+            "xboxlive_user_is_remote",
+            "xboxlive_user_id_for_user",
+            "xboxlive_sponsor_for_user",
+            "xboxlive_set_rich_presence",
+            "xboxlive_gamedisplayname_for_user",
+            "xboxlive_user_for_pad",
+            "xboxlive_pad_for_user",
+            "xboxlive_pad_count_for_user",
+            "xboxlive_agegroup_for_user",
+            "xboxlive_gamerscore_for_user",
+            "xboxlive_show_profile_card_for_user",
+            "xboxlive_reputation_for_user",
+            "xboxlive_sprite_add_from_gamerpicture",
+            "xboxlive_generate_player_session_id",
+            "xboxlive_set_savedata_user",
+            "xboxlive_get_savedata_user",
+            "xboxlive_get_file_error",
+            "xboxlive_stats_setup",
+            "xboxlive_stats_add_user",
+            "xboxlive_stats_remove_user",
+            "xboxlive_stats_flush_user",
+            "xboxlive_stats_set_stat_real",
+            "xboxlive_stats_set_stat_int",
+            "xboxlive_stats_set_stat_string",
+            "xboxlive_stats_delete_stat",
+            "xboxlive_stats_get_stat_names",
+            "xboxlive_stats_get_stat",
+            "xboxlive_stats_get_leaderboard",
+            "xboxlive_stats_get_social_leaderboard",
+            "xboxlive_achievement_show_achievements",
+            "xboxlive_achievement_load_friends",
+            "xboxlive_achievement_load_leaderboard",
+            "xboxlive_achievements_set_progress",
+            "xboxlive_get_stats_for_user",
+            "xboxlive_read_player_leaderboard",
+            "xboxlive_fire_event",
+            "xboxlive_matchmaking_start",
+            "xboxlive_matchmaking_stop",
+            "xboxlive_matchmaking_create",
+            "xboxlive_matchmaking_find",
+            "xboxlive_matchmaking_session_get_users",
+            "xboxlive_matchmaking_join_session",
+            "xboxlive_matchmaking_session_leave",
+            "xboxlive_matchmaking_send_invites",
+            "xboxlive_matchmaking_set_joinable_session",
+            "xboxlive_matchmaking_join_invite",
+        ),
+        _PLATFORM_XBOX_DOCS_PATH,
+        "UWP/Xbox Live APIs require a closed platform SDK/export runner or a registered platform addon hook.",
+    ),
+)
+_PLATFORM_EVENT_APIS = (
+    ("async_steam_event", _PLATFORM_STEAM_DOCS_PATH, "src.conversion.events.mappings.other_async_steam", "Async Steam event mapping is generated; payload production depends on a Steam addon hook."),
+    ("async_cloud_save_event", _PLATFORM_ASYNC_DOCS_PATH, "src.conversion.events.mappings.other_async_platform", "Async Cloud Save event mapping is generated; payload production depends on a cloud-save addon hook."),
+    ("async_social_event", _PLATFORM_XBOX_DOCS_PATH, "src.conversion.events.mappings.other_async_platform", "Async Social/platform event mapping is generated; payload production depends on the platform addon."),
+    ("async_push_notification_event", _PLATFORM_ASYNC_DOCS_PATH, "src.conversion.events.mappings.other_async_platform", "Async Push Notification event mapping is generated; notification delivery depends on a mobile notification extension."),
+    ("wallpaper_config_event", _PLATFORM_WALLPAPER_DOCS_PATH, "src.conversion.events.mappings.other_wallpaper", "Wallpaper Config event mapping is generated; payload production depends on the live wallpaper companion hook."),
+    ("wallpaper_subscription_data_event", _PLATFORM_WALLPAPER_DOCS_PATH, "src.conversion.events.mappings.other_wallpaper", "Wallpaper Subscription Data event mapping is generated; payload production depends on the live wallpaper companion hook."),
+    ("push_notifications_extension", _PLATFORM_ASYNC_DOCS_PATH, "src.conversion.gml_transpiler_parts.gml_api_manifest", "Current GameMaker push notification behavior is extension-backed; converted projects need an explicit mobile notification addon."),
+)
+
+
+def _platform_service_entries() -> tuple[GMLAPIEntry, ...]:
+    partial_entries = tuple(
+        _entry(
+            name,
+            "Platform Services",
+            "partial",
+            _PLATFORM_SERVICE_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "partial",
+            smoke_coverage,
+            docs_path,
+            notes,
+        )
+        for name, docs_path, smoke_coverage, notes in _PLATFORM_RUNTIME_HOOK_APIS
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "Platform Services",
+            "unsupported",
+            "src.conversion.gml_transpiler_parts.gml_api_manifest",
+            "n/a",
+            "no",
+            "no",
+            "no",
+            docs_path,
+            notes,
+        )
+        for names, docs_path, notes in _PLATFORM_UNSUPPORTED_GROUPS
+        for name in names
+    )
+    event_entries = tuple(
+        _entry(
+            name,
+            "Platform Services",
+            "partial" if name != "push_notifications_extension" else "planned",
+            owner_module,
+            "n/a",
+            "n/a",
+            "n/a",
+            "yes" if name != "push_notifications_extension" else "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, owner_module, notes in _PLATFORM_EVENT_APIS
+    )
+    return partial_entries + unsupported_entries + event_entries
+
+
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "gml_api_compatibility_report",
@@ -5588,42 +5793,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     ),
     *_flexpanel_entries(),
     *_os_debug_gc_entries(),
-    _entry(
-        "steam_is_initialized",
-        "Platform Services",
-        "unsupported",
-        "src.conversion.events.mappings.other_async_steam",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/Steam/Steam.htm",
-        "Needs optional Steam addon/SDK integration; pure transpilation cannot provide it.",
-    ),
-    _entry(
-        "iap_activate",
-        "Platform Services",
-        "unsupported",
-        "src.conversion.events.mappings.other_async_platform",
-        "n/a",
-        "no",
-        "no",
-        "partial",
-        "GameMaker_Language/GML_Reference/In_App_Purchases/In_App_Purchases.htm",
-        "Requires platform store SDK integration outside the core transpiler.",
-    ),
-    _entry(
-        "browser_input_capture",
-        "Platform Services",
-        "planned",
-        "src.conversion.gml_runtime_parts",
-        "n/a",
-        "no",
-        "no",
-        "no",
-        "GameMaker_Language/GML_Reference/Web_And_HTML5/Web_And_HTML5.htm",
-        "Requires HTML5/export-target policy.",
-    ),
+    *_platform_service_entries(),
     _entry(
         "external_define",
         "Extensions",

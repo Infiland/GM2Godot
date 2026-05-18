@@ -24,6 +24,7 @@ from .constants import (
     _MP_GRID_RUNTIME_FUNCTIONS,
     _NETWORK_RUNTIME_FUNCTIONS,
     _OS_DEBUG_GC_RUNTIME_FUNCTIONS,
+    _PLATFORM_SERVICE_RUNTIME_FUNCTIONS,
     _PATH_RUNTIME_FUNCTIONS,
     _PHYSICS_RUNTIME_FUNCTIONS,
     _ROOM_RUNTIME_FUNCTIONS,
@@ -687,6 +688,24 @@ _OS_DEBUG_GC_ARITY: dict[str, tuple[int, int | None]] = {
     "weak_ref_any_alive": (1, 3),
 }
 
+_PLATFORM_SERVICE_ARITY: dict[str, tuple[int, int | None]] = {
+    "steam_is_initialized": (0, 0),
+    "browser_input_capture": (1, 1),
+    "url_open": (1, 1),
+    "url_open_ext": (2, 2),
+    "url_open_full": (3, 3),
+    "url_get_domain": (0, 0),
+    "xboxlive_user_is_signed_in": (0, 0),
+    "xboxlive_user_is_signing_in": (0, 0),
+    "xboxlive_gamertag_for_user": (0, 0),
+    "xboxlive_show_account_picker": (0, 0),
+    "wallpaper_set_config": (1, 1),
+    "wallpaper_set_subscriptions": (1, 1),
+    "cloud_synchronise": (0, 0),
+    "cloud_string_save": (2, 2),
+    "cloud_file_save": (2, 2),
+}
+
 _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "draw_self": (0, 0),
     "draw_sprite": (4, 4),
@@ -959,6 +978,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _OS_DEBUG_GC_ARITY[name]
+        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+
+    for name, target in _PLATFORM_SERVICE_RUNTIME_FUNCTIONS.items():
+        min_args, max_args = _PLATFORM_SERVICE_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
     for name, target in _DS_COLLECTIONS_FUNCTIONS.items():

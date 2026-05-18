@@ -501,6 +501,8 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "bbox_left": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
     "bbox_right": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
     "bbox_top": _BuiltinVariableMetadata("instance", "0", False, False, "collision_bounds"),
+    "browser_height": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
+    "browser_width": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
     "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "debug_mode": _BuiltinVariableMetadata("global", "false", False, False, "debug"),
     "depth": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
@@ -568,6 +570,7 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "visible": _BuiltinVariableMetadata("instance", "true", True, False, "rendering"),
     "vspeed": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "temp_directory": _BuiltinVariableMetadata("global", "", False, False, "files"),
+    "webgl_enabled": _BuiltinVariableMetadata("global", "true", False, False, "platform"),
     "working_directory": _BuiltinVariableMetadata("global", "", False, False, "files"),
     "x": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
     "xprevious": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
@@ -1163,6 +1166,24 @@ _OS_DEBUG_GC_RUNTIME_FUNCTIONS = {
     "weak_ref_create": "gml_weak_ref_create",
     "weak_ref_alive": "gml_weak_ref_alive",
     "weak_ref_any_alive": "gml_weak_ref_any_alive",
+}
+
+_PLATFORM_SERVICE_RUNTIME_FUNCTIONS = {
+    "steam_is_initialized": "gml_steam_is_initialized",
+    "browser_input_capture": "gml_browser_input_capture",
+    "url_open": "gml_url_open",
+    "url_open_ext": "gml_url_open_ext",
+    "url_open_full": "gml_url_open_full",
+    "url_get_domain": "gml_url_get_domain",
+    "xboxlive_user_is_signed_in": "gml_xboxlive_user_is_signed_in",
+    "xboxlive_user_is_signing_in": "gml_xboxlive_user_is_signing_in",
+    "xboxlive_gamertag_for_user": "gml_xboxlive_gamertag_for_user",
+    "xboxlive_show_account_picker": "gml_xboxlive_show_account_picker",
+    "wallpaper_set_config": "gml_wallpaper_set_config",
+    "wallpaper_set_subscriptions": "gml_wallpaper_set_subscriptions",
+    "cloud_synchronise": "gml_cloud_synchronise",
+    "cloud_string_save": "gml_cloud_string_save",
+    "cloud_file_save": "gml_cloud_file_save",
 }
 
 _DRAW_RUNTIME_FUNCTIONS = {

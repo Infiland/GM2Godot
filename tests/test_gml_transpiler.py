@@ -3402,6 +3402,43 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "weak_ref_any_alive.*expects 1 to 3.*got 4"):
             transpile_gml_code("weak_ref_any_alive(items, 0, 1, true);", indent="")
 
+    def test_platform_service_helpers_lower_to_runtime_and_builtins(self):
+        self.assertEqual(
+            transpile_gml_expression("steam_is_initialized()"),
+            "GMRuntime.gml_steam_is_initialized()",
+        )
+        self.assertEqual(
+            transpile_gml_expression("browser_width + browser_height"),
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("browser_width"), GMRuntime.gml_builtin_global("browser_height"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("webgl_enabled"),
+            'GMRuntime.gml_builtin_global("webgl_enabled")',
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                'browser_input_capture(true);'
+                'domain = url_get_domain();'
+                'url_open_ext("https://example.com", "_blank");'
+                'signed_in = xboxlive_user_is_signed_in();'
+                'wallpaper_set_subscriptions(subscriptions);'
+                'cloud_id = cloud_synchronise();',
+                indent="",
+            ),
+            "GMRuntime.gml_browser_input_capture(true)\n"
+            "domain = GMRuntime.gml_url_get_domain()\n"
+            'GMRuntime.gml_url_open_ext("https://example.com", "_blank")\n'
+            "signed_in = GMRuntime.gml_xboxlive_user_is_signed_in()\n"
+            "GMRuntime.gml_wallpaper_set_subscriptions(subscriptions)\n"
+            "cloud_id = GMRuntime.gml_cloud_synchronise()",
+        )
+
+    def test_platform_service_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "url_open.*expects 1.*got 0"):
+            transpile_gml_code("url_open();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "browser_input_capture.*expects 1.*got 0"):
+            transpile_gml_code("browser_input_capture();", indent="")
+
     def test_math_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "clamp.*expects 3.*got 2"):
             transpile_gml_code("clamp(1, 2);", indent="")

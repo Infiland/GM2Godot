@@ -1,0 +1,210 @@
+{
+  "issue": 518,
+  "required_buckets": [
+    "movement_collisions",
+    "multi_room_transitions",
+    "draw_text_surface",
+    "audio_playback",
+    "ds_collections_save_files",
+    "async_http",
+    "camera_view"
+  ],
+  "unsupported_api_policy": "Fixtures must record unsupported APIs only when the fixture source reaches them; each recorded API must include the manifest API name and issue number.",
+  "fixtures": [
+    {
+      "id": "top_down_movement_collision",
+      "bucket": "movement_collisions",
+      "title": "Top-down movement with blocking collision",
+      "issue_numbers": [485, 487, 488],
+      "manifest_entries": [
+        "instance_create_layer",
+        "place_meeting",
+        "collision_rectangle",
+        "motion_set",
+        "move_contact_solid",
+        "move_bounce_solid"
+      ],
+      "game_maker_source_path": "source/top_down_movement_collision.gml",
+      "game_maker_expectation": "A player object moves horizontally, stops before a solid wall, bounces from the wall, and reports rectangle collision hits using object selectors.",
+      "expected_godot_assertions": [
+        "Generated object scripts register instances through GMRuntime.",
+        "Motion helpers preserve speed, direction, hspeed, vspeed, gravity, snap, contact, and bounce state.",
+        "Collision queries resolve the expected wall instance and noone misses."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_motion_helpers_godot.py::TestMotionHelpersGodotSmoke.test_runtime_motion_helpers_and_generated_motion_state",
+        "tests/test_collision_queries_godot.py::TestCollisionQueriesGodotSmoke.test_runtime_collision_queries_against_generated_shapes"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "multi_room_transition",
+      "bucket": "multi_room_transitions",
+      "title": "Multi-room transition and persistent lifecycle",
+      "issue_numbers": [496],
+      "manifest_entries": [
+        "room_goto",
+        "room_goto_next",
+        "room_goto_previous",
+        "room_restart",
+        "room_exists",
+        "room_get_name",
+        "room_get_info"
+      ],
+      "game_maker_source_path": "source/multi_room_transition.gml",
+      "game_maker_expectation": "A persistent controller starts in r_one, transitions to r_two, restarts, returns to r_one, and records room start/end lifecycle callbacks.",
+      "expected_godot_assertions": [
+        "Generated room scenes expose GameMaker room width, height, order, and persistent metadata.",
+        "GMRuntime room_goto_next, room_restart, and room_goto_previous update current_scene and room builtins.",
+        "Persistent nodes survive transitions and receive expected lifecycle callbacks."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_room_game_flow_godot.py::TestRoomGameFlowGodotSmoke.test_room_runtime_transitions_lifecycle_and_persistent_nodes"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "draw_text_surface",
+      "bucket": "draw_text_surface",
+      "title": "Draw text through an offscreen surface",
+      "issue_numbers": [490, 491, 492],
+      "manifest_entries": [
+        "draw_set_color",
+        "draw_set_alpha",
+        "draw_clear",
+        "draw_text",
+        "surface_create",
+        "surface_exists",
+        "surface_set_target",
+        "surface_reset_target",
+        "draw_surface_ext",
+        "surface_copy"
+      ],
+      "game_maker_source_path": "source/draw_text_surface.gml",
+      "game_maker_expectation": "The Draw event writes text, clears a surface target, resets the target stack, and draws the surface back to the application target.",
+      "expected_godot_assertions": [
+        "Generated Draw events are wrapped in GMRuntime draw begin/end context.",
+        "Text and sprite draw calls lower through the draw runtime.",
+        "Surface targets can be created, cleared, copied, drawn, and freed under headless Godot."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_draw_basic_godot.py::TestDrawBasicGodotSmoke.test_generated_draw_event_uses_basic_draw_runtime",
+        "tests/test_draw_sprite_text_godot.py::TestDrawSpriteTextGodotSmoke.test_generated_draw_event_uses_sprite_text_runtime",
+        "tests/test_draw_surfaces_godot.py::TestDrawSurfacesGodotSmoke.test_surface_runtime_handles_targets_and_application_surface"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "audio_playback",
+      "bucket": "audio_playback",
+      "title": "Imported sound playback and legacy aliases",
+      "issue_numbers": [495],
+      "manifest_entries": [
+        "audio_play_sound",
+        "audio_is_playing",
+        "audio_sound_gain",
+        "audio_sound_pitch",
+        "audio_stop_sound",
+        "sound_play",
+        "sound_stop"
+      ],
+      "game_maker_source_path": "source/audio_playback.gml",
+      "game_maker_expectation": "A sound asset plays on its audio group, exposes a live handle, accepts gain/pitch changes, and can be stopped through modern and legacy APIs.",
+      "expected_godot_assertions": [
+        "Sound registry metadata selects the expected AudioServer bus.",
+        "audio_play_sound returns distinct handles that resolve to AudioStreamPlayer nodes.",
+        "Modern audio helpers and legacy aliases agree on playing/stopped state."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_audio_runtime_godot.py::TestAudioRuntimeGodotSmoke.test_audio_runtime_handles_assets_and_legacy_aliases"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "ds_collections_save_files",
+      "bucket": "ds_collections_save_files",
+      "title": "Collections, text files, INI, and JSON saves",
+      "issue_numbers": [498, 499, 500, 505],
+      "manifest_entries": [
+        "ds_list_create",
+        "ds_list_add",
+        "ds_map_create",
+        "ds_map_set",
+        "ds_grid_create",
+        "ds_grid_set",
+        "file_text_open_write",
+        "file_text_write_string",
+        "ini_open",
+        "ini_write_string",
+        "ini_write_real",
+        "json_encode",
+        "json_decode"
+      ],
+      "game_maker_source_path": "source/ds_collections_save_files.gml",
+      "game_maker_expectation": "A save routine builds DS list/map/grid state, serializes it to text and JSON, and persists/reloads INI settings under the sandboxed save path.",
+      "expected_godot_assertions": [
+        "Sequential, map, and grid data structures preserve inserted values.",
+        "Text files, included files, directories, and GameMaker-style path helpers map to Godot user/data paths.",
+        "INI writes persist across close/open and JSON encode/decode sanitizes unsupported numeric values."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_ds_collections_godot.py::TestDSCollectionsGodotSmoke.test_ds_collections_runtime",
+        "tests/test_files_ini_json_godot.py::TestFilesIniJsonGodotSmoke.test_files_ini_json_and_path_mapping"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "async_http_bridge",
+      "bucket": "async_http",
+      "title": "HTTP requests bridged into async_load",
+      "issue_numbers": [506, 507],
+      "manifest_entries": [
+        "http_get",
+        "http_post_string",
+        "http_request",
+        "buffer_create",
+        "buffer_write",
+        "buffer_save_async"
+      ],
+      "game_maker_source_path": "source/async_http_bridge.gml",
+      "game_maker_expectation": "HTTP GET/POST/PUT and async buffer save produce request IDs and Async events with populated async_load payloads.",
+      "expected_godot_assertions": [
+        "Local HTTP server responses are routed to generated async HTTP handlers.",
+        "buffer_save_async dispatches Async Save/Load payloads.",
+        "Manual async dispatch reaches generated dialog handler surfaces without network access."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_async_http_godot.py::TestAsyncHttpGodotSmoke.test_http_requests_dispatch_async_load_to_generated_handlers"
+      ],
+      "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "camera_view_behavior",
+      "bucket": "camera_view",
+      "title": "Legacy view arrays synchronized with camera helpers",
+      "issue_numbers": [493],
+      "manifest_entries": [
+        "camera_create_view",
+        "camera_set_view_pos",
+        "camera_set_view_size",
+        "camera_set_view_angle",
+        "camera_get_view_x",
+        "camera_get_view_y",
+        "display_set_gui_size",
+        "display_get_gui_width",
+        "display_get_gui_height"
+      ],
+      "game_maker_source_path": "source/camera_view_behavior.gml",
+      "game_maker_expectation": "A camera assigned through legacy view arrays stays synchronized with camera setters/getters, Camera2D transform, and GUI display size helpers.",
+      "expected_godot_assertions": [
+        "view_xview/view_yview writes update the backing camera state.",
+        "camera_set_view_pos, camera_set_view_size, and camera_set_view_angle update Camera2D state.",
+        "display_set_gui_size is visible through display_get_gui_width/height."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_camera_helpers_sync_view_arrays_and_gui_size"
+      ],
+      "unsupported_api_issue_refs": []
+    }
+  ]
+}

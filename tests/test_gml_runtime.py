@@ -2373,6 +2373,19 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
 
+    def test_runtime_contains_platform_service_compatibility_helpers(self):
+        self.assertIn("static func gml_platform_service_register", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_platform_service_call", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_platform_service_unsupported", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_steam_is_initialized", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_browser_input_capture", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_url_open", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_xboxlive_user_is_signed_in", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_wallpaper_set_config", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_cloud_synchronise", GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "browser_width":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "webgl_enabled":', GML_RUNTIME_SCRIPT)
+
     def test_write_gml_runtime_writes_support_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             runtime_path = write_gml_runtime(tmpdir)

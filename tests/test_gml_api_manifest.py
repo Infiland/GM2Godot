@@ -307,6 +307,21 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert gml_pragma is not None
         self.assertEqual(gml_pragma.status, "unsupported")
         self.assertEqual(gml_pragma.issue_number, 515)
+        steam_is_initialized = get_gml_api_entry("steam_is_initialized")
+        self.assertIsNotNone(steam_is_initialized)
+        assert steam_is_initialized is not None
+        self.assertEqual(steam_is_initialized.status, "partial")
+        self.assertEqual(steam_is_initialized.issue_number, 516)
+        browser_input_capture = get_gml_api_entry("browser_input_capture")
+        self.assertIsNotNone(browser_input_capture)
+        assert browser_input_capture is not None
+        self.assertEqual(browser_input_capture.status, "partial")
+        self.assertEqual(browser_input_capture.issue_number, 516)
+        iap_activate = get_gml_api_entry("iap_activate")
+        self.assertIsNotNone(iap_activate)
+        assert iap_activate is not None
+        self.assertEqual(iap_activate.status, "unsupported")
+        self.assertEqual(iap_activate.issue_number, 516)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
@@ -430,6 +445,13 @@ class TestGMLAPIManifest(unittest.TestCase):
             "gc_get_stats",
             "weak_ref_create",
             "weak_ref_any_alive",
+            "steam_is_initialized",
+            "browser_input_capture",
+            "url_open",
+            "url_get_domain",
+            "xboxlive_user_is_signed_in",
+            "wallpaper_set_config",
+            "cloud_synchronise",
             "keyboard_check",
             "method",
             "show_debug_message",
@@ -559,6 +581,38 @@ class TestGMLAPIManifest(unittest.TestCase):
                 self.assertIn(name, entries)
                 self.assertEqual(entries[name].issue_number, 515)
 
+    def test_platform_services_manifest_represents_hooked_and_closed_platform_surfaces(self):
+        entries = {
+            entry.name: entry
+            for entry in iter_gml_api_entries()
+            if entry.category == "Platform Services"
+        }
+
+        for name in (
+            "steam_is_initialized",
+            "url_open_full",
+            "browser_width",
+            "webgl_enabled",
+            "iap_activate",
+            "clickable_add",
+            "xboxlive_matchmaking_create",
+            "wallpaper_set_config",
+            "cloud_synchronise",
+            "async_push_notification_event",
+            "async_cloud_save_event",
+            "async_social_event",
+            "wallpaper_subscription_data_event",
+            "push_notifications_extension",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, entries)
+                self.assertEqual(entries[name].issue_number, 516)
+
+        self.assertEqual(entries["steam_is_initialized"].status, "partial")
+        self.assertEqual(entries["browser_width"].runtime_support, "partial")
+        self.assertEqual(entries["iap_activate"].status, "unsupported")
+        self.assertEqual(entries["xboxlive_matchmaking_create"].status, "unsupported")
+
     def test_function_descriptor_arity_validation_is_deterministic(self):
         descriptor = get_gml_function_descriptor("struct_set")
 
@@ -589,6 +643,12 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("physics_joint_distance_create()")
         with self.assertRaisesRegex(GMLTranspileError, "external_call.*unsupported"):
             transpile_gml_expression("external_call('native_ext', 'fn')")
+        with self.assertRaisesRegex(GMLTranspileError, "iap_activate.*unsupported.*#516.*store"):
+            transpile_gml_expression("iap_activate()")
+        with self.assertRaisesRegex(GMLTranspileError, "clickable_add.*unsupported.*#516.*HTML5"):
+            transpile_gml_expression("clickable_add(0, 0, 100, 40, 'https://example.com')")
+        with self.assertRaisesRegex(GMLTranspileError, "xboxlive_matchmaking_create.*unsupported.*#516.*Xbox"):
+            transpile_gml_expression("xboxlive_matchmaking_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

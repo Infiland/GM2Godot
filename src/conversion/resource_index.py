@@ -1,7 +1,7 @@
 import copy
 import os
 from dataclasses import dataclass, field, replace
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.type_defs import (
@@ -57,6 +57,19 @@ class IndexedRoom:
     raw_data: JsonDict = field(default_factory=_empty_json_dict)
 
 
+@dataclass(frozen=True)
+class IndexedExtensionFunction:
+    """A GameMaker extension function discovered from extension metadata."""
+
+    extension_name: str
+    function_name: str
+    yy_path: str
+    yyp_path: str
+    file_name: str = ""
+    external_name: str = ""
+    arg_count: int | None = None
+
+
 class GameMakerResourceIndex(BaseConverter):
     """Index GameMaker project resources for converters that need cross references."""
 
@@ -82,6 +95,7 @@ class GameMakerResourceIndex(BaseConverter):
         self.yyp_data: JsonDict | None = None
         self.resources: dict[str, dict[str, IndexedResource]] = self._empty_resources()
         self.rooms: dict[str, IndexedRoom] = {}
+        self.extension_functions: dict[str, IndexedExtensionFunction] = {}
         self.room_order: list[str] = []
         self.used_room_order_fallback = False
 
@@ -93,6 +107,7 @@ class GameMakerResourceIndex(BaseConverter):
         """Build and return this resource index."""
         self.resources = self._empty_resources()
         self.rooms = {}
+        self.extension_functions = {}
         self.room_order = []
         self.used_room_order_fallback = False
         self.yyp_path = self.find_yyp_path()
@@ -165,6 +180,18 @@ class GameMakerResourceIndex(BaseConverter):
         resource = self.get_resource(kind, name)
         return resource.godot_path if resource else None
 
+    def get_extension_function(self, name: str) -> IndexedExtensionFunction | None:
+        """Return extension function metadata by GML function name, if discovered."""
+        return self.extension_functions.get(name)
+
+    def get_extension_functions(self) -> dict[str, IndexedExtensionFunction]:
+        """Return discovered GameMaker extension functions by GML function name."""
+        return dict(self.extension_functions)
+
+    def extension_function_names(self) -> set[str]:
+        """Return all discovered GameMaker extension function names."""
+        return set(self.extension_functions)
+
     def _empty_resources(self) -> dict[str, dict[str, IndexedResource]]:
         return {kind: {} for kind in self.RESOURCE_EXTENSIONS}
 
@@ -173,6 +200,12 @@ class GameMakerResourceIndex(BaseConverter):
             res_id = resource_entry.get("id", {})
             yyp_path = res_id.get("path", "")
             kind = self._kind_from_yyp_path(yyp_path)
+            if kind == "extensions":
+                name = res_id.get("name") or self._name_from_yyp_path(yyp_path)
+                if name:
+                    yy_path = os.path.normpath(os.path.join(self.gm_project_path, yyp_path))
+                    self._index_extension_resource(name, yy_path, yyp_path)
+                continue
             if kind not in self.RESOURCE_EXTENSIONS:
                 continue
 
@@ -204,6 +237,87 @@ class GameMakerResourceIndex(BaseConverter):
                 self.resources[kind][name] = self._make_resource(
                     kind, name, yy_path, yyp_path
                 )
+        extensions_dir = os.path.join(self.gm_project_path, "extensions")
+        if not os.path.isdir(extensions_dir):
+            return
+        for name in sorted(os.listdir(extensions_dir)):
+            extension_dir = os.path.join(extensions_dir, name)
+            yy_path = os.path.join(extension_dir, name + ".yy")
+            if not os.path.isdir(extension_dir) or not os.path.isfile(yy_path):
+                continue
+            yyp_path = "/".join(["extensions", name, name + ".yy"])
+            self._index_extension_resource(name, yy_path, yyp_path)
+
+    def _index_extension_resource(self, name: str, yy_path: str, yyp_path: str) -> None:
+        if not os.path.isfile(yy_path):
+            self._safe_log(
+                f"Skipping missing GameMaker extension {name}: {yy_path}"
+            )
+            return
+        data = self._read_yy_file(yy_path)
+        if data is None:
+            self._safe_log(
+                f"Skipping malformed GameMaker extension {name}: {yy_path}"
+            )
+            return
+        extension_name = str(data.get("name") or data.get("%Name") or name)
+        for extension_file in data.get("files", []):
+            if not isinstance(extension_file, dict):
+                continue
+            file_data = cast(JsonDict, extension_file)
+            file_name = str(file_data.get("filename") or file_data.get("name") or "")
+            for function_data in file_data.get("functions", []):
+                if not isinstance(function_data, dict):
+                    continue
+                function = self._parse_extension_function(
+                    extension_name,
+                    yy_path,
+                    yyp_path,
+                    file_name,
+                    cast(JsonDict, function_data),
+                )
+                if function is not None:
+                    self.extension_functions[function.function_name] = function
+
+    @staticmethod
+    def _parse_extension_function(
+        extension_name: str,
+        yy_path: str,
+        yyp_path: str,
+        file_name: str,
+        function_data: JsonDict,
+    ) -> IndexedExtensionFunction | None:
+        function_name = function_data.get("name") or function_data.get("functionName")
+        external_name = function_data.get("externalName") or function_data.get("external_name")
+        if not function_name and external_name:
+            function_name = external_name
+        if not function_name:
+            return None
+        arg_count = GameMakerResourceIndex._extension_arg_count(function_data)
+        return IndexedExtensionFunction(
+            extension_name=extension_name,
+            function_name=str(function_name),
+            yy_path=yy_path,
+            yyp_path=yyp_path,
+            file_name=file_name,
+            external_name=str(external_name or ""),
+            arg_count=arg_count,
+        )
+
+    @staticmethod
+    def _extension_arg_count(function_data: JsonDict) -> int | None:
+        raw_arg_count = function_data.get("argCount")
+        if raw_arg_count is None:
+            raw_arg_count = function_data.get("argc")
+        if raw_arg_count is not None and not isinstance(raw_arg_count, bool):
+            try:
+                return int(raw_arg_count)
+            except (TypeError, ValueError):
+                return None
+        args = function_data.get("args")
+        if isinstance(args, list):
+            return len(cast(list[Any], args))
+        return None
 
     def _parse_indexed_rooms(self) -> None:
         for name, resource in self.resources["rooms"].items():

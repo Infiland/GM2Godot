@@ -90,6 +90,26 @@ def _make_minimal_yy(
     )
 
 
+def _make_extension_yy(name: str) -> str:
+    return (
+        '{{\n'
+        '  "$GMExtension":"",\n'
+        '  "%Name":"{name}",\n'
+        '  "name":"{name}",\n'
+        '  "files":[\n'
+        '    {{\n'
+        '      "filename":"{name}.dll",\n'
+        '      "functions":[\n'
+        '        {{"name":"ads_show_rewarded","externalName":"Ads_ShowRewarded","argCount":1,}},\n'
+        '        {{"name":"analytics_track","args":[{{}},{{}},],}},\n'
+        '      ],\n'
+        '    }},\n'
+        '  ],\n'
+        '  "resourceType":"GMExtension",\n'
+        '}}\n'
+    ).format(name=name)
+
+
 class TestGameMakerResourceIndex(unittest.TestCase):
     def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
@@ -133,6 +153,12 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         _write_file(
             os.path.join(self.gm_dir, kind, name, name + ".yy"),
             _make_minimal_yy(name, resource_type, parent_name, parent_path),
+        )
+
+    def _write_extension(self, name: str) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "extensions", name, name + ".yy"),
+            _make_extension_yy(name),
         )
 
     def test_indexes_yyp_resources_and_preserves_room_order(self) -> None:
@@ -192,6 +218,32 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         self.assertTrue(tileset_path.endswith(
             os.path.join("tilesets", "ts_ground", "ts_ground.yy")
         ))
+
+    def test_indexes_extension_functions_from_yyp_metadata(self) -> None:
+        self._write_yyp([("extensions", "AdSDK")])
+        self._write_extension("AdSDK")
+
+        index = self._build_index()
+        rewarded = index.get_extension_function("ads_show_rewarded")
+        analytics = index.get_extension_function("analytics_track")
+
+        assert rewarded is not None
+        assert analytics is not None
+        self.assertEqual(rewarded.extension_name, "AdSDK")
+        self.assertEqual(rewarded.external_name, "Ads_ShowRewarded")
+        self.assertEqual(rewarded.arg_count, 1)
+        self.assertEqual(analytics.arg_count, 2)
+        self.assertEqual(
+            index.extension_function_names(),
+            {"ads_show_rewarded", "analytics_track"},
+        )
+
+    def test_indexes_extension_functions_from_disk_fallback(self) -> None:
+        self._write_extension("AdSDK")
+
+        index = self._build_index()
+
+        self.assertIn("ads_show_rewarded", index.get_extension_functions())
 
     def test_computes_godot_paths_with_subfolders(self) -> None:
         self._write_yyp([

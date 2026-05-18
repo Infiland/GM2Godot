@@ -33,6 +33,10 @@ from .gml_function_dispatch import (
     validate_gml_function_arity,
 )
 from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
+from .extension_functions import (
+    diagnostic_for_unmapped_extension_function,
+    validate_extension_mapping_arity,
+)
 from .identifiers import _is_plain_identifier, _sanitize_gdscript_identifier
 from .model import (
     _ArrayLiteral,
@@ -476,6 +480,21 @@ def _emit_builtin_call(
             local_names,
             scope_context=scope_context,
         )
+
+    extension_mapping = scope_context.extension_function_mappings.get(expr.callee.value)
+    if extension_mapping is not None:
+        arity_diagnostic = validate_extension_mapping_arity(extension_mapping, len(expr.args))
+        if arity_diagnostic is not None:
+            raise GMLTranspileError(arity_diagnostic)
+        emitted_args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
+        return f"{extension_mapping.target}({emitted_args})"
+
+    extension_function = scope_context.extension_functions.get(expr.callee.value)
+    if extension_function is not None:
+        raise GMLTranspileError(diagnostic_for_unmapped_extension_function(extension_function))
 
     diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
     if diagnostic is not None:

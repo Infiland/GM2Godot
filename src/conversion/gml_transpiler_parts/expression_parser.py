@@ -316,6 +316,8 @@ class _ExpressionParser:
                 static_scope=static_scope_name,
                 static_names=static_names,
                 static_prefix=static_prefix,
+                extension_functions=self.scope_context.extension_functions,
+                extension_function_mappings=self.scope_context.extension_function_mappings,
             )
         else:
             scope_context = _ScopeContext(
@@ -327,6 +329,8 @@ class _ExpressionParser:
                 static_scope=static_scope_name,
                 static_names=static_names,
                 static_prefix=static_prefix,
+                extension_functions=scope_context.extension_functions,
+                extension_function_mappings=scope_context.extension_function_mappings,
             )
         from .statement_parser import _StatementParser
 

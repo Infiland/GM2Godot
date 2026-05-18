@@ -11,6 +11,13 @@ from src.conversion.gml_transpiler_parts.expression_service import (
     transpile_gml_condition,
     transpile_gml_expression,
 )
+from src.conversion.gml_transpiler_parts.extension_functions import (
+    EXTENSION_FUNCTION_MAPPING_FILENAME,
+    diagnostic_for_unmapped_extension_function,
+    load_gml_extension_function_mappings,
+    normalize_extension_function_mappings,
+    normalize_extension_functions,
+)
 from src.conversion.gml_transpiler_parts.gml_api_manifest import (
     GMLAPICategoryReport,
     GMLAPIEntry,
@@ -29,6 +36,8 @@ from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
     validate_gml_function_arity,
 )
 from src.conversion.gml_transpiler_parts.model import (
+    GMLExtensionFunction,
+    GMLExtensionFunctionMapping,
     GMLTranspileError,
     _ArrayLiteral,
     _Binary,
@@ -67,6 +76,8 @@ __all__ = [
     "GMLAPICategoryReport",
     "GMLAPIEntry",
     "GMLFunctionDescriptor",
+    "GMLExtensionFunction",
+    "GMLExtensionFunctionMapping",
     "GMLPreprocessResult",
     "GMLPreprocessorDiagnostic",
     "_ArrayLiteral",
@@ -99,7 +110,9 @@ __all__ = [
     "_parse_gml_expression",
     "_tokenize",
     "category_issue_numbers",
+    "EXTENSION_FUNCTION_MAPPING_FILENAME",
     "diagnostic_for_unimplemented_gml_api",
+    "diagnostic_for_unmapped_extension_function",
     "generate_gml_api_compatibility_report",
     "get_gml_api_entry",
     "get_gml_function_descriptor",
@@ -107,6 +120,9 @@ __all__ = [
     "is_known_gml_api",
     "iter_gml_api_entries",
     "iter_gml_function_descriptors",
+    "load_gml_extension_function_mappings",
+    "normalize_extension_function_mappings",
+    "normalize_extension_functions",
     "preprocess_gml_source",
     "transpile_gml_code",
     "transpile_gml_condition",

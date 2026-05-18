@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
@@ -28,6 +29,26 @@ def _resource_entry(kind: str, name: str) -> dict[str, object]:
             "name": name,
             "path": f"{kind}/{name}/{name}.yy",
         }
+    }
+
+
+def _extension_yy(name: str) -> dict[str, object]:
+    return {
+        "%Name": name,
+        "name": name,
+        "files": [
+            {
+                "filename": f"{name}.dll",
+                "functions": [
+                    {
+                        "name": "ads_show_rewarded",
+                        "externalName": "Ads_ShowRewarded",
+                        "argCount": 1,
+                    }
+                ],
+            }
+        ],
+        "resourceType": "GMExtension",
     }
 
 
@@ -101,6 +122,36 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('"legacy_arguments": true', registry)
         self.assertIn('preload("res://scripts/Game/scr_modern.gd").new().gm2godot_callable()', registry)
         self.assertIn('"legacy_arguments": false', registry)
+
+    def test_converts_scripts_with_mapped_extension_calls(self) -> None:
+        self._write_project()
+        project_path = self.gm_dir / "ScriptTest.yyp"
+        project = json.loads(project_path.read_text(encoding="utf-8"))
+        resources = cast(list[object], project["resources"])
+        resources.append(_resource_entry("extensions", "AdSDK"))
+        _write_json(project_path, project)
+        _write_json(self.gm_dir / "extensions" / "AdSDK" / "AdSDK.yy", _extension_yy("AdSDK"))
+        _write_json(
+            self.gm_dir / "gm2godot_extension_functions.json",
+            {
+                "functions": {
+                    "ads_show_rewarded": {
+                        "target": "AdBridge.show_rewarded",
+                        "min_args": 1,
+                        "max_args": 1,
+                    }
+                }
+            },
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_add" / "scr_add.gml",
+            'ads_show_rewarded("zone_1"); return 1;',
+        )
+
+        self._converter().convert_all()
+
+        legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
+        self.assertIn('AdBridge.show_rewarded("zone_1")', legacy_script)
 
 
 if __name__ == "__main__":

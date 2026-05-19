@@ -87,6 +87,10 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "collision_rectangle": frozenset({4}),
     "collision_line": frozenset({4}),
     "collision_circle": frozenset({3}),
+    "collision_point_list": frozenset({2}),
+    "collision_rectangle_list": frozenset({4}),
+    "collision_line_list": frozenset({4}),
+    "collision_circle_list": frozenset({3}),
 }
 
 _PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -107,11 +111,18 @@ _DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "draw_tile": frozenset({0}),
     "draw_set_font": frozenset({0}),
     "sprite_get_texture": frozenset({0}),
+    "sprite_get_uvs": frozenset({0}),
+    "sprite_prefetch": frozenset({0}),
+    "sprite_flush": frozenset({0}),
+    "texturegroup_set_mode": frozenset({2}),
     "shader_set": frozenset({0}),
     "shader_get_name": frozenset({0}),
     "shader_is_compiled": frozenset({0}),
     "shader_get_uniform": frozenset({0}),
     "shader_get_sampler_index": frozenset({0}),
+    "part_system_create": frozenset({0}),
+    "part_system_create_layer": frozenset({2}),
+    "part_type_sprite": frozenset({1}),
     "camera_create_view": frozenset({5}),
 }
 
@@ -145,6 +156,20 @@ _ROOM_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "room_exists": frozenset({0}),
     "room_get_name": frozenset({0}),
     "room_get_info": frozenset({0}),
+}
+
+_SEQUENCE_TIMELINE_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "timeline_exists": frozenset({0}),
+    "timeline_get_name": frozenset({0}),
+    "timeline_moment_add_script": frozenset({0, 2}),
+    "timeline_moment_clear": frozenset({0}),
+    "timeline_clear": frozenset({0}),
+    "timeline_size": frozenset({0}),
+    "timeline_max_moment": frozenset({0}),
+    "sequence_exists": frozenset({0}),
+    "sequence_get": frozenset({0}),
+    "sequence_destroy": frozenset({0}),
+    "layer_sequence_create": frozenset({3}),
 }
 
 
@@ -473,7 +498,7 @@ def _emit_builtin_call(
         return None
 
     descriptor = get_gml_function_descriptor(expr.callee.value)
-    if descriptor is not None:
+    if descriptor is not None and descriptor.lowering_kind != "runtime_platform_service_api":
         return _emit_descriptor_call(
             descriptor,
             expr.args,
@@ -495,6 +520,14 @@ def _emit_builtin_call(
     extension_function = scope_context.extension_functions.get(expr.callee.value)
     if extension_function is not None:
         raise GMLTranspileError(diagnostic_for_unmapped_extension_function(extension_function))
+
+    if descriptor is not None:
+        return _emit_descriptor_call(
+            descriptor,
+            expr.args,
+            local_names,
+            scope_context=scope_context,
+        )
 
     diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
     if diagnostic is not None:
@@ -566,9 +599,11 @@ def _emit_descriptor_call(
         "runtime_draw_api",
         "runtime_instance_api",
         "runtime_motion_api",
+        "runtime_layer_api",
         "runtime_path_api",
         "runtime_path_asset_api",
         "runtime_room_api",
+        "runtime_sequence_api",
         "runtime_self_default",
         "runtime_time_api",
     }:
@@ -601,6 +636,15 @@ def _emit_descriptor_call(
                 local_names,
                 scope_context=scope_context,
             )
+        if descriptor.lowering_kind == "runtime_sequence_api":
+            emitted_args = _emit_sequence_api_args(
+                descriptor,
+                args,
+                local_names,
+                scope_context=scope_context,
+            )
+            if descriptor.name == "timeline_step" and not emitted_args:
+                emitted_args.append(scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_time_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_motion_api":
@@ -623,6 +667,19 @@ def _emit_descriptor_call(
             for arg in args[1:]
         )
         return f"GMRuntime.{descriptor.lowering_target}({emitted_first}, [{emitted_rest}])"
+
+    if descriptor.lowering_kind == "runtime_platform_service_api":
+        emitted_args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        )
+        return (
+            f"GMRuntime.gml_platform_service_call("
+            f"{json.dumps(descriptor.lowering_target)}, "
+            f"{json.dumps(descriptor.name)}, "
+            f"[{emitted_args}]"
+            f")"
+        )
 
     script_asset_indices = _SCRIPT_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args = ", ".join(
@@ -719,6 +776,22 @@ def _emit_room_api_args(
     scope_context: _ScopeContext,
 ) -> list[str]:
     asset_indices = _ROOM_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in asset_indices:
+            emitted_args.append(_emit_asset_argument(arg, local_names, scope_context=scope_context))
+        else:
+            emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
+
+
+def _emit_sequence_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    asset_indices = _SEQUENCE_TIMELINE_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:

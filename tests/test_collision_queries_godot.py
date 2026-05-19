@@ -115,9 +115,12 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tvar wall_selector = GMRuntime.gml_asset_get_index("o_wall")
         \tvar player_handle = GMRuntime.gml_instance_create_layer(10, 20, "Instances", player_selector, self)
         \tvar wall_handle = GMRuntime.gml_instance_create_layer(40, 20, "Instances", wall_selector, self)
+        \tvar wall_handle_2 = GMRuntime.gml_instance_create_layer(55, 20, "Instances", wall_selector, self)
         \tif not _check(GMRuntime.gml_handle_is_valid(player_handle), "player was not created"):
         \t\treturn
         \tif not _check(GMRuntime.gml_handle_is_valid(wall_handle), "wall was not created"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_handle_is_valid(wall_handle_2), "second wall was not created"):
         \t\treturn
         \tvar player = GMRuntime.gml_handle_resolve(player_handle)
 
@@ -144,6 +147,33 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(_same_handle(GMRuntime.gml_collision_point(player, 10, 20, GMRuntime.gml_instance_all(), false, false), player_handle), "all selector did not include current instance"):
         \t\treturn
         \tif not _check(GMRuntime.gml_collision_point(player, -100, -100, wall_selector, false, false).index == GMRuntime.GML_INSTANCE_INVALID_INDEX, "miss did not return noone"):
+        \t\treturn
+        \tvar point_hits = GMRuntime.gml_ds_list_create()
+        \tif not _check(GMRuntime.gml_collision_point_list(player, 40, 20, wall_selector, false, false, point_hits, true) == 1, "collision_point_list count failed"):
+        \t\treturn
+        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(point_hits, 0), wall_handle), "collision_point_list handle failed"):
+        \t\treturn
+        \tvar rect_hits = GMRuntime.gml_ds_list_create()
+        \tif not _check(GMRuntime.gml_collision_rectangle_list(player, 32, 12, 64, 28, wall_selector, false, false, rect_hits, true) == 2, "collision_rectangle_list count failed"):
+        \t\treturn
+        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(rect_hits, 0), wall_handle_2), "collision_rectangle_list first ordered handle failed"):
+        \t\treturn
+        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(rect_hits, 1), wall_handle), "collision_rectangle_list second ordered handle failed"):
+        \t\treturn
+        \tvar line_hits = GMRuntime.gml_ds_list_create()
+        \tif not _check(GMRuntime.gml_collision_line_list(player, 0, 20, 80, 20, wall_selector, false, false, line_hits, true) == 2, "collision_line_list count failed"):
+        \t\treturn
+        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(line_hits, 0), wall_handle), "collision_line_list first ordered handle failed"):
+        \t\treturn
+        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(line_hits, 1), wall_handle_2), "collision_line_list second ordered handle failed"):
+        \t\treturn
+        \tvar circle_hits = GMRuntime.gml_ds_list_create()
+        \tif not _check(GMRuntime.gml_collision_circle_list(player, 48, 20, 20, wall_selector, false, false, circle_hits, false) == 2, "collision_circle_list count failed"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_ds_list_size(circle_hits) == 2, "collision_circle_list did not append two handles"):
+        \t\treturn
+        \tvar notme_hits = GMRuntime.gml_ds_list_create()
+        \tif not _check(GMRuntime.gml_collision_point_list(player, 10, 20, GMRuntime.gml_instance_all(), false, true, notme_hits, false) == 0, "collision_point_list notme failed"):
         \t\treturn
 
         \tprint("COLLISION_SMOKE_OK")

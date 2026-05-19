@@ -135,11 +135,11 @@ static func gml_ds_map_merge(id_value, source_id):
 	if dest is Dictionary and src is Dictionary:
 		dest.merge(src, true)
 
-static func gml_ds_map_read(id_value, str_val):
-	pass
+static func gml_ds_map_read(id_value, str_val, legacy = false):
+	_gml_ds_read(GML_DS_MAP_HANDLE_KIND, id_value, str_val, legacy)
 
 static func gml_ds_map_write(id_value):
-	return ""
+	return _gml_ds_write(GML_DS_MAP_HANDLE_KIND, id_value)
 
 static func gml_ds_map_add_list(id_value, key, list_id):
 	var ds = _gml_resolve_ds_map(id_value)

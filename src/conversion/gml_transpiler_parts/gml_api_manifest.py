@@ -69,6 +69,8 @@ _CATEGORY_ISSUE_NUMBERS = {
     "Game Input": 494,
     "Audio": 495,
     "General Game Control": 496,
+    "Rooms and Layers": 566,
+    "Sequences and Timelines": 567,
     "Time": 497,
     "Data Structures Sequential": 498,
     "Data Structures Sequential": 498,
@@ -87,9 +89,11 @@ _CATEGORY_ISSUE_NUMBERS = {
     "Physics": 511,
     "Script Functions": 512,
     "Preprocessor": 513,
+    "Sprites and Textures": 568,
     "Flex Panels": 514,
     "OS Compiler Debug GC": 515,
-    "Platform Services": 516,
+    "OS and Device Media": 569,
+    "Platform Services": 570,
     "Extensions": 517,
     "Full-Game Fixtures": 518,
 }
@@ -121,6 +125,343 @@ def _entry(
         docs_url=f"{_GM_DOCS}/{docs_path}",
         notes=notes,
     )
+
+
+_LAYER_DOCS_PATH = (
+    "GameMaker_Language/GML_Reference/Asset_Management/Rooms/"
+    "General_Layer_Functions/General_Layer_Functions.htm"
+)
+_LAYER_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.11_layers"
+_LAYER_IMPLEMENTED_APIS = frozenset(
+    {
+        "layer_exists",
+        "layer_get_id",
+        "layer_get_id_at_depth",
+        "layer_get_name",
+        "layer_get_all",
+        "layer_get_depth",
+        "layer_depth",
+        "layer_create",
+        "layer_destroy",
+        "layer_add_instance",
+        "layer_get_all_elements",
+        "layer_get_element_type",
+    }
+)
+_LAYER_UNSUPPORTED_ELEMENT_APIS = (
+    (
+        "layer_tilemap_get_id",
+        "Tilemap layer element editing is classified separately from general layer handles and remains tied to tilemap/texture API work.",
+    ),
+    (
+        "layer_tilemap_create",
+        "Runtime tilemap element creation needs the texture/tilemap compatibility surface tracked by #568.",
+    ),
+    (
+        "layer_background_get_id",
+        "Background layer element mutation needs dedicated background asset compatibility; converted backgrounds remain static metadata.",
+    ),
+    (
+        "layer_background_create",
+        "Runtime background elements are not created until background asset conversion has a mutable runtime representation.",
+    ),
+    (
+        "layer_sprite_get_id",
+        "Sprite asset layer elements need the texture/skeletal API surface tracked by #568.",
+    ),
+    (
+        "layer_sprite_create",
+        "Runtime sprite layer elements are deferred to texture/sprite element compatibility tracked by #568.",
+    ),
+    (
+        "layer_particle_get_instance",
+        "Particle layer elements are resolved by particle system handles; direct layer element particle instances remain tracked by #564/#566.",
+    ),
+    (
+        "layer_particle_create",
+        "Runtime particle layer element creation remains delegated to the particle system compatibility surface from #564.",
+    ),
+)
+
+
+def _layer_entries() -> tuple[GMLAPIEntry, ...]:
+    implemented_entries = tuple(
+        _entry(
+            name,
+            "Rooms and Layers",
+            "implemented",
+            _LAYER_OWNER_MODULE,
+            "yes",
+            "yes",
+            "yes",
+            "yes"
+            if name
+            in {
+                "layer_get_id",
+                "layer_get_all",
+                "layer_create",
+                "layer_add_instance",
+                "layer_get_all_elements",
+                "layer_get_element_type",
+            }
+            else "no",
+            _LAYER_DOCS_PATH,
+            "Implemented through a GMRuntime layer registry that maps converted room layer metadata and runtime-created Node2D layers to stable handles.",
+        )
+        for name in sorted(_LAYER_IMPLEMENTED_APIS)
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "Rooms and Layers",
+            "unsupported",
+            _LAYER_OWNER_MODULE,
+            "yes",
+            "n/a",
+            "n/a",
+            "no",
+            _LAYER_DOCS_PATH,
+            notes,
+        )
+        for name, notes in _LAYER_UNSUPPORTED_ELEMENT_APIS
+    )
+    return implemented_entries + unsupported_entries
+
+
+_SEQUENCE_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequences.htm"
+_TIMELINE_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Timelines/Timelines.htm"
+_SEQUENCE_TIMELINE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.61_sequences_timelines"
+_TIMELINE_PARTIAL_APIS = frozenset(
+    {
+        "timeline_exists",
+        "timeline_get_name",
+        "timeline_moment_add_script",
+        "timeline_moment_clear",
+        "timeline_clear",
+        "timeline_size",
+        "timeline_max_moment",
+        "timeline_step",
+    }
+)
+_SEQUENCE_PARTIAL_APIS = frozenset(
+    {
+        "sequence_exists",
+        "sequence_get",
+        "sequence_create",
+        "sequence_destroy",
+        "layer_sequence_create",
+        "layer_sequence_destroy",
+        "layer_sequence_get_instance",
+        "layer_sequence_headpos",
+        "layer_sequence_get_headpos",
+        "layer_sequence_speedscale",
+        "layer_sequence_get_speedscale",
+        "layer_sequence_headdir",
+        "layer_sequence_get_headdir",
+        "layer_sequence_pause",
+        "layer_sequence_play",
+        "layer_sequence_is_paused",
+        "layer_sequence_is_finished",
+        "layer_sequence_step",
+    }
+)
+_SEQUENCE_UNSUPPORTED_APIS = (
+    (
+        "sequence_track_new",
+        "Runtime track authoring is rejected until GameMaker sequence track structs can be converted to Godot AnimationPlayer/Animation resources.",
+    ),
+    (
+        "sequence_keyframe_new",
+        "Runtime keyframe authoring is rejected until authored sequence tracks are mapped to AnimationPlayer tracks.",
+    ),
+    (
+        "sequence_keyframedata_new",
+        "Runtime keyframe data structs are rejected until sequence track evaluation has a Godot AnimationPlayer-backed representation.",
+    ),
+    (
+        "sequence_get_objects",
+        "Object-track introspection is unsupported until converted sequence tracks preserve object bindings.",
+    ),
+    (
+        "sequence_instance_override_object",
+        "Sequence object-track overrides are unsupported until object tracks are converted rather than stored as metadata only.",
+    ),
+)
+
+
+def _sequence_timeline_entries() -> tuple[GMLAPIEntry, ...]:
+    timeline_entries = tuple(
+        _entry(
+            name,
+            "Sequences and Timelines",
+            "partial",
+            _SEQUENCE_TIMELINE_OWNER_MODULE,
+            "yes",
+            "yes",
+            "partial",
+            "yes" if name in {"timeline_moment_add_script", "timeline_step"} else "no",
+            _TIMELINE_DOCS_PATH,
+            "Timeline asset lookup and runtime moment scheduling are supported through explicit GMRuntime timeline state; authored timeline asset conversion remains metadata-only.",
+            issue_number=567,
+        )
+        for name in sorted(_TIMELINE_PARTIAL_APIS)
+    )
+    sequence_entries = tuple(
+        _entry(
+            name,
+            "Sequences and Timelines",
+            "partial",
+            _SEQUENCE_TIMELINE_OWNER_MODULE,
+            "yes",
+            "yes",
+            "partial",
+            "yes"
+            if name
+            in {
+                "layer_sequence_create",
+                "layer_sequence_get_instance",
+                "layer_sequence_headpos",
+                "layer_sequence_speedscale",
+                "layer_sequence_pause",
+                "layer_sequence_step",
+            }
+            else "no",
+            _SEQUENCE_DOCS_PATH,
+            "Sequence object/instance metadata and playback state are supported; authored tracks are preserved as metadata with explicit diagnostics until AnimationPlayer conversion is implemented.",
+            issue_number=567,
+        )
+        for name in sorted(_SEQUENCE_PARTIAL_APIS)
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "Sequences and Timelines",
+            "unsupported",
+            _SEQUENCE_TIMELINE_OWNER_MODULE,
+            "yes",
+            "n/a",
+            "n/a",
+            "no",
+            _SEQUENCE_DOCS_PATH,
+            notes,
+            issue_number=567,
+        )
+        for name, notes in _SEQUENCE_UNSUPPORTED_APIS
+    )
+    return timeline_entries + sequence_entries + unsupported_entries
+
+
+_TEXTURE_DOCS_PATH = "GameMaker_Language/GML_Reference/Drawing/Textures/Textures.htm"
+_SKELETAL_DOCS_PATH = (
+    "GameMaker_Language/GML_Reference/Asset_Management/Sprites/"
+    "Skeletal_Animation/Skeletal_Animation.htm"
+)
+_SPRITES_TEXTURES_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.48_drawing_basic_forms"
+_TEXTURE_PARTIAL_APIS = frozenset(
+    {
+        "sprite_get_uvs",
+        "texture_get_texel_width",
+        "texture_get_texel_height",
+        "texture_get_uvs",
+        "texture_is_ready",
+        "texture_prefetch",
+        "texture_flush",
+        "sprite_prefetch",
+        "sprite_flush",
+        "sprite_prefetch_multi",
+        "sprite_flush_multi",
+        "draw_texture_flush",
+        "draw_flush",
+        "texture_global_scale",
+        "texture_debug_messages",
+        "texturegroup_set_mode",
+        "texturegroup_load",
+        "texturegroup_unload",
+        "texturegroup_get_status",
+        "texturegroup_get_names",
+        "texturegroup_get_textures",
+        "texturegroup_get_sprites",
+        "texturegroup_get_fonts",
+        "texturegroup_get_tilesets",
+    }
+)
+_SKELETAL_UNSUPPORTED_APIS = (
+    "skeleton_animation_get",
+    "skeleton_animation_set",
+    "skeleton_animation_get_ext",
+    "skeleton_animation_set_ext",
+    "skeleton_animation_get_duration",
+    "skeleton_animation_mix",
+    "skeleton_animation_list",
+    "skeleton_animation_clear",
+    "skeleton_animation_get_frames",
+    "skeleton_animation_get_frame",
+    "skeleton_animation_set_frame",
+    "skeleton_animation_get_position",
+    "skeleton_animation_set_position",
+    "skeleton_animation_get_event_frames",
+    "skeleton_animation_is_looping",
+    "skeleton_animation_is_finished",
+    "skeleton_skin_get",
+    "skeleton_skin_set",
+    "skeleton_skin_list",
+    "skeleton_attachment_get",
+    "skeleton_attachment_set",
+    "skeleton_bone_data_get",
+    "skeleton_bone_data_set",
+    "skeleton_bone_state_get",
+    "skeleton_bone_state_set",
+    "skeleton_slot_data",
+    "skeleton_slot_colour_set",
+    "skeleton_slot_colour_get",
+    "skeleton_collision_draw_set",
+)
+
+
+def _sprites_textures_entries() -> tuple[GMLAPIEntry, ...]:
+    texture_entries = tuple(
+        _entry(
+            name,
+            "Sprites and Textures",
+            "partial",
+            _SPRITES_TEXTURES_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "partial",
+            "yes"
+            if name
+            in {
+                "sprite_get_uvs",
+                "texture_get_texel_width",
+                "texture_get_texel_height",
+                "texture_get_uvs",
+                "texturegroup_get_names",
+                "texturegroup_get_sprites",
+            }
+            else "no",
+            _TEXTURE_DOCS_PATH,
+            "Exposes stable texture-page compatibility metadata over Godot Texture2D resources; texture group load/unload APIs are deterministic no-ops over imported resources.",
+            issue_number=568,
+        )
+        for name in sorted(_TEXTURE_PARTIAL_APIS)
+    )
+    skeletal_entries = tuple(
+        _entry(
+            name,
+            "Sprites and Textures",
+            "unsupported",
+            _SPRITES_TEXTURES_OWNER_MODULE,
+            "yes",
+            "n/a",
+            "n/a",
+            "no",
+            _SKELETAL_DOCS_PATH,
+            "Spine/skeletal sprite APIs require source skeleton data conversion to Godot Skeleton2D/AnimationPlayer; GM2Godot emits an explicit diagnostic instead of generating invalid GDScript.",
+            issue_number=568,
+        )
+        for name in _SKELETAL_UNSUPPORTED_APIS
+    )
+    return texture_entries + skeletal_entries
 
 
 _FLEXPANEL_DOCS_PATH = "GameMaker_Language/GML_Reference/Flex_Panels/Flex_Panels.htm"
@@ -297,17 +638,12 @@ _OS_DEBUG_GC_PLANNED_APIS = (
     ("GM_project_filename", _OS_COMPILER_DOCS_PATH, "Requires generated source project metadata."),
     ("GM_is_sandboxed", _OS_COMPILER_DOCS_PATH, "Requires an explicit export-target sandbox policy."),
     ("gml_release_mode", _OS_COMPILER_DOCS_PATH, "Requires generated compile/export mode metadata."),
-    ("clipboard_has_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
-    ("clipboard_get_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
-    ("clipboard_set_text", _OS_COMPILER_DOCS_PATH, "Requires a display-server clipboard policy for headless and exported targets."),
 )
 _OS_DEBUG_GC_UNSUPPORTED_APIS = (
     ("gml_pragma", _OS_COMPILER_DOCS_PATH, "GameMaker compile-time pragmas have no runtime equivalent after conversion."),
     ("os_powersave_enable", _OS_COMPILER_DOCS_PATH, "Godot does not expose GameMaker's platform power-save toggle in portable GDScript."),
     ("os_lock_orientation", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
     ("os_set_orientation_lock", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
-    ("os_check_permission", _OS_COMPILER_DOCS_PATH, "Runtime permission APIs require platform plugins or export-template integration."),
-    ("os_request_permission", _OS_COMPILER_DOCS_PATH, "Runtime permission APIs require platform plugins or export-template integration."),
     ("scheduler_resolution_get", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
     ("scheduler_resolution_set", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
     ("debug_event", _OS_DEBUG_DOCS_PATH, "GameMaker debugger event injection has no Godot runtime equivalent."),
@@ -385,6 +721,131 @@ def _os_debug_gc_entries() -> tuple[GMLAPIEntry, ...]:
     return implemented_entries + partial_entries + planned_entries + unsupported_entries
 
 
+_OS_DEVICE_MEDIA_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.72_os_debug_gc"
+_OS_DEVICE_MEDIA_PLATFORM_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.73_platform_services"
+_OS_DEVICE_MEDIA_CLIPBOARD_DOCS_PATH = "GameMaker_Language/GML_Reference/Strings/clipboard_set_text.htm"
+_OS_DEVICE_MEDIA_WEB_DOCS_PATH = "GameMaker_Language/GML_Reference/Web_And_HTML5/Web_And_HTML5.htm"
+_OS_DEVICE_MEDIA_VIDEO_DOCS_PATH = "GameMaker_Language/GML_Reference/Drawing/Videos/Videos.htm"
+_OS_DEVICE_MEDIA_AUDIO_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Buffers/Audio_Buffers.htm"
+_OS_DEVICE_MEDIA_INPUT_DOCS_PATH = "GameMaker_Language/GML_Reference/Game_Input/Device_Input/Device_Input.htm"
+_OS_DEVICE_MEDIA_IMPLEMENTED_APIS = (
+    ("clipboard_has_text", "Uses DisplayServer clipboard support and emits a one-time fallback warning when native clipboard support is unavailable."),
+    ("clipboard_get_text", "Reads DisplayServer clipboard text and emits a one-time fallback warning when native clipboard support is unavailable."),
+    ("clipboard_set_text", "Writes DisplayServer clipboard text and records a deterministic fallback value for targets without clipboard support."),
+)
+_OS_DEVICE_MEDIA_PARTIAL_APIS: tuple[tuple[str, str, GMLAPISupportFlag, str], ...] = (
+    ("url_open", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to provide target-specific window behavior."),
+    ("url_open_ext", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target parameter."),
+    ("url_open_full", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target/options parameters."),
+    ("url_get_domain", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Returns an empty string without a web hook; hook implementations can report the hosting domain."),
+    ("browser_height", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Falls back to the Godot window height when no browser/web hook is registered."),
+    ("browser_width", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Falls back to the Godot window width when no browser/web hook is registered."),
+    ("browser_input_capture", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "No-ops unless a web hook implements browser input capture policy."),
+    ("webgl_enabled", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Matches GameMaker's non-browser true fallback unless a web hook reports otherwise."),
+)
+_OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS = (
+    (
+        (
+            "audio_get_recorder_count",
+            "audio_get_recorder_info",
+            "audio_start_recording",
+            "audio_stop_recording",
+        ),
+        _OS_DEVICE_MEDIA_AUDIO_DOCS_PATH,
+        "Microphone/audio recorder APIs require target permission handling and a Godot audio-input addon before GM2Godot can produce recording buffers or async payloads.",
+    ),
+    (
+        (
+            "video_open",
+            "video_close",
+            "video_draw",
+            "video_set_volume",
+            "video_pause",
+            "video_resume",
+            "video_enable_loop",
+            "video_seek_to",
+            "video_is_looping",
+            "video_get_volume",
+            "video_get_duration",
+            "video_get_position",
+            "video_get_status",
+            "video_get_format",
+        ),
+        _OS_DEVICE_MEDIA_VIDEO_DOCS_PATH,
+        "Video playback and camera-feed constraints require a VideoStreamPlayer/camera addon policy before GM2Godot can preserve surfaces, status values, and async callbacks.",
+    ),
+    (
+        (
+            "device_get_tilt_x",
+            "device_get_tilt_y",
+            "device_get_tilt_z",
+            "device_is_keypad_open",
+            "display_get_orientation",
+        ),
+        _OS_DEVICE_MEDIA_INPUT_DOCS_PATH,
+        "Device sensor/orientation APIs require per-target permission and sensor bridges; GM2Godot rejects them instead of emitting unresolved calls.",
+    ),
+    (
+        (
+            "os_check_permission",
+            "os_request_permission",
+        ),
+        _OS_COMPILER_DOCS_PATH,
+        "Runtime permission APIs require platform plugins or export-template integration for clipboard, sensors, microphone, camera, and browser APIs.",
+    ),
+)
+
+
+def _os_device_media_entries() -> tuple[GMLAPIEntry, ...]:
+    implemented_entries = tuple(
+        _entry(
+            name,
+            "OS and Device Media",
+            "implemented",
+            _OS_DEVICE_MEDIA_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "yes",
+            "yes",
+            _OS_DEVICE_MEDIA_CLIPBOARD_DOCS_PATH,
+            notes,
+        )
+        for name, notes in _OS_DEVICE_MEDIA_IMPLEMENTED_APIS
+    )
+    partial_entries = tuple(
+        _entry(
+            name,
+            "OS and Device Media",
+            "partial",
+            _OS_DEVICE_MEDIA_PLATFORM_OWNER_MODULE,
+            "n/a",
+            "yes",
+            runtime_support,
+            "yes" if name in {"browser_width", "browser_height", "browser_input_capture", "url_get_domain"} else "no",
+            docs_path,
+            notes,
+        )
+        for name, docs_path, runtime_support, notes in _OS_DEVICE_MEDIA_PARTIAL_APIS
+    )
+    unsupported_entries = tuple(
+        _entry(
+            name,
+            "OS and Device Media",
+            "unsupported",
+            "src.conversion.gml_runtime_parts",
+            "n/a",
+            "no",
+            "no",
+            "no",
+            docs_path,
+            notes,
+        )
+        for names, docs_path, notes in _OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS
+        for name in names
+    )
+    return implemented_entries + partial_entries + unsupported_entries
+
+
 _PLATFORM_SERVICE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.73_platform_services"
 _PLATFORM_STEAM_DOCS_PATH = "GameMaker_Language/GML_Reference/Steam/Steam.htm"
 _PLATFORM_IAP_DOCS_PATH = "GameMaker_Language/GML_Reference/In_App_Purchases/In_App_Purchases.htm"
@@ -394,14 +855,6 @@ _PLATFORM_WALLPAPER_DOCS_PATH = "GameMaker_Language/GML_Reference/Live_Wallpaper
 _PLATFORM_ASYNC_DOCS_PATH = "GameMaker_Language/GML_Reference/Asynchronous_Functions/Asynchronous_Functions.htm"
 _PLATFORM_RUNTIME_HOOK_APIS: tuple[tuple[str, str, GMLAPISupportFlag, str], ...] = (
     ("steam_is_initialized", _PLATFORM_STEAM_DOCS_PATH, "yes", "Returns false without a registered Steam hook; registered Steam addons can override the value."),
-    ("url_open", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to provide target-specific window behavior."),
-    ("url_open_ext", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target parameter."),
-    ("url_open_full", _PLATFORM_WEB_DOCS_PATH, "no", "Uses OS.shell_open outside web exports and allows a web hook to honor the HTML5 target/options parameters."),
-    ("url_get_domain", _PLATFORM_WEB_DOCS_PATH, "yes", "Returns an empty string without a web hook; hook implementations can report the hosting domain."),
-    ("browser_height", _PLATFORM_WEB_DOCS_PATH, "yes", "Falls back to the Godot window height when no browser/web hook is registered."),
-    ("browser_width", _PLATFORM_WEB_DOCS_PATH, "yes", "Falls back to the Godot window width when no browser/web hook is registered."),
-    ("browser_input_capture", _PLATFORM_WEB_DOCS_PATH, "yes", "No-ops unless a web hook implements browser input capture policy."),
-    ("webgl_enabled", _PLATFORM_WEB_DOCS_PATH, "yes", "Matches GameMaker's non-browser true fallback unless a web hook reports otherwise."),
     ("xboxlive_user_is_signed_in", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns false without a registered Xbox Live hook; platform addons can provide real account state."),
     ("xboxlive_user_is_signing_in", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns false without a registered Xbox Live hook; platform addons can provide real sign-in state."),
     ("xboxlive_gamertag_for_user", _PLATFORM_XBOX_DOCS_PATH, "yes", "Returns an empty string without a registered Xbox Live hook."),
@@ -556,18 +1009,18 @@ def _platform_service_entries() -> tuple[GMLAPIEntry, ...]:
         )
         for name, docs_path, smoke_coverage, notes in _PLATFORM_RUNTIME_HOOK_APIS
     )
-    unsupported_entries = tuple(
+    hook_contract_entries = tuple(
         _entry(
             name,
             "Platform Services",
-            "unsupported",
-            "src.conversion.gml_transpiler_parts.gml_api_manifest",
+            "partial",
+            _PLATFORM_SERVICE_OWNER_MODULE,
             "n/a",
-            "no",
-            "no",
+            "yes",
+            "partial",
             "no",
             docs_path,
-            notes,
+            notes + " Calls lower to GMRuntime.gml_platform_service_call(service, api, args) and emit a deterministic runtime diagnostic when the service hook is missing.",
         )
         for names, docs_path, notes in _PLATFORM_UNSUPPORTED_GROUPS
         for name in names
@@ -576,18 +1029,18 @@ def _platform_service_entries() -> tuple[GMLAPIEntry, ...]:
         _entry(
             name,
             "Platform Services",
-            "partial" if name != "push_notifications_extension" else "planned",
+            "partial",
             owner_module,
             "n/a",
             "n/a",
             "n/a",
-            "yes" if name != "push_notifications_extension" else "no",
+            "yes",
             docs_path,
             notes,
         )
         for name, docs_path, owner_module, notes in _PLATFORM_EVENT_APIS
     )
-    return partial_entries + unsupported_entries + event_entries
+    return partial_entries + hook_contract_entries + event_entries
 
 
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
@@ -918,50 +1371,50 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "collision_point_list",
         "Movement and Collisions",
-        "planned",
+        "partial",
         "src.conversion.gml_runtime_parts.segments.45_collision_queries",
-        "n/a",
-        "no",
-        "no",
-        "no",
+        "yes",
+        "yes",
+        "partial",
+        "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Deferred until DS list handles are available.",
+        "Appends all bbox-approximated point collision matches to a DS list, with optional distance ordering.",
     ),
     _entry(
         "collision_rectangle_list",
         "Movement and Collisions",
-        "planned",
+        "partial",
         "src.conversion.gml_runtime_parts.segments.45_collision_queries",
-        "n/a",
-        "no",
-        "no",
-        "no",
+        "yes",
+        "yes",
+        "partial",
+        "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Deferred until DS list handles are available.",
+        "Appends all bbox-approximated rectangle collision matches to a DS list, with optional distance ordering.",
     ),
     _entry(
         "collision_line_list",
         "Movement and Collisions",
-        "planned",
+        "partial",
         "src.conversion.gml_runtime_parts.segments.45_collision_queries",
-        "n/a",
-        "no",
-        "no",
-        "no",
+        "yes",
+        "yes",
+        "partial",
+        "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Deferred until DS list handles are available.",
+        "Appends all bbox-approximated line collision matches to a DS list, with optional start-distance ordering.",
     ),
     _entry(
         "collision_circle_list",
         "Movement and Collisions",
-        "planned",
+        "partial",
         "src.conversion.gml_runtime_parts.segments.45_collision_queries",
-        "n/a",
-        "no",
-        "no",
-        "no",
+        "yes",
+        "yes",
+        "partial",
+        "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Deferred until DS list handles are available.",
+        "Appends all bbox-approximated circle collision matches to a DS list, with optional distance ordering.",
     ),
     _entry(
         "motion_set",
@@ -2890,10 +3343,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Lists/DS_Lists.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_list_write",
@@ -2902,10 +3355,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Lists/DS_Lists.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_list_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "ds_list_mark_as_list",
@@ -3070,10 +3523,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Stacks/DS_Stacks.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_stack_write",
@@ -3082,10 +3535,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Stacks/DS_Stacks.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_stack_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "ds_queue_create",
@@ -3214,10 +3667,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Queues/DS_Queues.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_queue_write",
@@ -3226,10 +3679,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Queues/DS_Queues.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_queue_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "ds_priority_create",
@@ -3406,10 +3859,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Priority_Queues/DS_Priority_Queues.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_priority_write",
@@ -3418,10 +3871,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.57_ds_lists_stacks_queues",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Priority_Queues/DS_Priority_Queues.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_priority_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "ds_map_create",
@@ -3658,10 +4111,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.58_ds_maps",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Maps/DS_Maps.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots, including nested list/map handles; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_map_write",
@@ -3670,10 +4123,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.58_ds_maps",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Maps/DS_Maps.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_map_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "ds_map_add_list",
@@ -3982,10 +4435,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.59_ds_grids",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Grids/DS_Grids.htm",
-        "Signature accepted; deserialization is a no-op stub.",
+        "Round-trips GM2Godot canonical JSON-backed DS snapshots; legacy GameMaker dump strings are not parsed.",
     ),
     _entry(
         "ds_grid_write",
@@ -3994,10 +4447,10 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "src.conversion.gml_runtime_parts.segments.59_ds_grids",
         "yes",
         "yes",
-        "partial",
-        "no",
+        "yes",
+        "yes",
         "GameMaker_Language/GML_Reference/Data_Structures/DS_Grids/DS_Grids.htm",
-        "Signature accepted; serialization returns empty string.",
+        "Emits GM2Godot canonical JSON-backed DS snapshots for later ds_grid_read; not byte-compatible with GameMaker dumps.",
     ),
     _entry(
         "array_accessor",
@@ -5472,22 +5925,89 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         _entry(
             name,
             "Particles GPU Effects",
-            "planned",
-            "src.conversion.gml_transpiler_parts.gml_api_manifest",
+            "partial",
+            "src.conversion.gml_runtime_parts.segments.51_particles",
             "n/a",
-            "no",
-            "no",
-            "no",
-            "GameMaker_Language/GML_Reference/Drawing/Particles/Particles.htm",
-            "Particle systems/types/emitters need a generated Godot particle resource lifecycle and are intentionally diagnostic-only for now.",
+            "yes",
+            "partial",
+            "yes",
+            "GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Systems/Particle_Systems.htm",
+            "Provides handle-backed particle system lifecycle, layer/depth/position state, counts, clears, and direct creation with generated Godot particle nodes.",
         )
         for name in (
+            "part_system_exists",
             "part_system_create",
+            "part_system_create_layer",
+            "part_system_get_layer",
+            "part_system_layer",
+            "part_system_depth",
+            "part_system_position",
             "part_system_destroy",
+            "part_system_clear",
+            "part_particles_clear",
+            "part_particles_count",
+            "part_particles_create",
+        )
+    ),
+    *(
+        _entry(
+            name,
+            "Particles GPU Effects",
+            "partial",
+            "src.conversion.gml_runtime_parts.segments.51_particles",
+            "n/a",
+            "yes",
+            "partial",
+            "yes",
+            "GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Types/Particle_Types.htm",
+            "Provides handle-backed particle type lifecycle and stores common visual/motion properties; GPUParticles2D visual output is approximate.",
+        )
+        for name in (
+            "part_type_exists",
             "part_type_create",
             "part_type_destroy",
+            "part_type_shape",
+            "part_type_size",
+            "part_type_scale",
+            "part_type_life",
+            "part_type_speed",
+            "part_type_direction",
+            "part_type_gravity",
+            "part_type_orientation",
+            "part_type_colour1",
+            "part_type_colour2",
+            "part_type_colour3",
+            "part_type_alpha1",
+            "part_type_alpha2",
+            "part_type_alpha3",
+            "part_type_blend",
+            "part_type_sprite",
+        )
+    ),
+    *(
+        _entry(
+            name,
+            "Particles GPU Effects",
+            "partial",
+            "src.conversion.gml_runtime_parts.segments.51_particles",
+            "n/a",
+            "yes",
+            "partial",
+            "yes",
+            "GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Emitters/Particle_Emitters.htm",
+            "Provides handle-backed emitter lifecycle, region/relative metadata, generated GPUParticles2D nodes, and deterministic burst/stream state.",
+        )
+        for name in (
+            "part_emitter_exists",
             "part_emitter_create",
+            "part_emitter_region",
+            "part_emitter_relative",
             "part_emitter_destroy",
+            "part_emitter_destroy_all",
+            "part_emitter_clear",
+            "part_emitter_enable",
+            "part_emitter_burst",
+            "part_emitter_stream",
         )
     ),
     *(
@@ -5538,23 +6058,29 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "texture_set_stage",
         )
     ),
-    *(
-        _entry(
-            name,
-            "Shaders",
-            "planned",
-            "src.conversion.gml_transpiler_parts.gml_api_manifest",
-            "n/a",
-            "no",
-            "no",
-            "partial",
-            "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
-            "Matrix and advanced sampler helpers need additional GameMaker-to-Godot parameter shape validation.",
-        )
-        for name in (
-            "shader_set_uniform_matrix",
-            "shader_enable_corner_id",
-        )
+    _entry(
+        "shader_set_uniform_matrix",
+        "Shaders",
+        "partial",
+        "src.conversion.gml_runtime_parts.segments.48_drawing_basic_forms",
+        "n/a",
+        "yes",
+        "partial",
+        "yes",
+        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+        "Sets a Godot mat4 uniform to the current compatibility matrix; exact GameMaker matrix-stack parity remains pending matrix-function support.",
+    ),
+    _entry(
+        "shader_enable_corner_id",
+        "Shaders",
+        "unsupported",
+        "src.conversion.gml_transpiler_parts.gml_api_manifest",
+        "n/a",
+        "no",
+        "no",
+        "no",
+        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+        "GameMaker corner-ID color-bit injection requires a custom vertex emission path that the current CanvasItem draw runtime cannot safely emulate.",
     ),
     *(
         _entry(
@@ -5582,6 +6108,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "physics_fixture_set_density",
             "physics_fixture_set_friction",
             "physics_fixture_set_restitution",
+            "physics_fixture_set_linear_damping",
+            "physics_fixture_set_angular_damping",
             "physics_fixture_set_sensor",
             "physics_fixture_bind",
             "physics_apply_force",
@@ -5590,25 +6118,36 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "physics_apply_local_impulse",
             "physics_apply_angular_impulse",
             "physics_apply_torque",
+            "physics_joint_distance_create",
+            "physics_joint_revolute_create",
+            "physics_joint_delete",
+            "physics_joint_get_value",
+            "physics_joint_set_value",
+            "physics_joint_enable_motor",
+            "physics_mass_properties",
         )
     ),
     *(
         _entry(
             name,
             "Physics",
-            "planned",
+            "unsupported",
             "src.conversion.gml_transpiler_parts.gml_api_manifest",
             "n/a",
             "no",
             "no",
             "partial",
             "GameMaker_Language/GML_Reference/Physics/Physics.htm",
-            "Box2D-specific joints, particle groups, and mass-data APIs need explicit parity mapping before runtime lowering.",
+            "This Box2D-specific joint or physics particle API has no safe portable Godot 2D runtime mapping yet and produces an explicit diagnostic.",
         )
         for name in (
-            "physics_joint_distance_create",
-            "physics_joint_revolute_create",
-            "physics_mass_properties",
+            "physics_joint_prismatic_create",
+            "physics_joint_pulley_create",
+            "physics_joint_gear_create",
+            "physics_joint_weld_create",
+            "physics_joint_rope_create",
+            "physics_joint_wheel_create",
+            "physics_joint_friction_create",
             "physics_particle_create",
         )
     ),
@@ -5791,8 +6330,12 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "GameMaker_Language/GML_Overview/GML_Overview.htm",
         "Import/include-style directives are rejected with source-line diagnostics until multi-file include policy is explicit.",
     ),
+    *_layer_entries(),
+    *_sequence_timeline_entries(),
+    *_sprites_textures_entries(),
     *_flexpanel_entries(),
     *_os_debug_gc_entries(),
+    *_os_device_media_entries(),
     *_platform_service_entries(),
     _entry(
         "external_define",

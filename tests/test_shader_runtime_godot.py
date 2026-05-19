@@ -42,10 +42,11 @@ class TestShaderRuntimeGodotSmoke(unittest.TestCase):
             shader_type canvas_item;
             uniform float amount = 0.0;
             uniform vec4 tint = vec4(1.0);
+            uniform mat4 gm_matrix;
             uniform sampler2D overlay;
 
             void fragment() {
-                COLOR = vec4(amount, tint.g, tint.b, 1.0);
+                COLOR = vec4(amount * gm_matrix[0][0], tint.g, tint.b, 1.0);
             }
             """
         )
@@ -106,6 +107,14 @@ class TestShaderRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
             \tvar tint_value = material.get_shader_parameter("tint")
             \tif not _check(abs(tint_value.y - 0.5) < 0.001 and abs(tint_value.z - 0.25) < 0.001, "vec4 uniform mismatch"):
+            \t\treturn
+            \tvar gm_matrix = GMRuntime.gml_shader_get_uniform(shader_id, "gm_matrix")
+            \tif not _check(GMRuntime.gml_shader_set_uniform_matrix(gm_matrix), "matrix uniform set failed"):
+            \t\treturn
+            \tvar matrix_value = material.get_shader_parameter("gm_matrix")
+            \tif not _check(matrix_value is Projection, "matrix uniform did not receive Projection"):
+            \t\treturn
+            \tif not _check(abs(matrix_value.x.x - 1.0) < 0.001, "matrix uniform value mismatch"):
             \t\treturn
 
             \tvar surf = GMRuntime.gml_surface_create(4, 4)

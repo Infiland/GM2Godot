@@ -233,11 +233,11 @@ static func gml_ds_grid_copy(id_dest, id_src):
 			for x in range(sw):
 				drow[x] = srow[x]
 
-static func gml_ds_grid_read(id_value, str_val):
-	pass
+static func gml_ds_grid_read(id_value, str_val, legacy = false):
+	_gml_ds_read(GML_DS_GRID_HANDLE_KIND, id_value, str_val, legacy)
 
 static func gml_ds_grid_write(id_value):
-	return ""
+	return _gml_ds_write(GML_DS_GRID_HANDLE_KIND, id_value)
 
 static func _gml_resolve_ds_grid(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):

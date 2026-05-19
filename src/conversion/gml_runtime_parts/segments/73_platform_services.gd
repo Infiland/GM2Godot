@@ -1,4 +1,45 @@
 static var _gml_platform_service_hooks = {}
+static var _gml_platform_service_async_defaults = {
+	"steam": {"kind": "steam", "handler": "_on_async_steam"},
+	"iap": {"kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"},
+	"cloud": {"kind": "cloud_save", "handler": "_on_async_cloud_save"},
+	"xboxlive": {"kind": "social", "handler": "_on_async_social"},
+	"push_notifications": {"kind": "push_notification", "handler": "_on_async_push_notification"},
+	"wallpaper": {"kind": "wallpaper_subscription_data", "handler": "_on_wallpaper_subscription_data"}
+}
+static var _gml_platform_service_contracts = {
+	"steam": {
+		"steam_is_initialized": {"args": [], "result": "bool", "async_kind": "steam", "handler": "_on_async_steam"},
+		"steam_set_achievement": {"args": ["achievement_name"], "result": "bool_or_request_id", "async_kind": "steam", "handler": "_on_async_steam"},
+		"steam_get_achievement": {"args": ["achievement_name"], "result": "bool_or_request_id", "async_kind": "steam", "handler": "_on_async_steam"},
+		"steam_upload_score": {"args": ["leaderboard_name", "score"], "result": "request_id", "async_kind": "steam", "handler": "_on_async_steam"},
+		"steam_download_scores": {"args": ["leaderboard_name", "start", "end"], "result": "request_id", "async_kind": "steam", "handler": "_on_async_steam"}
+	},
+	"iap": {
+		"iap_activate": {"args": [], "result": "request_id_or_status", "async_kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"},
+		"iap_acquire": {"args": ["product_id", "payload"], "result": "request_id", "async_kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"},
+		"iap_consume": {"args": ["product_id"], "result": "request_id", "async_kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"},
+		"iap_restore_all": {"args": [], "result": "request_id", "async_kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"}
+	},
+	"cloud": {
+		"cloud_synchronise": {"args": [], "result": "request_id", "async_kind": "cloud_save", "handler": "_on_async_cloud_save"},
+		"cloud_string_save": {"args": ["data", "description"], "result": "request_id", "async_kind": "cloud_save", "handler": "_on_async_cloud_save"},
+		"cloud_file_save": {"args": ["path", "description"], "result": "request_id", "async_kind": "cloud_save", "handler": "_on_async_cloud_save"}
+	},
+	"xboxlive": {
+		"xboxlive_achievements_set_progress": {"args": ["user_id", "achievement", "progress"], "result": "request_id_or_null", "async_kind": "social", "handler": "_on_async_social"},
+		"xboxlive_stats_get_leaderboard": {"args": ["leaderboard_name"], "result": "request_id", "async_kind": "social", "handler": "_on_async_social"},
+		"xboxlive_read_player_leaderboard": {"args": ["leaderboard_name", "user_id", "num_items", "friend_filter"], "result": "request_id", "async_kind": "social", "handler": "_on_async_social"},
+		"xboxlive_matchmaking_create": {"args": [], "result": "request_id", "async_kind": "social", "handler": "_on_async_social"}
+	},
+	"push_notifications": {
+		"push_notifications_extension": {"args": ["payload"], "result": "request_id", "async_kind": "push_notification", "handler": "_on_async_push_notification"}
+	},
+	"wallpaper": {
+		"wallpaper_set_config": {"args": ["settings_array"], "result": "request_id_or_null", "async_kind": "wallpaper_config", "handler": "_on_wallpaper_config"},
+		"wallpaper_set_subscriptions": {"args": ["subscriptions"], "result": "request_id_or_null", "async_kind": "wallpaper_subscription_data", "handler": "_on_wallpaper_subscription_data"}
+	}
+}
 
 
 static func gml_platform_service_register(service_name, hook):
@@ -12,6 +53,17 @@ static func gml_platform_service_register(service_name, hook):
 
 static func gml_platform_service_is_available(service_name):
 	return _gml_platform_service_hooks.has(str(service_name))
+
+
+static func gml_platform_service_contracts():
+	return _gml_clone_value(_gml_platform_service_contracts, 16)
+
+
+static func gml_platform_service_contract(service_name, api_name):
+	var contract = _gml_platform_service_contract(str(service_name), str(api_name))
+	if contract.is_empty():
+		return {}
+	return _gml_clone_value(contract, 8)
 
 
 static func gml_platform_service_has_api(service_name, api_name):
@@ -32,9 +84,9 @@ static func gml_platform_service_call(service_name, api_name, args = []):
 	if typeof(hook) == TYPE_DICTIONARY:
 		var callback = hook.get(method_name, null)
 		if typeof(callback) == TYPE_CALLABLE:
-			return callback.callv(args)
+			return _gml_platform_service_process_result(str(service_name), method_name, callback.callv(args))
 	if hook is Object and hook.has_method(method_name):
-		return hook.callv(method_name, args)
+		return _gml_platform_service_process_result(str(service_name), method_name, hook.callv(method_name, args))
 	return gml_platform_service_unsupported(api_name, service_name)
 
 
@@ -59,6 +111,45 @@ static func _gml_platform_service_try_call(service_name, api_name, args, fallbac
 
 static func _gml_platform_service_required_call(service_name, api_name, args):
 	return gml_platform_service_call(service_name, api_name, args)
+
+
+static func gml_platform_service_dispatch_async(service_name, payload, kind = "", handler_name = ""):
+	var defaults = _gml_platform_service_async_defaults.get(str(service_name), {})
+	var resolved_kind = str(kind)
+	if resolved_kind == "":
+		resolved_kind = str(defaults.get("kind", str(service_name)))
+	var resolved_handler = str(handler_name)
+	if resolved_handler == "":
+		resolved_handler = str(defaults.get("handler", "_on_async_" + str(service_name)))
+	var resolved_payload = payload if payload is Dictionary else {}
+	return gml_async_dispatch(resolved_kind, resolved_payload, resolved_handler)
+
+
+static func _gml_platform_service_process_result(service_name, api_name, result):
+	if typeof(result) != TYPE_DICTIONARY:
+		return result
+	var async_payload = result.get("async_payload", result.get("async", null))
+	if typeof(async_payload) != TYPE_DICTIONARY:
+		return result
+	var contract = _gml_platform_service_contract(service_name, api_name)
+	var event_kind = str(result.get("async_kind", contract.get("async_kind", "")))
+	var handler_name = str(result.get("handler", contract.get("handler", "")))
+	var dispatch_id = gml_platform_service_dispatch_async(service_name, async_payload, event_kind, handler_name)
+	if result.has("result"):
+		return result["result"]
+	if result.has("return_value"):
+		return result["return_value"]
+	return dispatch_id
+
+
+static func _gml_platform_service_contract(service_name, api_name):
+	var service_contracts = _gml_platform_service_contracts.get(str(service_name), {})
+	if typeof(service_contracts) != TYPE_DICTIONARY:
+		return {}
+	var contract = service_contracts.get(str(api_name), {})
+	if typeof(contract) != TYPE_DICTIONARY:
+		return {}
+	return contract
 
 
 static func gml_steam_is_initialized():

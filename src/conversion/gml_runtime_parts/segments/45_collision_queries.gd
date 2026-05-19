@@ -64,6 +64,36 @@ static func gml_collision_circle(current_self, x, y, radius, target, precise = f
 	)
 
 
+static func gml_collision_point_list(current_self, x, y, target, precise, notme, list_id, ordered):
+	_gml_collision_warn_precise_approximation(precise)
+	var point = Vector2(_to_real(x), _to_real(y))
+	var hits = _gml_collision_collect_point_hits(point, target, current_self, gml_bool(notme), point)
+	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
+
+
+static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
+	_gml_collision_warn_precise_approximation(precise)
+	var query_rect = _gml_collision_rect_from_bounds(x1, y1, x2, y2)
+	var origin = query_rect.position + query_rect.size * 0.5
+	var hits = _gml_collision_collect_rect_hits([query_rect], target, current_self, gml_bool(notme), origin)
+	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
+
+
+static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
+	_gml_collision_warn_precise_approximation(precise)
+	var start = Vector2(_to_real(x1), _to_real(y1))
+	var finish = Vector2(_to_real(x2), _to_real(y2))
+	var hits = _gml_collision_collect_line_hits(start, finish, target, current_self, gml_bool(notme), start)
+	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
+
+
+static func gml_collision_circle_list(current_self, x, y, radius, target, precise, notme, list_id, ordered):
+	_gml_collision_warn_precise_approximation(precise)
+	var center = Vector2(_to_real(x), _to_real(y))
+	var hits = _gml_collision_collect_circle_hits(center, abs(_to_real(radius)), target, current_self, gml_bool(notme), center)
+	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
+
+
 static func _gml_collision_warn_precise_approximation(precise):
 	if not gml_bool(precise):
 		return
@@ -105,6 +135,75 @@ static func _gml_collision_first_circle_hit(center, radius, target, current_self
 			if _gml_collision_circle_intersects_rect(center, radius, rect):
 				return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
+
+
+static func _gml_collision_collect_point_hits(point, target, current_self, notme, order_origin):
+	var hits = []
+	for instance in _gml_collision_candidate_instances(target, current_self, notme):
+		for rect in _gml_collision_rects_for_instance(instance):
+			if _gml_collision_rect_has_point(rect, point):
+				hits.append(_gml_collision_hit_record(instance, order_origin))
+				break
+	return hits
+
+
+static func _gml_collision_collect_rect_hits(query_rects, target, current_self, notme, order_origin):
+	var hits = []
+	for instance in _gml_collision_candidate_instances(target, current_self, notme):
+		var target_rects = _gml_collision_rects_for_instance(instance)
+		var hit = false
+		for query_rect in query_rects:
+			for target_rect in target_rects:
+				if query_rect.intersects(target_rect, true):
+					hit = true
+					break
+			if hit:
+				break
+		if hit:
+			hits.append(_gml_collision_hit_record(instance, order_origin))
+	return hits
+
+
+static func _gml_collision_collect_line_hits(start, finish, target, current_self, notme, order_origin):
+	var hits = []
+	for instance in _gml_collision_candidate_instances(target, current_self, notme):
+		for rect in _gml_collision_rects_for_instance(instance):
+			if _gml_collision_line_intersects_rect(start, finish, rect):
+				hits.append(_gml_collision_hit_record(instance, order_origin))
+				break
+	return hits
+
+
+static func _gml_collision_collect_circle_hits(center, radius, target, current_self, notme, order_origin):
+	var hits = []
+	for instance in _gml_collision_candidate_instances(target, current_self, notme):
+		for rect in _gml_collision_rects_for_instance(instance):
+			if _gml_collision_circle_intersects_rect(center, radius, rect):
+				hits.append(_gml_collision_hit_record(instance, order_origin))
+				break
+	return hits
+
+
+static func _gml_collision_hit_record(instance, order_origin):
+	return {
+		"handle": _gml_collision_handle_for_instance(instance),
+		"distance": order_origin.distance_squared_to(_gml_instance_position(instance))
+	}
+
+
+static func _gml_collision_append_hits_to_list(list_id, hits, ordered):
+	var ds = _gml_resolve_ds_list(list_id)
+	if not (ds is Dictionary):
+		return 0
+	if gml_bool(ordered):
+		hits.sort_custom(_gml_collision_hit_distance_less)
+	for hit in hits:
+		ds["data"].append(hit["handle"])
+	return hits.size()
+
+
+static func _gml_collision_hit_distance_less(left, right):
+	return float(left["distance"]) < float(right["distance"])
 
 
 static func _gml_collision_candidate_instances(target, current_self, notme):

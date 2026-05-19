@@ -74,11 +74,29 @@ class TestPlatformServicesGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_url_get_domain("https://user@example.com:443/a") == "example.com", "domain parse failed"):
             \t\treturn
+            \tvar contracts = GMRuntime.gml_platform_service_contracts()
+            \tif not _check(contracts.has("steam") and contracts["steam"].has("steam_set_achievement"), "platform contract table missing steam achievement"):
+            \t\treturn
+            \tvar steam_contract = GMRuntime.gml_platform_service_contract("steam", "steam_set_achievement")
+            \tif not _check(steam_contract["handler"] == "_on_async_steam", "steam contract handler mismatch"):
+            \t\treturn
+            \tvar missing_iap = GMRuntime.gml_platform_service_call("iap", "iap_activate", [])
+            \tif not _check(GMRuntime.is_undefined(missing_iap), "missing hook did not return undefined"):
+            \t\treturn
 
             \tGMRuntime.gml_platform_service_register("steam", {
             \t\t"steam_is_initialized": func(): return true,
+            \t\t"steam_set_achievement": func(name): return {"result": true, "async_payload": {"achievement": name, "status": 1}},
             \t})
             \tif not _check(GMRuntime.gml_steam_is_initialized(), "steam hook failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_platform_service_call("steam", "steam_set_achievement", ["ACH_WIN"]), "steam achievement hook failed"):
+            \t\treturn
+            \tvar steam_log = GMRuntime.gml_async_event_log()
+            \tvar steam_event = steam_log[steam_log.size() - 1]
+            \tif not _check(steam_event["handler"] == "_on_async_steam", "steam async handler failed"):
+            \t\treturn
+            \tif not _check(steam_event["payload"]["achievement"] == "ACH_WIN", "steam async payload failed"):
             \t\treturn
 
             \tGMRuntime.gml_platform_service_register("web", {
@@ -107,10 +125,23 @@ class TestPlatformServicesGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_xboxlive_gamertag_for_user() == "PlayerOne", "xbox gamertag hook failed"):
             \t\treturn
+            \tGMRuntime.gml_platform_service_register("cloud", {
+            \t\t"cloud_synchronise": func(): return {"result": 77, "async_payload": {"status": 0}},
+            \t})
+            \tif not _check(GMRuntime.gml_cloud_synchronise() == 77, "cloud async hook return failed"):
+            \t\treturn
+            \tvar cloud_log = GMRuntime.gml_async_event_log()
+            \tif not _check(cloud_log[cloud_log.size() - 1]["handler"] == "_on_async_cloud_save", "cloud async handler failed"):
+            \t\treturn
+            \tGMRuntime.gml_platform_service_dispatch_async("push_notifications", {"message": "hello"})
+            \tvar push_log = GMRuntime.gml_async_event_log()
+            \tif not _check(push_log[push_log.size() - 1]["handler"] == "_on_async_push_notification", "push async handler failed"):
+            \t\treturn
 
             \tGMRuntime.gml_platform_service_register("steam", null)
             \tGMRuntime.gml_platform_service_register("web", null)
             \tGMRuntime.gml_platform_service_register("xboxlive", null)
+            \tGMRuntime.gml_platform_service_register("cloud", null)
             \tprint("PLATFORM_SERVICES_SMOKE_OK")
             \tget_tree().quit(0)
             """

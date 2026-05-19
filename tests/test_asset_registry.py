@@ -111,6 +111,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 ("objects", "o_player"),
                 ("scripts", "scr_spawn"),
                 ("fonts", "fnt_ui"),
+                ("sequences", "seq_intro"),
+                ("timelines", "tl_intro"),
             ],
         )
         self._write_resource(
@@ -118,7 +120,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "s_player",
             "GMSprite",
             "folders/Sprites/Actors.yy",
-            {"tags": ["player", {"name": "visible"}]},
+            {
+                "tags": ["player", {"name": "visible"}],
+                "textureGroupId": {"name": "Characters", "path": "texturegroups/Characters"},
+            },
         )
         self._write_resource(
             "sounds",
@@ -134,6 +139,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self._write_resource("objects", "o_player", "GMObject", "folders/Objects/Actors.yy")
         self._write_resource("scripts", "scr_spawn", "GMScript", "folders/Scripts/Game.yy")
         self._write_resource("fonts", "fnt_ui", "GMFont", "folders/Fonts/UI.yy")
+        self._write_resource(
+            "sequences",
+            "seq_intro",
+            "GMSequence",
+            "folders/Sequences.yy",
+            {"length": 120, "playbackSpeed": 30, "playback": 1, "tracks": [{"name": "Title"}]},
+        )
+        self._write_resource("timelines", "tl_intro", "GMTimeline", "folders/Timelines.yy")
         _write_file(os.path.join(self.gm_dir, "datafiles", "config", "game.json"), "{}")
 
         entries = self._converter(organize_sounds_by_audio_group=True).build_entries()
@@ -142,6 +155,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(by_name["s_player"].asset_type, "sprite")
         self.assertEqual(by_name["s_player"].godot_path, "res://sprites/Actors/s_player/s_player.tscn")
         self.assertEqual(by_name["s_player"].tags, ("player", "visible"))
+        sprite_metadata = by_name["s_player"].metadata
+        self.assertIsNotNone(sprite_metadata)
+        assert sprite_metadata is not None
+        self.assertEqual(sprite_metadata["texture_group"], "Characters")
         self.assertEqual(by_name["snd_jump"].asset_type, "sound")
         self.assertEqual(
             by_name["snd_jump"].godot_path,
@@ -164,6 +181,15 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(by_name["o_player"].godot_path, "res://objects/Actors/o_player/o_player.tscn")
         self.assertEqual(by_name["scr_spawn"].godot_path, "res://scripts/Game/scr_spawn.gd")
         self.assertEqual(by_name["fnt_ui"].godot_path, "res://fonts/UI/fnt_ui.tres")
+        self.assertEqual(by_name["seq_intro"].asset_type, "sequence")
+        sequence_metadata = by_name["seq_intro"].metadata
+        self.assertIsNotNone(sequence_metadata)
+        assert sequence_metadata is not None
+        self.assertEqual(sequence_metadata["length"], 120.0)
+        self.assertEqual(sequence_metadata["playback_speed"], 30.0)
+        self.assertEqual(sequence_metadata["loopmode"], 1)
+        self.assertEqual(sequence_metadata["tracks"], [{"name": "Title"}])
+        self.assertEqual(by_name["tl_intro"].asset_type, "timeline")
         self.assertEqual(by_name["config/game.json"].asset_type, "included_file")
         self.assertEqual(by_name["config/game.json"].godot_path, "res://included_files/config/game.json")
 

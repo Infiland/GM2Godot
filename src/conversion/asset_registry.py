@@ -361,6 +361,15 @@ class AssetRegistryConverter(BaseConverter):
                 "volume": self._metadata_float(resource.raw_data.get("volume"), 1.0),
             }
 
+        if resource.kind == "sequences":
+            return self._sequence_metadata(resource.raw_data)
+
+        if resource.kind in {"sprites", "fonts", "tilesets"}:
+            texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
+            if texture_group:
+                return {"texture_group": texture_group}
+            return {}
+
         if resource.kind != "sounds":
             return {}
 
@@ -374,6 +383,22 @@ class AssetRegistryConverter(BaseConverter):
             "preload": bool(resource.raw_data.get("preload", True)),
             "compression": self._metadata_int(resource.raw_data.get("compression"), 0),
             "type": self._metadata_int(resource.raw_data.get("type"), 0),
+        }
+
+    def _sequence_metadata(self, raw_data: JsonDict) -> JsonDict:
+        length = raw_data.get("length")
+        if length is None:
+            length = raw_data.get("duration")
+        playback_speed = raw_data.get("playbackSpeed")
+        loopmode = raw_data.get("playback")
+        if loopmode is None:
+            loopmode = raw_data.get("loopmode")
+        tracks = raw_data.get("tracks")
+        return {
+            "length": self._metadata_float(length, 0.0),
+            "playback_speed": self._metadata_float(playback_speed, 1.0),
+            "loopmode": self._metadata_int(loopmode, 0),
+            "tracks": tracks if isinstance(tracks, list) else [],
         }
 
     def _room_order_indices(self, resources: Iterable[_ProjectResource]) -> dict[str, int]:

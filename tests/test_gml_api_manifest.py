@@ -200,7 +200,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         part_system_create = get_gml_api_entry("part_system_create")
         self.assertIsNotNone(part_system_create)
         assert part_system_create is not None
-        self.assertEqual(part_system_create.status, "planned")
+        self.assertEqual(part_system_create.status, "partial")
         self.assertEqual(part_system_create.issue_number, 509)
         effect_create_above = get_gml_api_entry("effect_create_above")
         self.assertIsNotNone(effect_create_above)
@@ -220,8 +220,13 @@ class TestGMLAPIManifest(unittest.TestCase):
         shader_set_uniform_matrix = get_gml_api_entry("shader_set_uniform_matrix")
         self.assertIsNotNone(shader_set_uniform_matrix)
         assert shader_set_uniform_matrix is not None
-        self.assertEqual(shader_set_uniform_matrix.status, "planned")
+        self.assertEqual(shader_set_uniform_matrix.status, "partial")
         self.assertEqual(shader_set_uniform_matrix.issue_number, 510)
+        shader_enable_corner_id = get_gml_api_entry("shader_enable_corner_id")
+        self.assertIsNotNone(shader_enable_corner_id)
+        assert shader_enable_corner_id is not None
+        self.assertEqual(shader_enable_corner_id.status, "unsupported")
+        self.assertEqual(shader_enable_corner_id.issue_number, 510)
         physics_world_create = get_gml_api_entry("physics_world_create")
         self.assertIsNotNone(physics_world_create)
         assert physics_world_create is not None
@@ -235,8 +240,41 @@ class TestGMLAPIManifest(unittest.TestCase):
         physics_joint_distance_create = get_gml_api_entry("physics_joint_distance_create")
         self.assertIsNotNone(physics_joint_distance_create)
         assert physics_joint_distance_create is not None
-        self.assertEqual(physics_joint_distance_create.status, "planned")
+        self.assertEqual(physics_joint_distance_create.status, "implemented")
         self.assertEqual(physics_joint_distance_create.issue_number, 511)
+        physics_joint_prismatic_create = get_gml_api_entry("physics_joint_prismatic_create")
+        self.assertIsNotNone(physics_joint_prismatic_create)
+        assert physics_joint_prismatic_create is not None
+        self.assertEqual(physics_joint_prismatic_create.status, "unsupported")
+        self.assertEqual(physics_joint_prismatic_create.issue_number, 511)
+        layer_get_id = get_gml_api_entry("layer_get_id")
+        self.assertIsNotNone(layer_get_id)
+        assert layer_get_id is not None
+        self.assertEqual(layer_get_id.status, "implemented")
+        self.assertEqual(layer_get_id.issue_number, 566)
+        layer_sequence_create = get_gml_api_entry("layer_sequence_create")
+        self.assertIsNotNone(layer_sequence_create)
+        assert layer_sequence_create is not None
+        self.assertEqual(layer_sequence_create.status, "partial")
+        self.assertEqual(layer_sequence_create.issue_number, 567)
+        self.assertIn("metadata", layer_sequence_create.notes)
+        sequence_track_new = get_gml_api_entry("sequence_track_new")
+        self.assertIsNotNone(sequence_track_new)
+        assert sequence_track_new is not None
+        self.assertEqual(sequence_track_new.status, "unsupported")
+        self.assertEqual(sequence_track_new.issue_number, 567)
+        texturegroup_get_names = get_gml_api_entry("texturegroup_get_names")
+        self.assertIsNotNone(texturegroup_get_names)
+        assert texturegroup_get_names is not None
+        self.assertEqual(texturegroup_get_names.status, "partial")
+        self.assertEqual(texturegroup_get_names.issue_number, 568)
+        self.assertIn("texture-page", texturegroup_get_names.notes)
+        skeleton_animation_set = get_gml_api_entry("skeleton_animation_set")
+        self.assertIsNotNone(skeleton_animation_set)
+        assert skeleton_animation_set is not None
+        self.assertEqual(skeleton_animation_set.status, "unsupported")
+        self.assertEqual(skeleton_animation_set.issue_number, 568)
+        self.assertIn("Skeleton2D", skeleton_animation_set.notes)
         script_execute = get_gml_api_entry("script_execute")
         self.assertIsNotNone(script_execute)
         assert script_execute is not None
@@ -316,29 +354,29 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIsNotNone(steam_is_initialized)
         assert steam_is_initialized is not None
         self.assertEqual(steam_is_initialized.status, "partial")
-        self.assertEqual(steam_is_initialized.issue_number, 516)
+        self.assertEqual(steam_is_initialized.issue_number, 570)
         browser_input_capture = get_gml_api_entry("browser_input_capture")
         self.assertIsNotNone(browser_input_capture)
         assert browser_input_capture is not None
         self.assertEqual(browser_input_capture.status, "partial")
-        self.assertEqual(browser_input_capture.issue_number, 516)
+        self.assertEqual(browser_input_capture.issue_number, 569)
         iap_activate = get_gml_api_entry("iap_activate")
         self.assertIsNotNone(iap_activate)
         assert iap_activate is not None
-        self.assertEqual(iap_activate.status, "unsupported")
-        self.assertEqual(iap_activate.issue_number, 516)
+        self.assertEqual(iap_activate.status, "partial")
+        self.assertEqual(iap_activate.issue_number, 570)
         self.assertTrue(is_known_gml_api("draw_sprite"))
         self.assertTrue(is_known_gml_api("working_directory"))
         self.assertFalse(is_known_gml_api("project_local_function"))
         self.assertEqual(godot_docs_root(), "https://docs.godotengine.org/en/stable")
 
     def test_known_unimplemented_gml_builtin_gets_diagnostic(self):
-        diagnostic = diagnostic_for_unimplemented_gml_api("collision_point_list")
+        diagnostic = diagnostic_for_unimplemented_gml_api("physics_joint_prismatic_create")
 
         self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertIn("collision_point_list", diagnostic)
-        self.assertIn("#487", diagnostic)
+        self.assertIn("physics_joint_prismatic_create", diagnostic)
+        self.assertIn("#511", diagnostic)
 
     def test_function_descriptors_include_lowering_metadata_and_issue_urls(self):
         descriptor = get_gml_function_descriptor("array_push")
@@ -352,6 +390,14 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(descriptor.lowering_target, "gml_array_push")
         self.assertEqual(descriptor.issue_url, "https://github.com/Infiland/GM2Godot/issues/502")
 
+        platform_descriptor = get_gml_function_descriptor("steam_set_achievement")
+        self.assertIsNotNone(platform_descriptor)
+        assert platform_descriptor is not None
+        self.assertEqual(platform_descriptor.category, "Platform Services")
+        self.assertEqual(platform_descriptor.lowering_kind, "runtime_platform_service_api")
+        self.assertEqual(platform_descriptor.lowering_target, "steam")
+        self.assertEqual(platform_descriptor.issue_number, 570)
+
     def test_function_descriptors_cover_current_implemented_call_helpers(self):
         descriptor_names = {descriptor.name for descriptor in iter_gml_function_descriptors()}
 
@@ -364,6 +410,10 @@ class TestGMLAPIManifest(unittest.TestCase):
             "instance_destroy",
             "place_meeting",
             "collision_rectangle",
+            "collision_point_list",
+            "collision_rectangle_list",
+            "collision_line_list",
+            "collision_circle_list",
             "motion_set",
             "move_contact_solid",
             "path_start",
@@ -418,18 +468,93 @@ class TestGMLAPIManifest(unittest.TestCase):
             "sprite_get_texture",
             "surface_get_texture",
             "texture_get_width",
+            "sprite_get_uvs",
+            "texture_get_texel_width",
+            "texture_get_uvs",
+            "texture_is_ready",
+            "texture_prefetch",
+            "texture_flush",
+            "sprite_prefetch",
+            "draw_texture_flush",
+            "texturegroup_set_mode",
+            "texturegroup_get_names",
+            "texturegroup_get_sprites",
             "shader_set",
             "shader_reset",
             "shader_get_uniform",
             "shader_set_uniform_f",
             "shader_set_uniform_i",
+            "shader_set_uniform_matrix",
             "texture_set_stage",
+            "part_system_exists",
+            "part_system_create",
+            "part_system_create_layer",
+            "part_system_get_layer",
+            "part_system_layer",
+            "part_system_depth",
+            "part_system_position",
+            "part_system_destroy",
+            "part_system_clear",
+            "part_particles_clear",
+            "part_particles_count",
+            "part_particles_create",
+            "part_type_exists",
+            "part_type_create",
+            "part_type_destroy",
+            "part_type_shape",
+            "part_type_size",
+            "part_type_scale",
+            "part_type_life",
+            "part_type_speed",
+            "part_type_direction",
+            "part_type_gravity",
+            "part_type_orientation",
+            "part_type_colour1",
+            "part_type_colour2",
+            "part_type_colour3",
+            "part_type_alpha1",
+            "part_type_alpha2",
+            "part_type_alpha3",
+            "part_type_blend",
+            "part_type_sprite",
+            "part_emitter_exists",
+            "part_emitter_create",
+            "part_emitter_region",
+            "part_emitter_relative",
+            "part_emitter_destroy",
+            "part_emitter_destroy_all",
+            "part_emitter_clear",
+            "part_emitter_enable",
+            "part_emitter_burst",
+            "part_emitter_stream",
             "physics_world_create",
             "physics_world_gravity",
             "physics_fixture_create",
+            "physics_fixture_set_linear_damping",
+            "physics_fixture_set_angular_damping",
             "physics_fixture_bind",
             "physics_apply_force",
             "physics_apply_impulse",
+            "physics_joint_distance_create",
+            "physics_joint_revolute_create",
+            "physics_joint_delete",
+            "physics_joint_get_value",
+            "physics_joint_set_value",
+            "physics_joint_enable_motor",
+            "physics_mass_properties",
+            "layer_get_id",
+            "layer_get_all",
+            "layer_create",
+            "layer_add_instance",
+            "layer_get_all_elements",
+            "layer_get_element_type",
+            "timeline_exists",
+            "timeline_moment_add_script",
+            "sequence_get",
+            "layer_sequence_create",
+            "layer_sequence_get_instance",
+            "layer_sequence_headpos",
+            "layer_sequence_pause",
             "script_execute",
             "script_exists",
             "script_get_name",
@@ -444,6 +569,9 @@ class TestGMLAPIManifest(unittest.TestCase):
             "os_get_info",
             "os_get_language",
             "environment_get_variable",
+            "clipboard_has_text",
+            "clipboard_get_text",
+            "clipboard_set_text",
             "show_debug_message_ext",
             "code_is_compiled",
             "gc_collect",
@@ -451,6 +579,9 @@ class TestGMLAPIManifest(unittest.TestCase):
             "weak_ref_create",
             "weak_ref_any_alive",
             "steam_is_initialized",
+            "steam_set_achievement",
+            "iap_activate",
+            "xboxlive_achievements_set_progress",
             "browser_input_capture",
             "url_open",
             "url_get_domain",
@@ -580,11 +711,46 @@ class TestGMLAPIManifest(unittest.TestCase):
             "show_question",
             "gml_pragma",
             "GM_runtime_version",
-            "clipboard_get_text",
         ):
             with self.subTest(name=name):
                 self.assertIn(name, entries)
                 self.assertEqual(entries[name].issue_number, 515)
+
+    def test_os_device_media_manifest_classifies_clipboard_browser_and_unsupported_media(self):
+        entries = {
+            entry.name: entry
+            for entry in iter_gml_api_entries()
+            if entry.category == "OS and Device Media"
+        }
+
+        for name in (
+            "clipboard_has_text",
+            "clipboard_get_text",
+            "clipboard_set_text",
+            "browser_width",
+            "browser_input_capture",
+            "url_open_full",
+            "webgl_enabled",
+            "audio_start_recording",
+            "video_open",
+            "video_get_status",
+            "device_get_tilt_x",
+            "display_get_orientation",
+            "os_request_permission",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(name, entries)
+                self.assertEqual(entries[name].issue_number, 569)
+
+        self.assertEqual(entries["clipboard_get_text"].status, "implemented")
+        self.assertEqual(entries["browser_width"].status, "partial")
+        self.assertEqual(entries["url_open_full"].runtime_support, "no")
+        self.assertEqual(entries["audio_start_recording"].status, "unsupported")
+        self.assertEqual(entries["video_open"].status, "unsupported")
+        self.assertIn("VideoStreamPlayer", entries["video_open"].notes)
+        self.assertEqual(entries["device_get_tilt_x"].status, "unsupported")
+        self.assertIn("sensor", entries["device_get_tilt_x"].notes)
+        self.assertEqual(entries["os_request_permission"].status, "unsupported")
 
     def test_platform_services_manifest_represents_hooked_and_closed_platform_surfaces(self):
         entries = {
@@ -595,9 +761,6 @@ class TestGMLAPIManifest(unittest.TestCase):
 
         for name in (
             "steam_is_initialized",
-            "url_open_full",
-            "browser_width",
-            "webgl_enabled",
             "iap_activate",
             "clickable_add",
             "xboxlive_matchmaking_create",
@@ -611,12 +774,14 @@ class TestGMLAPIManifest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertIn(name, entries)
-                self.assertEqual(entries[name].issue_number, 516)
+                self.assertEqual(entries[name].issue_number, 570)
 
         self.assertEqual(entries["steam_is_initialized"].status, "partial")
-        self.assertEqual(entries["browser_width"].runtime_support, "partial")
-        self.assertEqual(entries["iap_activate"].status, "unsupported")
-        self.assertEqual(entries["xboxlive_matchmaking_create"].status, "unsupported")
+        self.assertEqual(entries["iap_activate"].status, "partial")
+        self.assertIn("gml_platform_service_call", entries["iap_activate"].notes)
+        self.assertEqual(entries["xboxlive_matchmaking_create"].status, "partial")
+        self.assertIn("xbox", entries["xboxlive_matchmaking_create"].notes.lower())
+        self.assertEqual(entries["push_notifications_extension"].status, "partial")
 
     def test_extensions_manifest_tracks_discovery_mapping_and_security_policy(self):
         entries = {
@@ -654,28 +819,30 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("#483", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "collision_point_list.*planned"):
-            transpile_gml_expression("collision_point_list()")
         with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):
             transpile_gml_expression('show_message_async("Hello")')
         with self.assertRaisesRegex(GMLTranspileError, "network_send_broadcast.*unsupported"):
             transpile_gml_expression("network_send_broadcast(sock, 6502, buf, 4)")
-        with self.assertRaisesRegex(GMLTranspileError, "part_system_create.*planned"):
-            transpile_gml_expression("part_system_create()")
         with self.assertRaisesRegex(GMLTranspileError, "effect_create_above.*unsupported"):
             transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
-        with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_matrix.*planned"):
-            transpile_gml_expression("shader_set_uniform_matrix(u, matrix)")
-        with self.assertRaisesRegex(GMLTranspileError, "physics_joint_distance_create.*planned"):
-            transpile_gml_expression("physics_joint_distance_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "shader_enable_corner_id.*unsupported"):
+            transpile_gml_expression("shader_enable_corner_id(true)")
+        with self.assertRaisesRegex(GMLTranspileError, "physics_joint_prismatic_create.*unsupported"):
+            transpile_gml_expression("physics_joint_prismatic_create()")
+        with self.assertRaisesRegex(GMLTranspileError, "sequence_track_new.*unsupported.*#567"):
+            transpile_gml_expression("sequence_track_new(seqtracktype_graphic)")
+        with self.assertRaisesRegex(GMLTranspileError, "skeleton_animation_set.*unsupported.*#568"):
+            transpile_gml_expression("skeleton_animation_set('walk')")
+        with self.assertRaisesRegex(GMLTranspileError, "audio_start_recording.*unsupported.*#569.*Microphone"):
+            transpile_gml_expression("audio_start_recording(0)")
+        with self.assertRaisesRegex(GMLTranspileError, "video_open.*unsupported.*#569.*VideoStreamPlayer"):
+            transpile_gml_expression('video_open("intro.mp4")')
+        with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_x.*unsupported.*#569.*sensor"):
+            transpile_gml_expression("device_get_tilt_x()")
+        with self.assertRaisesRegex(GMLTranspileError, "os_request_permission.*unsupported.*#569.*permission"):
+            transpile_gml_expression('os_request_permission("DeviceMotion")')
         with self.assertRaisesRegex(GMLTranspileError, "external_call.*unsupported"):
             transpile_gml_expression("external_call('native_ext', 'fn')")
-        with self.assertRaisesRegex(GMLTranspileError, "iap_activate.*unsupported.*#516.*store"):
-            transpile_gml_expression("iap_activate()")
-        with self.assertRaisesRegex(GMLTranspileError, "clickable_add.*unsupported.*#516.*HTML5"):
-            transpile_gml_expression("clickable_add(0, 0, 100, 40, 'https://example.com')")
-        with self.assertRaisesRegex(GMLTranspileError, "xboxlive_matchmaking_create.*unsupported.*#516.*Xbox"):
-            transpile_gml_expression("xboxlive_matchmaking_create()")
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

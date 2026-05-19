@@ -95,6 +95,20 @@ class TestGPUDrawStateGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_texture_get_height(tex) == 4, "texture height failed"):
             \t\treturn
+            \tif not _check(is_equal_approx(GMRuntime.gml_texture_get_texel_width(tex), 0.125), "texture texel width failed"):
+            \t\treturn
+            \tif not _check(is_equal_approx(GMRuntime.gml_texture_get_texel_height(tex), 0.25), "texture texel height failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_texture_get_uvs(tex).size() == 8, "texture UV metadata failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_texture_is_ready(tex), "texture_is_ready failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_texture_prefetch(tex), "texture_prefetch failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_texture_flush(tex), "texture_flush failed"):
+            \t\treturn
+            \tGMRuntime.gml_draw_texture_flush()
+            \tGMRuntime.gml_draw_flush()
 
             \tGMRuntime.gml_surface_free(surf)
             \tGMRuntime.gml_draw_end()

@@ -19,6 +19,7 @@ static func gml_room_enter_scene(scene, force = false):
 	if entry == null:
 		return false
 	_gml_room_pending_entry = null
+	gml_layer_register_scene(scene)
 	_gml_room_update_current(entry, scene)
 	if not _gml_room_game_started:
 		_gml_room_game_started = true

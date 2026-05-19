@@ -295,6 +295,34 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gpu_set_alphatestref(128)", "GMRuntime.gml_gpu_set_alphatestref(128)"),
     RuntimeValueParityCase("surface_get_texture(surf)", "GMRuntime.gml_surface_get_texture(surf)"),
     RuntimeValueParityCase("texture_get_width(tex)", "GMRuntime.gml_texture_get_width(tex)"),
+    RuntimeValueParityCase("sprite_get_uvs(spr_player, 0)", 'GMRuntime.gml_sprite_get_uvs(GMRuntime.gml_asset_get_index("spr_player"), 0)'),
+    RuntimeValueParityCase("texture_get_texel_width(tex)", "GMRuntime.gml_texture_get_texel_width(tex)"),
+    RuntimeValueParityCase("texture_get_texel_height(tex)", "GMRuntime.gml_texture_get_texel_height(tex)"),
+    RuntimeValueParityCase("texture_get_uvs(tex)", "GMRuntime.gml_texture_get_uvs(tex)"),
+    RuntimeValueParityCase("texture_is_ready(tex)", "GMRuntime.gml_texture_is_ready(tex)"),
+    RuntimeValueParityCase("texture_prefetch(tex)", "GMRuntime.gml_texture_prefetch(tex)"),
+    RuntimeValueParityCase("texture_flush(tex)", "GMRuntime.gml_texture_flush(tex)"),
+    RuntimeValueParityCase("sprite_prefetch(spr_player)", 'GMRuntime.gml_sprite_prefetch(GMRuntime.gml_asset_get_index("spr_player"))'),
+    RuntimeValueParityCase("sprite_flush(spr_player)", 'GMRuntime.gml_sprite_flush(GMRuntime.gml_asset_get_index("spr_player"))'),
+    RuntimeValueParityCase("draw_texture_flush()", "GMRuntime.gml_draw_texture_flush()"),
+    RuntimeValueParityCase("draw_flush()", "GMRuntime.gml_draw_flush()"),
+    RuntimeValueParityCase("texture_global_scale(2)", "GMRuntime.gml_texture_global_scale(2)"),
+    RuntimeValueParityCase("texture_debug_messages(true)", "GMRuntime.gml_texture_debug_messages(true)"),
+    RuntimeValueParityCase(
+        "texturegroup_set_mode(true, false, spr_player)",
+        'GMRuntime.gml_texturegroup_set_mode(true, false, GMRuntime.gml_asset_get_index("spr_player"))',
+    ),
+    RuntimeValueParityCase("texturegroup_load('Characters')", "GMRuntime.gml_texturegroup_load('Characters')"),
+    RuntimeValueParityCase("texturegroup_unload('Characters')", "GMRuntime.gml_texturegroup_unload('Characters')"),
+    RuntimeValueParityCase("texturegroup_get_status('Characters')", "GMRuntime.gml_texturegroup_get_status('Characters')"),
+    RuntimeValueParityCase("texturegroup_get_names()", "GMRuntime.gml_texturegroup_get_names()"),
+    RuntimeValueParityCase("texturegroup_get_sprites('Characters')", "GMRuntime.gml_texturegroup_get_sprites('Characters')"),
+    RuntimeValueParityCase("texturegroup_get_fonts('Characters')", "GMRuntime.gml_texturegroup_get_fonts('Characters')"),
+    RuntimeValueParityCase("texturegroup_get_tilesets('Characters')", "GMRuntime.gml_texturegroup_get_tilesets('Characters')"),
+    RuntimeValueParityCase("texturegroup_get_textures('Characters')", "GMRuntime.gml_texturegroup_get_textures('Characters')"),
+    RuntimeValueParityCase("texturegroup_status_fetched", "3"),
+    RuntimeValueParityCase("video_status_playing", "2"),
+    RuntimeValueParityCase("video_format_rgba", "0"),
     RuntimeValueParityCase("shader_set(shd_wave)", 'GMRuntime.gml_shader_set(GMRuntime.gml_asset_get_index("shd_wave"))'),
     RuntimeValueParityCase("shader_reset()", "GMRuntime.gml_shader_reset()"),
     RuntimeValueParityCase(
@@ -303,13 +331,60 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     ),
     RuntimeValueParityCase("shader_set_uniform_f(u, 1, 2, 3, 4)", "GMRuntime.gml_shader_set_uniform_f(u, 1, 2, 3, 4)"),
     RuntimeValueParityCase("shader_set_uniform_i(u, 1)", "GMRuntime.gml_shader_set_uniform_i(u, 1)"),
+    RuntimeValueParityCase("shader_set_uniform_matrix(u)", "GMRuntime.gml_shader_set_uniform_matrix(u)"),
     RuntimeValueParityCase("texture_set_stage(u, tex)", "GMRuntime.gml_texture_set_stage(u, tex)"),
+    RuntimeValueParityCase("part_system_create()", "GMRuntime.gml_part_system_create()"),
+    RuntimeValueParityCase("part_system_create_layer('Effects', true)", "GMRuntime.gml_part_system_create_layer('Effects', true)"),
+    RuntimeValueParityCase("part_system_get_layer(ps)", "GMRuntime.gml_part_system_get_layer(ps)"),
+    RuntimeValueParityCase("part_system_layer(ps, 'Other')", "GMRuntime.gml_part_system_layer(ps, 'Other')"),
+    RuntimeValueParityCase("part_system_depth(ps, -1000)", "GMRuntime.gml_part_system_depth(ps, -1000)"),
+    RuntimeValueParityCase("part_system_position(ps, 20, 30)", "GMRuntime.gml_part_system_position(ps, 20, 30)"),
+    RuntimeValueParityCase("part_system_exists(ps)", "GMRuntime.gml_part_system_exists(ps)"),
+    RuntimeValueParityCase("part_type_create()", "GMRuntime.gml_part_type_create()"),
+    RuntimeValueParityCase("part_type_shape(pt, pt_shape_flare)", 'GMRuntime.gml_part_type_shape(pt, "flare")'),
+    RuntimeValueParityCase("part_type_size(pt, 1, 2, 0.1, 0)", "GMRuntime.gml_part_type_size(pt, 1, 2, 0.1, 0)"),
+    RuntimeValueParityCase("part_type_scale(pt, 2, 1)", "GMRuntime.gml_part_type_scale(pt, 2, 1)"),
+    RuntimeValueParityCase("part_type_life(pt, 30, 60)", "GMRuntime.gml_part_type_life(pt, 30, 60)"),
+    RuntimeValueParityCase("part_type_speed(pt, 0.5, 2, 0, 0)", "GMRuntime.gml_part_type_speed(pt, 0.5, 2, 0, 0)"),
+    RuntimeValueParityCase("part_type_direction(pt, 0, 359, 0, 10)", "GMRuntime.gml_part_type_direction(pt, 0, 359, 0, 10)"),
+    RuntimeValueParityCase("part_type_gravity(pt, 0.25, 270)", "GMRuntime.gml_part_type_gravity(pt, 0.25, 270)"),
+    RuntimeValueParityCase(
+        "part_type_orientation(pt, 0, 90, 0, 0, true)",
+        "GMRuntime.gml_part_type_orientation(pt, 0, 90, 0, 0, true)",
+    ),
+    RuntimeValueParityCase(
+        "part_type_colour3(pt, c_red, c_white, c_yellow)",
+        "GMRuntime.gml_part_type_colour3(pt, 0x0000ff, 0xffffff, 0x00ffff)",
+    ),
+    RuntimeValueParityCase("part_type_alpha3(pt, 1, 0.5, 0)", "GMRuntime.gml_part_type_alpha3(pt, 1, 0.5, 0)"),
+    RuntimeValueParityCase("part_type_blend(pt, true)", "GMRuntime.gml_part_type_blend(pt, true)"),
+    RuntimeValueParityCase("part_emitter_create(ps)", "GMRuntime.gml_part_emitter_create(ps)"),
+    RuntimeValueParityCase(
+        "part_emitter_region(ps, pe, -10, 10, -5, 5, ps_shape_ellipse, ps_distr_linear)",
+        'GMRuntime.gml_part_emitter_region(ps, pe, -10, 10, -5, 5, "ellipse", "linear")',
+    ),
+    RuntimeValueParityCase("part_emitter_relative(ps, pe, false)", "GMRuntime.gml_part_emitter_relative(ps, pe, false)"),
+    RuntimeValueParityCase(
+        "part_particles_create(ps, x, y, pt, 3)",
+        "GMRuntime.gml_part_particles_create(ps, position.x, position.y, pt, 3)",
+    ),
+    RuntimeValueParityCase("part_emitter_burst(ps, pe, pt, 4)", "GMRuntime.gml_part_emitter_burst(ps, pe, pt, 4)"),
+    RuntimeValueParityCase("part_emitter_stream(ps, pe, pt, 1)", "GMRuntime.gml_part_emitter_stream(ps, pe, pt, 1)"),
+    RuntimeValueParityCase("part_particles_count(ps)", "GMRuntime.gml_part_particles_count(ps)"),
     RuntimeValueParityCase("physics_world_create(0.1)", "GMRuntime.gml_physics_world_create(0.1)"),
     RuntimeValueParityCase("physics_world_gravity(0, 9.8)", "GMRuntime.gml_physics_world_gravity(0, 9.8)"),
     RuntimeValueParityCase("physics_fixture_create()", "GMRuntime.gml_physics_fixture_create()"),
     RuntimeValueParityCase(
         "physics_fixture_set_box_shape(fix, 8, 4)",
         "GMRuntime.gml_physics_fixture_set_box_shape(fix, 8, 4)",
+    ),
+    RuntimeValueParityCase(
+        "physics_fixture_set_linear_damping(fix, 0.3)",
+        "GMRuntime.gml_physics_fixture_set_linear_damping(fix, 0.3)",
+    ),
+    RuntimeValueParityCase(
+        "physics_fixture_set_angular_damping(fix, 0.4)",
+        "GMRuntime.gml_physics_fixture_set_angular_damping(fix, 0.4)",
     ),
     RuntimeValueParityCase("physics_fixture_bind(fix, id)", "GMRuntime.gml_physics_fixture_bind(fix, id)"),
     RuntimeValueParityCase(
@@ -320,6 +395,19 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "physics_apply_impulse(0, 0, 10, 0)",
         "GMRuntime.gml_physics_apply_impulse(0, 0, 10, 0, self)",
     ),
+    RuntimeValueParityCase(
+        "physics_joint_distance_create(id, other, x, y, x + 10, y, false)",
+        "GMRuntime.gml_physics_joint_distance_create(id, other, position.x, position.y, GMRuntime.gml_add(position.x, 10), position.y, false)",
+    ),
+    RuntimeValueParityCase(
+        "physics_joint_revolute_create(id, other, x, y, -90, 90, true, 10, 2, false, false)",
+        "GMRuntime.gml_physics_joint_revolute_create(id, other, position.x, position.y, -90, 90, true, 10, 2, false, false)",
+    ),
+    RuntimeValueParityCase("physics_joint_get_value(joint, phy_joint_length)", 'GMRuntime.gml_physics_joint_get_value(joint, "length")'),
+    RuntimeValueParityCase("physics_joint_set_value(joint, phy_joint_length, 32)", 'GMRuntime.gml_physics_joint_set_value(joint, "length", 32)'),
+    RuntimeValueParityCase("physics_joint_enable_motor(joint, true)", "GMRuntime.gml_physics_joint_enable_motor(joint, true)"),
+    RuntimeValueParityCase("physics_mass_properties(2, 0, 0, 1)", "GMRuntime.gml_physics_mass_properties(2, 0, 0, 1, self)"),
+    RuntimeValueParityCase("physics_joint_delete(joint)", "GMRuntime.gml_physics_joint_delete(joint)"),
     RuntimeValueParityCase(
         "script_execute(scr_add, 1, 2)",
         'GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index("scr_add"), [1, 2])',
@@ -353,6 +441,42 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("room_exists(r_next)", 'GMRuntime.gml_room_exists(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("room_get_name(r_next)", 'GMRuntime.gml_room_get_name(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("room_get_info(r_next)", 'GMRuntime.gml_room_get_info(GMRuntime.gml_asset_get_index("r_next"))'),
+    RuntimeValueParityCase('layer_get_id("Instances")', 'GMRuntime.gml_layer_get_id("Instances")'),
+    RuntimeValueParityCase("layer_exists(layer_id)", "GMRuntime.gml_layer_exists(layer_id)"),
+    RuntimeValueParityCase("layer_get_name(layer_id)", "GMRuntime.gml_layer_get_name(layer_id)"),
+    RuntimeValueParityCase("layer_get_all()", "GMRuntime.gml_layer_get_all()"),
+    RuntimeValueParityCase("layer_get_depth(layer_id)", "GMRuntime.gml_layer_get_depth(layer_id)"),
+    RuntimeValueParityCase("layer_depth(layer_id, 50)", "GMRuntime.gml_layer_depth(layer_id, 50)"),
+    RuntimeValueParityCase("layer_get_id_at_depth(50)", "GMRuntime.gml_layer_get_id_at_depth(50)"),
+    RuntimeValueParityCase('layer_create(25, "Effects")', 'GMRuntime.gml_layer_create(25, "Effects")'),
+    RuntimeValueParityCase("layer_add_instance(layer_id, id)", "GMRuntime.gml_layer_add_instance(layer_id, id)"),
+    RuntimeValueParityCase("layer_get_all_elements(layer_id)", "GMRuntime.gml_layer_get_all_elements(layer_id)"),
+    RuntimeValueParityCase("layer_get_element_type(element)", "GMRuntime.gml_layer_get_element_type(element)"),
+    RuntimeValueParityCase("layer_destroy(layer_id)", "GMRuntime.gml_layer_destroy(layer_id)"),
+    RuntimeValueParityCase("timeline_exists(tl_intro)", 'GMRuntime.gml_timeline_exists(GMRuntime.gml_asset_get_index("tl_intro"))'),
+    RuntimeValueParityCase("timeline_get_name(tl_intro)", 'GMRuntime.gml_timeline_get_name(GMRuntime.gml_asset_get_index("tl_intro"))'),
+    RuntimeValueParityCase("timeline_moment_add_script(tl_intro, 2, scr_add)", 'GMRuntime.gml_timeline_moment_add_script(GMRuntime.gml_asset_get_index("tl_intro"), 2, GMRuntime.gml_asset_get_index("scr_add"))'),
+    RuntimeValueParityCase("timeline_moment_clear(tl_intro, 2)", 'GMRuntime.gml_timeline_moment_clear(GMRuntime.gml_asset_get_index("tl_intro"), 2)'),
+    RuntimeValueParityCase("timeline_clear(tl_intro)", 'GMRuntime.gml_timeline_clear(GMRuntime.gml_asset_get_index("tl_intro"))'),
+    RuntimeValueParityCase("timeline_size(tl_intro)", 'GMRuntime.gml_timeline_size(GMRuntime.gml_asset_get_index("tl_intro"))'),
+    RuntimeValueParityCase("timeline_max_moment(tl_intro)", 'GMRuntime.gml_timeline_max_moment(GMRuntime.gml_asset_get_index("tl_intro"))'),
+    RuntimeValueParityCase("timeline_step()", "GMRuntime.gml_timeline_step(self)"),
+    RuntimeValueParityCase("timeline_step(id)", "GMRuntime.gml_timeline_step(id)"),
+    RuntimeValueParityCase("sequence_exists(seq_intro)", 'GMRuntime.gml_sequence_exists(GMRuntime.gml_asset_get_index("seq_intro"))'),
+    RuntimeValueParityCase("sequence_get(seq_intro)", 'GMRuntime.gml_sequence_get(GMRuntime.gml_asset_get_index("seq_intro"))'),
+    RuntimeValueParityCase("sequence_create()", "GMRuntime.gml_sequence_create()"),
+    RuntimeValueParityCase("sequence_destroy(seq)", "GMRuntime.gml_sequence_destroy(seq)"),
+    RuntimeValueParityCase("layer_sequence_create(layer_id, 1, 2, seq_intro)", 'GMRuntime.gml_layer_sequence_create(layer_id, 1, 2, GMRuntime.gml_asset_get_index("seq_intro"))'),
+    RuntimeValueParityCase("layer_sequence_get_instance(seq_el)", "GMRuntime.gml_layer_sequence_get_instance(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_headpos(seq_el, 10)", "GMRuntime.gml_layer_sequence_headpos(seq_el, 10)"),
+    RuntimeValueParityCase("layer_sequence_get_headpos(seq_el)", "GMRuntime.gml_layer_sequence_get_headpos(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_speedscale(seq_el, 0.5)", "GMRuntime.gml_layer_sequence_speedscale(seq_el, 0.5)"),
+    RuntimeValueParityCase("layer_sequence_get_speedscale(seq_el)", "GMRuntime.gml_layer_sequence_get_speedscale(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_headdir(seq_el, seqdir_left)", "GMRuntime.gml_layer_sequence_headdir(seq_el, -1)"),
+    RuntimeValueParityCase("layer_sequence_pause(seq_el)", "GMRuntime.gml_layer_sequence_pause(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_play(seq_el)", "GMRuntime.gml_layer_sequence_play(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_is_paused(seq_el)", "GMRuntime.gml_layer_sequence_is_paused(seq_el)"),
+    RuntimeValueParityCase("layer_sequence_step(seq_el, 4)", "GMRuntime.gml_layer_sequence_step(seq_el, 4)"),
     RuntimeValueParityCase("alarm_get(0)", "GMRuntime.gml_alarm_get(self, 0)"),
     RuntimeValueParityCase("alarm_set(0, 30)", "GMRuntime.gml_alarm_set(self, 0, 30)"),
     RuntimeValueParityCase("time_source_create(null, 60, 0, cb)", "GMRuntime.gml_time_source_create(null, 60, 0, cb)"),
@@ -454,6 +578,22 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase(
         "collision_circle(4, 5, 8, o_enemy, false, false)",
         'GMRuntime.gml_collision_circle(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_enemy"), false, false)',
+    ),
+    RuntimeValueParityCase(
+        "collision_point_list(target_x, target_y, o_enemy, false, true, hits, true)",
+        'GMRuntime.gml_collision_point_list(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_enemy"), false, true, hits, true)',
+    ),
+    RuntimeValueParityCase(
+        "collision_rectangle_list(0, 0, 10, 10, o_enemy, false, true, hits, false)",
+        'GMRuntime.gml_collision_rectangle_list(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_enemy"), false, true, hits, false)',
+    ),
+    RuntimeValueParityCase(
+        "collision_line_list(0, 0, 10, 10, o_enemy, false, true, hits, true)",
+        'GMRuntime.gml_collision_line_list(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_enemy"), false, true, hits, true)',
+    ),
+    RuntimeValueParityCase(
+        "collision_circle_list(4, 5, 8, o_enemy, false, false, hits, true)",
+        'GMRuntime.gml_collision_circle_list(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_enemy"), false, false, hits, true)',
     ),
     RuntimeValueParityCase("motion_set(0, 4)", "GMRuntime.gml_motion_set(self, 0, 4)"),
     RuntimeValueParityCase("motion_add(90, 2)", "GMRuntime.gml_motion_add(self, 90, 2)"),
@@ -997,6 +1137,31 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_room_exists",
             "gml_room_get_name",
             "gml_room_get_info",
+            "gml_layer_exists",
+            "gml_layer_get_id",
+            "gml_layer_get_id_at_depth",
+            "gml_layer_get_name",
+            "gml_layer_get_all",
+            "gml_layer_get_depth",
+            "gml_layer_depth",
+            "gml_layer_create",
+            "gml_layer_destroy",
+            "gml_layer_add_instance",
+            "gml_layer_get_all_elements",
+            "gml_layer_get_element_type",
+            "gml_timeline_exists",
+            "gml_timeline_get_name",
+            "gml_timeline_moment_add_script",
+            "gml_timeline_step",
+            "gml_sequence_exists",
+            "gml_sequence_get",
+            "gml_sequence_create",
+            "gml_layer_sequence_create",
+            "gml_layer_sequence_get_instance",
+            "gml_layer_sequence_headpos",
+            "gml_layer_sequence_speedscale",
+            "gml_layer_sequence_pause",
+            "gml_layer_sequence_step",
             "gml_draw_text",
             "gml_draw_text_ext",
             "gml_draw_text_transformed",
@@ -1189,10 +1354,34 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_gpu_set_alphatestref",
             "gml_gpu_get_alphatestref",
             "gml_sprite_get_texture",
+            "gml_sprite_get_uvs",
             "gml_surface_get_texture",
             "gml_texture_exists",
             "gml_texture_get_width",
             "gml_texture_get_height",
+            "gml_texture_get_texel_width",
+            "gml_texture_get_texel_height",
+            "gml_texture_get_uvs",
+            "gml_texture_is_ready",
+            "gml_texture_prefetch",
+            "gml_texture_flush",
+            "gml_sprite_prefetch",
+            "gml_sprite_flush",
+            "gml_sprite_prefetch_multi",
+            "gml_sprite_flush_multi",
+            "gml_draw_texture_flush",
+            "gml_draw_flush",
+            "gml_texture_global_scale",
+            "gml_texture_debug_messages",
+            "gml_texturegroup_set_mode",
+            "gml_texturegroup_load",
+            "gml_texturegroup_unload",
+            "gml_texturegroup_get_status",
+            "gml_texturegroup_get_names",
+            "gml_texturegroup_get_sprites",
+            "gml_texturegroup_get_fonts",
+            "gml_texturegroup_get_tilesets",
+            "gml_texturegroup_get_textures",
             "gml_shader_set",
             "gml_shader_reset",
             "gml_shader_get_name",
@@ -1203,7 +1392,49 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_shader_set_uniform_i",
             "gml_shader_set_uniform_f_array",
             "gml_shader_set_uniform_i_array",
+            "gml_shader_set_uniform_matrix",
             "gml_texture_set_stage",
+            "gml_part_system_exists",
+            "gml_part_system_create",
+            "gml_part_system_create_layer",
+            "gml_part_system_get_layer",
+            "gml_part_system_layer",
+            "gml_part_system_depth",
+            "gml_part_system_position",
+            "gml_part_system_destroy",
+            "gml_part_system_clear",
+            "gml_part_particles_clear",
+            "gml_part_particles_count",
+            "gml_part_particles_create",
+            "gml_part_type_exists",
+            "gml_part_type_create",
+            "gml_part_type_destroy",
+            "gml_part_type_shape",
+            "gml_part_type_size",
+            "gml_part_type_scale",
+            "gml_part_type_life",
+            "gml_part_type_speed",
+            "gml_part_type_direction",
+            "gml_part_type_gravity",
+            "gml_part_type_orientation",
+            "gml_part_type_colour1",
+            "gml_part_type_colour2",
+            "gml_part_type_colour3",
+            "gml_part_type_alpha1",
+            "gml_part_type_alpha2",
+            "gml_part_type_alpha3",
+            "gml_part_type_blend",
+            "gml_part_type_sprite",
+            "gml_part_emitter_exists",
+            "gml_part_emitter_create",
+            "gml_part_emitter_region",
+            "gml_part_emitter_relative",
+            "gml_part_emitter_destroy",
+            "gml_part_emitter_destroy_all",
+            "gml_part_emitter_clear",
+            "gml_part_emitter_enable",
+            "gml_part_emitter_burst",
+            "gml_part_emitter_stream",
             "gml_physics_world_create",
             "gml_physics_world_gravity",
             "gml_physics_world_gravity_get",
@@ -1216,6 +1447,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_physics_fixture_set_density",
             "gml_physics_fixture_set_friction",
             "gml_physics_fixture_set_restitution",
+            "gml_physics_fixture_set_linear_damping",
+            "gml_physics_fixture_set_angular_damping",
             "gml_physics_fixture_set_sensor",
             "gml_physics_fixture_bind",
             "gml_physics_apply_force",
@@ -1224,6 +1457,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_physics_apply_local_impulse",
             "gml_physics_apply_angular_impulse",
             "gml_physics_apply_torque",
+            "gml_physics_joint_distance_create",
+            "gml_physics_joint_revolute_create",
+            "gml_physics_joint_delete",
+            "gml_physics_joint_get_value",
+            "gml_physics_joint_set_value",
+            "gml_physics_joint_enable_motor",
+            "gml_physics_mass_properties",
             "gml_script_execute",
             "gml_script_call",
             "gml_script_register",
@@ -1505,6 +1745,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_collision_rectangle(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_line(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_circle(current_self, x, y, radius, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_point_list(current_self, x, y, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_circle_list(current_self, x, y, radius, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("push_warning(\"GML precise collision masks are approximated with generated collision shape bounds\")", GML_RUNTIME_SCRIPT)
         self.assertIn("if node is CollisionShape2D:", GML_RUNTIME_SCRIPT)
         self.assertIn("if shape is RectangleShape2D:", GML_RUNTIME_SCRIPT)
@@ -1991,6 +2235,27 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("node.reparent(persistent_root, true)", GML_RUNTIME_SCRIPT)
         self.assertIn("entries.sort_custom(_gml_room_entry_order_less)", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_layer_helpers_use_registry_and_scene_metadata(self):
+        self.assertIn('const GML_LAYER_HANDLE_KIND = "layer"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_register_scene(scene, clear_existing = true):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_get_id(layer_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_create(depth, layer_name = \"\"):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_add_instance(layer, instance):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_get_all_elements(layer):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_get_element_type(element):", GML_RUNTIME_SCRIPT)
+        self.assertIn("gml_layer_register_scene(scene)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var resolved_layer = _gml_layer_resolve_node(layer)", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_sequence_timeline_helpers_preserve_metadata(self):
+        self.assertIn('const GML_SEQUENCE_HANDLE_KIND = "sequence"', GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_TIMELINE_HANDLE_KIND = "timeline"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_timeline_moment_add_script(timeline, step, script):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_timeline_step(instance):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sequence_create():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_sequence_create(layer, x, y, sequence):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_sequence_get_instance(sequence_element_id):", GML_RUNTIME_SCRIPT)
+        self.assertIn("GM2Godot preserves sequence playback metadata", GML_RUNTIME_SCRIPT)
+
     def test_runtime_ds_collection_runtime_functions(self):
         self.assertIn('const GML_DS_LIST_HANDLE_KIND = "ds_list"', GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_DS_STACK_HANDLE_KIND = "ds_stack"', GML_RUNTIME_SCRIPT)
@@ -2095,7 +2360,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_ds_grid_value_x(id_value, x1, y1, x2, y2, val):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_grid_value_y(id_value, x1, y1, x2, y2, val):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_grid_copy(id_dest, id_src):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_ds_grid_read(id_value, str_val):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_ds_grid_read(id_value, str_val, legacy = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_grid_write(id_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_resolve_ds_grid(id_value):", GML_RUNTIME_SCRIPT)
 
@@ -2368,15 +2633,41 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_contains_os_debug_gc_compatibility_helpers(self):
         self.assertIn("static func gml_os_type", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_show_debug_message_ext", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_clipboard_has_text", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_clipboard_get_text", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_clipboard_set_text", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_clipboard_warn_unavailable", GML_RUNTIME_SCRIPT)
+        self.assertIn("GM2Godot clipboard fallback is active", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_gc_collect", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_weak_ref_create", GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
 
+    def test_runtime_contains_particle_compatibility_helpers(self):
+        self.assertIn("const GML_PARTICLE_SYSTEM_HANDLE_KIND", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_system_create", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_system_create_layer", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_system_depth", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_system_position", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_type_create", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_type_size", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_type_colour3", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_emitter_create", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_emitter_region", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_emitter_relative", GML_RUNTIME_SCRIPT)
+        self.assertIn("GPUParticles2D.new()", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_particles_create", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_emitter_burst", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_part_emitter_stream", GML_RUNTIME_SCRIPT)
+
     def test_runtime_contains_platform_service_compatibility_helpers(self):
         self.assertIn("static func gml_platform_service_register", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_platform_service_contracts", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_platform_service_dispatch_async", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_platform_service_call", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_platform_service_unsupported", GML_RUNTIME_SCRIPT)
+        self.assertIn('"steam_set_achievement"', GML_RUNTIME_SCRIPT)
+        self.assertIn('"push_notifications"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_steam_is_initialized", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_browser_input_capture", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_url_open", GML_RUNTIME_SCRIPT)
@@ -2400,7 +2691,7 @@ class TestGMLRuntimeParityFixtures(unittest.TestCase):
         for parity_case in RUNTIME_VALUE_PARITY_CASES:
             with self.subTest(gml_expression=parity_case.gml_expression):
                 self.assertEqual(
-                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "scr_add", "spr_player", "snd_hit", "shd_wave", "r_next"}),
+                    transpile_gml_expression(parity_case.gml_expression, asset_names={"o_enemy", "path_patrol", "scr_add", "spr_player", "snd_hit", "shd_wave", "r_next", "seq_intro", "tl_intro"}),
                     parity_case.gdscript_expression,
                 )
 

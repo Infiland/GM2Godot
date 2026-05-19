@@ -18,6 +18,8 @@ static var _gml_gc_enabled = true
 static var _gml_gc_target_frame_time = 100.0
 static var _gml_gc_frame = 0
 static var _gml_unhandled_exception_handler = null
+static var _gml_clipboard_fallback = ""
+static var _gml_clipboard_fallback_warned = false
 
 
 static func gml_os_type():
@@ -93,6 +95,29 @@ static func gml_os_get_info():
 
 static func gml_environment_get_variable(name):
 	return OS.get_environment(str(name))
+
+
+static func gml_clipboard_has_text():
+	if _gml_display_server_has_clipboard():
+		return DisplayServer.clipboard_has()
+	_gml_clipboard_warn_unavailable()
+	return _gml_clipboard_fallback != ""
+
+
+static func gml_clipboard_get_text():
+	if _gml_display_server_has_clipboard():
+		return DisplayServer.clipboard_get()
+	_gml_clipboard_warn_unavailable()
+	return _gml_clipboard_fallback
+
+
+static func gml_clipboard_set_text(text):
+	_gml_clipboard_fallback = str(text)
+	if _gml_display_server_has_clipboard():
+		DisplayServer.clipboard_set(_gml_clipboard_fallback)
+	else:
+		_gml_clipboard_warn_unavailable()
+	return null
 
 
 static func gml_parameter_count():
@@ -224,6 +249,18 @@ static func gml_weak_ref_any_alive(values, index = 0, length = -1):
 
 static func _gml_is_weak_ref(value):
 	return typeof(value) == TYPE_DICTIONARY and value.has(GML_WEAK_REF_MARKER)
+
+
+static func _gml_display_server_has_clipboard():
+	return DisplayServer.has_feature(DisplayServer.FEATURE_CLIPBOARD)
+
+
+static func _gml_clipboard_warn_unavailable():
+	if _gml_clipboard_fallback_warned:
+		return null
+	_gml_clipboard_fallback_warned = true
+	push_warning("GM2Godot clipboard fallback is active because DisplayServer clipboard support is unavailable on this target.")
+	return null
 
 
 static func _gml_os_version_code(version_text):

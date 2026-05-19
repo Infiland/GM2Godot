@@ -266,12 +266,12 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 
 
 static func _gml_instance_creation_parent(current_self, layer):
+	if layer != null:
+		var resolved_layer = _gml_layer_resolve_node(layer)
+		if resolved_layer != null:
+			return resolved_layer
 	if current_self is Node:
 		var tree = current_self.get_tree()
-		if layer != null and tree != null and tree.current_scene != null:
-			var layer_node = tree.current_scene.find_child(str(layer), true, false)
-			if layer_node is Node:
-				return layer_node
 		if tree != null and tree.current_scene != null:
 			return tree.current_scene
 		var current_parent = current_self.get_parent()
@@ -576,4 +576,3 @@ static func gml_ansi_char(code):
 	if n < 0 or n > 255:
 		return ""
 	return char(n)
-

@@ -148,6 +148,16 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         }])
         self.assertIn("func _on_collision_o_bullet():", content)
 
+    def test_timeline_builtin_variables_are_declared(self):
+        content = generate_script_content(
+            [],
+            code_bodies={"_ready": "\ttimeline_index = tl_intro\n\ttimeline_running = true"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_timeline"),
+        )
+
+        self.assertIn("timeline_index = tl_intro", content)
+        self.assertIn("timeline_running = true", content)
+
     def test_other_event(self):
         content = generate_script_content([{"eventType": 7, "eventNum": 26}])
         self.assertIn("func _on_other_26():", content)

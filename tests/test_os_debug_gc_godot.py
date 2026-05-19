@@ -62,6 +62,12 @@ class TestOSDebugGCGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_os_get_language().length() <= 2, "language code too long"):
             \t\treturn
+            \tGMRuntime.gml_clipboard_set_text("gm2godot clipboard smoke")
+            \tif not _check(GMRuntime.gml_clipboard_has_text(), "clipboard_has_text failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_clipboard_get_text() == "gm2godot clipboard smoke", "clipboard_get_text failed"):
+            \t\treturn
+            \tGMRuntime.gml_clipboard_set_text("")
 
             \tGMRuntime.gml_show_debug_message_ext("OS_DEBUG_VALUE {0}", [os_type])
             \tGMRuntime.gml_gc_enable(false)

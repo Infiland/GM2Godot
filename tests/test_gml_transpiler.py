@@ -2366,6 +2366,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("collision_circle(4, 5, 8, o_wall, false, false)", asset_names=asset_names),
             'GMRuntime.gml_collision_circle(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false)',
         )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_point_list(target_x, target_y, o_wall, false, true, hits, true)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_point_list(self, target_x, target_y, GMRuntime.gml_asset_get_index("o_wall"), false, true, hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_rectangle_list(0, 0, 10, 10, o_wall, false, true, hits, false)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_rectangle_list(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_wall"), false, true, hits, false)',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_line_list(0, 0, 10, 10, o_wall, false, true, hits, true)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_line_list(self, 0, 0, 10, 10, GMRuntime.gml_asset_get_index("o_wall"), false, true, hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_circle_list(4, 5, 8, o_wall, false, false, hits, true)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_circle_list(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false, hits, true)',
+        )
 
     def test_motion_helpers_pass_self_and_sync_motion_assignments(self):
         self.assertEqual(
@@ -2969,6 +2997,79 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_game_end()",
         )
 
+    def test_layer_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'layer_id = layer_get_id("Instances");'
+                "ok = layer_exists(layer_id);"
+                "name = layer_get_name(layer_id);"
+                "layers = layer_get_all();"
+                "depth = layer_get_depth(layer_id);"
+                "layer_depth(layer_id, 50);"
+                "front = layer_get_id_at_depth(50);"
+                'fx = layer_create(25, "Effects");'
+                "layer_add_instance(fx, id);"
+                "elements = layer_get_all_elements(layer_id);"
+                "kind = layer_get_element_type(elements[0]);"
+                "layer_destroy(fx);",
+                indent="",
+            ),
+            'layer_id = GMRuntime.gml_layer_get_id("Instances")\n'
+            "ok = GMRuntime.gml_layer_exists(layer_id)\n"
+            "name = GMRuntime.gml_layer_get_name(layer_id)\n"
+            "layers = GMRuntime.gml_layer_get_all()\n"
+            "depth = GMRuntime.gml_layer_get_depth(layer_id)\n"
+            "GMRuntime.gml_layer_depth(layer_id, 50)\n"
+            "front = GMRuntime.gml_layer_get_id_at_depth(50)\n"
+            'fx = GMRuntime.gml_layer_create(25, "Effects")\n'
+            "GMRuntime.gml_layer_add_instance(fx, id)\n"
+            "elements = GMRuntime.gml_layer_get_all_elements(layer_id)\n"
+            "kind = GMRuntime.gml_layer_get_element_type(GMRuntime.gml_array_get(elements, 0))\n"
+            "GMRuntime.gml_layer_destroy(fx)",
+        )
+
+    def test_layer_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "layer_create.*expects 1 to 2.*got 3"):
+            transpile_gml_code('layer_create(1, "A", "B");', indent="")
+
+    def test_sequence_timeline_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "timeline_exists(tl_intro);"
+                "timeline_moment_add_script(tl_intro, 2, scr_add);"
+                "timeline_step();"
+                "seq = sequence_get(seq_intro);"
+                "el = layer_sequence_create(layer_id, 1, 2, seq_intro);"
+                "inst = layer_sequence_get_instance(el);"
+                "layer_sequence_headpos(el, 10);"
+                "layer_sequence_speedscale(el, 0.5);"
+                "layer_sequence_headdir(el, seqdir_left);"
+                "layer_sequence_pause(el);"
+                "layer_sequence_play(el);"
+                "layer_sequence_step(el, 4);"
+                "layer_sequence_destroy(el);",
+                indent="",
+                asset_names={"tl_intro", "scr_add", "seq_intro"},
+            ),
+            'GMRuntime.gml_timeline_exists(GMRuntime.gml_asset_get_index("tl_intro"))\n'
+            'GMRuntime.gml_timeline_moment_add_script(GMRuntime.gml_asset_get_index("tl_intro"), 2, GMRuntime.gml_asset_get_index("scr_add"))\n'
+            "GMRuntime.gml_timeline_step(self)\n"
+            'seq = GMRuntime.gml_sequence_get(GMRuntime.gml_asset_get_index("seq_intro"))\n'
+            'el = GMRuntime.gml_layer_sequence_create(layer_id, 1, 2, GMRuntime.gml_asset_get_index("seq_intro"))\n'
+            "inst = GMRuntime.gml_layer_sequence_get_instance(el)\n"
+            "GMRuntime.gml_layer_sequence_headpos(el, 10)\n"
+            "GMRuntime.gml_layer_sequence_speedscale(el, 0.5)\n"
+            "GMRuntime.gml_layer_sequence_headdir(el, -1)\n"
+            "GMRuntime.gml_layer_sequence_pause(el)\n"
+            "GMRuntime.gml_layer_sequence_play(el)\n"
+            "GMRuntime.gml_layer_sequence_step(el, 4)\n"
+            "GMRuntime.gml_layer_sequence_destroy(el)",
+        )
+
+    def test_sequence_track_authoring_rejects_with_diagnostic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "sequence_track_new.*unsupported.*#567"):
+            transpile_gml_code("sequence_track_new(seqtracktype_graphic);", indent="")
+
     def test_ds_list_collection_helpers_lower_to_runtime(self):
         self.assertEqual(
             transpile_gml_code(
@@ -3256,7 +3357,25 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "gpu_set_colorwriteenable(true, false, true, true);"
                 "gpu_set_alphatestref(128);"
                 "tex = sprite_get_texture(spr_player, 0);"
-                "w = texture_get_width(tex);",
+                "uvs = sprite_get_uvs(spr_player, 0);"
+                "w = texture_get_width(tex);"
+                "tw = texture_get_texel_width(tex);"
+                "th = texture_get_texel_height(tex);"
+                "ready = texture_is_ready(tex);"
+                "texture_prefetch(tex);"
+                "texture_flush(tex);"
+                "sprite_prefetch(spr_player);"
+                "sprite_flush(spr_player);"
+                "draw_texture_flush();"
+                "draw_flush();"
+                "texture_global_scale(2);"
+                "texture_debug_messages(true);"
+                "texturegroup_set_mode(true, false, spr_player);"
+                "texturegroup_load('Characters');"
+                "texturegroup_unload('Characters');"
+                "texturegroup_status = texturegroup_get_status('Characters');"
+                "texturegroup_names = texturegroup_get_names();"
+                "texturegroup_sprites = texturegroup_get_sprites('Characters');",
                 indent="",
                 asset_names={"spr_player"},
             ),
@@ -3267,12 +3386,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_gpu_set_colorwriteenable(true, false, true, true)\n"
             "GMRuntime.gml_gpu_set_alphatestref(128)\n"
             "tex = GMRuntime.gml_sprite_get_texture(GMRuntime.gml_asset_get_index(\"spr_player\"), 0)\n"
-            "w = GMRuntime.gml_texture_get_width(tex)",
+            "uvs = GMRuntime.gml_sprite_get_uvs(GMRuntime.gml_asset_get_index(\"spr_player\"), 0)\n"
+            "w = GMRuntime.gml_texture_get_width(tex)\n"
+            "tw = GMRuntime.gml_texture_get_texel_width(tex)\n"
+            "th = GMRuntime.gml_texture_get_texel_height(tex)\n"
+            "ready = GMRuntime.gml_texture_is_ready(tex)\n"
+            "GMRuntime.gml_texture_prefetch(tex)\n"
+            "GMRuntime.gml_texture_flush(tex)\n"
+            "GMRuntime.gml_sprite_prefetch(GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
+            "GMRuntime.gml_sprite_flush(GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
+            "GMRuntime.gml_draw_texture_flush()\n"
+            "GMRuntime.gml_draw_flush()\n"
+            "GMRuntime.gml_texture_global_scale(2)\n"
+            "GMRuntime.gml_texture_debug_messages(true)\n"
+            "GMRuntime.gml_texturegroup_set_mode(true, false, GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
+            "GMRuntime.gml_texturegroup_load('Characters')\n"
+            "GMRuntime.gml_texturegroup_unload('Characters')\n"
+            "texturegroup_status = GMRuntime.gml_texturegroup_get_status('Characters')\n"
+            "texturegroup_names = GMRuntime.gml_texturegroup_get_names()\n"
+            "texturegroup_sprites = GMRuntime.gml_texturegroup_get_sprites('Characters')",
         )
 
     def test_gpu_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 4.*got 3"):
             transpile_gml_code("gpu_set_colorwriteenable(true, true, true);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "texturegroup_set_mode.*1 to 3.*got 4"):
+            transpile_gml_code("texturegroup_set_mode(true, false, spr_player, 0);", indent="", asset_names={"spr_player"})
 
     def test_shader_helpers_lower_to_runtime(self):
         self.assertEqual(
@@ -3281,6 +3420,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "u = shader_get_uniform(shd_wave, 'amount');"
                 "shader_set_uniform_f(u, 1, 2, 3, 4);"
                 "shader_set_uniform_i(u, 1);"
+                "shader_set_uniform_matrix(u);"
                 "texture_set_stage(u, tex);"
                 "shader_reset();",
                 indent="",
@@ -3290,6 +3430,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "u = GMRuntime.gml_shader_get_uniform(GMRuntime.gml_asset_get_index(\"shd_wave\"), 'amount')\n"
             "GMRuntime.gml_shader_set_uniform_f(u, 1, 2, 3, 4)\n"
             "GMRuntime.gml_shader_set_uniform_i(u, 1)\n"
+            "GMRuntime.gml_shader_set_uniform_matrix(u)\n"
             "GMRuntime.gml_texture_set_stage(u, tex)\n"
             "GMRuntime.gml_shader_reset()",
         )
@@ -3297,6 +3438,75 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_shader_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_f.*2 to 5.*got 6"):
             transpile_gml_code("shader_set_uniform_f(u, 1, 2, 3, 4, 5);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "shader_set_uniform_matrix.*expects 1.*got 0"):
+            transpile_gml_code("shader_set_uniform_matrix();", indent="")
+
+    def test_particle_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "ps = part_system_create_layer('Effects', true);"
+                "part_system_depth(ps, -1000);"
+                "part_system_position(ps, 20, 30);"
+                "layer_id = part_system_get_layer(ps);"
+                "part_system_layer(ps, 'OtherEffects');"
+                "ok = part_system_exists(ps);"
+                "pt = part_type_create();"
+                "part_type_shape(pt, pt_shape_flare);"
+                "part_type_size(pt, 1, 2, 0.1, 0);"
+                "part_type_scale(pt, 2, 1);"
+                "part_type_life(pt, 30, 60);"
+                "part_type_speed(pt, 0.5, 2, 0, 0);"
+                "part_type_direction(pt, 0, 359, 0, 10);"
+                "part_type_gravity(pt, 0.25, 270);"
+                "part_type_orientation(pt, 0, 90, 0, 0, true);"
+                "part_type_colour3(pt, c_red, c_white, c_yellow);"
+                "part_type_alpha3(pt, 1, 0.5, 0);"
+                "part_type_blend(pt, true);"
+                "pe = part_emitter_create(ps);"
+                "part_emitter_region(ps, pe, -10, 10, -5, 5, ps_shape_ellipse, ps_distr_linear);"
+                "part_emitter_relative(ps, pe, false);"
+                "part_particles_create(ps, x, y, pt, 3);"
+                "part_emitter_burst(ps, pe, pt, 4);"
+                "part_emitter_stream(ps, pe, pt, 1);"
+                "count = part_particles_count(ps);"
+                "part_emitter_destroy(ps, pe);"
+                "part_type_destroy(pt);"
+                "part_system_destroy(ps);",
+                indent="",
+            ),
+            "ps = GMRuntime.gml_part_system_create_layer('Effects', true)\n"
+            "GMRuntime.gml_part_system_depth(ps, -1000)\n"
+            "GMRuntime.gml_part_system_position(ps, 20, 30)\n"
+            "layer_id = GMRuntime.gml_part_system_get_layer(ps)\n"
+            "GMRuntime.gml_part_system_layer(ps, 'OtherEffects')\n"
+            "ok = GMRuntime.gml_part_system_exists(ps)\n"
+            "pt = GMRuntime.gml_part_type_create()\n"
+            "GMRuntime.gml_part_type_shape(pt, \"flare\")\n"
+            "GMRuntime.gml_part_type_size(pt, 1, 2, 0.1, 0)\n"
+            "GMRuntime.gml_part_type_scale(pt, 2, 1)\n"
+            "GMRuntime.gml_part_type_life(pt, 30, 60)\n"
+            "GMRuntime.gml_part_type_speed(pt, 0.5, 2, 0, 0)\n"
+            "GMRuntime.gml_part_type_direction(pt, 0, 359, 0, 10)\n"
+            "GMRuntime.gml_part_type_gravity(pt, 0.25, 270)\n"
+            "GMRuntime.gml_part_type_orientation(pt, 0, 90, 0, 0, true)\n"
+            "GMRuntime.gml_part_type_colour3(pt, 0x0000ff, 0xffffff, 0x00ffff)\n"
+            "GMRuntime.gml_part_type_alpha3(pt, 1, 0.5, 0)\n"
+            "GMRuntime.gml_part_type_blend(pt, true)\n"
+            "pe = GMRuntime.gml_part_emitter_create(ps)\n"
+            "GMRuntime.gml_part_emitter_region(ps, pe, -10, 10, -5, 5, \"ellipse\", \"linear\")\n"
+            "GMRuntime.gml_part_emitter_relative(ps, pe, false)\n"
+            "GMRuntime.gml_part_particles_create(ps, position.x, position.y, pt, 3)\n"
+            "GMRuntime.gml_part_emitter_burst(ps, pe, pt, 4)\n"
+            "GMRuntime.gml_part_emitter_stream(ps, pe, pt, 1)\n"
+            "count = GMRuntime.gml_part_particles_count(ps)\n"
+            "GMRuntime.gml_part_emitter_destroy(ps, pe)\n"
+            "GMRuntime.gml_part_type_destroy(pt)\n"
+            "GMRuntime.gml_part_system_destroy(ps)",
+        )
+
+    def test_particle_helper_arity_errors_are_deterministic(self):
+        with self.assertRaisesRegex(GMLTranspileError, "part_emitter_destroy.*expects 2.*got 1"):
+            transpile_gml_code("part_emitter_destroy(pe);", indent="")
 
     def test_physics_helpers_lower_to_runtime(self):
         self.assertEqual(
@@ -3305,18 +3515,36 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "physics_world_gravity(0, 9.8);"
                 "fix = physics_fixture_create();"
                 "physics_fixture_set_box_shape(fix, 8, 4);"
+                "physics_fixture_set_linear_damping(fix, 0.3);"
+                "physics_fixture_set_angular_damping(fix, 0.4);"
                 "physics_fixture_bind(fix, id);"
                 "physics_apply_force(0, 0, 2, 0);"
-                "physics_apply_impulse(0, 0, 10, 0);",
+                "physics_apply_impulse(0, 0, 10, 0);"
+                "joint = physics_joint_distance_create(id, other, x, y, x + 10, y, false);"
+                "rev = physics_joint_revolute_create(id, other, x, y, -90, 90, true, 10, 2, false, false);"
+                "len = physics_joint_get_value(joint, phy_joint_length);"
+                "physics_joint_set_value(joint, phy_joint_length, 32);"
+                "physics_joint_enable_motor(rev, true);"
+                "physics_mass_properties(2, 0, 0, 1);"
+                "physics_joint_delete(joint);",
                 indent="",
             ),
             "GMRuntime.gml_physics_world_create(0.1)\n"
             "GMRuntime.gml_physics_world_gravity(0, 9.8)\n"
             "fix = GMRuntime.gml_physics_fixture_create()\n"
             "GMRuntime.gml_physics_fixture_set_box_shape(fix, 8, 4)\n"
+            "GMRuntime.gml_physics_fixture_set_linear_damping(fix, 0.3)\n"
+            "GMRuntime.gml_physics_fixture_set_angular_damping(fix, 0.4)\n"
             "GMRuntime.gml_physics_fixture_bind(fix, id)\n"
             "GMRuntime.gml_physics_apply_force(0, 0, 2, 0, self)\n"
-            "GMRuntime.gml_physics_apply_impulse(0, 0, 10, 0, self)",
+            "GMRuntime.gml_physics_apply_impulse(0, 0, 10, 0, self)\n"
+            "joint = GMRuntime.gml_physics_joint_distance_create(id, other, position.x, position.y, GMRuntime.gml_add(position.x, 10), position.y, false)\n"
+            "rev = GMRuntime.gml_physics_joint_revolute_create(id, other, position.x, position.y, -90, 90, true, 10, 2, false, false)\n"
+            "len = GMRuntime.gml_physics_joint_get_value(joint, \"length\")\n"
+            "GMRuntime.gml_physics_joint_set_value(joint, \"length\", 32)\n"
+            "GMRuntime.gml_physics_joint_enable_motor(rev, true)\n"
+            "GMRuntime.gml_physics_mass_properties(2, 0, 0, 1, self)\n"
+            "GMRuntime.gml_physics_joint_delete(joint)",
         )
 
     def test_physics_helper_arity_errors_are_deterministic(self):
@@ -3389,12 +3617,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code(
                 'info = os_get_info();'
                 'show_debug_message_ext("{0}:{1}", [os_get_language(), os_type]);'
+                'clipboard_set_text("done");'
+                'has_clipboard = clipboard_has_text();'
                 'gc_collect();'
                 'alive = weak_ref_alive(weak_ref_create({a: 1}));',
                 indent="",
             ),
             "info = GMRuntime.gml_os_get_info()\n"
             'GMRuntime.gml_show_debug_message_ext("{0}:{1}", [GMRuntime.gml_os_get_language(), GMRuntime.gml_builtin_global("os_type")])\n'
+            'GMRuntime.gml_clipboard_set_text("done")\n'
+            "has_clipboard = GMRuntime.gml_clipboard_has_text()\n"
             "GMRuntime.gml_gc_collect()\n"
             'alive = GMRuntime.gml_weak_ref_alive(GMRuntime.gml_weak_ref_create(GMRuntime.gml_struct({"a": 1})))',
         )
@@ -3425,7 +3657,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 'url_open_ext("https://example.com", "_blank");'
                 'signed_in = xboxlive_user_is_signed_in();'
                 'wallpaper_set_subscriptions(subscriptions);'
-                'cloud_id = cloud_synchronise();',
+                'cloud_id = cloud_synchronise();'
+                'steam_set_achievement("ACH_WIN");'
+                'iap_activate();'
+                'xboxlive_achievements_set_progress(user_id, "Game_Completed", 100);'
+                'xboxlive_matchmaking_create();',
                 indent="",
             ),
             "GMRuntime.gml_browser_input_capture(true)\n"
@@ -3433,14 +3669,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_url_open_ext("https://example.com", "_blank")\n'
             "signed_in = GMRuntime.gml_xboxlive_user_is_signed_in()\n"
             "GMRuntime.gml_wallpaper_set_subscriptions(subscriptions)\n"
-            "cloud_id = GMRuntime.gml_cloud_synchronise()",
+            "cloud_id = GMRuntime.gml_cloud_synchronise()\n"
+            'GMRuntime.gml_platform_service_call("steam", "steam_set_achievement", ["ACH_WIN"])\n'
+            'GMRuntime.gml_platform_service_call("iap", "iap_activate", [])\n'
+            'GMRuntime.gml_platform_service_call("xboxlive", "xboxlive_achievements_set_progress", [user_id, "Game_Completed", 100])\n'
+            'GMRuntime.gml_platform_service_call("xboxlive", "xboxlive_matchmaking_create", [])',
         )
 
     def test_platform_service_helper_arity_errors_are_deterministic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "url_open.*expects 1.*got 0"):
+        with self.assertRaisesRegex(GMLTranspileError, "url_open.*expects 1.*got 0.*#569"):
             transpile_gml_code("url_open();", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "browser_input_capture.*expects 1.*got 0"):
+        with self.assertRaisesRegex(GMLTranspileError, "browser_input_capture.*expects 1.*got 0.*#569"):
             transpile_gml_code("browser_input_capture();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "steam_set_achievement.*expects 1.*got 0.*#570"):
+            transpile_gml_code("steam_set_achievement();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "xboxlive_achievements_set_progress.*expects 3.*got 2.*#570"):
+            transpile_gml_code("xboxlive_achievements_set_progress(user_id, 'Achievement');", indent="")
+
+    def test_os_device_media_unsupported_apis_get_diagnostics(self):
+        with self.assertRaisesRegex(GMLTranspileError, "audio_get_recorder_count.*unsupported.*#569.*Microphone"):
+            transpile_gml_code("audio_get_recorder_count();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "video_draw.*unsupported.*#569.*VideoStreamPlayer"):
+            transpile_gml_code("video_draw();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):
+            transpile_gml_code("device_get_tilt_y();", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "display_get_orientation.*unsupported.*#569.*sensor"):
+            transpile_gml_code("display_get_orientation();", indent="")
 
     def test_extension_function_mappings_emit_configured_hook_calls(self):
         self.assertEqual(

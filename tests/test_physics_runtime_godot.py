@@ -65,18 +65,28 @@ class TestPhysicsRuntimeGodotSmoke(unittest.TestCase):
             \tbody.mass = 1.0
             \tbody.gravity_scale = 0.0
             \tadd_child(body)
+            \tvar body_b = RigidBody2D.new()
+            \tbody_b.name = "PhysicsBodyB"
+            \tbody_b.mass = 1.0
+            \tbody_b.gravity_scale = 0.0
+            \tbody_b.position = Vector2(32, 0)
+            \tadd_child(body_b)
 
             \tvar fixture = GMRuntime.gml_physics_fixture_create()
             \tGMRuntime.gml_physics_fixture_set_box_shape(fixture, 8, 4)
             \tGMRuntime.gml_physics_fixture_set_density(fixture, 1)
             \tGMRuntime.gml_physics_fixture_set_friction(fixture, 0.4)
             \tGMRuntime.gml_physics_fixture_set_restitution(fixture, 0.2)
+            \tGMRuntime.gml_physics_fixture_set_linear_damping(fixture, 0.3)
+            \tGMRuntime.gml_physics_fixture_set_angular_damping(fixture, 0.4)
             \tif not _check(GMRuntime.gml_physics_fixture_bind(fixture, body), "fixture bind failed"):
             \t\treturn
             \tvar shape = body.get_node_or_null("_gm_physics_fixture_" + str(fixture.index))
             \tif not _check(shape is CollisionShape2D, "fixture did not create CollisionShape2D"):
             \t\treturn
             \tif not _check(shape.shape is RectangleShape2D, "fixture did not create rectangle shape"):
+            \t\treturn
+            \tif not _check(abs(body.linear_damp - 0.3) < 0.001 and abs(body.angular_damp - 0.4) < 0.001, "fixture damping not applied"):
             \t\treturn
 
             \tGMRuntime.gml_physics_apply_impulse(0, 0, 20, 0, body)
@@ -86,6 +96,33 @@ class TestPhysicsRuntimeGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_physics_apply_force(0, 0, 5, 0, body)
             \tGMRuntime.gml_physics_apply_angular_impulse(1, body)
             \tGMRuntime.gml_physics_apply_torque(0.5, body)
+            \tvar distance_joint = GMRuntime.gml_physics_joint_distance_create(body, body_b, 0, 0, 32, 0, false)
+            \tif not _check(GMRuntime.gml_handle_is_valid(distance_joint), "distance joint handle invalid"):
+            \t\treturn
+            \tvar distance_node = distance_joint.reference["node"]
+            \tif not _check(distance_node is DampedSpringJoint2D, "distance joint node mismatch"):
+            \t\treturn
+            \tif not _check(abs(distance_node.length - 32.0) < 0.001, "distance joint length mismatch"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_physics_joint_get_value(distance_joint, "length") == 32, "joint get length failed"):
+            \t\treturn
+            \tGMRuntime.gml_physics_joint_set_value(distance_joint, "length", 48)
+            \tif not _check(abs(distance_node.length - 48.0) < 0.001, "joint set length failed"):
+            \t\treturn
+            \tvar revolute_joint = GMRuntime.gml_physics_joint_revolute_create(body, body_b, 16, 0, -90, 90, true, 10, 2, false, false)
+            \tif not _check(GMRuntime.gml_handle_is_valid(revolute_joint), "revolute joint handle invalid"):
+            \t\treturn
+            \tif not _check(revolute_joint.reference["node"] is PinJoint2D, "revolute joint node mismatch"):
+            \t\treturn
+            \tGMRuntime.gml_physics_joint_enable_motor(revolute_joint, true)
+            \tif not _check(GMRuntime.gml_physics_joint_get_value(revolute_joint, "motor"), "joint motor metadata mismatch"):
+            \t\treturn
+            \tGMRuntime.gml_physics_mass_properties(2, 1, -1, 0.5, body)
+            \tif not _check(abs(body.mass - 2.0) < 0.001 and body.center_of_mass == Vector2(1, -1), "mass properties failed"):
+            \t\treturn
+            \tGMRuntime.gml_physics_joint_delete(distance_joint)
+            \tif not _check(not GMRuntime.gml_handle_is_valid(distance_joint), "joint delete did not invalidate handle"):
+            \t\treturn
 
             \tGMRuntime.gml_physics_fixture_delete(fixture)
             \tprint("PHYSICS_RUNTIME_SMOKE_OK")

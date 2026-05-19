@@ -64,6 +64,10 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	
             	GMRuntime.gml_ds_list_insert(l1, 1, "grape")
             	if not _check(str(GMRuntime.gml_ds_list_find_value(l1, 1)) == "grape", "List insert failed"): return
+            	var l2 = GMRuntime.gml_ds_list_create()
+            	GMRuntime.gml_ds_list_read(l2, GMRuntime.gml_ds_list_write(l1))
+            	if not _check(GMRuntime.gml_ds_list_size(l2) == 3, "List read/write size failed"): return
+            	if not _check(str(GMRuntime.gml_ds_list_find_value(l2, 1)) == "grape", "List read/write value failed"): return
             	
             	# --- DS Stacks ---
             	var s1 = GMRuntime.gml_ds_stack_create()
@@ -72,6 +76,9 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	if not _check(int(GMRuntime.gml_ds_stack_top(s1)) == 20, "Stack top not 20"): return
             	if not _check(int(GMRuntime.gml_ds_stack_pop(s1)) == 20, "Stack pop not 20"): return
             	if not _check(GMRuntime.gml_ds_stack_size(s1) == 1, "Stack size not 1 after pop"): return
+            	var s2 = GMRuntime.gml_ds_stack_create()
+            	GMRuntime.gml_ds_stack_read(s2, GMRuntime.gml_ds_stack_write(s1))
+            	if not _check(int(GMRuntime.gml_ds_stack_top(s2)) == 10, "Stack read/write top failed"): return
             	
             	# --- DS Queues ---
             	var q1 = GMRuntime.gml_ds_queue_create()
@@ -79,6 +86,9 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	if not _check(int(GMRuntime.gml_ds_queue_head(q1)) == 100, "Queue head not 100"): return
             	if not _check(int(GMRuntime.gml_ds_queue_tail(q1)) == 200, "Queue tail not 200"): return
             	if not _check(int(GMRuntime.gml_ds_queue_dequeue(q1)) == 100, "Queue dequeue not 100"): return
+            	var q2 = GMRuntime.gml_ds_queue_create()
+            	GMRuntime.gml_ds_queue_read(q2, GMRuntime.gml_ds_queue_write(q1))
+            	if not _check(int(GMRuntime.gml_ds_queue_head(q2)) == 200, "Queue read/write head failed"): return
             	
             	# --- DS Priority ---
             	var p1 = GMRuntime.gml_ds_priority_create()
@@ -89,6 +99,36 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	if not _check(str(GMRuntime.gml_ds_priority_find_min(p1)) == "Low", "Priority min not Low"): return
             	if not _check(str(GMRuntime.gml_ds_priority_delete_max(p1)) == "High", "Priority delete max not High"): return
             	if not _check(GMRuntime.gml_ds_priority_size(p1) == 2, "Priority size not 2 after delete"): return
+            	var p2 = GMRuntime.gml_ds_priority_create()
+            	GMRuntime.gml_ds_priority_read(p2, GMRuntime.gml_ds_priority_write(p1))
+            	if not _check(str(GMRuntime.gml_ds_priority_find_max(p2)) == "Medium", "Priority read/write max failed"): return
+            	if not _check(int(GMRuntime.gml_ds_priority_find_priority(p2, "Low")) == 1, "Priority read/write priority failed"): return
+            	
+            	# --- DS Maps ---
+            	var nested_list = GMRuntime.gml_ds_list_create()
+            	GMRuntime.gml_ds_list_add(nested_list, ["nested"])
+            	var m1 = GMRuntime.gml_ds_map_create()
+            	GMRuntime.gml_ds_map_set(m1, "food", "apple")
+            	GMRuntime.gml_ds_map_set(m1, 7, "seven")
+            	GMRuntime.gml_ds_map_add_list(m1, "nested", nested_list)
+            	var m2 = GMRuntime.gml_ds_map_create()
+            	GMRuntime.gml_ds_map_read(m2, GMRuntime.gml_ds_map_write(m1))
+            	if not _check(str(GMRuntime.gml_ds_map_find_value(m2, "food")) == "apple", "Map read/write string key failed"): return
+            	if not _check(str(GMRuntime.gml_ds_map_find_value(m2, 7)) == "seven", "Map read/write numeric key failed"): return
+            	if not _check(GMRuntime.gml_ds_map_is_list(m2, "nested"), "Map read/write nested list mark failed"): return
+            	var restored_nested = GMRuntime.gml_ds_map_find_value(m2, "nested")
+            	if not _check(str(GMRuntime.gml_ds_list_find_value(restored_nested, 0)) == "nested", "Map read/write nested list value failed"): return
+            	
+            	# --- DS Grids ---
+            	var g1 = GMRuntime.gml_ds_grid_create(2, 2)
+            	GMRuntime.gml_ds_grid_set(g1, 0, 0, "nw")
+            	GMRuntime.gml_ds_grid_set(g1, 1, 1, 42)
+            	var g2 = GMRuntime.gml_ds_grid_create(1, 1)
+            	GMRuntime.gml_ds_grid_read(g2, GMRuntime.gml_ds_grid_write(g1))
+            	if not _check(GMRuntime.gml_ds_grid_width(g2) == 2, "Grid read/write width failed"): return
+            	if not _check(GMRuntime.gml_ds_grid_height(g2) == 2, "Grid read/write height failed"): return
+            	if not _check(str(GMRuntime.gml_ds_grid_get(g2, 0, 0)) == "nw", "Grid read/write string value failed"): return
+            	if not _check(int(GMRuntime.gml_ds_grid_get(g2, 1, 1)) == 42, "Grid read/write numeric value failed"): return
             	
             	print("DS_COLLECTIONS_SMOKE_OK")
             	get_tree().quit(0)

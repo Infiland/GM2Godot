@@ -18,6 +18,10 @@ const GML_BLEND_MULTIPLY = 3
 const GML_CULL_NO_CULLING = 0
 const GML_CULL_CLOCKWISE = 1
 const GML_CULL_COUNTERCLOCKWISE = 2
+const GML_TEXTUREGROUP_STATUS_UNLOADED = 0
+const GML_TEXTUREGROUP_STATUS_LOADING = 1
+const GML_TEXTUREGROUP_STATUS_LOADED = 2
+const GML_TEXTUREGROUP_STATUS_FETCHED = 3
 
 static var _gml_draw_context_stack = []
 static var _gml_draw_sprite_cache = {}
@@ -25,6 +29,13 @@ static var _gml_draw_font_cache = {}
 static var _gml_draw_tileset_cache = {}
 static var _gml_shader_material_cache = {}
 static var _gml_shader_uniform_cache = {}
+static var _gml_texturegroup_status = {}
+static var _gml_texturegroup_mode = {
+	"explicit": false,
+	"debug": false,
+	"default_sprite": -1,
+	"global_scale": 1
+}
 static var _gml_draw_state = {
 	"color": 0xffffff,
 	"alpha": 1.0,
@@ -392,6 +403,13 @@ static func gml_sprite_get_texture(sprite, subimg):
 	return gml_handle_register(GML_TEXTURE_HANDLE_KIND, frame["texture"])
 
 
+static func gml_sprite_get_uvs(sprite, subimg):
+	var frame = _gml_draw_sprite_frame(sprite, subimg)
+	if frame == null:
+		return []
+	return _gml_texture_uvs(frame["texture"])
+
+
 static func gml_surface_get_texture(surface):
 	var resolved_surface = _gml_surface_resolve(surface)
 	if resolved_surface == null:
@@ -415,6 +433,133 @@ static func gml_texture_get_height(texture):
 	if resolved_texture == null:
 		return 0
 	return int(resolved_texture.get_height())
+
+
+static func gml_texture_get_texel_width(texture):
+	var width = gml_texture_get_width(texture)
+	if width <= 0:
+		return 0.0
+	return 1.0 / float(width)
+
+
+static func gml_texture_get_texel_height(texture):
+	var height = gml_texture_get_height(texture)
+	if height <= 0:
+		return 0.0
+	return 1.0 / float(height)
+
+
+static func gml_texture_get_uvs(texture):
+	var resolved_texture = _gml_texture_resolve(texture)
+	if resolved_texture == null:
+		return []
+	return _gml_texture_uvs(resolved_texture)
+
+
+static func gml_texture_is_ready(texture):
+	return gml_texture_exists(texture)
+
+
+static func gml_texture_prefetch(texture):
+	return gml_texture_exists(texture)
+
+
+static func gml_texture_flush(texture):
+	return gml_texture_exists(texture)
+
+
+static func gml_sprite_prefetch(sprite):
+	return _gml_draw_sprite_data(sprite) != null
+
+
+static func gml_sprite_flush(sprite):
+	var entry = _gml_asset_resolve(sprite)
+	if typeof(entry) == TYPE_DICTIONARY:
+		_gml_draw_sprite_cache.erase(int(entry.get("id", -1)))
+	return _gml_asset_resolve(sprite) != null
+
+
+static func gml_sprite_prefetch_multi(sprites):
+	return _gml_sprite_texture_multi(sprites, true)
+
+
+static func gml_sprite_flush_multi(sprites):
+	return _gml_sprite_texture_multi(sprites, false)
+
+
+static func gml_draw_texture_flush():
+	_gml_draw_sprite_cache.clear()
+	_gml_draw_tileset_cache.clear()
+	return null
+
+
+static func gml_draw_flush():
+	return null
+
+
+static func gml_texture_global_scale(pow2integer):
+	_gml_texturegroup_mode["global_scale"] = max(1, int(_to_real(pow2integer)))
+	return null
+
+
+static func gml_texture_debug_messages(enable):
+	_gml_texturegroup_mode["debug"] = gml_bool(enable)
+	return null
+
+
+static func gml_texturegroup_set_mode(explicit, debug = false, default_sprite = -1):
+	_gml_texturegroup_mode["explicit"] = gml_bool(explicit)
+	_gml_texturegroup_mode["debug"] = gml_bool(debug)
+	_gml_texturegroup_mode["default_sprite"] = default_sprite
+	return null
+
+
+static func gml_texturegroup_load(groupname):
+	var group = str(groupname)
+	if not _gml_texturegroup_names().has(group):
+		return false
+	_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_FETCHED
+	return true
+
+
+static func gml_texturegroup_unload(groupname):
+	var group = str(groupname)
+	if not _gml_texturegroup_names().has(group):
+		return false
+	_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_UNLOADED
+	return true
+
+
+static func gml_texturegroup_get_status(groupname):
+	var group = str(groupname)
+	if not _gml_texturegroup_names().has(group):
+		return GML_TEXTUREGROUP_STATUS_UNLOADED
+	return int(_gml_texturegroup_status.get(group, GML_TEXTUREGROUP_STATUS_FETCHED))
+
+
+static func gml_texturegroup_get_names():
+	return _gml_texturegroup_names()
+
+
+static func gml_texturegroup_get_sprites(groupname):
+	return _gml_texturegroup_asset_ids(groupname, "sprite")
+
+
+static func gml_texturegroup_get_fonts(groupname):
+	return _gml_texturegroup_asset_ids(groupname, "font")
+
+
+static func gml_texturegroup_get_tilesets(groupname):
+	return _gml_texturegroup_asset_ids(groupname, "tileset")
+
+
+static func gml_texturegroup_get_textures(groupname):
+	var textures = []
+	for asset_id in _gml_texturegroup_asset_ids(groupname, "sprite"):
+		var texture_handle = gml_sprite_get_texture(asset_id, 0)
+		if gml_handle_is_valid(texture_handle):
+			textures.append(texture_handle)
+	return textures
 
 
 static func gml_shader_set(shader):
@@ -473,6 +618,10 @@ static func gml_shader_set_uniform_i_array(uniform, values):
 	for value in _gml_shader_uniform_array(values):
 		array.append(int(_to_real(value)))
 	return _gml_shader_set_uniform_value(uniform, array)
+
+
+static func gml_shader_set_uniform_matrix(uniform):
+	return _gml_shader_set_uniform_value(uniform, _gml_shader_current_matrix())
 
 
 static func gml_texture_set_stage(uniform, texture):
@@ -662,6 +811,60 @@ static func _gml_texture_resolve(texture):
 	return null
 
 
+static func _gml_texture_uvs(texture):
+	if texture == null:
+		return []
+	return [0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0]
+
+
+static func _gml_sprite_texture_multi(sprites, prefetch):
+	if typeof(sprites) != TYPE_ARRAY:
+		return false
+	var ok = true
+	for sprite in sprites:
+		if bool(prefetch):
+			ok = gml_sprite_prefetch(sprite) and ok
+		else:
+			ok = gml_sprite_flush(sprite) and ok
+	return ok
+
+
+static func _gml_texturegroup_names():
+	_gml_asset_registry_ensure_loaded()
+	var names = []
+	for entry in _gml_asset_entries:
+		var group = _gml_texturegroup_name_for_entry(entry)
+		if group != "" and not names.has(group):
+			names.append(group)
+	names.sort()
+	return names
+
+
+static func _gml_texturegroup_asset_ids(groupname, asset_type):
+	_gml_asset_registry_ensure_loaded()
+	var group = str(groupname)
+	var type_key = _gml_asset_type_key(asset_type)
+	var ids = []
+	for entry in _gml_asset_entries:
+		if str(entry.get("type", "")) != type_key:
+			continue
+		if _gml_texturegroup_name_for_entry(entry) == group:
+			ids.append(int(entry.get("id", -1)))
+	return ids
+
+
+static func _gml_texturegroup_name_for_entry(entry):
+	if typeof(entry) != TYPE_DICTIONARY:
+		return ""
+	var asset_type = str(entry.get("type", ""))
+	if not ["sprite", "font", "tileset"].has(asset_type):
+		return ""
+	var metadata = entry.get("metadata", {})
+	if typeof(metadata) == TYPE_DICTIONARY and str(metadata.get("texture_group", "")) != "":
+		return str(metadata.get("texture_group", ""))
+	return "Default"
+
+
 static func _gml_shader_entry(shader):
 	_gml_asset_registry_ensure_loaded()
 	var entry: Variant = _gml_asset_resolve(shader)
@@ -785,6 +988,10 @@ static func _gml_shader_uniform_array(values):
 				result.append(_gml_buffer_read_u8(buffer, index))
 			return result
 	return []
+
+
+static func _gml_shader_current_matrix():
+	return Projection.IDENTITY
 
 
 static func _gml_draw_apply_gpu_state(target = null):

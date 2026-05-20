@@ -21,18 +21,24 @@ GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.14.
   - Linux
 - **Real-time Progress**: Visual feedback with progress bar and time tracking
 - **Customizable Conversion**: Choose exactly which assets to convert
+- **Compatibility Roadmap**: Tracks current and missing GameMaker-to-Godot coverage in [`todo-list/`](todo-list/README.md)
 
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
 - A modern asset conversion tool from GameMaker to Godot
+- A growing GMS2+ GML-to-GDScript transpiler and Godot runtime compatibility layer
 - A time-saver for starting Godot projects from GameMaker
 - A tool for developers who want to migrate their projects
 
 **GM2Godot isn't:**
 - A perfect 1:1 conversion tool
-- A GML to GDScript transpiler *(yet)*
+- A complete implementation of every current GameMaker GML Code and GML Reference page yet
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
+
+## Compatibility Todo List
+
+The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It tracks checked current coverage, missing features, GMS2+ GML Code coverage, GML Reference/runtime API coverage, events, project import work, Godot architecture, and testing/codebase improvements.
 
 ## Releases
 
@@ -141,6 +147,11 @@ The project uses PySide6 (not Tkinter). Required packages are:
 
 Run the application using:
 python main.py
+
+Verification for coding agents:
+- If Python or generated-code logic changes, run ./venv/bin/pyright --warnings and relevant tests.
+- For broad code changes, run ./venv/bin/python -m unittest.
+- For documentation-only changes, do not run Pyright or tests unless explicitly requested.
 
 Ensure all dependencies are installed correctly before execution.
 ```

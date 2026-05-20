@@ -413,8 +413,28 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
+        self.assertIn('func _gm_apply_image_transform():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
         self.assertIn('func _ready():\n\t_gm_initialize_sprite_runtime()', content)
+
+    def test_sprite_runtime_hydrates_room_instance_transform_metadata(self):
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="s_player",
+                sprite_scene_paths={"s_player": "res://sprites/s_player/s_player.tscn"},
+            ),
+        )
+
+        self.assertIn('if has_meta("gamemaker_image_angle"):', content)
+        self.assertIn('image_angle = get_meta("gamemaker_image_angle")', content)
+        self.assertIn('image_xscale = get_meta("gamemaker_image_xscale")', content)
+        self.assertIn('image_yscale = get_meta("gamemaker_image_yscale")', content)
+        self.assertIn('image_blend = get_meta("gamemaker_image_blend")', content)
+        self.assertIn('image_alpha = get_meta("gamemaker_image_alpha")', content)
+        self.assertIn('rotation_degrees = float(image_angle)', content)
+        self.assertIn('scale = Vector2(float(image_xscale), float(image_yscale))', content)
+        self.assertIn('sprite_node.modulate = _gm_image_modulate()', content)
 
     def test_sprite_runtime_uses_gml_body_without_duplicate_builtin_vars(self):
         content = generate_script_content(

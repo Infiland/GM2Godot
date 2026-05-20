@@ -953,6 +953,25 @@ def _decode_gamemaker_colour(value: JsonValue) -> list[float]:
     ]
 
 
+def _gamemaker_colour_blend(value: JsonValue) -> int:
+    try:
+        packed = int(value)
+    except (TypeError, ValueError):
+        return 0xFFFFFF
+    return packed & 0xFFFFFF
+
+
+def _gamemaker_colour_alpha(value: JsonValue) -> float:
+    try:
+        packed = int(value)
+    except (TypeError, ValueError):
+        return 1.0
+    packed = packed & 0xFFFFFFFF
+    if packed <= 0xFFFFFF:
+        return 1.0
+    return ((packed >> 24) & 0xFF) / 255.0
+
+
 def _format_color_component(value: float) -> str:
     if value == 0:
         return "0"
@@ -1060,7 +1079,17 @@ def _instance_scene_lines(
         f"metadata/gamemaker_instance_object_name = {godot_value(object_name)}",
         f"metadata/gamemaker_instance_creation_order_index = {godot_value(order_index)}",
         f"metadata/gamemaker_instance_ignored = {godot_value(bool(instance.get('ignore', False)))}",
+        f"metadata/gamemaker_instance_x = {godot_value(instance.get('x', 0))}",
+        f"metadata/gamemaker_instance_y = {godot_value(instance.get('y', 0))}",
+        f"metadata/gamemaker_instance_rotation = {godot_value(instance.get('rotation', 0))}",
+        f"metadata/gamemaker_instance_scale_x = {godot_value(instance.get('scaleX', 1))}",
+        f"metadata/gamemaker_instance_scale_y = {godot_value(instance.get('scaleY', 1))}",
         f"metadata/gamemaker_colour = {godot_value(instance.get('colour'))}",
+        f"metadata/gamemaker_image_angle = {godot_value(instance.get('rotation', 0))}",
+        f"metadata/gamemaker_image_xscale = {godot_value(instance.get('scaleX', 1))}",
+        f"metadata/gamemaker_image_yscale = {godot_value(instance.get('scaleY', 1))}",
+        f"metadata/gamemaker_image_blend = {godot_value(_gamemaker_colour_blend(instance.get('colour')))}",
+        f"metadata/gamemaker_image_alpha = {godot_value(_gamemaker_colour_alpha(instance.get('colour')))}",
         f"metadata/gamemaker_image_index = {godot_value(instance.get('imageIndex'))}",
         f"metadata/gamemaker_image_speed = {godot_value(instance.get('imageSpeed'))}",
         f"metadata/gamemaker_object_id = {godot_value(instance.get('objectId'))}",

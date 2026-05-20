@@ -31,7 +31,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
 - Add comments for complex logic
 - Keep functions focused and concise
 - Use type hints where appropriate
-- Keep linting and type checking clean. Run `./venv/bin/pyright --warnings` before submitting changes and fix every reported error or warning.
+- Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
 
 ### UI Development
 - Maintain consistency with the existing dark theme
@@ -82,8 +82,9 @@ When adding new asset conversion features:
 ## Testing
 
 Before submitting a PR:
-- Run `./venv/bin/pyright --warnings` and fix all lint/type-check diagnostics
-- Run the relevant tests; for broad changes, run `./venv/bin/python -m unittest`
+- For Python or generated-code logic changes, run `./venv/bin/pyright --warnings` and fix all lint/type-check diagnostics
+- For code behavior changes, run the relevant tests; for broad code changes, run `./venv/bin/python -m unittest`
+- For documentation-only changes, do not run Pyright or tests unless explicitly requested
 - Test your changes with both GameMaker and Godot projects
 - Verify the UI works at different resolutions
 - Check that existing features still work

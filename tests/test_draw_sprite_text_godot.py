@@ -103,6 +103,16 @@ def _write_registry(project_dir: Path) -> None:
             godot_path="res://objects/o_drawer/o_drawer.tscn",
             legacy_id="objects/o_drawer/o_drawer.yy",
         ),
+        AssetRegistryEntry(
+            id=102,
+            name="o_transform",
+            kind="objects",
+            asset_type="object",
+            type_name="Object",
+            source_path="objects/o_transform/o_transform.yy",
+            godot_path="res://objects/o_transform/o_transform.tscn",
+            legacy_id="objects/o_transform/o_transform.yy",
+        ),
     )
     _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
 
@@ -134,6 +144,22 @@ def _write_object(project_dir: Path, name: str) -> None:
                 "_draw": transpile_gml_code(draw_source, asset_names={"spr_player"}),
             },
             instance_variables={"draw_ok", "text_height", "text_width"},
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="spr_player",
+                sprite_scene_paths={"spr_player": "res://sprites/spr_player/spr_player.tscn"},
+            ),
+            object_runtime=ObjectRuntimeConfig(object_name=name),
+        ),
+    )
+    _write_text(object_dir / f"{name}.tscn", _object_scene(name))
+
+
+def _write_transform_object(project_dir: Path, name: str) -> None:
+    object_dir = project_dir / "objects" / name
+    _write_text(
+        object_dir / f"{name}.gd",
+        generate_script_content(
+            [],
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name="spr_player",
                 sprite_scene_paths={"spr_player": "res://sprites/spr_player/spr_player.tscn"},
@@ -193,6 +219,69 @@ def _write_smoke_scene(project_dir: Path) -> None:
     _write_text(project_dir / "smoke.tscn", smoke_scene)
 
 
+def _write_transform_smoke_scene(project_dir: Path) -> None:
+    smoke_script = textwrap.dedent(
+        """\
+        extends Node2D
+
+        func _check(condition, message):
+        \tif not condition:
+        \t\tpush_error(str(message))
+        \t\tget_tree().quit(1)
+        \t\treturn false
+        \treturn true
+
+        func _ready():
+        \tvar instance = $inst_rotated
+        \tawait get_tree().process_frame
+        \tif not _check(abs(instance.image_angle - 90.0) < 0.01, "room rotation did not hydrate image_angle"):
+        \t\treturn
+        \tif not _check(abs(instance.rotation_degrees - 90.0) < 0.01, "image_angle did not apply to node rotation"):
+        \t\treturn
+        \tif not _check(abs(instance.image_xscale - 2.0) < 0.01 and abs(instance.image_yscale - 0.5) < 0.01, "room scale did not hydrate image scale"):
+        \t\treturn
+        \tif not _check(instance.scale.distance_to(Vector2(2, 0.5)) < 0.01, "image scale did not apply to node scale"):
+        \t\treturn
+        \tif not _check(abs(instance.image_speed - 0.25) < 0.01, "room image_speed did not hydrate"):
+        \t\treturn
+        \tif not _check(instance.image_blend == 255, "room blend did not hydrate"):
+        \t\treturn
+        \tif not _check(abs(instance.image_alpha - 0.5) < 0.01, "room alpha did not hydrate"):
+        \t\treturn
+        \tvar sprite_node = instance.find_child("Sprite2D", true, false)
+        \tif not _check(sprite_node != null and sprite_node.modulate.is_equal_approx(Color(1, 0, 0, 0.5)), "image blend/alpha did not apply to sprite visual"):
+        \t\treturn
+        \tprint("ROOM_INSTANCE_TRANSFORM_SMOKE_OK")
+        \tget_tree().quit(0)
+        """
+    )
+    smoke_scene = textwrap.dedent(
+        """\
+        [gd_scene load_steps=3 format=3]
+
+        [ext_resource type="Script" path="res://smoke_transform.gd" id="1"]
+        [ext_resource type="PackedScene" path="res://objects/o_transform/o_transform.tscn" id="2"]
+
+        [node name="Smoke" type="Node2D"]
+        script = ExtResource("1")
+
+        [node name="inst_rotated" parent="." instance=ExtResource("2")]
+        position = Vector2(100, 200)
+        rotation_degrees = 90
+        scale = Vector2(2, 0.5)
+        metadata/gamemaker_image_angle = 90
+        metadata/gamemaker_image_xscale = 2
+        metadata/gamemaker_image_yscale = 0.5
+        metadata/gamemaker_image_blend = 255
+        metadata/gamemaker_image_alpha = 0.5
+        metadata/gamemaker_image_index = 0
+        metadata/gamemaker_image_speed = 0.25
+        """
+    )
+    _write_text(project_dir / "smoke_transform.gd", smoke_script)
+    _write_text(project_dir / "smoke_transform.tscn", smoke_scene)
+
+
 class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
     def test_generated_draw_event_uses_sprite_text_runtime(self) -> None:
         godot_binary = _find_godot_binary()
@@ -240,6 +329,53 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("DRAW_SPRITE_TEXT_SMOKE_OK", output)
+
+    def test_room_instance_transform_metadata_hydrates_sprite_runtime(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                '[application]\nconfig/name="RoomInstanceTransformSmoke"\nrun/main_scene="res://smoke_transform.tscn"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_registry(project_dir)
+            _write_bytes(
+                project_dir / "sprites" / "spr_player" / "spr_player.png",
+                base64.b64decode(_PNG_1X1_WHITE),
+            )
+            _write_text(project_dir / "sprites" / "spr_player" / "spr_player.tscn", _sprite_scene())
+            _write_transform_object(project_dir, "o_transform")
+            _write_transform_smoke_scene(project_dir)
+
+            godot_env = dict(os.environ)
+            godot_env["HOME"] = str(project_dir)
+            result = subprocess.run(
+                [
+                    godot_binary,
+                    "--headless",
+                    "--log-file",
+                    str(project_dir / "godot.log"),
+                    "--path",
+                    str(project_dir),
+                    "--scene",
+                    "res://smoke_transform.tscn",
+                    "--quit-after",
+                    "10",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+                env=godot_env,
+            )
+            output = result.stdout + result.stderr
+
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("ROOM_INSTANCE_TRANSFORM_SMOKE_OK", output)
 
 
 if __name__ == "__main__":

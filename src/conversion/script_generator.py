@@ -70,16 +70,22 @@ _DRAW_RUNTIME_FUNCTIONS = frozenset({
 })
 _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "AnimatedSprite2D",
+    "CanvasItem",
+    "Color",
     "GMRuntime",
     "Node2D",
     "Sprite2D",
     "_GM_SPRITE_SCENES",
     "_gm_apply_image_index",
+    "_gm_apply_image_transform",
     "_gm_apply_sprite_index",
     "_gm_clear_current_sprite",
+    "_gm_image_modulate",
     "_gm_current_sprite_scene_root",
     "_gm_initialize_sprite_runtime",
+    "_gm_room_colour_alpha",
     "_gm_sprite_visual_node",
+    "Vector2",
 })
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
@@ -243,11 +249,26 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\t\t_gm_apply_image_index()"
         "\n\nvar image_number = 1"
         "\nvar image_speed = 1.0"
-        "\nvar image_xscale = 1.0"
-        "\nvar image_yscale = 1.0"
-        "\nvar image_angle = 0.0"
-        "\nvar image_blend = 0xffffff"
-        "\nvar image_alpha = 1.0"
+        "\nvar image_xscale = 1.0:"
+        "\n\tset(value):"
+        "\n\t\timage_xscale = value"
+        "\n\t\t_gm_apply_image_transform()"
+        "\nvar image_yscale = 1.0:"
+        "\n\tset(value):"
+        "\n\t\timage_yscale = value"
+        "\n\t\t_gm_apply_image_transform()"
+        "\nvar image_angle = 0.0:"
+        "\n\tset(value):"
+        "\n\t\timage_angle = value"
+        "\n\t\t_gm_apply_image_transform()"
+        "\nvar image_blend = 0xffffff:"
+        "\n\tset(value):"
+        "\n\t\timage_blend = value"
+        "\n\t\t_gm_apply_image_transform()"
+        "\nvar image_alpha = 1.0:"
+        "\n\tset(value):"
+        "\n\t\timage_alpha = value"
+        "\n\t\t_gm_apply_image_transform()"
         "\n\nfunc _gm_initialize_sprite_runtime():"
         "\n\t_gm_apply_sprite_index()"
         "\n\tif has_meta(\"gamemaker_image_index\"):"
@@ -256,8 +277,27 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\t\t_gm_apply_image_index()"
         "\n\tif has_meta(\"gamemaker_image_speed\"):"
         "\n\t\timage_speed = get_meta(\"gamemaker_image_speed\")"
-        "\n\tif has_meta(\"gamemaker_colour\") and get_meta(\"gamemaker_colour\") != null:"
+        "\n\tif has_meta(\"gamemaker_image_angle\"):"
+        "\n\t\timage_angle = get_meta(\"gamemaker_image_angle\")"
+        "\n\telse:"
+        "\n\t\timage_angle = rotation_degrees"
+        "\n\tif has_meta(\"gamemaker_image_xscale\"):"
+        "\n\t\timage_xscale = get_meta(\"gamemaker_image_xscale\")"
+        "\n\telse:"
+        "\n\t\timage_xscale = scale.x"
+        "\n\tif has_meta(\"gamemaker_image_yscale\"):"
+        "\n\t\timage_yscale = get_meta(\"gamemaker_image_yscale\")"
+        "\n\telse:"
+        "\n\t\timage_yscale = scale.y"
+        "\n\tif has_meta(\"gamemaker_image_blend\"):"
+        "\n\t\timage_blend = get_meta(\"gamemaker_image_blend\")"
+        "\n\telif has_meta(\"gamemaker_colour\") and get_meta(\"gamemaker_colour\") != null:"
         "\n\t\timage_blend = int(get_meta(\"gamemaker_colour\")) & 0xffffff"
+        "\n\tif has_meta(\"gamemaker_image_alpha\"):"
+        "\n\t\timage_alpha = get_meta(\"gamemaker_image_alpha\")"
+        "\n\telif has_meta(\"gamemaker_colour\") and get_meta(\"gamemaker_colour\") != null:"
+        "\n\t\timage_alpha = _gm_room_colour_alpha(get_meta(\"gamemaker_colour\"))"
+        "\n\t_gm_apply_image_transform()"
         "\n\nfunc _gm_apply_sprite_index():"
         "\n\tif sprite_index == null:"
         "\n\t\t_gm_clear_current_sprite()"
@@ -270,10 +310,12 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current != null and str(current.name) == sprite_name:"
         "\n\t\t_gm_apply_image_index()"
+        "\n\t\t_gm_apply_image_transform()"
         "\n\t\treturn"
         "\n\tvar scene = _GM_SPRITE_SCENES.get(sprite_name)"
         "\n\tif scene == null:"
         "\n\t\t_gm_apply_image_index()"
+        "\n\t\t_gm_apply_image_transform()"
         "\n\t\treturn"
         "\n\tif current != null:"
         "\n\t\tremove_child(current)"
@@ -283,6 +325,7 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\tadd_child(instance)"
         "\n\tmove_child(instance, 0)"
         "\n\t_gm_apply_image_index()"
+        "\n\t_gm_apply_image_transform()"
         "\n\nfunc _gm_apply_image_index():"
         "\n\tvar sprite_node = _gm_sprite_visual_node()"
         "\n\tif sprite_node == null:"
@@ -303,6 +346,25 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
         "\n\t\timage_number = max(frame_count, 1)"
         "\n\t\tif frame_count > 1:"
         "\n\t\t\tsprite_node.frame = min(frame_index, frame_count - 1)"
+        "\n\nfunc _gm_apply_image_transform():"
+        "\n\trotation_degrees = float(image_angle)"
+        "\n\tscale = Vector2(float(image_xscale), float(image_yscale))"
+        "\n\tvar sprite_node = _gm_sprite_visual_node()"
+        "\n\tif sprite_node is CanvasItem:"
+        "\n\t\tsprite_node.modulate = _gm_image_modulate()"
+        "\n\nfunc _gm_image_modulate():"
+        "\n\tvar blend = int(image_blend) & 0xffffff"
+        "\n\treturn Color("
+        "\n\t\tfloat(blend & 0xff) / 255.0,"
+        "\n\t\tfloat((blend >> 8) & 0xff) / 255.0,"
+        "\n\t\tfloat((blend >> 16) & 0xff) / 255.0,"
+        "\n\t\tclamp(float(image_alpha), 0.0, 1.0)"
+        "\n\t)"
+        "\n\nfunc _gm_room_colour_alpha(colour):"
+        "\n\tvar packed = int(colour) & 0xffffffff"
+        "\n\tif packed <= 0xffffff:"
+        "\n\t\treturn 1.0"
+        "\n\treturn float((packed >> 24) & 0xff) / 255.0"
         "\n\nfunc _gm_current_sprite_scene_root():"
         "\n\tfor child in get_children():"
         "\n\t\tif str(child.name) in _GM_SPRITE_SCENES:"

@@ -40,7 +40,7 @@ static func gml_ds_map_set(id_value, key, value):
 	if ds is Dictionary:
 		ds[key] = value
 		return value
-	return gml_unsupported_type_error("GML ds_map set", ds)
+	return gml_undefined()
 
 static func gml_ds_map_replace(id_value, key, value):
 	var ds = _gml_resolve_ds_map(id_value)
@@ -68,7 +68,7 @@ static func gml_ds_map_find_value(id_value, key):
 		if resolved_map.has(key):
 			return resolved_map[key]
 		return gml_undefined()
-	return gml_unsupported_type_error("GML ds_map access", resolved_map)
+	return gml_undefined()
 
 static func gml_ds_map_find_first(id_value):
 	var ds = _gml_resolve_ds_map(id_value)

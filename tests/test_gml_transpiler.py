@@ -1401,6 +1401,33 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_ds_map_set(inventory, "food", amount)',
         )
 
+    def test_transpiles_ds_grid_mutation_targets_once(self):
+        self.assertEqual(
+            transpile_gml_code("grid[# next_x(), next_y()] += value;", indent=""),
+            "var _gml_grid_x_0 = next_x()\n"
+            "var _gml_grid_y_1 = next_y()\n"
+            "GMRuntime.gml_ds_grid_set(grid, _gml_grid_x_0, _gml_grid_y_1, "
+            "GMRuntime.gml_add(GMRuntime.gml_ds_grid_get(grid, _gml_grid_x_0, _gml_grid_y_1), value))",
+        )
+        self.assertEqual(
+            transpile_gml_code("grid[# next_x(), next_y()]++;", indent=""),
+            "var _gml_grid_x_0 = next_x()\n"
+            "var _gml_grid_y_1 = next_y()\n"
+            "GMRuntime.gml_ds_grid_set(grid, _gml_grid_x_0, _gml_grid_y_1, "
+            "GMRuntime.gml_add(GMRuntime.gml_ds_grid_get(grid, _gml_grid_x_0, _gml_grid_y_1), 1))",
+        )
+
+    def test_nested_mixed_accessor_mutation_caches_grid_cell_container(self):
+        self.assertEqual(
+            transpile_gml_code("result = grid[# next_x(), next_y()][? next_key()] += value;", indent=""),
+            "var _gml_map_target_0 = GMRuntime.gml_ds_grid_get(grid, next_x(), next_y())\n"
+            "var _gml_map_key_1 = next_key()\n"
+            "var _gml_assignment_value_2 = GMRuntime.gml_add("
+            "GMRuntime.gml_ds_map_find_value(_gml_map_target_0, _gml_map_key_1), value)\n"
+            "GMRuntime.gml_ds_map_set(_gml_map_target_0, _gml_map_key_1, _gml_assignment_value_2)\n"
+            "result = _gml_assignment_value_2",
+        )
+
     def test_any_values_pass_through_calls_without_lossy_conversion(self):
         self.assertEqual(
             transpile_gml_expression('callback([1, "x"], {value: undefined})'),

@@ -241,9 +241,7 @@ static func gml_ds_grid_write(id_value):
 
 static func _gml_resolve_ds_grid(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
-		var resolved = gml_handle_resolve_for_kind(GML_DS_GRID_HANDLE_KIND, id_value)
-		if resolved != null:
-			return resolved
+		return gml_handle_resolve_for_kind(GML_DS_GRID_HANDLE_KIND, id_value)
 	return id_value
 
 static func _gml_ds_grid_create_unregistered(w, h):

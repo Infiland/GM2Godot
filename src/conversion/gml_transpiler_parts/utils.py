@@ -12,6 +12,7 @@ from .model import (
     _Binary,
     _Call,
     _DEFAULT_SCOPE_CONTEXT,
+    _DSGridAccess,
     _DSMapAccess,
     _DSListAccess,
     _Expression,
@@ -134,6 +135,12 @@ def _expression_needs_assignment_cache(expr: _Expression) -> bool:
         return (
             _expression_needs_assignment_cache(expr.target)
             or _expression_needs_assignment_cache(expr.index)
+        )
+    if isinstance(expr, _DSGridAccess):
+        return (
+            _expression_needs_assignment_cache(expr.target)
+            or _expression_needs_assignment_cache(expr.x_index)
+            or _expression_needs_assignment_cache(expr.y_index)
         )
     if isinstance(expr, _Member):
         return _expression_needs_assignment_cache(expr.target)

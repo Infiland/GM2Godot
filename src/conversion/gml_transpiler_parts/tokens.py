@@ -59,6 +59,13 @@ def _tokenize(source: str) -> list[_Token]:
                 tokens.append(_Token("DIRECTIVE", "#macro", line=line, column=column, index=index))
                 index += len("#macro")
                 continue
+            previous_index = index - 1
+            while previous_index >= 0 and source[previous_index].isspace():
+                previous_index -= 1
+            if previous_index >= 0 and source[previous_index] == "[":
+                tokens.append(_Token("OP", char, line=line, column=column, index=index))
+                index += 1
+                continue
             try:
                 color_literal, color_end = _read_hash_color_literal(source, index)
             except GMLTranspileError as exc:

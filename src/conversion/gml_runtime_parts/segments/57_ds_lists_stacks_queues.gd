@@ -2,30 +2,22 @@
 
 static func _gml_resolve_ds_list(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
-		var resolved = gml_handle_resolve_for_kind(GML_DS_LIST_HANDLE_KIND, id_value)
-		if resolved != null:
-			return resolved
+		return gml_handle_resolve_for_kind(GML_DS_LIST_HANDLE_KIND, id_value)
 	return id_value
 
 static func _gml_resolve_ds_stack(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
-		var resolved = gml_handle_resolve_for_kind(GML_DS_STACK_HANDLE_KIND, id_value)
-		if resolved != null:
-			return resolved
+		return gml_handle_resolve_for_kind(GML_DS_STACK_HANDLE_KIND, id_value)
 	return id_value
 
 static func _gml_resolve_ds_queue(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
-		var resolved = gml_handle_resolve_for_kind(GML_DS_QUEUE_HANDLE_KIND, id_value)
-		if resolved != null:
-			return resolved
+		return gml_handle_resolve_for_kind(GML_DS_QUEUE_HANDLE_KIND, id_value)
 	return id_value
 
 static func _gml_resolve_ds_priority(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
-		var resolved = gml_handle_resolve_for_kind(GML_DS_PRIORITY_HANDLE_KIND, id_value)
-		if resolved != null:
-			return resolved
+		return gml_handle_resolve_for_kind(GML_DS_PRIORITY_HANDLE_KIND, id_value)
 	return id_value
 
 
@@ -316,7 +308,8 @@ static func gml_ds_list_set(id_value, pos, value):
 			if idx >= arr.size():
 				arr.resize(idx + 1)
 			arr[idx] = value
-	return value
+			return value
+	return gml_undefined()
 
 static func gml_ds_list_delete(id_value, pos):
 	var ds = _gml_resolve_ds_list(id_value)

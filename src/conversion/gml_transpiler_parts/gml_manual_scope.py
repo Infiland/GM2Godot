@@ -270,7 +270,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "GameMaker_Language/GML_Reference/Variable_Functions/Array_Functions/Array_Functions.htm",
         ("Arrays", "Accessors"),
         ("tests/test_gml_runtime.py",),
-        "Array helpers exist; copy/reference and nested accessor conformance are tracked by #583.",
+        "Array helpers and nested accessor mutation caching exist; exact copy/reference behavior remains partial.",
     ),
     _entry(
         "reference_asset_management",
@@ -511,7 +511,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "GameMaker_Language/GML_Reference/Data_Structures/Data_Structures.htm",
         ("Data Structures Sequential", "Data Structures Maps", "Data Structures Grids", "Accessors"),
         ("tests/test_ds_collections_godot.py",),
-        "Core DS operations exist; serialization, nested marking, sorting, handle reuse, and edge cases remain open.",
+        "Core DS operations exist; accessor reads/writes return undefined for missing or destroyed handles, while serialization, sorting, and handle reuse remain partial.",
     ),
     _entry(
         "reference_strings",

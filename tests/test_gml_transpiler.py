@@ -1776,36 +1776,27 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("throw;", indent="")
 
     def test_transpiles_try_catch_blocks(self):
-        self.assertEqual(
-            transpile_gml_code(
-                'try { throw "bad"; } catch (err) { message = err.message; }',
-                indent="",
-            ),
-            "var _gml_try_exception_0 = (func():\n"
-            '\treturn GMRuntime.gml_throw("bad")\n'
-            "\treturn GMRuntime.gml_undefined()\n"
-            ").call()\n"
-            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
-            "\tvar err = GMRuntime.gml_exception_struct(_gml_try_exception_0)\n"
-            "\t_gml_try_exception_0 = (func():\n"
-            '\t\tmessage = GMRuntime.gml_selector_get(err, "message")\n'
-            "\t\treturn GMRuntime.gml_undefined()\n"
-            "\t).call()\n"
-            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
-            "\treturn _gml_try_exception_0",
+        output = transpile_gml_code(
+            'try { throw "bad"; } catch (err) { message = err.message; }',
+            indent="",
         )
 
+        self.assertIn("var _gml_try_control_0 = GMRuntime.gml_undefined()", output)
+        self.assertIn('_gml_try_control_0 = {"kind": "throw", "value": GMRuntime.gml_throw("bad")}', output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "throw":', output)
+        self.assertIn('var err = GMRuntime.gml_exception_struct(_gml_try_control_0["value"])', output)
+        self.assertIn('message = GMRuntime.gml_selector_get(err, "message")', output)
+        self.assertIn('return _gml_try_control_0["value"]', output)
+
     def test_transpiles_try_finally_blocks(self):
-        self.assertEqual(
-            transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent=""),
-            "var _gml_try_exception_0 = (func():\n"
-            "\tscore = 1\n"
-            "\treturn GMRuntime.gml_undefined()\n"
-            ").call()\n"
-            "cleaned = true\n"
-            "if GMRuntime.is_gml_exception(_gml_try_exception_0):\n"
-            "\treturn _gml_try_exception_0",
-        )
+        output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
+
+        self.assertIn("var _gml_try_control_0 = GMRuntime.gml_undefined()", output)
+        self.assertIn("while true:\n\tscore = 1\n\tbreak", output)
+        self.assertIn("cleaned = true", output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "return":', output)
+        self.assertIn('return _gml_try_control_0["value"]', output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "throw":', output)
 
     def test_transpiles_nested_try_catch_propagation(self):
         output = transpile_gml_code(
@@ -1814,14 +1805,39 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             indent="",
         )
 
-        self.assertIn("var _gml_try_exception_0 = (func():", output)
-        self.assertIn("\tvar _gml_try_exception_1 = (func():", output)
-        self.assertIn("\t\treturn GMRuntime.gml_throw(\"bad\")", output)
-        self.assertIn("\t\tvar inner = GMRuntime.gml_exception_struct(_gml_try_exception_1)", output)
-        self.assertIn("\t\t\treturn GMRuntime.gml_throw(inner)", output)
-        self.assertIn("\treturn _gml_try_exception_1", output)
-        self.assertIn("var outer = GMRuntime.gml_exception_struct(_gml_try_exception_0)", output)
+        self.assertIn("var _gml_try_control_0 = GMRuntime.gml_undefined()", output)
+        self.assertIn("\tvar _gml_try_control_1 = GMRuntime.gml_undefined()", output)
+        self.assertIn('\t\t_gml_try_control_1 = {"kind": "throw", "value": GMRuntime.gml_throw("bad")}', output)
+        self.assertIn('var inner = GMRuntime.gml_exception_struct(_gml_try_control_1["value"])', output)
+        self.assertIn('_gml_try_control_1 = {"kind": "throw", "value": GMRuntime.gml_throw(inner)}', output)
+        self.assertIn('_gml_try_control_0 = {"kind": "throw", "value": _gml_try_control_1["value"]}', output)
+        self.assertIn('var outer = GMRuntime.gml_exception_struct(_gml_try_control_0["value"])', output)
         self.assertIn('message = GMRuntime.gml_selector_get(outer, "message")', output)
+
+    def test_finally_preserves_abrupt_control_flow_from_try_body(self):
+        return_output = transpile_gml_code(
+            "function f() { try { return 1; } finally { cleaned = true; } }",
+            indent="",
+        )
+        self.assertIn('_gml_try_control_0 = {"kind": "return", "value": 1}', return_output)
+        self.assertIn("cleaned = true", return_output)
+        self.assertIn('return _gml_try_control_0["value"]', return_output)
+
+        break_output = transpile_gml_code(
+            "while ready { try { break; } finally { cleaned = true; } after = true; }",
+            indent="",
+        )
+        self.assertIn('_gml_try_control_0 = {"kind": "break", "value": GMRuntime.gml_undefined()}', break_output)
+        self.assertIn("cleaned = true", break_output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "break":\n\t\tbreak', break_output)
+
+        continue_output = transpile_gml_code(
+            "while ready { try { continue; } finally { cleaned = true; } after = true; }",
+            indent="",
+        )
+        self.assertIn('_gml_try_control_0 = {"kind": "continue", "value": GMRuntime.gml_undefined()}', continue_output)
+        self.assertIn("cleaned = true", continue_output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "continue":\n\t\tcontinue', continue_output)
 
     def test_rejects_control_flow_inside_finally_blocks(self):
         cases = (
@@ -1845,6 +1861,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("delete mystruct;", indent=""),
             "mystruct = GMRuntime.gml_undefined()",
+        )
+
+    def test_transpiles_delete_member_and_accessor_targets(self):
+        self.assertEqual(
+            transpile_gml_code("delete mystruct.child;", indent=""),
+            'GMRuntime.gml_struct_remove(mystruct, "child")',
+        )
+        self.assertEqual(
+            transpile_gml_code('delete mystruct[$ "child"];', indent=""),
+            'GMRuntime.gml_struct_remove(mystruct, "child")',
+        )
+        self.assertEqual(
+            transpile_gml_code("delete items[2];", indent=""),
+            "GMRuntime.gml_array_delete(items, 2)",
+        )
+        self.assertEqual(
+            transpile_gml_code('delete inventory[? "food"];', indent=""),
+            'GMRuntime.gml_ds_map_delete(inventory, "food")',
+        )
+        self.assertEqual(
+            transpile_gml_code("delete queue[| 0];", indent=""),
+            "GMRuntime.gml_ds_list_delete(queue, 0)",
         )
 
     def test_transpiles_with_blocks(self):
@@ -1975,7 +2013,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("delete make_struct();", indent="")
 
         with self.assertRaises(GMLTranspileError):
-            transpile_gml_code("delete mystruct.child;", indent="")
+            transpile_gml_code("delete grid[# 0, 0];", indent="")
 
     def test_transpiles_while_blocks(self):
         self.assertEqual(
@@ -2181,24 +2219,25 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_switch_break_exits_switch_not_outer_loop(self):
-        self.assertEqual(
-            transpile_gml_code(
-                "while running begin switch (state) { case 1: score = 1; break; } ticks += 1; end",
-                indent="",
-            ),
-            "while GMRuntime.gml_bool(running):\n"
-            "\tvar _gml_switch_value_0 = state\n"
-            "\tvar _gml_switch_matched_1 = false\n"
-            "\tvar _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, 1)\n"
-            "\twhile true:\n"
-            "\t\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 1):\n"
-            "\t\t\t_gml_switch_matched_1 = true\n"
-            "\t\tif _gml_switch_matched_1:\n"
-            "\t\t\tscore = 1\n"
-            "\t\t\tbreak\n"
-            "\t\tbreak\n"
-            "\tticks = GMRuntime.gml_add(ticks, 1)",
+        output = transpile_gml_code(
+            "while running begin switch (state) { case 1: score = 1; break; } ticks += 1; end",
+            indent="",
         )
+
+        self.assertIn("while GMRuntime.gml_bool(running):", output)
+        self.assertIn("\t\tscore = 1\n\t\t\tbreak", output)
+        self.assertIn("\tticks = GMRuntime.gml_add(ticks, 1)", output)
+
+    def test_switch_continue_targets_outer_loop(self):
+        output = transpile_gml_code(
+            "while running begin switch (state) { case 1: if skip begin continue; end score = 1; break; } ticks += 1; end",
+            indent="",
+        )
+
+        self.assertIn("var _gml_switch_control_3 = GMRuntime.gml_undefined()", output)
+        self.assertIn('_gml_switch_control_3 = {"kind": "continue", "value": GMRuntime.gml_undefined()}', output)
+        self.assertIn('if not GMRuntime.is_undefined(_gml_switch_control_3) and _gml_switch_control_3["kind"] == "continue":\n\t\tcontinue', output)
+        self.assertIn("\tticks = GMRuntime.gml_add(ticks, 1)", output)
 
     def test_for_loop_preserves_execution_order(self):
         self.assertEqual(

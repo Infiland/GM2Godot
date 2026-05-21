@@ -9,7 +9,11 @@ from .emitter import _emit_instance_keyword_argument
 from .enum_helpers import _evaluate_enum_value_tokens
 from .expression_parser import _parse_gml_expression
 from .expression_service import transpile_gml_condition, transpile_gml_expression
-from .identifiers import _sanitize_gdscript_identifier, _validate_gml_identifier, _reject_asset_identifier_name
+from .identifiers import (
+    _reject_asset_identifier_name,
+    _sanitize_gdscript_identifier,
+    _validate_gml_identifier,
+)
 from .model import (
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
@@ -17,7 +21,11 @@ from .model import (
     _ScopeContext,
     _Token,
 )
-from .statements import _transpile_statement
+from .statements import (
+    _ControlFlowCapture,
+    _control_flow_dispatch_lines,
+    _transpile_statement,
+)
 from .utils import (
     _indent_lines,
     _insert_lines_before_continue,
@@ -53,6 +61,7 @@ class _StatementParser:
         static_scope_prefix: str | None = None,
         extension_functions: dict[str, GMLExtensionFunction] | None = None,
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping] | None = None,
+        control_flow_capture: _ControlFlowCapture | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -78,6 +87,7 @@ class _StatementParser:
             extension_function_mappings=extension_function_mappings,
         )
         self.inherited_event_call = inherited_event_call
+        self.control_flow_capture = control_flow_capture
         self.macro_values: MutableMapping[str, str] = (
             macro_values if macro_values is not None else {}
         )
@@ -142,6 +152,7 @@ class _StatementParser:
             inherited_event_call=self.inherited_event_call,
             macro_values=self.macro_values,
             generated_counter=self.generated_counter,
+            control_flow_capture=self.control_flow_capture,
         )
 
     def _parse_macro_statement(self) -> list[str]:
@@ -483,6 +494,8 @@ class _StatementParser:
         switch_value = self._next_generated_name("_gml_switch_value")
         switch_matched = self._next_generated_name("_gml_switch_matched")
         switch_has_case = self._next_generated_name("_gml_switch_has_case")
+        switch_control = self._next_generated_name("_gml_switch_control")
+        switch_capture = self._switch_control_capture(switch_control)
         expression = transpile_gml_expression(
             _tokens_to_source(expression_tokens),
             local_names=self.local_names,
@@ -491,7 +504,7 @@ class _StatementParser:
             scope_context=self.scope_context,
             macro_values=self.macro_values,
         )
-        sections = self._parse_switch_sections()
+        sections = self._parse_switch_sections(switch_capture)
         case_values = [
             section_value
             for section_kind, section_value, _ in sections
@@ -503,12 +516,15 @@ class _StatementParser:
         ]
         has_case_expression = " or ".join(case_conditions) if case_conditions else "false"
 
-        lines = [
+        lines: list[str] = []
+        if switch_capture is not None:
+            lines.append(f"var {switch_control} = GMRuntime.gml_undefined()")
+        lines.extend([
             f"var {switch_value} = {expression}",
             f"var {switch_matched} = false",
             f"var {switch_has_case} = {has_case_expression}",
             "while true:",
-        ]
+        ])
         for section_kind, section_value, section_lines in sections:
             if section_kind == "case":
                 lines.append(
@@ -522,9 +538,40 @@ class _StatementParser:
             lines.append(f"\tif {switch_matched}:")
             lines.extend(f"\t\t{line}" for line in (section_lines or ["pass"]))
         lines.append("\tbreak")
+        if switch_capture is not None:
+            lines.extend(
+                _control_flow_dispatch_lines(
+                    switch_control,
+                    switch_capture,
+                    self.control_flow_capture,
+                )
+            )
         return lines
 
-    def _parse_switch_sections(self) -> list[tuple[str, str | None, list[str]]]:
+    def _switch_control_capture(self, switch_control: str) -> _ControlFlowCapture | None:
+        parent_capture = self.control_flow_capture
+        capture_return = bool(parent_capture and parent_capture.capture_return)
+        capture_exit = bool(parent_capture and parent_capture.capture_exit)
+        capture_throw = bool(parent_capture and parent_capture.capture_throw)
+        capture_continue = self.continue_depth > 0 or bool(
+            parent_capture and parent_capture.capture_continue
+        )
+        if not (capture_return or capture_exit or capture_throw or capture_continue):
+            return None
+        return _ControlFlowCapture(
+            switch_control,
+            self.loop_depth + 1,
+            self.continue_depth,
+            capture_return=capture_return,
+            capture_exit=capture_exit,
+            capture_throw=capture_throw,
+            capture_continue=capture_continue,
+        )
+
+    def _parse_switch_sections(
+        self,
+        control_flow_capture: _ControlFlowCapture | None,
+    ) -> list[tuple[str, str | None, list[str]]]:
         self._skip_newlines()
         self._consume("{")
         sections: list[tuple[str, str | None, list[str]]] = []
@@ -544,19 +591,35 @@ class _StatementParser:
                     macro_values=self.macro_values,
                 )
                 body_tokens = self._read_switch_section_body_tokens()
-                sections.append(("case", label, self._parse_switch_section_body(body_tokens)))
+                sections.append(
+                    (
+                        "case",
+                        label,
+                        self._parse_switch_section_body(body_tokens, control_flow_capture),
+                    )
+                )
                 continue
             if self._match_identifier("default"):
                 self._consume(":")
                 body_tokens = self._read_switch_section_body_tokens()
-                sections.append(("default", None, self._parse_switch_section_body(body_tokens)))
+                sections.append(
+                    (
+                        "default",
+                        None,
+                        self._parse_switch_section_body(body_tokens, control_flow_capture),
+                    )
+                )
                 continue
             raise GMLTranspileError(f"Expected switch case or default, got: {self._peek().value}")
 
         self._consume("}")
         return sections
 
-    def _parse_switch_section_body(self, body_tokens: list[_Token]) -> list[str]:
+    def _parse_switch_section_body(
+        self,
+        body_tokens: list[_Token],
+        control_flow_capture: _ControlFlowCapture | None,
+    ) -> list[str]:
         parser = _StatementParser(
             body_tokens,
             local_names=self.local_names,
@@ -574,6 +637,7 @@ class _StatementParser:
             macro_priorities=self.macro_priorities,
             macro_configuration=self.macro_configuration,
             global_names=self.global_names,
+            control_flow_capture=control_flow_capture,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
@@ -587,8 +651,23 @@ class _StatementParser:
 
     def _parse_try_statement(self) -> list[str]:
         self._consume_identifier("try")
-        exception_name = self._next_generated_name("_gml_try_exception")
-        try_lines = self._parse_body()
+        control_name = self._next_generated_name("_gml_try_control")
+        try_capture = _ControlFlowCapture(
+            control_name,
+            self.loop_depth,
+            self.continue_depth,
+            capture_return=True,
+            capture_exit=True,
+            capture_throw=True,
+            capture_break=self.loop_depth > 0,
+            capture_continue=self.continue_depth > 0,
+        )
+        parent_capture = self.control_flow_capture
+        self.control_flow_capture = try_capture
+        try:
+            try_lines = self._parse_body()
+        finally:
+            self.control_flow_capture = parent_capture
 
         self._skip_newlines()
         catch_name: str | None = None
@@ -597,9 +676,11 @@ class _StatementParser:
             catch_name = self._parse_catch_variable_name()
             had_catch_local = catch_name in self.local_names
             self.local_names.add(catch_name)
+            self.control_flow_capture = try_capture
             try:
                 catch_lines = self._parse_body()
             finally:
+                self.control_flow_capture = parent_capture
                 if not had_catch_local:
                     self.local_names.discard(catch_name)
 
@@ -616,30 +697,27 @@ class _StatementParser:
             raise GMLTranspileError("try requires catch or finally")
 
         lines = [
-            f"var {exception_name} = (func():",
+            f"var {control_name} = GMRuntime.gml_undefined()",
+            "while true:",
             *_indent_lines(try_lines or ["pass"]),
-            "\treturn GMRuntime.gml_undefined()",
-            ").call()",
+            "\tbreak",
         ]
 
         if catch_lines is not None and catch_name is not None:
             gdscript_catch_name = _sanitize_gdscript_identifier(catch_name)
             lines.extend([
-                f"if GMRuntime.is_gml_exception({exception_name}):",
-                f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({exception_name})",
-                f"\t{exception_name} = (func():",
+                f"if not GMRuntime.is_undefined({control_name}) and {control_name}[\"kind\"] == \"throw\":",
+                f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
+                f"\t{control_name} = GMRuntime.gml_undefined()",
+                "\twhile true:",
                 *[f"\t\t{line}" if line else "" for line in (catch_lines or ["pass"])],
-                "\t\treturn GMRuntime.gml_undefined()",
-                "\t).call()",
+                "\t\tbreak",
             ])
 
         if finally_lines is not None:
             lines.extend(finally_lines or ["pass"])
 
-        lines.extend([
-            f"if GMRuntime.is_gml_exception({exception_name}):",
-            f"\treturn {exception_name}",
-        ])
+        lines.extend(_control_flow_dispatch_lines(control_name, try_capture, parent_capture))
         return lines
 
     def _parse_catch_variable_name(self) -> str:

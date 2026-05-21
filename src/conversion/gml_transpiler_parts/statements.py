@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import (
@@ -62,6 +63,18 @@ from .utils import (
 _MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
 
 
+@dataclass(frozen=True)
+class _ControlFlowCapture:
+    variable_name: str
+    loop_depth: int
+    continue_depth: int
+    capture_return: bool = False
+    capture_exit: bool = False
+    capture_throw: bool = False
+    capture_break: bool = False
+    capture_continue: bool = False
+
+
 def _transpile_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
@@ -76,6 +89,7 @@ def _transpile_statement(
     inherited_event_call: str | None = None,
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
+    control_flow_capture: _ControlFlowCapture | None = None,
 ) -> list[str]:
     if not statement:
         return []
@@ -90,6 +104,8 @@ def _transpile_statement(
         _reject_finally_control_flow(finally_depth)
         if return_depth <= 0:
             raise GMLTranspileError("return used outside a function or method")
+        if control_flow_capture is not None and control_flow_capture.capture_return:
+            return _captured_control_flow_lines(control_flow_capture, "return")
         return ["return"]
     if statement.startswith("return "):
         _reject_finally_control_flow(finally_depth)
@@ -113,19 +129,38 @@ def _transpile_statement(
             scope_context=scope_context,
             macro_values=macro_values,
         )
+        if control_flow_capture is not None and control_flow_capture.capture_return:
+            return [
+                *prelude_lines,
+                *_captured_control_flow_lines(control_flow_capture, "return", return_value),
+            ]
         return [*prelude_lines, f"return {return_value}"]
     if statement == "break":
         _reject_finally_control_flow(finally_depth)
         if loop_depth <= 0:
             raise GMLTranspileError("break used outside a loop")
+        if (
+            control_flow_capture is not None
+            and control_flow_capture.capture_break
+            and loop_depth == control_flow_capture.loop_depth
+        ):
+            return _captured_control_flow_lines(control_flow_capture, "break")
         return ["break"]
     if statement == "continue":
         _reject_finally_control_flow(finally_depth)
         if continue_depth <= 0:
             raise GMLTranspileError("continue used outside a loop")
+        if (
+            control_flow_capture is not None
+            and control_flow_capture.capture_continue
+            and continue_depth == control_flow_capture.continue_depth
+        ):
+            return _captured_control_flow_lines(control_flow_capture, "continue")
         return ["continue"]
     if statement == "exit":
         _reject_finally_control_flow(finally_depth)
+        if control_flow_capture is not None and control_flow_capture.capture_exit:
+            return _captured_control_flow_lines(control_flow_capture, "exit")
         return ["return"]
     event_inherited_lines = _transpile_event_inherited_statement(statement, inherited_event_call)
     if event_inherited_lines is not None:
@@ -151,6 +186,15 @@ def _transpile_statement(
             scope_context=scope_context,
             macro_values=macro_values,
         )
+        if control_flow_capture is not None and control_flow_capture.capture_throw:
+            return [
+                *prelude_lines,
+                *_captured_control_flow_lines(
+                    control_flow_capture,
+                    "throw",
+                    f"GMRuntime.gml_throw({thrown_value})",
+                ),
+            ]
         return [*prelude_lines, f"return GMRuntime.gml_throw({thrown_value})"]
 
     if statement.startswith("delete "):
@@ -179,6 +223,9 @@ def _transpile_statement(
         if global_target is not None:
             global_scope, member_name = global_target
             return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, GMRuntime.gml_undefined())"]
+        delete_lines = _delete_target_lines(target_expr, local_names, scope_context)
+        if delete_lines is not None:
+            return delete_lines
         if not isinstance(target_expr, _Name):
             raise GMLTranspileError("delete can only be used with variables")
         scoped_target = _scoped_instance_assignment_parts(
@@ -1045,6 +1092,117 @@ def _transpile_statement(
 def _reject_finally_control_flow(finally_depth: int) -> None:
     if finally_depth > 0:
         raise GMLTranspileError("break, continue, exit, and return are not allowed inside finally")
+
+
+def _delete_target_lines(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str] | None:
+    if isinstance(target_expr, _Member):
+        target = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return [f"GMRuntime.gml_struct_remove({target}, {json.dumps(target_expr.member)})"]
+    if isinstance(target_expr, _StructAccess):
+        target = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        key = _emit_expression(target_expr.key, local_names, scope_context=scope_context)[0]
+        return [f"GMRuntime.gml_struct_remove({target}, {key})"]
+    if isinstance(target_expr, _Index | _ArrayRefAccess):
+        target = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(target_expr.index, local_names, scope_context=scope_context)[0]
+        return [f"GMRuntime.gml_array_delete({target}, {index})"]
+    if isinstance(target_expr, _DSMapAccess):
+        target = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        key = _emit_expression(target_expr.key, local_names, scope_context=scope_context)[0]
+        return [f"GMRuntime.gml_ds_map_delete({target}, {key})"]
+    if isinstance(target_expr, _DSListAccess):
+        target = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(target_expr.index, local_names, scope_context=scope_context)[0]
+        return [f"GMRuntime.gml_ds_list_delete({target}, {index})"]
+    if isinstance(target_expr, _DSGridAccess):
+        raise GMLTranspileError("delete does not support DS grid accessors")
+    return None
+
+
+def _captured_control_flow_lines(
+    capture: _ControlFlowCapture,
+    kind: str,
+    value: str = "GMRuntime.gml_undefined()",
+) -> list[str]:
+    return [
+        f'{capture.variable_name} = {{"kind": {json.dumps(kind)}, "value": {value}}}',
+        "break",
+    ]
+
+
+def _control_flow_dispatch_lines(
+    control_name: str,
+    source_capture: _ControlFlowCapture,
+    parent_capture: _ControlFlowCapture | None = None,
+) -> list[str]:
+    lines: list[str] = []
+    for kind in ("return", "exit", "break", "continue", "throw"):
+        if not _capture_handles_kind(source_capture, kind):
+            continue
+        lines.append(
+            f"if not GMRuntime.is_undefined({control_name}) and "
+            f'{control_name}["kind"] == {json.dumps(kind)}:'
+        )
+        if parent_capture is not None and _capture_handles_kind(parent_capture, kind):
+            lines.extend(
+                _indent_lines(
+                    _captured_control_flow_lines(
+                        parent_capture,
+                        kind,
+                        f'{control_name}["value"]',
+                    )
+                )
+            )
+            continue
+        if kind == "return":
+            lines.append(f'\treturn {control_name}["value"]')
+        elif kind == "exit":
+            lines.append("\treturn")
+        elif kind == "break":
+            lines.append("\tbreak")
+        elif kind == "continue":
+            lines.append("\tcontinue")
+        elif kind == "throw":
+            lines.append(f'\treturn {control_name}["value"]')
+    return lines
+
+
+def _capture_handles_kind(capture: _ControlFlowCapture, kind: str) -> bool:
+    if kind == "return":
+        return capture.capture_return
+    if kind == "exit":
+        return capture.capture_exit
+    if kind == "throw":
+        return capture.capture_throw
+    if kind == "break":
+        return capture.capture_break
+    if kind == "continue":
+        return capture.capture_continue
+    return False
 
 
 def _nullish_assignment_lines(

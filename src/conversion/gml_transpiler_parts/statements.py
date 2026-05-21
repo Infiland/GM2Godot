@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, Mapping, MutableMapping, MutableSet
+from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import (
     _BUILTIN_ARRAY_VARIABLES,
@@ -46,10 +46,12 @@ from .model import (
     _Name,
     _ScopeContext,
     _StructAccess,
+    _Token,
 )
 from .tokens import _expression_tokens
 from .utils import (
     _cache_assignment_part,
+    _indent_lines,
     _next_generated_name_from_counter,
     _normalize_scope_context,
     _split_assignment,
@@ -93,15 +95,25 @@ def _transpile_statement(
         _reject_finally_control_flow(finally_depth)
         if return_depth <= 0:
             raise GMLTranspileError("return used outside a function or method")
-        return_value = transpile_gml_expression(
+        prelude_lines, return_source = _lower_mutation_expressions(
             statement[7:].strip(),
+            local_names,
+            instance_variables,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
+        return_value = transpile_gml_expression(
+            return_source,
             local_names,
             enum_values,
             enum_names,
             scope_context=scope_context,
             macro_values=macro_values,
         )
-        return [f"return {return_value}"]
+        return [*prelude_lines, f"return {return_value}"]
     if statement == "break":
         _reject_finally_control_flow(finally_depth)
         if loop_depth <= 0:
@@ -121,15 +133,25 @@ def _transpile_statement(
     if statement == "throw":
         raise GMLTranspileError("throw requires an expression")
     if statement.startswith("throw "):
-        thrown_value = transpile_gml_expression(
+        prelude_lines, thrown_source = _lower_mutation_expressions(
             statement[6:].strip(),
+            local_names,
+            instance_variables,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
+        thrown_value = transpile_gml_expression(
+            thrown_source,
             local_names,
             enum_values,
             enum_names,
             scope_context=scope_context,
             macro_values=macro_values,
         )
-        return [f"return GMRuntime.gml_throw({thrown_value})"]
+        return [*prelude_lines, f"return GMRuntime.gml_throw({thrown_value})"]
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()
@@ -177,10 +199,12 @@ def _transpile_statement(
         return _transpile_var_statement(
             statement[4:].strip(),
             local_names,
+            instance_variables,
             enum_values,
             enum_names,
             scope_context=scope_context,
             macro_values=macro_values,
+            generated_counter=generated_counter,
         )
 
     increment = _parse_increment_statement(statement)
@@ -469,7 +493,20 @@ def _transpile_statement(
     if assignment is not None:
         target, operator, value = assignment
         if _split_assignment(value) is not None:
-            raise GMLTranspileError("Chained assignments are not supported")
+            if operator not in ("=", ":="):
+                raise GMLTranspileError("Chained compound assignments are not supported")
+            assignment_lines, _assigned_value = _transpile_assignment_expression_to_temp(
+                statement,
+                local_names,
+                instance_variables,
+                enum_values=enum_values,
+                enum_names=enum_names,
+                scope_context=scope_context,
+                macro_values=macro_values,
+                generated_counter=generated_counter,
+                result_required=False,
+            )
+            return assignment_lines
         increment_value = _parse_increment_expression(value)
         if operator in ("=", ":=") and increment_value is not None:
             increment_target, increment_delta, increment_mode = increment_value
@@ -546,27 +583,41 @@ def _transpile_statement(
             local_names,
             scope_context,
         )
-        value = transpile_gml_expression(
+        value_prelude_lines, value_source = _lower_mutation_expressions(
             value,
+            local_names,
+            instance_variables,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
+        value = transpile_gml_expression(
+            value_source,
             local_names,
             enum_values,
             enum_names,
             scope_context=scope_context,
             macro_values=macro_values,
         )
+        prelude_lines = [] if operator == "??=" else value_prelude_lines
         if static_target is not None:
             static_scope, member_name = static_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"]
+                return [*prelude_lines, f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"]
             current_value = f"GMRuntime.gml_struct_get({static_scope}, {member_name})"
             if operator == "??=":
-                return [
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_struct_set({static_scope}, {member_name}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
+                    *prelude_lines,
                     f"GMRuntime.gml_struct_set({static_scope}, {member_name}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
@@ -574,16 +625,19 @@ def _transpile_statement(
         if global_target is not None:
             global_scope, member_name = global_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
+                return [*prelude_lines, f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
             current_value = f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
             if operator == "??=":
-                return [
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_struct_set({global_scope}, {member_name}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
+                    *prelude_lines,
                     f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
@@ -591,30 +645,46 @@ def _transpile_statement(
         motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
         if motion_target is not None:
             instance_target, member_name = motion_target
-            return _motion_assignment_lines(
-                instance_target,
-                member_name,
-                operator,
-                value,
-                scope_context,
-            )
+            if operator == "??=":
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    _motion_current_value(instance_target, member_name, scope_context),
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"],
+                )
+            return [
+                *prelude_lines,
+                *_motion_assignment_lines(
+                    instance_target,
+                    member_name,
+                    operator,
+                    value,
+                    scope_context,
+                ),
+            ]
         if scoped_target is not None:
             instance_target, member_name = scoped_target
             if operator in ("=", ":="):
                 return [
+                    *prelude_lines,
                     "GMRuntime.gml_variable_instance_set("
                     f"{instance_target}, {member_name}, {value})"
                 ]
             current_value = f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})"
             if operator == "??=":
-                return [
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    "\tGMRuntime.gml_variable_instance_set("
-                    f"{instance_target}, {member_name}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [
+                        "GMRuntime.gml_variable_instance_set("
+                        f"{instance_target}, {member_name}, {value})"
+                    ],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
+                    *prelude_lines,
                     "GMRuntime.gml_variable_instance_set("
                     f"{instance_target}, {member_name}, "
                     f"GMRuntime.{helper}({current_value}, {value}))"
@@ -634,8 +704,7 @@ def _transpile_statement(
                 scope_context=scope_context,
             )[0]
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
-            prelude_lines: list[str] = []
+                return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             container = _cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
@@ -652,11 +721,12 @@ def _transpile_statement(
             )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_array_set({container}, {index}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_array_set({container}, {index}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
@@ -677,8 +747,7 @@ def _transpile_statement(
                 scope_context=scope_context,
             )[0]
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
-            prelude_lines: list[str] = []
+                return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             container = _cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
@@ -695,11 +764,12 @@ def _transpile_statement(
             )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_array_set({container}, {index}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_array_set({container}, {index}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
@@ -716,8 +786,7 @@ def _transpile_statement(
         if ds_map_target is not None:
             container, key = ds_map_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
-            prelude_lines: list[str] = []
+                return [*prelude_lines, f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
             if isinstance(target_expr, _DSMapAccess):
                 container = _cache_assignment_part(
                     prelude_lines,
@@ -735,11 +804,12 @@ def _transpile_statement(
                 )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_ds_map_set({container}, {key}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
@@ -757,8 +827,7 @@ def _transpile_statement(
         if ds_list_target is not None:
             container, index = ds_list_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"]
-            prelude_lines = []
+                return [*prelude_lines, f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"]
             if isinstance(target_expr, _DSListAccess):
                 container = _cache_assignment_part(
                     prelude_lines,
@@ -776,11 +845,12 @@ def _transpile_statement(
                 )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_ds_list_find_value({container}, {index})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_ds_list_set({container}, {index}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_list_find_value({container}, {index})"
@@ -797,8 +867,7 @@ def _transpile_statement(
         if ds_grid_target is not None:
             container, x_index, y_index = ds_grid_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"]
-            prelude_lines = []
+                return [*prelude_lines, f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"]
             if isinstance(target_expr, _DSGridAccess):
                 container = _cache_assignment_part(
                     prelude_lines,
@@ -823,11 +892,12 @@ def _transpile_statement(
                 )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
@@ -846,8 +916,7 @@ def _transpile_statement(
         if selector_target is not None:
             container, key = selector_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_selector_set({container}, {key}, {value})"]
-            prelude_lines = []
+                return [*prelude_lines, f"GMRuntime.gml_selector_set({container}, {key}, {value})"]
             if isinstance(target_expr, _Member):
                 container = _cache_assignment_part(
                     prelude_lines,
@@ -857,6 +926,20 @@ def _transpile_statement(
                     "_gml_selector_target",
                 )
             if operator == "??=":
+                if value_prelude_lines:
+                    current_value = _next_generated_name_from_counter(
+                        generated_counter,
+                        "_gml_selector_value",
+                    )
+                    return _nullish_assignment_lines(
+                        [
+                            *prelude_lines,
+                            f"var {current_value} = GMRuntime.gml_selector_get({container}, {key})",
+                        ],
+                        current_value,
+                        value_prelude_lines,
+                        [f"GMRuntime.gml_selector_set({container}, {key}, {value})"],
+                    )
                 return [
                     *prelude_lines,
                     f"GMRuntime.gml_selector_set_if_nullish({container}, {key}, "
@@ -882,8 +965,7 @@ def _transpile_statement(
         if struct_target is not None:
             container, key = struct_target
             if operator in ("=", ":="):
-                return [f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
-            prelude_lines = []
+                return [*prelude_lines, f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
             if isinstance(target_expr, _StructAccess):
                 container = _cache_assignment_part(
                     prelude_lines,
@@ -909,11 +991,12 @@ def _transpile_statement(
                 )
             if operator == "??=":
                 current_value = f"GMRuntime.gml_struct_get({container}, {key})"
-                return [
-                    *prelude_lines,
-                    f"if GMRuntime.gml_is_nullish({current_value}):",
-                    f"\tGMRuntime.gml_struct_set({container}, {key}, {value})",
-                ]
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [f"GMRuntime.gml_struct_set({container}, {key}, {value})"],
+                )
             if operator in _COMPOUND_RUNTIME_FUNCTIONS:
                 helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_struct_get({container}, {key})"
@@ -924,16 +1007,32 @@ def _transpile_statement(
                 ]
             raise GMLTranspileError("Unsupported struct member assignment operator")
         if operator == "??=":
-            return [f"if GMRuntime.gml_is_nullish({target}):", f"\t{target} = {value}"]
+            return _nullish_assignment_lines(
+                prelude_lines,
+                target,
+                value_prelude_lines,
+                [f"{target} = {value}"],
+            )
         if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-            return [f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
+            return [*prelude_lines, f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
         if operator == ":=":
-            return [f"{target} = {value}"]
-        return [f"{target} {operator} {value}"]
+            return [*prelude_lines, f"{target} = {value}"]
+        return [*prelude_lines, f"{target} {operator} {value}"]
 
+    prelude_lines, expression_source = _lower_mutation_expressions(
+        statement,
+        local_names,
+        instance_variables,
+        enum_values,
+        enum_names,
+        scope_context=scope_context,
+        macro_values=macro_values,
+        generated_counter=generated_counter,
+    )
     return [
+        *prelude_lines,
         transpile_gml_expression(
-            statement,
+            expression_source,
             local_names,
             enum_values,
             enum_names,
@@ -946,6 +1045,20 @@ def _transpile_statement(
 def _reject_finally_control_flow(finally_depth: int) -> None:
     if finally_depth > 0:
         raise GMLTranspileError("break, continue, exit, and return are not allowed inside finally")
+
+
+def _nullish_assignment_lines(
+    prelude_lines: Iterable[str],
+    current_value: str,
+    value_prelude_lines: Iterable[str],
+    assignment_lines: Iterable[str],
+) -> list[str]:
+    return [
+        *prelude_lines,
+        f"if GMRuntime.gml_is_nullish({current_value}):",
+        *_indent_lines(value_prelude_lines),
+        *_indent_lines(assignment_lines),
+    ]
 
 
 def _transpile_event_inherited_statement(
@@ -1211,10 +1324,12 @@ def _record_instance_assignment(
 def _transpile_var_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
+    instance_variables: MutableSet[str] | None = None,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     if local_names is None:
@@ -1222,6 +1337,7 @@ def _transpile_var_statement(
     scope_context = _normalize_scope_context(scope_context)
     enum_name_set = frozenset(enum_names or [])
     macro_values = macro_values or {}
+    generated_counter = generated_counter if generated_counter is not None else [0]
     for declaration in _split_top_level(statement, ","):
         declaration = declaration.strip()
         if not declaration:
@@ -1246,14 +1362,39 @@ def _transpile_var_statement(
         _reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
-        initial_value = transpile_gml_expression(
-            value,
-            local_names,
-            enum_values,
-            enum_names,
-            scope_context=scope_context,
-            macro_values=macro_values,
-        )
+        nested_assignment = _split_assignment(value)
+        if nested_assignment is not None:
+            prelude_lines, initial_value = _transpile_assignment_expression_to_temp(
+                value,
+                local_names,
+                instance_variables,
+                enum_values=enum_values,
+                enum_names=enum_names,
+                scope_context=scope_context,
+                macro_values=macro_values,
+                generated_counter=generated_counter,
+            )
+            lines.extend(prelude_lines)
+        else:
+            prelude_lines, value_source = _lower_mutation_expressions(
+                value,
+                local_names,
+                instance_variables,
+                enum_values,
+                enum_names,
+                scope_context=scope_context,
+                macro_values=macro_values,
+                generated_counter=generated_counter,
+            )
+            initial_value = transpile_gml_expression(
+                value_source,
+                local_names,
+                enum_values,
+                enum_names,
+                scope_context=scope_context,
+                macro_values=macro_values,
+            )
+            lines.extend(prelude_lines)
         lines.append(f"var {_sanitize_gdscript_identifier(name)} = {initial_value}")
         local_names.add(name)
     return lines
@@ -1309,7 +1450,633 @@ def _parse_increment_expression(statement: str) -> tuple[str, _IncrementDelta, _
 
 
 def _is_increment_target_expression(expr: _Expression) -> bool:
-    return isinstance(expr, _Name | _Index | _ArrayRefAccess | _Member | _StructAccess | _DSMapAccess | _DSListAccess)
+    return isinstance(
+        expr,
+        _Name
+        | _Index
+        | _ArrayRefAccess
+        | _Member
+        | _StructAccess
+        | _DSMapAccess
+        | _DSListAccess
+        | _DSGridAccess,
+    )
+
+
+def _lower_mutation_expressions(
+    source: str,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
+) -> tuple[list[str], str]:
+    scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
+    generated_counter = generated_counter if generated_counter is not None else [0]
+    prelude_lines: list[str] = []
+    rewritten_source = source
+
+    while True:
+        mutation = _find_next_mutation_expression(rewritten_source)
+        if mutation is None:
+            return prelude_lines, rewritten_source
+
+        replace_start, replace_end, target_source, delta, mode = mutation
+        mutation_lines, replacement = _transpile_increment_expression_to_value(
+            target_source,
+            delta,
+            mode,
+            local_names,
+            instance_variables,
+            enum_values=enum_values,
+            enum_names=enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
+        prelude_lines.extend(mutation_lines)
+        rewritten_source = (
+            f"{rewritten_source[:replace_start]}{replacement}{rewritten_source[replace_end:]}"
+        )
+
+
+def _find_next_mutation_expression(
+    source: str,
+) -> tuple[int, int, str, _IncrementDelta, _IncrementMode] | None:
+    tokens = [token for token in _expression_tokens(source) if token.kind != "EOF"]
+    for index, token in enumerate(tokens):
+        if token.value not in ("++", "--"):
+            continue
+
+        delta: _IncrementDelta = 1 if token.value == "++" else -1
+        previous_token_can_end_expression = (
+            index > 0 and _token_can_end_expression(tokens[index - 1])
+        )
+        if not previous_token_can_end_expression:
+            target_end = _read_postfix_target_end(tokens, index + 1)
+            if target_end is None:
+                raise GMLTranspileError("Increment expression target must be assignable")
+            source_end = _token_end(tokens[target_end - 1])
+            target_source = source[tokens[index + 1].index:source_end].strip()
+            return token.index, source_end, target_source, delta, "prefix"
+
+        target_start = _find_postfix_target_start(tokens, index)
+        if target_start is None:
+            raise GMLTranspileError("Increment expression target must be assignable")
+        return (
+            tokens[target_start].index,
+            _token_end(token),
+            source[tokens[target_start].index:token.index].strip(),
+            delta,
+            "postfix",
+        )
+
+    return None
+
+
+def _token_can_end_expression(token: _Token) -> bool:
+    return token.kind in ("IDENT", "NUMBER", "STRING") or token.value in ")]}"
+
+
+def _find_postfix_target_start(tokens: list[_Token], operator_index: int) -> int | None:
+    valid_starts: list[int] = []
+    for start in range(operator_index):
+        target_end = _read_postfix_target_end(tokens, start)
+        if target_end == operator_index:
+            valid_starts.append(start)
+    if not valid_starts:
+        return None
+    return min(valid_starts)
+
+
+def _read_postfix_target_end(tokens: list[_Token], start: int) -> int | None:
+    end = _read_primary_target_end(tokens, start)
+    if end is None:
+        return None
+
+    while end < len(tokens):
+        token = tokens[end]
+        if token.value in ("(", "["):
+            balanced_end = _read_balanced_token_end(tokens, end)
+            if balanced_end is None:
+                return None
+            end = balanced_end
+            continue
+        if token.value == ".":
+            if end + 1 >= len(tokens) or tokens[end + 1].kind != "IDENT":
+                return None
+            end += 2
+            continue
+        break
+
+    return end
+
+
+def _read_primary_target_end(tokens: list[_Token], start: int) -> int | None:
+    if start >= len(tokens):
+        return None
+    token = tokens[start]
+    if token.kind in ("IDENT", "NUMBER", "STRING"):
+        return start + 1
+    if token.value in ("(", "[", "{"):
+        return _read_balanced_token_end(tokens, start)
+    return None
+
+
+def _read_balanced_token_end(tokens: list[_Token], start: int) -> int | None:
+    opener = tokens[start].value
+    closer = {"(": ")", "[": "]", "{": "}"}.get(opener)
+    if closer is None:
+        return None
+
+    depth = 0
+    for index in range(start, len(tokens)):
+        value = tokens[index].value
+        if value == opener:
+            depth += 1
+        elif value == closer:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _token_end(token: _Token) -> int:
+    return token.index + len(token.value)
+
+
+def _transpile_increment_expression_to_value(
+    target_source: str,
+    delta: _IncrementDelta,
+    mode: _IncrementMode,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
+) -> tuple[list[str], str]:
+    scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
+    generated_counter = generated_counter if generated_counter is not None else [0]
+    target_expr = _parse_assignment_target(
+        target_source,
+        local_names,
+        enum_values=enum_values,
+        enum_names=enum_names,
+        scope_context=scope_context,
+        macro_values=macro_values,
+    )
+    if not _is_increment_target_expression(target_expr):
+        raise GMLTranspileError("Increment expression target must be assignable")
+
+    prelude_lines: list[str] = []
+    current_value, write_value = _assignment_target_reader_writer(
+        target_source,
+        target_expr,
+        local_names,
+        instance_variables,
+        scope_context=scope_context,
+        generated_counter=generated_counter,
+        prelude_lines=prelude_lines,
+    )
+    helper = "gml_add" if delta > 0 else "gml_sub"
+    result_name = _next_expression_generated_name(
+        generated_counter,
+        "_gm2gd_mutation_value",
+        local_names,
+    )
+    if mode == "postfix":
+        return [
+            *prelude_lines,
+            f"var {result_name} = {current_value}",
+            *write_value(f"GMRuntime.{helper}({result_name}, 1)"),
+        ], result_name
+    return [
+        *prelude_lines,
+        f"var {result_name} = GMRuntime.{helper}({current_value}, 1)",
+        *write_value(result_name),
+    ], result_name
+
+
+def _next_expression_generated_name(
+    generated_counter: list[int],
+    prefix: str,
+    local_names: MutableSet[str],
+) -> str:
+    while True:
+        candidate = _next_generated_name_from_counter(generated_counter, prefix)
+        if candidate not in local_names:
+            local_names.add(candidate)
+            return candidate
+
+
+def _parse_assignment_target(
+    target: str,
+    local_names: Iterable[str],
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+) -> _Expression:
+    scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
+    _reject_constant_assignment_target_name(target, macro_values.keys())
+    target_expr = _parse_gml_expression(
+        target,
+        enum_values,
+        enum_names,
+        macro_values=macro_values,
+        scope_context=scope_context,
+    )
+    target_expr = _unwrap_grouped_expression(target_expr)
+    _reject_enum_assignment_target(target_expr, enum_names)
+    _reject_readonly_builtin_assignment_target(target_expr, local_names)
+    if isinstance(target_expr, _Name):
+        _reject_asset_identifier_name(target_expr.value, scope_context)
+    return target_expr
+
+
+def _assignment_target_reader_writer(
+    target_source: str,
+    target_expr: _Expression,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    scope_context: _ScopeContext,
+    generated_counter: list[int],
+    prelude_lines: list[str],
+) -> tuple[str, Callable[[str], list[str]]]:
+    static_target = _static_scope_assignment_parts(target_expr, scope_context)
+    if static_target is not None:
+        static_scope, member_name = static_target
+        return (
+            f"GMRuntime.gml_struct_get({static_scope}, {member_name})",
+            lambda value: [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"],
+        )
+
+    global_target = _global_scope_assignment_parts(target_expr, local_names, scope_context)
+    if global_target is not None:
+        global_scope, member_name = global_target
+        return (
+            f"GMRuntime.gml_struct_get({global_scope}, {member_name})",
+            lambda value: [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"],
+        )
+
+    motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
+    if motion_target is not None:
+        instance_target, member_name = motion_target
+        current_value = _motion_current_value(instance_target, member_name, scope_context)
+        return (
+            current_value,
+            lambda value: [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"],
+        )
+
+    scoped_target = _scoped_instance_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context,
+    )
+    if scoped_target is not None:
+        instance_target, member_name = scoped_target
+        return (
+            f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})",
+            lambda value: [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, {value})"
+            ],
+        )
+
+    _record_instance_assignment(target_source, local_names, instance_variables)
+    if isinstance(target_expr, _Index | _ArrayRefAccess):
+        container = _emit_expression(
+            target_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        index = _emit_expression(
+            target_expr.index,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        container = _cache_assignment_part(
+            prelude_lines,
+            target_expr.target,
+            container,
+            generated_counter,
+            "_gml_array_target",
+        )
+        index = _cache_assignment_part(
+            prelude_lines,
+            target_expr.index,
+            index,
+            generated_counter,
+            "_gml_array_index",
+        )
+        return (
+            f"GMRuntime.gml_array_get({container}, {index})",
+            lambda value: [f"GMRuntime.gml_array_set({container}, {index}, {value})"],
+        )
+
+    ds_map_target = _ds_map_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if ds_map_target is not None:
+        container, key = ds_map_target
+        if isinstance(target_expr, _DSMapAccess):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_map_target",
+            )
+            key = _cache_assignment_part(
+                prelude_lines,
+                target_expr.key,
+                key,
+                generated_counter,
+                "_gml_map_key",
+            )
+        return (
+            f"GMRuntime.gml_ds_map_find_value({container}, {key})",
+            lambda value: [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"],
+        )
+
+    ds_list_target = _ds_list_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if ds_list_target is not None:
+        container, index = ds_list_target
+        if isinstance(target_expr, _DSListAccess):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_list_target",
+            )
+            index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.index,
+                index,
+                generated_counter,
+                "_gml_list_index",
+            )
+        return (
+            f"GMRuntime.gml_ds_list_find_value({container}, {index})",
+            lambda value: [f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"],
+        )
+
+    ds_grid_target = _ds_grid_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if ds_grid_target is not None:
+        container, x_index, y_index = ds_grid_target
+        if isinstance(target_expr, _DSGridAccess):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_grid_target",
+            )
+            x_index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.x_index,
+                x_index,
+                generated_counter,
+                "_gml_grid_x",
+            )
+            y_index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.y_index,
+                y_index,
+                generated_counter,
+                "_gml_grid_y",
+            )
+        return (
+            f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})",
+            lambda value: [
+                f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"
+            ],
+        )
+
+    selector_target = _selector_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if selector_target is not None:
+        container, key = selector_target
+        if isinstance(target_expr, _Member):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_selector_target",
+            )
+        return (
+            f"GMRuntime.gml_selector_get({container}, {key})",
+            lambda value: [f"GMRuntime.gml_selector_set({container}, {key}, {value})"],
+        )
+
+    struct_target = _struct_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context=scope_context,
+    )
+    if struct_target is not None:
+        container, key = struct_target
+        if isinstance(target_expr, _StructAccess):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_struct_target",
+            )
+            key = _cache_assignment_part(
+                prelude_lines,
+                target_expr.key,
+                key,
+                generated_counter,
+                "_gml_struct_key",
+            )
+        elif isinstance(target_expr, _Member):
+            container = _cache_assignment_part(
+                prelude_lines,
+                target_expr.target,
+                container,
+                generated_counter,
+                "_gml_struct_target",
+            )
+        return (
+            f"GMRuntime.gml_struct_get({container}, {key})",
+            lambda value: [f"GMRuntime.gml_struct_set({container}, {key}, {value})"],
+        )
+
+    if isinstance(target_expr, _Name) or (
+        isinstance(target_expr, _Member)
+        and _uses_direct_member_access(target_expr, scope_context=scope_context)
+    ):
+        emitted_target = _emit_expression(
+            target_expr,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        return emitted_target, lambda value: [f"{emitted_target} = {value}"]
+
+    raise GMLTranspileError("Assignment target must be assignable")
+
+
+def _transpile_assignment_expression_to_temp(
+    source: str,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
+    result_required: bool = True,
+) -> tuple[list[str], str]:
+    scope_context = _normalize_scope_context(scope_context)
+    macro_values = macro_values or {}
+    generated_counter = generated_counter if generated_counter is not None else [0]
+    assignment = _split_assignment(source)
+    if assignment is None:
+        prelude_lines, value_source = _lower_mutation_expressions(
+            source,
+            local_names,
+            instance_variables,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
+        return prelude_lines, transpile_gml_expression(
+            value_source,
+            local_names,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+        )
+
+    target, operator, value = assignment
+    target_expr = _parse_assignment_target(
+        target,
+        local_names,
+        enum_values=enum_values,
+        enum_names=enum_names,
+        scope_context=scope_context,
+        macro_values=macro_values,
+    )
+    prelude_lines: list[str] = []
+    current_value, write_value = _assignment_target_reader_writer(
+        target,
+        target_expr,
+        local_names,
+        instance_variables,
+        scope_context=scope_context,
+        generated_counter=generated_counter,
+        prelude_lines=prelude_lines,
+    )
+
+    if operator in ("=", ":="):
+        rhs_lines, rhs_value = _transpile_assignment_expression_to_temp(
+            value,
+            local_names,
+            instance_variables,
+            enum_values=enum_values,
+            enum_names=enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+            result_required=True,
+        )
+        if not result_required:
+            return [
+                *prelude_lines,
+                *rhs_lines,
+                *write_value(rhs_value),
+            ], rhs_value
+        result_name = _next_generated_name_from_counter(
+            generated_counter,
+            "_gml_assignment_value",
+        )
+        local_names.add(result_name)
+        return [
+            *prelude_lines,
+            *rhs_lines,
+            f"var {result_name} = {rhs_value}",
+            *write_value(result_name),
+        ], result_name
+
+    if operator == "??=":
+        result_name = _next_generated_name_from_counter(
+            generated_counter,
+            "_gml_assignment_value",
+        )
+        local_names.add(result_name)
+        rhs_lines, rhs_value = _transpile_assignment_expression_to_temp(
+            value,
+            local_names,
+            instance_variables,
+            enum_values=enum_values,
+            enum_names=enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+            result_required=True,
+        )
+        return [
+            *prelude_lines,
+            f"var {result_name} = {current_value}",
+            f"if GMRuntime.gml_is_nullish({result_name}):",
+            *_indent_lines(rhs_lines),
+            f"\t{result_name} = {rhs_value}",
+            *_indent_lines(write_value(result_name)),
+        ], result_name
+
+    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+        rhs_lines, rhs_value = _transpile_assignment_expression_to_temp(
+            value,
+            local_names,
+            instance_variables,
+            enum_values=enum_values,
+            enum_names=enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+            result_required=True,
+        )
+        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+        result_name = _next_generated_name_from_counter(
+            generated_counter,
+            "_gml_assignment_value",
+        )
+        local_names.add(result_name)
+        return [
+            *prelude_lines,
+            *rhs_lines,
+            f"var {result_name} = GMRuntime.{helper}({current_value}, {rhs_value})",
+            *write_value(result_name),
+        ], result_name
+
+    raise GMLTranspileError("Unsupported assignment expression operator")
 
 
 def _transpile_assignment_to_emitted_value(

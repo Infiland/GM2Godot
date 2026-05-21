@@ -127,7 +127,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Foundation", "Cross-Instance Addressing"),
         ("tests/test_gml_transpiler.py",),
-        "Dynamic lookup, asset/script identity, and full creation-on-assignment remain open.",
+        "Lookup precedence is encoded for locals, globals, assets, builtins, statics, and scoped instance targets; unresolved dynamic lookup edge cases remain partial.",
     ),
     _entry(
         "overview_data_types",

@@ -178,6 +178,8 @@ def _emit_name(
     value: str,
     local_names: Iterable[str],
     scope_context: _ScopeContext,
+    *,
+    resolve_asset_names: bool = True,
 ) -> tuple[str, int]:
     is_local = value in local_names
     if not is_local and value == "self":
@@ -203,6 +205,14 @@ def _emit_name(
         legacy_argument = _legacy_argument_replacement(value)
         if legacy_argument is not None:
             return legacy_argument, _POSTFIX_PRECEDENCE
+        if value in scope_context.asset_names and _is_plain_identifier(value):
+            if value in scope_context.global_names:
+                raise GMLTranspileError(
+                    f"Unscoped identifier '{value}' collides with a global and asset name; "
+                    f"use global.{value} for the global or asset_get_index({json.dumps(value)}) for the asset."
+                )
+            if resolve_asset_names:
+                return f"GMRuntime.gml_asset_get_index({json.dumps(value)})", _POSTFIX_PRECEDENCE
         if _name_resolves_to_global(value, local_names, scope_context):
             return (
                 "GMRuntime.gml_struct_get("
@@ -315,12 +325,20 @@ def _emit_expression(
         builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
             return builtin_call, _POSTFIX_PRECEDENCE
-        callee = _emit_child(
-            expr.callee,
-            _POSTFIX_PRECEDENCE,
-            local_names=local_names,
-            scope_context=scope_context,
-        )
+        if isinstance(expr.callee, _Name):
+            callee = _emit_name(
+                expr.callee.value,
+                local_names,
+                scope_context,
+                resolve_asset_names=False,
+            )[0]
+        else:
+            callee = _emit_child(
+                expr.callee,
+                _POSTFIX_PRECEDENCE,
+                local_names=local_names,
+                scope_context=scope_context,
+            )
         args = ", ".join(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
             for arg in expr.args

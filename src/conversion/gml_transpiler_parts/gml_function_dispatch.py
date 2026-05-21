@@ -131,7 +131,12 @@ _VARIABLE_ARITY: dict[str, tuple[int, int | None]] = {
     "variable_global_exists": (1, 1),
     "variable_global_get": (1, 1),
     "variable_global_set": (2, 2),
+    "variable_struct_exists": (2, 2),
     "variable_struct_get": (2, 2),
+    "variable_struct_set": (3, 3),
+    "variable_struct_remove": (2, 2),
+    "variable_struct_get_names": (1, 1),
+    "variable_struct_names_count": (1, 1),
 }
 
 _DS_MAP_ARITY: dict[str, tuple[int, int | None]] = {

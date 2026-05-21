@@ -110,7 +110,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "40_arrays_structs_variables.gd",
-        "Array, struct, static, and variable access helpers.",
+        "Array, struct, static, dynamic variable, and selector access helpers.",
         depends_on=(
             "00_prelude.gd",
             "10_handles_and_instances.gd",

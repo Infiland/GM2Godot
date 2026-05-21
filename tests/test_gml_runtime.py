@@ -752,6 +752,26 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         'GMRuntime.gml_variable_struct_get(mystruct, "x")',
     ),
     RuntimeValueParityCase(
+        'variable_struct_exists(mystruct, "x")',
+        'GMRuntime.gml_variable_struct_exists(mystruct, "x")',
+    ),
+    RuntimeValueParityCase(
+        'variable_struct_set(mystruct, "x", 10)',
+        'GMRuntime.gml_variable_struct_set(mystruct, "x", 10)',
+    ),
+    RuntimeValueParityCase(
+        'variable_struct_remove(mystruct, "x")',
+        'GMRuntime.gml_variable_struct_remove(mystruct, "x")',
+    ),
+    RuntimeValueParityCase(
+        "variable_struct_get_names(mystruct)",
+        "GMRuntime.gml_variable_struct_get_names(mystruct)",
+    ),
+    RuntimeValueParityCase(
+        "variable_struct_names_count(mystruct)",
+        "GMRuntime.gml_variable_struct_names_count(mystruct)",
+    ),
+    RuntimeValueParityCase(
         'variable_instance_get(enemy, "hp")',
         'GMRuntime.gml_variable_instance_get(enemy, "hp")',
     ),
@@ -1524,7 +1544,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_struct_exists_from_hash",
             "gml_struct_remove_from_hash",
             "gml_global_scope",
+            "gml_variable_struct_exists",
             "gml_variable_struct_get",
+            "gml_variable_struct_set",
+            "gml_variable_struct_remove",
+            "gml_variable_struct_get_names",
+            "gml_variable_struct_names_count",
             "gml_variable_instance_exists",
             "gml_variable_instance_get",
             "gml_variable_instance_set",
@@ -2120,6 +2145,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_missing_value_helpers_return_undefined(self):
         self.assertIn("static func gml_variable_struct_get(struct_value, member_name):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_get(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_struct_exists(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_exists(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_struct_set(struct_value, member_name, value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_set(struct_value, member_name, value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_struct_remove(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_remove(struct_value, member_name)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_struct_get_names(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_get_names(struct_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_variable_struct_names_count(struct_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_names_count(struct_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_get(instance_value, member_name):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_get(instance_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)

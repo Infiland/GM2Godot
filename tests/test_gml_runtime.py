@@ -2164,6 +2164,53 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("ds[key] = value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("resolved_map.get(", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_ds_accessors_treat_destroyed_handles_consistently(self):
+        self.assertIn(
+            "static func _gml_resolve_ds_map(map_value):\n"
+            "\tif is_handle(map_value) or is_numeric(map_value) or is_string(map_value):\n"
+            "\t\treturn gml_handle_resolve_for_kind(GML_DS_MAP_HANDLE_KIND, map_value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func _gml_resolve_ds_list(id_value):\n"
+            "\tif is_handle(id_value) or is_numeric(id_value) or is_string(id_value):\n"
+            "\t\treturn gml_handle_resolve_for_kind(GML_DS_LIST_HANDLE_KIND, id_value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func _gml_resolve_ds_grid(id_value):\n"
+            "\tif is_handle(id_value) or is_numeric(id_value) or is_string(id_value):\n"
+            "\t\treturn gml_handle_resolve_for_kind(GML_DS_GRID_HANDLE_KIND, id_value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_ds_map_set(id_value, key, value):\n"
+            "\tvar ds = _gml_resolve_ds_map(id_value)\n"
+            "\tif ds is Dictionary:\n"
+            "\t\tds[key] = value\n"
+            "\t\treturn value\n"
+            "\treturn gml_undefined()",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_ds_map_find_value(id_value, key):\n"
+            "\tvar resolved_map = _gml_resolve_ds_map(id_value)\n"
+            "\tif resolved_map is Dictionary:\n"
+            "\t\tif resolved_map.has(key):\n"
+            "\t\t\treturn resolved_map[key]\n"
+            "\t\treturn gml_undefined()\n"
+            "\treturn gml_undefined()",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_ds_list_set(id_value, pos, value):\n"
+            "\tvar ds = _gml_resolve_ds_list(id_value)\n"
+            "\tvar idx = _to_int64_value(pos)\n"
+            "\tif ds is Dictionary:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("\t\t\treturn value\n\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
+
     def test_runtime_preserves_undefined_value_model(self):
         self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)

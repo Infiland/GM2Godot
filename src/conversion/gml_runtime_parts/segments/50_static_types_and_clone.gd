@@ -98,9 +98,7 @@ static func _gml_resolve_instance(instance_value):
 
 static func _gml_resolve_ds_map(map_value):
 	if is_handle(map_value) or is_numeric(map_value) or is_string(map_value):
-		var resolved_map = gml_handle_resolve_for_kind(GML_DS_MAP_HANDLE_KIND, map_value)
-		if resolved_map != null:
-			return resolved_map
+		return gml_handle_resolve_for_kind(GML_DS_MAP_HANDLE_KIND, map_value)
 	return map_value
 
 
@@ -283,4 +281,3 @@ static func gml_type_name(value):
 	if gml_type != GML_TYPE_UNKNOWN:
 		return gml_type
 	return "godot_type_" + str(typeof(value))
-

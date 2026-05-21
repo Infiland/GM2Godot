@@ -187,19 +187,19 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "57_ds_lists_stacks_queues.gd",
-        "List, stack, queue, and priority data structure handles.",
+        "List, stack, queue, and priority data structure handles with destroyed-handle guards.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd"),
         tests=("tests/test_ds_collections_godot.py",),
     ),
     _segment(
         "58_ds_maps.gd",
-        "Map data structure handles, accessors, JSON bridges, and persistence.",
+        "Map data structure handles, accessors, destroyed-handle guards, JSON bridges, and persistence.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "57_ds_lists_stacks_queues.gd"),
         tests=("tests/test_ds_collections_godot.py",),
     ),
     _segment(
         "59_ds_grids.gd",
-        "Grid data structure handles, regions, math operations, and persistence.",
+        "Grid data structure handles, accessors, regions, math operations, and destroyed-handle guards.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd"),
         tests=("tests/test_ds_collections_godot.py",),
     ),

@@ -7,6 +7,12 @@ from typing import Optional, List
 # Import localization manager
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    load_gamemaker_project_manifest,
+    unsupported_project_option_diagnostics,
+)
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 class ProjectSettingsConverter(BaseConverter):
@@ -15,11 +21,17 @@ class ProjectSettingsConverter(BaseConverter):
                  progress_callback: ProgressCallback | None = None,
                  conversion_running: ConversionRunning | None = None,
                  gm_platform: str = 'windows',
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None,
+                 project_manifest: GameMakerProjectManifest | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path,
                          log_callback, progress_callback, conversion_running,
-                         max_workers=max_workers)
+                         max_workers=max_workers, diagnostics=diagnostics)
         self.gm_platform = gm_platform
+        self.project_manifest = project_manifest or load_gamemaker_project_manifest(
+            self.gm_project_path,
+            target_platform=gm_platform,
+        )
         self.options_platform_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, f'options_{self.gm_platform}.yy')
         self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
@@ -76,34 +88,25 @@ class ProjectSettingsConverter(BaseConverter):
         return None
 
     def get_gm_project_name(self) -> Optional[str]:
-        yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
-        if not yyp_files:
+        if self.project_manifest.yyp_path is None:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
-
-        yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
-        try:
-            with open(yyp_file, 'r', encoding='utf-8') as file:
-                content = file.read()
-                match = re.search(r'"%Name":\s*"([^"]*)"', content)
-                return match.group(1) if match else None
-        except Exception as e:
-            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNameNotRead").format(error=str(e)))
+        if not self.project_manifest.project_name:
+            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNameNotRead").format(error="missing %Name/name"))
             return None
+        return self.project_manifest.project_name
 
     def get_gm_option(self, option_name: str, file_path: str) -> Optional[str]:
+        option = self.project_manifest.get_option(
+            option_name,
+            self._platform_from_options_path(file_path),
+        )
+        if option is not None:
+            return self._option_value_as_string(option.value)
         if not os.path.exists(file_path):
             self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return None
-
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                match = re.search(f'"{option_name}":\\s*([^,\n]+)', content)
-                return match.group(1).strip('"') if match else None
-        except Exception as e:
-            self.log_callback(get_localized("Console_Convertor_Settings_Error_yypGeneric").format(option_name=option_name, file_path=os.path.basename(file_path), error=str(e)))
-            return None
+        return None
 
     def update_project_name(self) -> None:
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
@@ -142,23 +145,18 @@ class ProjectSettingsConverter(BaseConverter):
 
             content = re.sub(r'config/icon="res://.*"', 'config/icon="res://icon.png"', content)
 
-            settings_to_update = [
-                (f"option_windows_description_info", "config/description"),
-                (f"option_{self.gm_platform}_version", "config/version"),
-                (f"option_windows_use_splash", "boot_splash/show_image"),
-                (f"option_game_speed", "run/max_fps"),
-                (f"option_{self.gm_platform}_vsync", "window/vsync/vsync_mode"),
-                (f"option_{self.gm_platform}_sync", "window/vsync/vsync_mode"),
-                (f"option_{self.gm_platform}_resize_window", "window/size/resizable"),
-                (f"option_windows_borderless", "window/size/borderless"),
-                (f"option_{self.gm_platform}_interpolate_pixels", "textures/canvas_textures/default_texture_filter"),
-                (f"option_{self.gm_platform}_start_fullscreen", "window/size/mode")
-            ]
-
-            for gm_option, godot_setting in settings_to_update:
-                value = self.get_gm_option(gm_option, self.options_windows_path if 'windows' in gm_option else self.options_platform_path if self.gm_platform in gm_option else self.options_main_path)
-                if value:
+            for gm_option, platform, godot_setting, value_kind in self._project_setting_mappings():
+                option = self.project_manifest.get_option(gm_option, platform)
+                if option is not None:
+                    value = self._godot_project_setting_value(option.value, value_kind)
                     content = self.update_godot_setting(content, godot_setting, value)
+
+            for diagnostic in unsupported_project_option_diagnostics(
+                self.project_manifest,
+                target_platform=self.gm_platform,
+                supported_keys=self._supported_project_option_keys(),
+            ):
+                self._safe_log(f"Warning: {diagnostic.message}")
 
             with open(project_godot_path, 'w', encoding='utf-8') as file:
                 file.write(content)
@@ -168,16 +166,12 @@ class ProjectSettingsConverter(BaseConverter):
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_NotUpdated").format(error=str(e)))
 
-    def update_godot_setting(self, content: str, setting: str, value: str, section: str = "application") -> str:
+    def update_godot_setting(self, content: str, setting: str, value: object, section: str = "application") -> str:
         if section not in content:
             content += f"\n[{section}]\n"
         
         setting_pattern = f"{setting}\\s*=.*"
-        
-        if value.lower() in ['true', 'false']:
-            new_setting = f'{setting}={value.lower()}'
-        else:
-            new_setting = f'{setting}="{value}"'
+        new_setting = f'{setting}={self._format_godot_value(value)}'
         
         if re.search(setting_pattern, content):
             content = re.sub(setting_pattern, new_setting, content)
@@ -192,35 +186,104 @@ class ProjectSettingsConverter(BaseConverter):
         return content
 
     def read_audio_groups(self) -> List[str]:
-        yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
-        if not yyp_files:
+        if self.project_manifest.yyp_path is None:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_yypNotFound"))
             return []
-
-        yyp_file = os.path.join(self.gm_project_path, yyp_files[0])
-        try:
-            with open(yyp_file, 'r', encoding='utf-8') as file:
-                yyp_content = file.read()
-                
-                audio_groups_match = re.search(r'"AudioGroups":\s*\[(.*?)\]', yyp_content, re.DOTALL)
-                if not audio_groups_match:
-                    self.log_callback(get_localized("Console_Convertor_AudioBus_Error_SectionNotFound_GM"))
-                    return []
-
-                audio_groups_content = audio_groups_match.group(1)
-                audio_group_names = re.findall(r'"%Name":\s*"([^"]*)"', audio_groups_content)
-                
-                if not audio_group_names:
-                    self.log_callback(get_localized("Console_Convertor_AudioBus_Error_NameNotFound_GM"))
-
-                    return []
-
-                self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Found").format(audio_group_names=', '.join(audio_group_names)))
-                return audio_group_names
-
-        except Exception as e:
-            self.log_callback(get_localized("Console_Convertor_AudioBus_Error_Group_Generic").format(error=str(e)))
+        audio_group_names = self.project_manifest.audio_group_names()
+        if not audio_group_names:
+            self.log_callback(get_localized("Console_Convertor_AudioBus_Error_SectionNotFound_GM"))
             return []
+        self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Found").format(audio_group_names=', '.join(audio_group_names)))
+        return audio_group_names
+
+    def _project_setting_mappings(self) -> list[tuple[str, str, str, str]]:
+        return [
+            ("option_windows_description_info", "windows", "config/description", "string"),
+            (f"option_{self.gm_platform}_version", self.gm_platform, "config/version", "string"),
+            ("option_windows_use_splash", "windows", "boot_splash/show_image", "bool"),
+            ("option_game_speed", "main", "run/max_fps", "int"),
+            (f"option_{self.gm_platform}_vsync", self.gm_platform, "window/vsync/vsync_mode", "vsync"),
+            (f"option_{self.gm_platform}_sync", self.gm_platform, "window/vsync/vsync_mode", "vsync"),
+            (f"option_{self.gm_platform}_resize_window", self.gm_platform, "window/size/resizable", "bool"),
+            ("option_windows_borderless", "windows", "window/size/borderless", "bool"),
+            (
+                f"option_{self.gm_platform}_interpolate_pixels",
+                self.gm_platform,
+                "textures/canvas_textures/default_texture_filter",
+                "texture_filter",
+            ),
+            (f"option_{self.gm_platform}_start_fullscreen", self.gm_platform, "window/size/mode", "fullscreen"),
+        ]
+
+    def _supported_project_option_keys(self) -> set[str]:
+        return {key for key, _platform, _setting, _kind in self._project_setting_mappings()}
+
+    def _platform_from_options_path(self, file_path: str) -> str:
+        options_root = os.path.join(self.gm_project_path, "options")
+        try:
+            relative = os.path.relpath(file_path, options_root)
+        except ValueError:
+            relative = os.path.basename(file_path)
+        parts = relative.split(os.sep)
+        if len(parts) > 1 and parts[0]:
+            return parts[0]
+        filename = os.path.splitext(os.path.basename(file_path))[0]
+        if filename.startswith("options_"):
+            return filename[len("options_"):]
+        return "main"
+
+    @staticmethod
+    def _option_value_as_string(value: object) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def _godot_project_setting_value(self, value: object, value_kind: str) -> object:
+        if value_kind == "bool":
+            return self._bool_option(value)
+        if value_kind == "int":
+            return self._int_option(value)
+        if value_kind == "vsync":
+            return 1 if self._bool_option(value) else 0
+        if value_kind == "texture_filter":
+            return 1 if self._bool_option(value) else 0
+        if value_kind == "fullscreen":
+            return 3 if self._bool_option(value) else 0
+        return value
+
+    @staticmethod
+    def _bool_option(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value != 0
+        return str(value).casefold() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _int_option(value: object) -> int:
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if not isinstance(value, (int, float, str)):
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _format_godot_value(value: object) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+        value_text = str(value)
+        lowered = value_text.casefold()
+        if lowered in {"true", "false"}:
+            return lowered
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", value_text):
+            return value_text
+        escaped = value_text.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
 
     def generate_audio_bus_layout(self) -> None:
         audio_groups = self.read_audio_groups()

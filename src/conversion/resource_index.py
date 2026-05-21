@@ -4,6 +4,11 @@ from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectResourceReference,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -31,6 +36,10 @@ class IndexedResource:
     yyp_path: str
     godot_path: str
     subfolder: str = ""
+    uuid: str = ""
+    resource_type: str = ""
+    order: int = 0
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -93,6 +102,7 @@ class GameMakerResourceIndex(BaseConverter):
                          max_workers=max_workers)
         self.yyp_path: str | None = None
         self.yyp_data: JsonDict | None = None
+        self.project_manifest: GameMakerProjectManifest | None = None
         self.resources: dict[str, dict[str, IndexedResource]] = self._empty_resources()
         self.rooms: dict[str, IndexedRoom] = {}
         self.extension_functions: dict[str, IndexedExtensionFunction] = {}
@@ -110,11 +120,12 @@ class GameMakerResourceIndex(BaseConverter):
         self.extension_functions = {}
         self.room_order = []
         self.used_room_order_fallback = False
-        self.yyp_path = self.find_yyp_path()
-        self.yyp_data = self._read_yy_file(self.yyp_path) if self.yyp_path else None
+        self.project_manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self.yyp_path = self.project_manifest.yyp_path
+        self.yyp_data = self.project_manifest.raw_data if self.project_manifest.raw_data else None
 
         if self.yyp_data is not None:
-            self._index_yyp_resources(self.yyp_data)
+            self._index_yyp_resources()
             self._parse_indexed_rooms()
             self._apply_yyp_room_order(self.yyp_data)
             self._resolve_room_inheritance()
@@ -180,6 +191,49 @@ class GameMakerResourceIndex(BaseConverter):
         resource = self.get_resource(kind, name)
         return resource.godot_path if resource else None
 
+    def find_project_resources(
+        self,
+        *,
+        uuid: str | None = None,
+        name: str | None = None,
+        path: str | None = None,
+        kind: str | None = None,
+        resource_type: str | None = None,
+    ) -> tuple[ProjectResourceReference, ...]:
+        """Return manifest resource references matched by UUID, name, path, kind, or type."""
+        if self.project_manifest is None:
+            return ()
+        return self.project_manifest.find_resources(
+            uuid=uuid,
+            name=name,
+            path=path,
+            kind=kind,
+            resource_type=resource_type,
+        )
+
+    def resolve_indexed_resource(
+        self,
+        *,
+        uuid: str | None = None,
+        name: str | None = None,
+        path: str | None = None,
+        kind: str | None = None,
+        resource_type: str | None = None,
+    ) -> IndexedResource | None:
+        """Return the first indexed resource matched by manifest metadata."""
+        matches = self.find_project_resources(
+            uuid=uuid,
+            name=name,
+            path=path,
+            kind=kind,
+            resource_type=resource_type,
+        )
+        for reference in matches:
+            resource = self.get_resource(reference.kind, reference.name)
+            if resource is not None:
+                return resource
+        return None
+
     def get_extension_function(self, name: str) -> IndexedExtensionFunction | None:
         """Return extension function metadata by GML function name, if discovered."""
         return self.extension_functions.get(name)
@@ -195,13 +249,14 @@ class GameMakerResourceIndex(BaseConverter):
     def _empty_resources(self) -> dict[str, dict[str, IndexedResource]]:
         return {kind: {} for kind in self.RESOURCE_EXTENSIONS}
 
-    def _index_yyp_resources(self, yyp_data: JsonDict) -> None:
-        for resource_entry in yyp_data.get("resources", []):
-            res_id = resource_entry.get("id", {})
-            yyp_path = res_id.get("path", "")
-            kind = self._kind_from_yyp_path(yyp_path)
+    def _index_yyp_resources(self) -> None:
+        if self.project_manifest is None:
+            return
+        for resource_ref in self.project_manifest.resources:
+            yyp_path = resource_ref.path
+            kind = resource_ref.kind
             if kind == "extensions":
-                name = res_id.get("name") or self._name_from_yyp_path(yyp_path)
+                name = resource_ref.name or self._name_from_yyp_path(yyp_path)
                 if name:
                     yy_path = os.path.normpath(os.path.join(self.gm_project_path, yyp_path))
                     self._index_extension_resource(name, yy_path, yyp_path)
@@ -209,7 +264,7 @@ class GameMakerResourceIndex(BaseConverter):
             if kind not in self.RESOURCE_EXTENSIONS:
                 continue
 
-            name = res_id.get("name") or self._name_from_yyp_path(yyp_path)
+            name = resource_ref.name or self._name_from_yyp_path(yyp_path)
             if not name:
                 continue
 
@@ -220,7 +275,7 @@ class GameMakerResourceIndex(BaseConverter):
                 )
                 continue
 
-            self.resources[kind][name] = self._make_resource(kind, name, yy_path, yyp_path)
+            self.resources[kind][name] = self._make_resource(kind, name, yy_path, yyp_path, resource_ref)
 
     def _index_disk_resources(self) -> None:
         for kind in self.RESOURCE_EXTENSIONS:
@@ -565,7 +620,12 @@ class GameMakerResourceIndex(BaseConverter):
         self.room_order = ordered
 
     def _make_resource(
-        self, kind: str, name: str, yy_path: str, yyp_path: str
+        self,
+        kind: str,
+        name: str,
+        yy_path: str,
+        yyp_path: str,
+        resource_ref: ProjectResourceReference | None = None,
     ) -> IndexedResource:
         subfolder = self._get_subfolder_from_yy(yy_path)
         return IndexedResource(
@@ -575,6 +635,10 @@ class GameMakerResourceIndex(BaseConverter):
             yyp_path=yyp_path,
             godot_path=self.godot_res_path(kind, name, subfolder),
             subfolder=subfolder,
+            uuid=resource_ref.uuid if resource_ref is not None else "",
+            resource_type=resource_ref.resource_type if resource_ref is not None else "",
+            order=resource_ref.order if resource_ref is not None else 0,
+            tags=resource_ref.tags if resource_ref is not None else (),
         )
 
     @classmethod

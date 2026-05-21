@@ -65,6 +65,7 @@ class Converter:
             self.progress_callback, self.conversion_running.is_set,
             gm_platform=gm_platform,
             max_workers=self.max_workers,
+            diagnostics=self.diagnostics,
         )
 
         converters: list[tuple[str, ConverterFn, str]] = [

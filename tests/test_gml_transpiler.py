@@ -2239,9 +2239,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "score = 10",
         )
 
-    def test_rejects_chained_assignments(self):
-        with self.assertRaises(GMLTranspileError):
-            transpile_gml_code("a = b = c;", indent="")
+    def test_transpiles_chained_assignment_results(self):
+        self.assertEqual(
+            transpile_gml_code("a = b = c;", indent=""),
+            "var _gml_assignment_value_0 = c\n"
+            "b = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("a = b += 1;", indent=""),
+            "var _gml_assignment_value_0 = GMRuntime.gml_add(b, 1)\n"
+            "b = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("a = b ??= 1;", indent=""),
+            "var _gml_assignment_value_0 = b\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = 1\n"
+            "\tb = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("items[next_index()] = b = c;", indent=""),
+            "var _gml_array_index_0 = next_index()\n"
+            "var _gml_assignment_value_1 = c\n"
+            "b = _gml_assignment_value_1\n"
+            "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)",
+        )
 
     def test_rejects_invalid_local_var_names(self):
         with self.assertRaises(GMLTranspileError):
@@ -2831,6 +2856,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("score ??= 10;", indent=""),
             "if GMRuntime.gml_is_nullish(score):\n\tscore = 10",
         )
+        self.assertEqual(
+            transpile_gml_code("score ??= count++;", indent=""),
+            "if GMRuntime.gml_is_nullish(score):\n"
+            "\tvar _gm2gd_mutation_value_0 = count\n"
+            "\tcount = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "\tscore = _gm2gd_mutation_value_0",
+        )
 
     def test_transpiles_increment_decrement_statements(self):
         self.assertEqual(
@@ -2851,6 +2883,78 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         with self.assertRaisesRegex(GMLTranspileError, "Increment target must be assignable"):
             transpile_gml_code("1++;", indent="")
+
+    def test_transpiles_mutation_expressions(self):
+        self.assertEqual(
+            transpile_gml_code("foo(i++);", indent=""),
+            "var _gm2gd_mutation_value_0 = i\n"
+            "i = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "foo(_gm2gd_mutation_value_0)",
+        )
+        self.assertEqual(
+            transpile_gml_code("foo(--i);", indent=""),
+            "var _gm2gd_mutation_value_0 = GMRuntime.gml_sub(i, 1)\n"
+            "i = _gm2gd_mutation_value_0\n"
+            "foo(_gm2gd_mutation_value_0)",
+        )
+        self.assertEqual(
+            transpile_gml_code("foo(items[i]++);", indent=""),
+            "var _gm2gd_mutation_value_0 = GMRuntime.gml_array_get(items, i)\n"
+            "GMRuntime.gml_array_set(items, i, GMRuntime.gml_add(_gm2gd_mutation_value_0, 1))\n"
+            "foo(_gm2gd_mutation_value_0)",
+        )
+        self.assertEqual(
+            transpile_gml_code("foo(items[i++]);", indent=""),
+            "var _gm2gd_mutation_value_0 = i\n"
+            "i = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "foo(GMRuntime.gml_array_get(items, _gm2gd_mutation_value_0))",
+        )
+        self.assertEqual(
+            transpile_gml_code("foo(get_struct().a++);", indent=""),
+            "var _gml_selector_target_0 = get_struct()\n"
+            "var _gm2gd_mutation_value_1 = GMRuntime.gml_selector_get(_gml_selector_target_0, \"a\")\n"
+            "GMRuntime.gml_selector_set(_gml_selector_target_0, \"a\", "
+            "GMRuntime.gml_add(_gm2gd_mutation_value_1, 1))\n"
+            "foo(_gm2gd_mutation_value_1)",
+        )
+
+        for source in ("foo(1++);", "foo(++1);", "foo((1)++);"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "Increment expression target must be assignable"):
+                    transpile_gml_code(source, indent="")
+
+    def test_assignment_expression_results_cover_member_and_accessor_targets(self):
+        self.assertEqual(
+            transpile_gml_code("result = mystruct.a += 1;", indent=""),
+            "var _gml_assignment_value_0 = GMRuntime.gml_add("
+            "GMRuntime.gml_selector_get(mystruct, \"a\"), 1)\n"
+            "GMRuntime.gml_selector_set(mystruct, \"a\", _gml_assignment_value_0)\n"
+            "result = _gml_assignment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("result = mystruct.a ??= fallback;", indent=""),
+            "var _gml_assignment_value_0 = GMRuntime.gml_selector_get(mystruct, \"a\")\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = fallback\n"
+            "\tGMRuntime.gml_selector_set(mystruct, \"a\", _gml_assignment_value_0)\n"
+            "result = _gml_assignment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("result = items[next_index()] += value;", indent=""),
+            "var _gml_array_index_0 = next_index()\n"
+            "var _gml_assignment_value_1 = GMRuntime.gml_add("
+            "GMRuntime.gml_array_get(items, _gml_array_index_0), value)\n"
+            "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)\n"
+            "result = _gml_assignment_value_1",
+        )
+        self.assertEqual(
+            transpile_gml_code("result = list[| index] ??= fallback;", indent=""),
+            "var _gml_assignment_value_0 = GMRuntime.gml_ds_list_find_value(list, index)\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = fallback\n"
+            "\tGMRuntime.gml_ds_list_set(list, index, _gml_assignment_value_0)\n"
+            "result = _gml_assignment_value_0",
+        )
 
     def test_transpiles_expression_statements(self):
         self.assertEqual(

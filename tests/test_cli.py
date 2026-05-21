@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src import cli
+from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+
+
+class TestCLIReports(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.temp_dir)
+
+    def test_report_writes_static_and_diagnostic_reports(self) -> None:
+        report_dir = os.path.join(self.temp_dir, "reports")
+
+        exit_code = cli.main(["report", "--report-dir", report_dir])
+
+        self.assertEqual(exit_code, 0)
+        report_root = os.path.join(report_dir, "gm2godot")
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "conversion_diagnostics.json")))
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "conversion_diagnostics.md")))
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "gml_manual_scope.md")))
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "gml_api_compatibility.md")))
+
+        with open(os.path.join(report_root, "conversion_diagnostics.json"), "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+
+        self.assertEqual(report["summary"]["total"], 0)
+
+    def test_analyze_only_writes_platform_diagnostic_without_conversion_output(self) -> None:
+        gm_dir = os.path.join(self.temp_dir, "gm")
+        report_dir = os.path.join(self.temp_dir, "reports")
+        os.makedirs(gm_dir)
+
+        exit_code = cli.main([
+            "analyze",
+            "--gm-project",
+            gm_dir,
+            "--report-dir",
+            report_dir,
+            "--target-platform",
+            "linux",
+            "--max-warnings",
+            "0",
+        ])
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(os.path.exists(os.path.join(gm_dir, "project.godot")))
+
+        with open(os.path.join(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH), "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+
+        codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
+        self.assertIn("GM2GD-CLI-TARGET-PLATFORM", codes)
+        self.assertIn("GM2GD-ANALYZE-MISSING-YYP", codes)
+        self.assertTrue(any("linux" in diagnostic["message"] for diagnostic in report["diagnostics"]))
+
+    def test_validate_applies_thresholds_to_existing_diagnostics_report(self) -> None:
+        godot_dir = os.path.join(self.temp_dir, "godot")
+        report_root = os.path.join(godot_dir, "gm2godot")
+        os.makedirs(report_root)
+        with open(os.path.join(godot_dir, "project.godot"), "w", encoding="utf-8") as project_file:
+            project_file.write('[application]\nconfig/name="Demo"\n')
+        with open(os.path.join(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH), "w", encoding="utf-8") as report_file:
+            json.dump(
+                {
+                    "summary": {"info": 0, "warning": 1, "error": 0, "total": 1},
+                    "diagnostics": [
+                        {
+                            "severity": "warning",
+                            "code": "GM2GD-GML-UNSUPPORTED",
+                            "message": "Unsupported GML API: show_message_async",
+                            "api": "show_message_async",
+                        }
+                    ],
+                },
+                report_file,
+            )
+
+        exit_code = cli.main(["validate", "--godot-project", godot_dir, "--fail-on-unsupported"])
+
+        self.assertEqual(exit_code, 2)
+
+    def test_convert_can_write_selected_reports_and_fail_warning_threshold(self) -> None:
+        gm_dir = os.path.join(self.temp_dir, "gm")
+        godot_dir = os.path.join(self.temp_dir, "godot")
+        report_dir = os.path.join(self.temp_dir, "reports")
+        os.makedirs(gm_dir)
+        os.makedirs(godot_dir)
+        with open(os.path.join(gm_dir, "Bad.yyp"), "w", encoding="utf-8") as yyp_file:
+            yyp_file.write('{"resources": [}')
+        with open(os.path.join(godot_dir, "project.godot"), "w", encoding="utf-8") as project_file:
+            project_file.write('[application]\nconfig/name="Demo"\n')
+
+        exit_code = cli.main([
+            "convert",
+            "--gm-project",
+            gm_dir,
+            "--godot-project",
+            godot_dir,
+            "--only",
+            "asset_registry",
+            "--report-dir",
+            report_dir,
+            "--max-warnings",
+            "0",
+        ])
+
+        self.assertEqual(exit_code, 2)
+        self.assertTrue(os.path.isfile(os.path.join(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)))
+        self.assertTrue(os.path.isfile(os.path.join(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)))
+
+        with open(os.path.join(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH), "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+
+        codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
+        self.assertIn("GM2GD-WARNING", codes)
+        self.assertIn("GM2GD-CLI-TARGET-PLATFORM", codes)
+
+
+if __name__ == "__main__":
+    unittest.main()

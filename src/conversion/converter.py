@@ -14,6 +14,7 @@ from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.diagnostics import DiagnosticCollector, write_conversion_diagnostic_reports
 from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
 
 from src.localization import get_localized
@@ -42,12 +43,19 @@ class Converter:
         self.progress_callback: ProgressCallback = progress_callback
         self.status_callback: LogCallback = status_callback
         self.conversion_running = conversion_running
-        self.update_log_callback: LogCallback = update_log_callback or log_callback
+        self._raw_log_callback: LogCallback = log_callback
+        self._raw_update_log_callback: LogCallback = update_log_callback or log_callback
+        self.update_log_callback: LogCallback = self._raw_update_log_callback
         self.compact_logging = compact_logging
         self.max_workers = max_workers
+        self.diagnostics = DiagnosticCollector()
 
     def convert(self, gm_path: str, gm_platform: str, godot_path: str,
                 settings: Mapping[str, BoolSetting]) -> None:
+        self.diagnostics = DiagnosticCollector()
+        self.log_callback = self.diagnostics.wrap_log_callback(self._raw_log_callback)
+        self.update_log_callback = self.diagnostics.wrap_log_callback(self._raw_update_log_callback)
+
         group_sounds_by_audio_group = False
         if "sound_group_folders" in settings:
             group_sounds_by_audio_group = settings["sound_group_folders"].get()
@@ -120,6 +128,7 @@ class Converter:
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
+                diagnostics=self.diagnostics,
             ).convert_all(), "Console_Convertor_Scripts"),
             ("objects", lambda: ObjectConverter(
                 gm_path, godot_path, self.log_callback,
@@ -127,6 +136,7 @@ class Converter:
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
+                diagnostics=self.diagnostics,
             ).convert_all(), "Console_Convertor_Objects"),
             ("rooms", lambda: RoomConverter(
                 gm_path, godot_path, self.log_callback,
@@ -145,11 +155,14 @@ class Converter:
             ).convert_all(), "Console_Convertor_AssetRegistry"),
         ]
 
-        for setting_key, converter_fn, log_key in converters:
-            setting = settings.get(setting_key)
-            if setting is not None and setting.get() and self.conversion_running.is_set():
-                log_message = get_localized(log_key)
-                self.log_callback(log_message)
-                self.status_callback(log_message)
-                converter_fn()
-                self.progress_callback(0)
+        try:
+            for setting_key, converter_fn, log_key in converters:
+                setting = settings.get(setting_key)
+                if setting is not None and setting.get() and self.conversion_running.is_set():
+                    log_message = get_localized(log_key)
+                    self.log_callback(log_message)
+                    self.status_callback(log_message)
+                    converter_fn()
+                    self.progress_callback(0)
+        finally:
+            write_conversion_diagnostic_reports(godot_path, self.diagnostics)

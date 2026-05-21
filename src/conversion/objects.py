@@ -7,6 +7,7 @@ from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
@@ -36,9 +37,11 @@ class ObjectConverter(BaseConverter):
                  log_callback: LogCallback = print, progress_callback: ProgressCallback | None = None,
                  conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_objects_path = os.path.join(self.godot_project_path, 'objects')
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
@@ -292,10 +295,20 @@ class ObjectConverter(BaseConverter):
                     static_scope_prefix=f"{object_name}.{mapping.godot_func}",
                 )
             except GMLTranspileError as exc:
-                self._safe_log(
+                message = (
                     "Warning: Could not transpile GameMaker event code for "
                     f"{object_name}/{mapping.gml_filename}: {exc}"
                 )
+                if self.diagnostics is not None:
+                    self.diagnostics.add_transpile_failure(
+                        message,
+                        source_path=source_path,
+                        resource=object_name,
+                        resource_type="object",
+                        event=mapping.godot_func,
+                        workaround="Split or rewrite unsupported GML for this event, or add the missing runtime/API support tracked by the linked issue.",
+                    )
+                self._safe_log(message)
 
         return code_bodies, instance_variables
 

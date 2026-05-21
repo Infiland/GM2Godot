@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Any, cast
 
 from src.localization import get_localized
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -18,7 +19,8 @@ class BaseConverter(ABC):
                  log_callback: LogCallback = print, progress_callback: ProgressCallback | None = None,
                  conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         self.gm_project_path = os.fspath(gm_project_path)
         self.godot_project_path = os.fspath(godot_project_path)
         self.log_callback: LogCallback = log_callback
@@ -27,16 +29,21 @@ class BaseConverter(ABC):
         self.update_log_callback: LogCallback = update_log_callback or log_callback
         self.compact_logging = compact_logging
         self.max_workers = max_workers or os.cpu_count() or 1
+        self.diagnostics = diagnostics
         self._lock = threading.Lock()
 
     def _safe_log(self, message: str) -> None:
         """Thread-safe wrapper for log_callback. Use in multi-threaded converters."""
         with self._lock:
+            if self.diagnostics is not None:
+                self.diagnostics.add_from_log_message(message)
             self.log_callback(message)
 
     def _safe_update_log(self, message: str) -> None:
         """Thread-safe wrapper for update_log_callback. Use in multi-threaded converters."""
         with self._lock:
+            if self.diagnostics is not None:
+                self.diagnostics.add_from_log_message(message)
             self.update_log_callback(message)
 
     def _safe_progress(self, value: int | float) -> None:

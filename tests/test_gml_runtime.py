@@ -121,6 +121,14 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     ),
     RuntimeValueParityCase("method_get_self(callback)", "GMRuntime.gml_method_get_self(callback)"),
     RuntimeValueParityCase("method_get_index(callback)", "GMRuntime.gml_method_get_index(callback)"),
+    RuntimeValueParityCase(
+        "method(player, callback) == method(player, callback)",
+        "GMRuntime.gml_eq(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(player, callback))",
+    ),
+    RuntimeValueParityCase(
+        "method(player, callback) != method(enemy, callback)",
+        "GMRuntime.gml_ne(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(enemy, callback))",
+    ),
     RuntimeValueParityCase("method_call(callback)", "GMRuntime.gml_method_call(callback)"),
     RuntimeValueParityCase(
         "method_call(callback, [1, 2, 3], 1, 2)",
@@ -423,6 +431,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("script_exists(scr_add)", 'GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index("scr_add"))'),
     RuntimeValueParityCase("script_get_name(scr_add)", 'GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index("scr_add"))'),
     RuntimeValueParityCase("global_function('scr_add')", "GMRuntime.gml_global_function('scr_add')"),
+    RuntimeValueParityCase(
+        "script_get_callable(scr_add) == global_function('scr_add')",
+        'GMRuntime.gml_eq(GMRuntime.gml_script_get_callable(GMRuntime.gml_asset_get_index("scr_add")), GMRuntime.gml_global_function(\'scr_add\'))',
+    ),
     RuntimeValueParityCase("argument0", "GMRuntime.gml_argument(0)"),
     RuntimeValueParityCase("argument15", "GMRuntime.gml_argument(15)"),
     RuntimeValueParityCase("5 div 2", "GMRuntime.gml_int_div(5, 2)"),
@@ -1874,6 +1886,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return method", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_method(value):\n\t\treturn GML_TYPE_METHOD", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_method_identity_uses_bound_self_and_index(self):
+        self.assertIn("static func _gml_method_same(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not is_method(left) or not is_method(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("var left_self = gml_method_get_self(left)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var right_self = gml_method_get_self(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if not gml_eq(left_self, right_self):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("var left_index = gml_method_get_index(left)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var right_index = gml_method_get_index(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "return typeof(left_index) == TYPE_CALLABLE and typeof(right_index) == TYPE_CALLABLE and left_index == right_index",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return gml_eq(left_index, right_index)", GML_RUNTIME_SCRIPT)
+
     def test_runtime_constructor_methods_allocate_new_structs(self):
         self.assertIn("static func gml_constructor(scope, func_or_method):", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_method = gml_method(scope, func_or_method, true)", GML_RUNTIME_SCRIPT)
@@ -1920,6 +1946,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return not gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_reference_equality_uses_identity(self):
+        self.assertIn("if is_method(left) or is_method(right):\n\t\treturn _gml_method_same(left, right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_gml_reference_value(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _is_gml_reference_value(left) or _is_gml_reference_value(right):", GML_RUNTIME_SCRIPT)
         self.assertIn(

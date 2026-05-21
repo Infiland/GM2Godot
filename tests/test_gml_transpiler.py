@@ -846,6 +846,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("method_get_index(callback)"),
             "GMRuntime.gml_method_get_index(callback)",
         )
+        self.assertEqual(
+            transpile_gml_expression("method(player, callback) == method(player, callback)"),
+            "GMRuntime.gml_eq(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(player, callback))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("method(player, callback) != method(enemy, callback)"),
+            "GMRuntime.gml_ne(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(enemy, callback))",
+        )
         self.assertEqual(transpile_gml_expression("method_call(callback)"), "GMRuntime.gml_method_call(callback)")
         self.assertEqual(
             transpile_gml_expression("method_call(callback, [1, 2, 3], 1, 2)"),
@@ -3733,6 +3741,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "ok = script_exists(scr_add);"
                 "name = script_get_name(scr_add);"
                 "fn = global_function('scr_add');"
+                "same = script_get_callable(scr_add) == global_function('scr_add');"
                 "legacy = argument0 + argument1 + argument_count;",
                 indent="",
                 asset_names={"scr_add"},
@@ -3741,6 +3750,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "ok = GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
             "name = GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
             "fn = GMRuntime.gml_global_function('scr_add')\n"
+            "same = GMRuntime.gml_eq(GMRuntime.gml_script_get_callable(GMRuntime.gml_asset_get_index(\"scr_add\")), GMRuntime.gml_global_function('scr_add'))\n"
             "legacy = GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1)), GMRuntime.gml_builtin_global(\"argument_count\"))",
         )
 

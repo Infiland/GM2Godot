@@ -133,6 +133,8 @@ static func gml_eq(left, right):
 		return is_ptr(left) and is_ptr(right) and left.value == right.value and left.invalid == right.invalid
 	if is_handle(left) or is_handle(right):
 		return _gml_handle_eq(left, right)
+	if is_method(left) or is_method(right):
+		return _gml_method_same(left, right)
 	if is_nan_value(left) or is_nan_value(right):
 		return false
 	if is_numeric(left) and is_numeric(right):

@@ -1925,7 +1925,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_while_blocks(self):
         self.assertEqual(
             transpile_gml_code("while score > 0 begin score -= 1; end", indent=""),
-            "while score > 0:\n\tscore = GMRuntime.gml_sub(score, 1)",
+            "while GMRuntime.gml_gt(score, 0):\n\tscore = GMRuntime.gml_sub(score, 1)",
         )
         self.assertEqual(
             transpile_gml_code("while (count) count--;", indent=""),
@@ -2003,14 +2003,14 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("do begin score += 1; end until score >= 3;", indent=""),
             "while true:\n"
             "\tscore = GMRuntime.gml_add(score, 1)\n"
-            "\tif score >= 3:\n"
+            "\tif GMRuntime.gml_gte(score, 3):\n"
             "\t\tbreak",
         )
         self.assertEqual(
             transpile_gml_code("do score += 1 until score >= 3;", indent=""),
             "while true:\n"
             "\tscore = GMRuntime.gml_add(score, 1)\n"
-            "\tif score >= 3:\n"
+            "\tif GMRuntime.gml_gte(score, 3):\n"
             "\t\tbreak",
         )
 
@@ -2031,11 +2031,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ),
             "while true:\n"
             "\tif GMRuntime.gml_bool(should_skip):\n"
-            "\t\tif score >= 3:\n"
+            "\t\tif GMRuntime.gml_gte(score, 3):\n"
             "\t\t\tbreak\n"
             "\t\tcontinue\n"
             "\tscore = GMRuntime.gml_add(score, 1)\n"
-            "\tif score >= 3:\n"
+            "\tif GMRuntime.gml_gte(score, 3):\n"
             "\t\tbreak",
         )
 
@@ -2043,7 +2043,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("for (i = 0; i < 3; i++) begin score += i; end", indent=""),
             "i = 0\n"
-            "while i < 3:\n"
+            "while GMRuntime.gml_lt(i, 3):\n"
             "\tscore = GMRuntime.gml_add(score, i)\n"
             "\ti = GMRuntime.gml_add(i, 1)",
         )
@@ -2162,7 +2162,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("for (var i = 0, total = 0; i < 3; i++) total += i;", indent=""),
             "var i = 0\n"
             "var total = 0\n"
-            "while i < 3:\n"
+            "while GMRuntime.gml_lt(i, 3):\n"
             "\ttotal = GMRuntime.gml_add(total, i)\n"
             "\ti = GMRuntime.gml_add(i, 1)",
         )
@@ -2174,7 +2174,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 indent="",
             ),
             "i = 0\n"
-            "while i < 3:\n"
+            "while GMRuntime.gml_lt(i, 3):\n"
             "\tif GMRuntime.gml_bool(skip):\n"
             "\t\ti = GMRuntime.gml_add(i, 1)\n"
             "\t\tcontinue\n"
@@ -2975,7 +2975,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_if_blocks(self):
         self.assertEqual(
             transpile_gml_code("if score > 0 { score -= 1; } else { score = 0; }", indent=""),
-            "if score > 0:\n\tscore = GMRuntime.gml_sub(score, 1)\nelse:\n\tscore = 0",
+            "if GMRuntime.gml_gt(score, 0):\n\tscore = GMRuntime.gml_sub(score, 1)\nelse:\n\tscore = 0",
         )
 
     def test_transpiles_if_blocks_with_single_equals_conditions(self):

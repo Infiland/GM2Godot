@@ -254,6 +254,13 @@ _BITWISE_RUNTIME_FUNCTIONS = {
     ">>": "gml_shift_right",
 }
 
+_COMPARISON_RUNTIME_FUNCTIONS = {
+    "<": "gml_lt",
+    "<=": "gml_lte",
+    ">": "gml_gt",
+    ">=": "gml_gte",
+}
+
 _DS_COLLECTIONS_FUNCTIONS = {
     "ds_list_create": "gml_ds_list_create",
     "ds_list_destroy": "gml_ds_list_destroy",

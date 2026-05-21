@@ -66,7 +66,7 @@ class _ExpressionParser:
     def parse(self) -> _Expression:
         expr = self._parse_expression()
         if not self._at_end():
-            raise GMLTranspileError(f"Unexpected token: {self._peek().value}")
+            raise self._error(f"Unexpected token: {self._peek().value}")
         return expr
 
     def _parse_expression(self, min_precedence: int = 0) -> _Expression:
@@ -212,7 +212,11 @@ class _ExpressionParser:
             expr = self._parse_expression()
             self._consume(")")
             return _Grouped(expr)
-        raise GMLTranspileError(f"Expected expression, got: {token.value}")
+        raise GMLTranspileError(
+            f"Expected expression, got: {token.value}",
+            line=token.line,
+            column=token.column,
+        )
 
     def _parse_macro_expansion(self, name: str) -> _Expression | None:
         macro_source = self.macro_values.get(name)
@@ -415,13 +419,20 @@ class _ExpressionParser:
 
     def _consume(self, value: str) -> None:
         if not self._match(value):
-            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+            raise self._error(f"Expected '{value}', got: {self._peek().value}")
 
     def _consume_identifier(self) -> str:
         token = self._advance()
         if token.kind != "IDENT":
-            raise GMLTranspileError(f"Expected identifier, got: {token.value}")
-        _validate_gml_identifier(token.value)
+            raise GMLTranspileError(
+                f"Expected identifier, got: {token.value}",
+                line=token.line,
+                column=token.column,
+            )
+        try:
+            _validate_gml_identifier(token.value)
+        except GMLTranspileError as exc:
+            raise exc.with_location(token.line, token.column) from exc
         return token.value
 
     def _read_balanced_tokens(self, opener: str, closer: str) -> list[_Token]:
@@ -437,7 +448,7 @@ class _ExpressionParser:
                     return tokens
             tokens.append(token)
 
-        raise GMLTranspileError(f"Expected '{closer}'")
+        raise self._error(f"Expected '{closer}'")
 
     def _check(self, value: str) -> bool:
         return self._peek().value == value
@@ -455,6 +466,10 @@ class _ExpressionParser:
 
     def _at_end(self) -> bool:
         return self._peek().kind == "EOF"
+
+    def _error(self, message: str) -> GMLTranspileError:
+        token = self._peek()
+        return GMLTranspileError(message, line=token.line, column=token.column)
 
 
 def _parse_gml_expression(

@@ -110,11 +110,22 @@ class TestScriptConverter(unittest.TestCase):
         self.assertEqual(registry_path, str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH))
         legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
         modern_script = (self.godot_dir / "scripts" / "Game" / "scr_modern.gd").read_text(encoding="utf-8")
+        legacy_source_map = json.loads(
+            (self.godot_dir / "scripts" / "Game" / "scr_add.gd.gmlmap.json").read_text(encoding="utf-8")
+        )
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
 
         self.assertIn("func _gm_script_call():", legacy_script)
+        self.assertIn("# GM2Godot source:", legacy_script)
         self.assertIn("GMRuntime.gml_argument(0)", legacy_script)
         self.assertIn("GMRuntime.gml_argument(1)", legacy_script)
+        self.assertEqual(legacy_source_map["event"], "script:scr_add")
+        self.assertTrue(legacy_source_map["entries"])
+        self.assertEqual(
+            legacy_source_map["entries"][0]["source_path"],
+            str(self.gm_dir / "scripts" / "scr_add" / "scr_add.gml"),
+        )
+        self.assertEqual(legacy_source_map["entries"][0]["source_line"], 1)
         self.assertIn("func gm2godot_callable():", modern_script)
         self.assertIn("func _gm_script_call(a = null, b = null):", modern_script)
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)

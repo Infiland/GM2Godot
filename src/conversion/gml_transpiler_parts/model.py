@@ -28,11 +28,36 @@ _IncrementMode: TypeAlias = Literal["prefix", "postfix"]
 class GMLTranspileError(ValueError):
     """Raised when the small GML subset transpiler cannot parse input."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        line: int | None = None,
+        column: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.line = line
+        self.column = column
+
+    def with_location(self, line: int, column: int) -> "GMLTranspileError":
+        if self.line is not None and self.column is not None:
+            return self
+        return GMLTranspileError(self.message, line=line, column=column)
+
+    def __str__(self) -> str:
+        if self.line is None or self.column is None:
+            return self.message
+        return f"{self.message} at line {self.line}, column {self.column}"
+
 
 @dataclass(frozen=True)
 class _Token:
     kind: str
     value: str
+    line: int = 1
+    column: int = 1
+    index: int = 0
 
 
 @dataclass(frozen=True)

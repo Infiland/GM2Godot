@@ -797,7 +797,7 @@ class _StatementParser:
                     return tokens
             tokens.append(token)
 
-        raise GMLTranspileError(f"Expected '{closer}'")
+        raise self._error(f"Expected '{closer}'")
 
     def _read_simple_statement(self) -> list[_Token]:
         tokens: list[_Token] = []
@@ -833,22 +833,29 @@ class _StatementParser:
 
     def _consume(self, value: str) -> None:
         if not self._match(value):
-            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+            raise self._error(f"Expected '{value}', got: {self._peek().value}")
 
     def _consume_identifier(self, value: str) -> None:
         if not self._match_identifier(value):
-            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+            raise self._error(f"Expected '{value}', got: {self._peek().value}")
 
     def _consume_directive(self, value: str) -> None:
         if not self._check_directive(value):
-            raise GMLTranspileError(f"Expected '{value}', got: {self._peek().value}")
+            raise self._error(f"Expected '{value}', got: {self._peek().value}")
         self.position += 1
 
     def _consume_identifier_name(self) -> str:
         token = self._advance()
         if token.kind != "IDENT":
-            raise GMLTranspileError(f"Expected identifier, got: {token.value}")
-        _validate_gml_identifier(token.value)
+            raise GMLTranspileError(
+                f"Expected identifier, got: {token.value}",
+                line=token.line,
+                column=token.column,
+            )
+        try:
+            _validate_gml_identifier(token.value)
+        except GMLTranspileError as exc:
+            raise exc.with_location(token.line, token.column) from exc
         return token.value
 
     def _check(self, value: str | None) -> bool:
@@ -882,3 +889,7 @@ class _StatementParser:
         index = self.generated_counter[0]
         self.generated_counter[0] += 1
         return f"{prefix}_{index}"
+
+    def _error(self, message: str) -> GMLTranspileError:
+        token = self._peek()
+        return GMLTranspileError(message, line=token.line, column=token.column)

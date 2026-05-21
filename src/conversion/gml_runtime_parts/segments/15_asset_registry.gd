@@ -49,6 +49,8 @@ static var _gml_asset_by_legacy_id = {}
 static var _gml_asset_ids_by_type = {}
 static var _gml_asset_dynamic_ids = {}
 static var _gml_asset_next_dynamic_id = GML_DYNAMIC_ASSET_ID_START
+static var _gml_texture_group_entries = {}
+static var _gml_audio_group_entries = {}
 
 
 static func gml_asset_registry_set(entries):
@@ -63,6 +65,50 @@ static func gml_asset_registry_set(entries):
 	for entry in entries:
 		_gml_asset_add_entry(entry)
 	return null
+
+
+static func gml_texture_group_registry_set(entries):
+	_gml_texture_group_entries = {}
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var name = str(entry.get("name", ""))
+		if name == "":
+			continue
+		_gml_texture_group_entries[name] = entry
+	return null
+
+
+static func gml_texture_group_registry_entries():
+	_gml_asset_registry_ensure_loaded()
+	var entries = []
+	var names = _gml_texture_group_entries.keys()
+	names.sort()
+	for name in names:
+		entries.append(_gml_texture_group_entries[name])
+	return entries
+
+
+static func gml_audio_group_registry_set(entries):
+	_gml_audio_group_entries = {}
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var name = str(entry.get("name", ""))
+		if name == "":
+			continue
+		_gml_audio_group_entries[name] = entry
+	return null
+
+
+static func gml_audio_group_registry_entries():
+	_gml_asset_registry_ensure_loaded()
+	var entries = []
+	var names = _gml_audio_group_entries.keys()
+	names.sort()
+	for name in names:
+		entries.append(_gml_audio_group_entries[name])
+	return entries
 
 
 static func gml_asset_registry_entries():
@@ -188,6 +234,10 @@ static func _gml_asset_registry_ensure_loaded():
 		return
 	if registry_script.has_method("gml_asset_registry_entries"):
 		gml_asset_registry_set(registry_script.gml_asset_registry_entries())
+	if registry_script.has_method("gml_texture_group_registry_entries"):
+		gml_texture_group_registry_set(registry_script.gml_texture_group_registry_entries())
+	if registry_script.has_method("gml_audio_group_registry_entries"):
+		gml_audio_group_registry_set(registry_script.gml_audio_group_registry_entries())
 
 
 static func _gml_asset_add_entry(entry):
@@ -261,6 +311,36 @@ static func _gml_asset_type_key(asset_type):
 	if GML_ASSET_TYPE_ALIASES.has(key):
 		return GML_ASSET_TYPE_ALIASES[key]
 	return key
+
+
+static func _gml_texture_group_registry_entry(groupname):
+	_gml_asset_registry_ensure_loaded()
+	var group = str(groupname)
+	if _gml_texture_group_entries.has(group):
+		return _gml_texture_group_entries[group]
+	return null
+
+
+static func _gml_texture_group_registry_names():
+	_gml_asset_registry_ensure_loaded()
+	var names = _gml_texture_group_entries.keys()
+	names.sort()
+	return names
+
+
+static func _gml_audio_group_registry_entry(groupname):
+	_gml_asset_registry_ensure_loaded()
+	var group = str(groupname)
+	if _gml_audio_group_entries.has(group):
+		return _gml_audio_group_entries[group]
+	return null
+
+
+static func _gml_audio_group_registry_names():
+	_gml_asset_registry_ensure_loaded()
+	var names = _gml_audio_group_entries.keys()
+	names.sort()
+	return names
 
 
 static func _gml_asset_tag_array(tags):

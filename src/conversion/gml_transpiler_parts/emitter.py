@@ -205,6 +205,8 @@ def _emit_name(
         legacy_argument = _legacy_argument_replacement(value)
         if legacy_argument is not None:
             return legacy_argument, _POSTFIX_PRECEDENCE
+        if value.startswith("audiogroup_") and _is_plain_identifier(value):
+            return json.dumps(value), _PRIMARY_PRECEDENCE
         if value in scope_context.asset_names and _is_plain_identifier(value):
             if value in scope_context.global_names:
                 raise GMLTranspileError(

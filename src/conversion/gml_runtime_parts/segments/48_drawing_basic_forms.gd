@@ -469,6 +469,11 @@ static func gml_texture_flush(texture):
 
 
 static func gml_sprite_prefetch(sprite):
+	var entry = _gml_asset_resolve(sprite)
+	if typeof(entry) == TYPE_DICTIONARY:
+		var group = _gml_texturegroup_name_for_entry(entry)
+		if group != "":
+			_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_FETCHED
 	return _gml_draw_sprite_data(sprite) != null
 
 
@@ -516,17 +521,18 @@ static func gml_texturegroup_set_mode(explicit, debug = false, default_sprite = 
 
 static func gml_texturegroup_load(groupname):
 	var group = str(groupname)
-	if not _gml_texturegroup_names().has(group):
+	if not _gml_texturegroup_exists(group):
 		return false
-	_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_FETCHED
+	_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_LOADED
 	return true
 
 
 static func gml_texturegroup_unload(groupname):
 	var group = str(groupname)
-	if not _gml_texturegroup_names().has(group):
+	if not _gml_texturegroup_exists(group):
 		return false
 	_gml_texturegroup_status[group] = GML_TEXTUREGROUP_STATUS_UNLOADED
+	_gml_texturegroup_flush_assets(group)
 	return true
 
 
@@ -831,13 +837,17 @@ static func _gml_sprite_texture_multi(sprites, prefetch):
 
 static func _gml_texturegroup_names():
 	_gml_asset_registry_ensure_loaded()
-	var names = []
+	var names = _gml_texture_group_registry_names()
 	for entry in _gml_asset_entries:
 		var group = _gml_texturegroup_name_for_entry(entry)
 		if group != "" and not names.has(group):
 			names.append(group)
 	names.sort()
 	return names
+
+
+static func _gml_texturegroup_exists(groupname):
+	return _gml_texturegroup_names().has(str(groupname))
 
 
 static func _gml_texturegroup_asset_ids(groupname, asset_type):
@@ -851,6 +861,17 @@ static func _gml_texturegroup_asset_ids(groupname, asset_type):
 		if _gml_texturegroup_name_for_entry(entry) == group:
 			ids.append(int(entry.get("id", -1)))
 	return ids
+
+
+static func _gml_texturegroup_flush_assets(groupname):
+	var group = str(groupname)
+	for asset_id in _gml_texturegroup_asset_ids(group, "sprite"):
+		_gml_draw_sprite_cache.erase(asset_id)
+	for asset_id in _gml_texturegroup_asset_ids(group, "font"):
+		_gml_draw_font_cache.erase(asset_id)
+	for asset_id in _gml_texturegroup_asset_ids(group, "tileset"):
+		_gml_draw_tileset_cache.erase(asset_id)
+	return null
 
 
 static func _gml_texturegroup_name_for_entry(entry):

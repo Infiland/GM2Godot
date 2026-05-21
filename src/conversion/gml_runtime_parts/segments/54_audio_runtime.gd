@@ -6,6 +6,7 @@ static var _gml_audio_root = null
 static var _gml_audio_instances = {}
 static var _gml_audio_instances_by_asset = {}
 static var _gml_audio_asset_state = {}
+static var _gml_audio_group_state = {}
 static var _gml_audio_master_gain = 1.0
 
 
@@ -21,13 +22,17 @@ static func gml_audio_play_sound(sound, priority, loop, gain = null, offset = nu
 		return gml_handle_invalid(GML_SOUND_HANDLE_KIND)
 	var asset_id = int(sound_entry["id"])
 	var asset_state = _gml_audio_asset_state_for_entry(sound_entry)
+	var audio_group = _gml_audio_group_for_entry(sound_entry)
+	if not _gml_audio_group_is_loaded_name(audio_group):
+		return gml_handle_invalid(GML_SOUND_HANDLE_KIND)
+	var group_state = _gml_audio_group_state_for_name(audio_group)
 	var instance_gain = max(_to_real(gain), 0.0) if gain != null else 1.0
 	var instance_pitch = max(_to_real(pitch), GML_AUDIO_MIN_PITCH) if pitch != null else 1.0
 	var player = AudioStreamPlayer.new()
 	player.name = "_gm_sound_" + str(asset_id) + "_" + str(_gml_handle_next_indices.get(GML_SOUND_HANDLE_KIND, 0))
 	player.stream = _gml_audio_stream_for_playback(stream, loop)
-	player.bus = _gml_audio_bus_for_entry(sound_entry)
-	player.volume_linear = _gml_audio_final_gain(asset_state["gain"], instance_gain)
+	player.bus = _gml_audio_bus_for_group(audio_group)
+	player.volume_linear = _gml_audio_final_gain(asset_state["gain"], group_state["gain"], instance_gain)
 	player.pitch_scale = _gml_audio_final_pitch(asset_state["pitch"], instance_pitch)
 	player.max_polyphony = 1
 	var handle = gml_handle_register(GML_SOUND_HANDLE_KIND, player, str(sound_entry["name"]))
@@ -36,10 +41,12 @@ static func gml_audio_play_sound(sound, priority, loop, gain = null, offset = nu
 		"player": player,
 		"asset_id": asset_id,
 		"asset_name": str(sound_entry["name"]),
+		"audio_group": audio_group,
 		"priority": _to_real(priority),
 		"loop": bool(loop),
 		"listener_mask": listener_mask,
 		"asset_gain": asset_state["gain"],
+		"group_gain": group_state["gain"],
 		"asset_pitch": asset_state["pitch"],
 		"instance_gain": instance_gain,
 		"instance_pitch": instance_pitch,
@@ -168,6 +175,86 @@ static func gml_sound_global_volume(volume):
 	return null
 
 
+static func gml_audio_group_load(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return false
+	var state = _gml_audio_group_state_for_name(group)
+	if bool(state["loaded"]) or bool(state["loading"]):
+		return false
+	state["loading"] = true
+	state["progress"] = 1.0
+	state["loaded"] = true
+	state["loading"] = false
+	return true
+
+
+static func gml_audio_group_unload(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or group == "audiogroup_default" or not _gml_audio_group_exists(group):
+		return false
+	var state = _gml_audio_group_state_for_name(group)
+	if not bool(state["loaded"]) and not bool(state["loading"]):
+		return false
+	gml_audio_group_stop_all(group)
+	state["loaded"] = false
+	state["loading"] = false
+	state["progress"] = 0.0
+	return true
+
+
+static func gml_audio_group_is_loaded(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return false
+	return _gml_audio_group_is_loaded_name(group)
+
+
+static func gml_audio_group_load_progress(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return 0.0
+	return _to_real(_gml_audio_group_state_for_name(group).get("progress", 0.0))
+
+
+static func gml_audio_group_name(group_id):
+	var group = _gml_audio_group_name(group_id)
+	return group if _gml_audio_group_exists(group) else ""
+
+
+static func gml_audio_group_stop_all(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return false
+	var instance_indices = []
+	for entry in _gml_audio_instances.values():
+		if str(entry.get("audio_group", "audiogroup_default")) == group:
+			instance_indices.append(entry["handle"].index)
+	for instance_index in instance_indices:
+		_gml_audio_unregister_instance(instance_index, true)
+	return true
+
+
+static func gml_audio_group_set_gain(group_id, gain, time = 0):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return false
+	var state = _gml_audio_group_state_for_name(group)
+	var gain_value = max(_to_real(gain), 0.0)
+	state["gain"] = gain_value
+	for entry in _gml_audio_entries_for_group(group):
+		entry["group_gain"] = gain_value
+		_gml_audio_apply_entry_volume(entry)
+	return true
+
+
+static func gml_audio_group_get_gain(group_id):
+	var group = _gml_audio_group_name(group_id)
+	if group == "" or not _gml_audio_group_exists(group):
+		return 0.0
+	return _to_real(_gml_audio_group_state_for_name(group).get("gain", 1.0))
+
+
 static func _gml_audio_root_node():
 	if _gml_audio_root != null and is_instance_valid(_gml_audio_root):
 		return _gml_audio_root
@@ -216,9 +303,7 @@ static func _gml_audio_stream_for_playback(stream, loop):
 	return stream
 
 
-static func _gml_audio_bus_for_entry(sound_entry):
-	var metadata = _gml_audio_metadata(sound_entry)
-	var audio_group = str(metadata["audio_group"]) if metadata.has("audio_group") else "audiogroup_default"
+static func _gml_audio_bus_for_group(audio_group):
 	if audio_group == "" or audio_group == "audiogroup_default":
 		return "Master"
 	return audio_group
@@ -277,7 +362,7 @@ static func _gml_audio_entries_for_asset(asset_id):
 static func _gml_audio_apply_entry_volume(entry):
 	var player = entry["player"]
 	if player is AudioStreamPlayer and is_instance_valid(player):
-		player.volume_linear = _gml_audio_final_gain(entry["asset_gain"], entry["instance_gain"])
+		player.volume_linear = _gml_audio_final_gain(entry["asset_gain"], entry["group_gain"], entry["instance_gain"])
 
 
 static func _gml_audio_apply_entry_pitch(entry):
@@ -286,8 +371,8 @@ static func _gml_audio_apply_entry_pitch(entry):
 		player.pitch_scale = _gml_audio_final_pitch(entry["asset_pitch"], entry["instance_pitch"])
 
 
-static func _gml_audio_final_gain(asset_gain, instance_gain):
-	return max(_to_real(asset_gain), 0.0) * max(_to_real(instance_gain), 0.0) * _gml_audio_master_gain
+static func _gml_audio_final_gain(asset_gain, group_gain, instance_gain):
+	return max(_to_real(asset_gain), 0.0) * max(_to_real(group_gain), 0.0) * max(_to_real(instance_gain), 0.0) * _gml_audio_master_gain
 
 
 static func _gml_audio_final_pitch(asset_pitch, instance_pitch):
@@ -331,3 +416,69 @@ static func _gml_audio_unregister_instance(instance_index, stop_player):
 	var handle = entry["handle"]
 	gml_handle_invalidate(handle)
 	return true
+
+
+static func _gml_audio_group_for_entry(sound_entry):
+	var metadata = _gml_audio_metadata(sound_entry)
+	return str(metadata["audio_group"]) if metadata.has("audio_group") else "audiogroup_default"
+
+
+static func _gml_audio_group_name(group_id):
+	if is_string(group_id):
+		return str(group_id)
+	if typeof(group_id) == TYPE_DICTIONARY and group_id.has("name"):
+		return str(group_id["name"])
+	return str(group_id)
+
+
+static func _gml_audio_group_exists(group):
+	var group_name = str(group)
+	if group_name == "audiogroup_default":
+		return true
+	if _gml_audio_group_registry_entry(group_name) != null:
+		return true
+	_gml_asset_registry_ensure_loaded()
+	for entry in _gml_asset_entries:
+		if str(entry.get("type", "")) != "sound":
+			continue
+		if _gml_audio_group_for_entry(entry) == group_name:
+			return true
+	return false
+
+
+static func _gml_audio_group_is_loaded_name(group):
+	return bool(_gml_audio_group_state_for_name(group).get("loaded", false))
+
+
+static func _gml_audio_group_state_for_name(group):
+	var group_name = str(group)
+	if not _gml_audio_group_state.has(group_name):
+		var registry_entry = _gml_audio_group_registry_entry(group_name)
+		var has_registry_entry = typeof(registry_entry) == TYPE_DICTIONARY
+		var loaded = group_name == "audiogroup_default"
+		var gain = 1.0
+		if has_registry_entry:
+			loaded = bool(registry_entry.get("loaded", loaded))
+			gain = _to_real(registry_entry.get("gain", 1.0))
+		elif group_name != "":
+			loaded = true
+		_gml_audio_group_state[group_name] = {
+			"loaded": loaded,
+			"loading": false,
+			"progress": 1.0 if loaded else 0.0,
+			"gain": max(gain, 0.0)
+		}
+	return _gml_audio_group_state[group_name]
+
+
+static func _gml_audio_entries_for_group(group):
+	var group_name = str(group)
+	var entries = []
+	var instance_indices = []
+	for entry in _gml_audio_instances.values():
+		if str(entry.get("audio_group", "audiogroup_default")) == group_name:
+			instance_indices.append(entry["handle"].index)
+	for instance_index in instance_indices:
+		if _gml_audio_instances.has(instance_index):
+			entries.append(_gml_audio_instances[instance_index])
+	return entries

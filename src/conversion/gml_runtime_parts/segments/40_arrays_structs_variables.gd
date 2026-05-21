@@ -245,6 +245,26 @@ static func gml_variable_struct_get(struct_value, member_name):
 	return gml_struct_get(struct_value, member_name)
 
 
+static func gml_variable_struct_exists(struct_value, member_name):
+	return gml_struct_exists(struct_value, member_name)
+
+
+static func gml_variable_struct_set(struct_value, member_name, value):
+	return gml_struct_set(struct_value, member_name, value)
+
+
+static func gml_variable_struct_remove(struct_value, member_name):
+	return gml_struct_remove(struct_value, member_name)
+
+
+static func gml_variable_struct_get_names(struct_value):
+	return gml_struct_get_names(struct_value)
+
+
+static func gml_variable_struct_names_count(struct_value):
+	return gml_struct_names_count(struct_value)
+
+
 static func gml_variable_instance_get(instance_value, member_name):
 	return gml_selector_get(instance_value, member_name)
 

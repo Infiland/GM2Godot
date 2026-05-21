@@ -1221,6 +1221,26 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_struct_get(mystruct, "x")',
         )
         self.assertEqual(
+            transpile_gml_expression('variable_struct_exists(mystruct, "x")'),
+            'GMRuntime.gml_variable_struct_exists(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_struct_set(mystruct, "x", score + 1)'),
+            'GMRuntime.gml_variable_struct_set(mystruct, "x", GMRuntime.gml_add(score, 1))',
+        )
+        self.assertEqual(
+            transpile_gml_expression('variable_struct_remove(mystruct, "x")'),
+            'GMRuntime.gml_variable_struct_remove(mystruct, "x")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_struct_get_names(mystruct)"),
+            "GMRuntime.gml_variable_struct_get_names(mystruct)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("variable_struct_names_count(mystruct)"),
+            "GMRuntime.gml_variable_struct_names_count(mystruct)",
+        )
+        self.assertEqual(
             transpile_gml_expression('variable_instance_get(enemy, "hp")'),
             'GMRuntime.gml_variable_instance_get(enemy, "hp")',
         )
@@ -2307,8 +2327,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code("self.Script1 = Script1;", indent="", asset_names=asset_names),
-            "self.Script1 = Script1",
+            'self.Script1 = GMRuntime.gml_asset_get_index("Script1")',
         )
+
+    def test_scope_lookup_precedence_and_asset_values_are_explicit(self):
+        self.assertEqual(
+            transpile_gml_expression("score", local_names={"score"}, global_names={"score"}),
+            "score",
+        )
+        self.assertEqual(
+            transpile_gml_expression("score", global_names={"score"}),
+            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("spr_player", asset_names={"spr_player"}),
+            'GMRuntime.gml_asset_get_index("spr_player")',
+        )
+        self.assertEqual(
+            transpile_gml_expression("spr_player", local_names={"spr_player"}, asset_names={"spr_player"}),
+            "spr_player",
+        )
+        self.assertEqual(
+            transpile_gml_expression("scr_add(1)", asset_names={"scr_add"}),
+            "scr_add(1)",
+        )
+        with self.assertRaisesRegex(GMLTranspileError, "collides with a global and asset name"):
+            transpile_gml_expression("shared_name", global_names={"shared_name"}, asset_names={"shared_name"})
 
     def test_instance_object_selector_arguments_use_asset_registry_ids(self):
         asset_names = {"o_enemy"}

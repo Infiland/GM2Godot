@@ -816,7 +816,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert diagnostic is not None
         self.assertIn("struct_set", diagnostic)
         self.assertIn("expects 3", diagnostic)
-        self.assertIn("#483", diagnostic)
+        self.assertIn("#482", diagnostic)
 
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
         with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):

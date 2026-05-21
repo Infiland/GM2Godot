@@ -967,7 +967,12 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
     "variable_global_exists": "gml_variable_global_exists",
     "variable_global_get": "gml_variable_global_get",
     "variable_global_set": "gml_variable_global_set",
+    "variable_struct_exists": "gml_variable_struct_exists",
     "variable_struct_get": "gml_variable_struct_get",
+    "variable_struct_set": "gml_variable_struct_set",
+    "variable_struct_remove": "gml_variable_struct_remove",
+    "variable_struct_get_names": "gml_variable_struct_get_names",
+    "variable_struct_names_count": "gml_variable_struct_names_count",
 }
 
 _DS_MAP_RUNTIME_FUNCTIONS = {

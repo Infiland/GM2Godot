@@ -13,6 +13,7 @@ from .constants import (
     _BUILTIN_ARRAY_VARIABLES,
     _BUILTIN_GLOBAL_VARIABLES,
     _BUILTIN_INSTANCE_VARIABLES,
+    _COMPARISON_RUNTIME_FUNCTIONS,
     _DIRECT_MEMBER_TARGETS,
     _GML_BUILTIN_CONSTANT_IDENTIFIERS,
     _GML_LITERAL_IDENTIFIERS,
@@ -883,6 +884,11 @@ def _emit_binary(
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_div({left}, {right})", _POSTFIX_PRECEDENCE
+
+    if expr.operator in _COMPARISON_RUNTIME_FUNCTIONS:
+        left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
+        right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
+        return f"GMRuntime.{_COMPARISON_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
 
     if expr.operator in _ARITHMETIC_RUNTIME_FUNCTIONS:
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]

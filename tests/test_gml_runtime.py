@@ -62,13 +62,21 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "undefined != infinity",
         "GMRuntime.gml_ne(GMRuntime.gml_undefined(), INF)",
     ),
+    RuntimeValueParityCase("score > 0", "GMRuntime.gml_gt(score, 0)"),
+    RuntimeValueParityCase("score >= 0", "GMRuntime.gml_gte(score, 0)"),
+    RuntimeValueParityCase("score < 10", "GMRuntime.gml_lt(score, 10)"),
+    RuntimeValueParityCase("score <= 10", "GMRuntime.gml_lte(score, 10)"),
+    RuntimeValueParityCase('"alpha" < "beta"', 'GMRuntime.gml_lt("alpha", "beta")'),
+    RuntimeValueParityCase("NaN < 1", "GMRuntime.gml_lt(NAN, 1)"),
     RuntimeValueParityCase("bool(pointer_null)", "GMRuntime.gml_bool(GMRuntime.gml_pointer_null())"),
     RuntimeValueParityCase("bool(0.5)", "GMRuntime.gml_bool(0.5)"),
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
     RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
     RuntimeValueParityCase('string("abc")', 'GMRuntime.gml_string("abc")'),
+    RuntimeValueParityCase('string("Grüße")', 'GMRuntime.gml_string("Grüße")'),
     RuntimeValueParityCase('typeof("abc")', 'GMRuntime.gml_typeof("abc")'),
     RuntimeValueParityCase('is_string("abc")', 'GMRuntime.is_string("abc")'),
+    RuntimeValueParityCase('string_ord_at("é", 1)', 'GMRuntime.gml_string_ord_at("é", 1)'),
     RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
     RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
     RuntimeValueParityCase('int64("42")', 'GMRuntime.gml_int64("42")'),
@@ -978,6 +986,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "is_infinity",
             "gml_eq",
             "gml_ne",
+            "gml_lt",
+            "gml_lte",
+            "gml_gt",
+            "gml_gte",
             "gml_div",
             "gml_int_div",
             "gml_real",
@@ -2587,6 +2599,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func is_nan_value(value):\n\treturn is_number(value) and is_nan(float(value))", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_infinity(value):\n\treturn is_number(value) and is_inf(float(value))", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_comparison_helpers_centralize_ordering_semantics(self):
+        self.assertIn("static func gml_lt(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_lte(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_gt(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_gte(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_string(left) and is_string(right):", GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML less-than comparison", left, right)', GML_RUNTIME_SCRIPT)
+
     def test_runtime_bitwise_helpers_return_int64_values(self):
         self.assertIn("static func gml_bit_or(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLInt64.new(_to_int64_value(left) | _to_int64_value(right))", GML_RUNTIME_SCRIPT)
@@ -2614,6 +2636,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('return gml_unsupported_binary_type_error("GML divide", left, right)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_binary_type_error("GML integer divide", left, right)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_binary_type_error("GML modulo", left, right)', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_unsupported_binary_type_error("GML less-than comparison", left, right)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_unsupported_binary_type_error(api_name, left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_error(", GML_RUNTIME_SCRIPT)

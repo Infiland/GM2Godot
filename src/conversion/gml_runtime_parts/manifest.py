@@ -205,7 +205,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "50_static_types_and_clone.gd",
-        "Deep clone helpers and static type metadata.",
+        "Deep clone helpers, equality and ordering value semantics, and static type metadata.",
         depends_on=("00_prelude.gd", "20_methods_and_exceptions.gd", "40_arrays_structs_variables.gd"),
         tests=("tests/test_gml_runtime.py",),
     ),
@@ -253,7 +253,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "70_handle_string_helpers.gd",
-        "Handle parsing, string formatting, hashing, and value serialization helpers.",
+        "Handle parsing, Unicode codepoint string helpers, hashing, and value serialization helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "60_conversion_helpers.gd"),
         tests=("tests/test_gml_runtime.py",),
     ),

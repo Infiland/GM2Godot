@@ -140,7 +140,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Foundation", "Maths and Numbers", "Strings"),
         ("tests/test_gml_runtime.py",),
-        "Truthiness, equality, NaN, infinity, undefined, and string conversion need a full audit.",
+        "Runtime helpers centralize truthiness, equality, ordering, NaN, infinity, undefined, and string conversion semantics; exact string and handle edge cases remain partial.",
     ),
     _entry(
         "overview_conditionals",
@@ -153,7 +153,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Foundation",),
         ("tests/test_gml_transpiler.py",),
-        "Syntax exists; exact truthiness and coercion are tracked by #581.",
+        "Conditional expression output routes through runtime truthiness helpers; uncovered expression contexts remain partial.",
     ),
     _entry(
         "overview_cross_instance_addressing",
@@ -524,7 +524,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "GameMaker_Language/GML_Reference/Strings/Strings.htm",
         ("Strings",),
         ("tests/test_gml_runtime.py",),
-        "String subset exists; Unicode, byte length, formatting, and conversion edge cases are tracked by #581.",
+        "String helpers use Godot Unicode codepoint operations; byte length, formatting, locale case mapping, and template interpolation remain partial.",
     ),
     _entry(
         "reference_maths_numbers",

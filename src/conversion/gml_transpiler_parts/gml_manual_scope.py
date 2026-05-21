@@ -230,8 +230,8 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "source_diagnostic",
         "GameMaker_Language/GML_Overview/Language_Features.htm",
         ("Foundation",),
-        ("tests/test_gml_transpiler.py",),
-        "Most syntax exists; finally, with, switch traces, delete, and event inheritance are tracked by #585.",
+        ("tests/test_gml_transpiler.py", "tests/test_objects.py"),
+        "Finally preserves abrupt control flow, switch continue targets outer loops, delete covers member/accessor targets, and event inheritance has generated callback coverage.",
     ),
     _entry(
         "language_preprocessor_macros",

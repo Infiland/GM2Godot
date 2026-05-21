@@ -142,12 +142,13 @@ class TestObjectConverterBasic(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self) -> ObjectConverter:
+    def _make_converter(self, macro_configuration: str | None = None) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
+            macro_configuration=macro_configuration,
         )
 
     def test_converts_object_to_godot_dir(self):
@@ -380,12 +381,13 @@ class TestObjectConverterSubfolders(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self) -> ObjectConverter:
+    def _make_converter(self, macro_configuration: str | None = None) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
+            macro_configuration=macro_configuration,
         )
 
     def test_object_in_subfolder(self):
@@ -462,12 +464,13 @@ class TestScriptGeneration(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self) -> ObjectConverter:
+    def _make_converter(self, macro_configuration: str | None = None) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
+            macro_configuration=macro_configuration,
         )
 
     def _setup_object(self, name: str, sprite_name: str | None = None,
@@ -552,6 +555,31 @@ class TestScriptGeneration(unittest.TestCase):
             "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
             content,
         )
+
+    def test_script_event_sources_use_selected_macro_configuration(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(
+                "#if Android\n"
+                "score = 11;\n"
+                "#else\n"
+                "score = 22;\n"
+                "#endif\n"
+            )
+
+        converter = self._make_converter(macro_configuration="Android")
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("\tscore = 11", content)
+        self.assertNotIn("\tscore = 22", content)
 
     def test_script_with_create_event(self):
         """eventType 0 should produce func _ready()."""

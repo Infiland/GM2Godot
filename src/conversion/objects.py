@@ -60,11 +60,13 @@ class ObjectConverter(BaseConverter):
                  conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
                  max_workers: int | None = None,
-                 diagnostics: DiagnosticCollector | None = None) -> None:
+                 diagnostics: DiagnosticCollector | None = None,
+                 macro_configuration: str | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers,
                          diagnostics=diagnostics)
         self.godot_objects_path = os.path.join(self.godot_project_path, 'objects')
+        self.macro_configuration = macro_configuration
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of object name -> subfolder.
@@ -320,6 +322,7 @@ class ObjectConverter(BaseConverter):
                     source,
                     instance_variables=instance_variables,
                     inherited_event_call=inherited_event_call,
+                    macro_configuration=self.macro_configuration,
                     asset_names=asset_names,
                     static_scope_prefix=f"{object_name}.{mapping.godot_func}",
                     source_path=source_path,

@@ -99,6 +99,7 @@ class ScriptConverter(BaseConverter):
         compact_logging: bool = False,
         max_workers: int | None = None,
         diagnostics: DiagnosticCollector | None = None,
+        macro_configuration: str | None = None,
     ) -> None:
         super().__init__(
             gm_project_path,
@@ -112,6 +113,7 @@ class ScriptConverter(BaseConverter):
             diagnostics=diagnostics,
         )
         self.godot_scripts_path = os.path.join(self.godot_project_path, "scripts")
+        self.macro_configuration = macro_configuration
 
     def _asset_entries(self) -> tuple[AssetRegistryEntry, ...]:
         registry_converter = AssetRegistryConverter(
@@ -263,6 +265,7 @@ class ScriptConverter(BaseConverter):
             local_names=local_names,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
+            macro_configuration=self.macro_configuration,
             source_path=source_path,
             event=f"script:{declaration.name}",
             preserve_source_comments=True,
@@ -330,6 +333,7 @@ class ScriptConverter(BaseConverter):
             static_scope_prefix=f"{entry.name}.script",
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
+            macro_configuration=self.macro_configuration,
             source_path=source_path,
             event=f"script:{entry.name}",
             preserve_source_comments=True,

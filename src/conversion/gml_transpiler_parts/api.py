@@ -25,6 +25,7 @@ def transpile_gml_code(
     instance_variables: MutableSet[str] | None = None,
     inherited_event_call: str | None = None,
     macro_configuration: str | None = None,
+    active_preprocessor_symbols: Iterable[str] | None = None,
     top_level_global_scope: bool = False,
     legacy_global_builtins: bool = False,
     asset_names: Iterable[str] | None = None,
@@ -45,6 +46,7 @@ def transpile_gml_code(
         instance_variables=instance_variables,
         inherited_event_call=inherited_event_call,
         macro_configuration=macro_configuration,
+        active_preprocessor_symbols=active_preprocessor_symbols,
         top_level_global_scope=top_level_global_scope,
         legacy_global_builtins=legacy_global_builtins,
         asset_names=asset_names,
@@ -66,6 +68,7 @@ def transpile_gml_code_with_source_map(
     instance_variables: MutableSet[str] | None = None,
     inherited_event_call: str | None = None,
     macro_configuration: str | None = None,
+    active_preprocessor_symbols: Iterable[str] | None = None,
     top_level_global_scope: bool = False,
     legacy_global_builtins: bool = False,
     asset_names: Iterable[str] | None = None,
@@ -79,7 +82,11 @@ def transpile_gml_code_with_source_map(
     generated_line_offset: int = 0,
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
-    preprocessed = preprocess_gml_source(source, macro_configuration=macro_configuration)
+    preprocessed = preprocess_gml_source(
+        source,
+        macro_configuration=macro_configuration,
+        active_symbols=active_preprocessor_symbols,
+    )
     parser = _StatementParser(
         _tokenize(preprocessed.source),
         local_names=local_names,

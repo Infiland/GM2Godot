@@ -10,6 +10,7 @@ from typing import Iterable
 from src.localization import get_localized
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     EXTENSION_FUNCTION_MAPPING_FILENAME,
@@ -92,6 +93,7 @@ class ScriptConverter(BaseConverter):
         update_log_callback: LogCallback | None = None,
         compact_logging: bool = False,
         max_workers: int | None = None,
+        diagnostics: DiagnosticCollector | None = None,
     ) -> None:
         super().__init__(
             gm_project_path,
@@ -102,6 +104,7 @@ class ScriptConverter(BaseConverter):
             update_log_callback,
             compact_logging,
             max_workers=max_workers,
+            diagnostics=diagnostics,
         )
         self.godot_scripts_path = os.path.join(self.godot_project_path, "scripts")
 
@@ -332,12 +335,29 @@ class ScriptConverter(BaseConverter):
                 extension_function_mappings=extension_function_mappings,
             )
         except (OSError, GMLTranspileError) as exc:
-            self._safe_log(
-                get_localized("Console_Convertor_Scripts_ParseError").format(
-                    script_name=entry.name,
-                    error=str(exc),
-                )
+            message = get_localized("Console_Convertor_Scripts_ParseError").format(
+                script_name=entry.name,
+                error=str(exc),
             )
+            if self.diagnostics is not None:
+                if isinstance(exc, GMLTranspileError):
+                    self.diagnostics.add_transpile_failure(
+                        message,
+                        source_path=source_path,
+                        resource=entry.name,
+                        resource_type="script",
+                        workaround="Split or rewrite unsupported GML for this script, or add the missing runtime/API support tracked by the linked issue.",
+                    )
+                else:
+                    self.diagnostics.add(
+                        "warning",
+                        "GM2GD-SCRIPT-READ",
+                        message,
+                        source_path=source_path,
+                        resource=entry.name,
+                        resource_type="script",
+                    )
+            self._safe_log(message)
             return None
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)

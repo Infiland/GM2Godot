@@ -6,12 +6,14 @@ import threading
 import tempfile
 import shutil
 import unittest
+import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 
 
 class TestConversionCategories(unittest.TestCase):
@@ -93,6 +95,41 @@ class TestConverterSkipsDisabled(unittest.TestCase):
         # With every setting False, no converter log/status messages should appear
         self.assertEqual(self.logs, [])
         self.assertEqual(self.statuses, [])
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        ))
+
+    def test_conversion_writes_warning_diagnostics_report(self):
+        with open(os.path.join(self.gm_dir, "Test.yyp"), "w", encoding="utf-8") as f:
+            f.write('{"resources": [}')
+
+        conversion_running = threading.Event()
+        conversion_running.set()
+
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            status_callback=lambda msg: self.statuses.append(msg),
+            conversion_running=conversion_running,
+        )
+        all_keys = (
+            CONVERSION_CATEGORIES["assets"]
+            + CONVERSION_CATEGORIES["project"]
+            + CONVERSION_CATEGORIES["wip"]
+        )
+        settings = {key: _FakeBooleanVar(False) for key in all_keys}
+        settings["asset_registry"] = _FakeBooleanVar(True)
+
+        converter.convert(self.gm_dir, "windows", self.godot_dir, settings)
+
+        self.assertTrue(any("Warning: Could not parse GameMaker project .yyp" in log for log in self.logs))
+        report_path = os.path.join(self.godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+
+        self.assertEqual(report["summary"]["warning"], 1)
+        self.assertEqual(report["diagnostics"][0]["code"], "GM2GD-WARNING")
+        self.assertIn("Could not parse GameMaker project .yyp", report["diagnostics"][0]["message"])
 
 
 class TestConverterRespectsRunningFlag(unittest.TestCase):

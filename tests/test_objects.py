@@ -11,6 +11,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.objects import ObjectConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import JsonDict
 
 
@@ -628,6 +629,32 @@ class TestScriptGeneration(unittest.TestCase):
             content,
         )
         self.assertIn("\tprint(label)", content)
+
+    def test_transpile_failure_records_structured_diagnostic(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write('show_message_async("Hello");')
+
+        diagnostics = DiagnosticCollector()
+        converter = ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+        converter.convert_all()
+
+        recorded = diagnostics.diagnostics()
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0].code, "GM2GD-GML-TRANSPILE")
+        self.assertEqual(recorded[0].api, "show_message_async")
+        self.assertEqual(recorded[0].issue_number, 507)
+        self.assertEqual(recorded[0].resource, "o_test")
+        self.assertEqual(recorded[0].resource_type, "object")
+        self.assertEqual(recorded[0].event, "_ready")
 
     def test_child_event_inherited_preserves_parent_exit_boundary(self):
         """exit in an inherited parent event should not abort the child event."""

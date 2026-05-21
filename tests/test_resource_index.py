@@ -219,6 +219,37 @@ class TestGameMakerResourceIndex(unittest.TestCase):
             os.path.join("tilesets", "ts_ground", "ts_ground.yy")
         ))
 
+    def test_preserves_manifest_resource_metadata_and_resolves_by_graph_fields(self) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "Graph.yyp"),
+            "{\n"
+            '  "resources":[\n'
+            '    {"id":{"id":"uuid-sprite","name":"s_player","path":"sprites/s_player/s_player.yy"},'
+            '"resourceType":"GMSprite","tags":["hero"],"order":7}\n'
+            "  ],\n"
+            '  "RoomOrderNodes":[],\n'
+            '  "resourceType":"GMProject"\n'
+            "}\n",
+        )
+        self._write_resource("sprites", "s_player", "folders/Sprites/Actors.yy", "GMSprite")
+
+        index = self._build_index()
+        sprite = index.get_resource("sprites", "s_player")
+        resolved_by_uuid = index.resolve_indexed_resource(uuid="uuid-sprite")
+        resolved_by_path = index.resolve_indexed_resource(path="sprites\\s_player\\s_player.yy")
+        refs_by_type = index.find_project_resources(resource_type="GMSprite")
+
+        assert sprite is not None
+        assert resolved_by_uuid is not None
+        assert resolved_by_path is not None
+        self.assertEqual(sprite.uuid, "uuid-sprite")
+        self.assertEqual(sprite.resource_type, "GMSprite")
+        self.assertEqual(sprite.tags, ("hero",))
+        self.assertEqual(sprite.order, 7)
+        self.assertEqual(resolved_by_uuid.name, "s_player")
+        self.assertEqual(resolved_by_path.name, "s_player")
+        self.assertEqual([resource.name for resource in refs_by_type], ["s_player"])
+
     def test_indexes_extension_functions_from_yyp_metadata(self) -> None:
         self._write_yyp([("extensions", "AdSDK")])
         self._write_extension("AdSDK")

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from typing import cast
 
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
     ScriptConverter,
@@ -163,6 +164,51 @@ class TestScriptConverter(unittest.TestCase):
 
         legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
         self.assertIn('AdBridge.show_rewarded("zone_1")', legacy_script)
+
+    def test_records_migration_diagnostic_for_unsupported_multi_function_script_assets(self) -> None:
+        self._write_project()
+        project_path = self.gm_dir / "ScriptTest.yyp"
+        project = json.loads(project_path.read_text(encoding="utf-8"))
+        resources = cast(list[object], project["resources"])
+        resources.append(_resource_entry("scripts", "scr_multi"))
+        _write_json(project_path, project)
+        _write_json(
+            self.gm_dir / "scripts" / "scr_multi" / "scr_multi.yy",
+            {
+                "%Name": "scr_multi",
+                "name": "scr_multi",
+                "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
+                "resourceType": "GMScript",
+            },
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_multi" / "scr_multi.gml",
+            "function helper(a) { return a; } function scr_multi(a) { return helper(a); }",
+        )
+        diagnostics = DiagnosticCollector()
+
+        registry_path = ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(registry_path, str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH))
+        recorded = diagnostics.diagnostics()
+        self.assertEqual(len(recorded), 1)
+        diagnostic = recorded[0]
+        self.assertEqual(diagnostic.code, "GM2GD-GML-TRANSPILE")
+        self.assertEqual(diagnostic.resource, "scr_multi")
+        self.assertEqual(diagnostic.resource_type, "script")
+        self.assertIn("Unexpected token: function", diagnostic.message)
+        self.assertIn("Split or rewrite unsupported GML", diagnostic.workaround or "")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertIn('"name": "scr_add"', registry)
+        self.assertIn('"name": "scr_modern"', registry)
+        self.assertNotIn('"name": "scr_multi"', registry)
 
 
 if __name__ == "__main__":

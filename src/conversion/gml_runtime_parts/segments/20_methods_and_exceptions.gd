@@ -219,6 +219,20 @@ static func gml_method_get_index(method):
 	return method
 
 
+static func _gml_method_same(left, right):
+	if not is_method(left) or not is_method(right):
+		return false
+	var left_self = gml_method_get_self(left)
+	var right_self = gml_method_get_self(right)
+	if not gml_eq(left_self, right_self):
+		return false
+	var left_index = gml_method_get_index(left)
+	var right_index = gml_method_get_index(right)
+	if typeof(left_index) == TYPE_CALLABLE or typeof(right_index) == TYPE_CALLABLE:
+		return typeof(left_index) == TYPE_CALLABLE and typeof(right_index) == TYPE_CALLABLE and left_index == right_index
+	return gml_eq(left_index, right_index)
+
+
 static func _gml_method_call_args(array_args, offset, num_args):
 	var source = [] if array_args == null else array_args
 	if typeof(source) != TYPE_ARRAY:

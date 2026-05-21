@@ -192,7 +192,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Script Functions",),
         ("tests/test_scripts.py", "tests/test_script_runtime_godot.py"),
-        "Script wrappers exist; function identity and legacy/current import variants need hardening.",
+        "Script wrappers preserve callable identity for registry/global lookups; unsupported multi-function current-script assets emit migration diagnostics.",
     ),
     _entry(
         "overview_methods",
@@ -205,7 +205,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Script Functions", "Foundation"),
         ("tests/test_gml_transpiler.py",),
-        "Bound methods exist; method identity and method_get_* parity remain open.",
+        "Bound methods expose self/index helpers and compare identity by bound self plus method index.",
     ),
     _entry(
         "overview_statics_constructors",
@@ -218,7 +218,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         _OVERVIEW_DOCS,
         ("Arrays", "Accessors", "Foundation", "Script Functions"),
         ("tests/test_gml_transpiler.py", "tests/test_gml_runtime.py"),
-        "Core syntax exists; static chains, copy/reference parity, and accessor edge cases remain open.",
+        "Constructor static chains, inherited statics, closure-backed function literals, and accessor edge cases have focused runtime coverage.",
     ),
     _entry(
         "language_control_flow",

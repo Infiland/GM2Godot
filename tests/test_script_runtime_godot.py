@@ -89,12 +89,24 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
 
             const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
 
+            var _parent_constructor_method = null
+
             func _check(condition, message):
             \tif not condition:
             \t\tpush_error(str(message))
             \t\tget_tree().quit(1)
             \t\treturn false
             \treturn true
+
+            func _identity(value = 0):
+            \treturn value
+
+            func _parent_constructor(instance, value):
+            \tGMRuntime.gml_variable_instance_set(instance, "parent_value", value)
+
+            func _child_constructor(instance, value):
+            \tGMRuntime.gml_constructor_inherit(instance, _parent_constructor_method, [value])
+            \tGMRuntime.gml_variable_instance_set(instance, "child_value", value + 1)
 
             func _ready():
             \tcall_deferred("_run")
@@ -113,11 +125,43 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
 
             \tvar callable = GMRuntime.gml_global_function("scr_modern")
+            \tif not _check(GMRuntime.gml_eq(callable, GMRuntime.gml_script_get_callable(modern_id)), "script callable identity failed"):
+            \t\treturn
             \tvar callbacks = [callable]
             \tvar method_result = GMRuntime.gml_method_call(callbacks[0], [4, 6])
             \tif not _check(method_result == 10, "callable lookup did not remain method-callable: " + str(method_result)):
             \t\treturn
             \tif not _check(GMRuntime.gml_script_execute(modern_id, [5]) == 9, "optional default argument failed"):
+            \t\treturn
+
+            \tvar method_a = GMRuntime.gml_method(self, Callable(self, "_identity"))
+            \tvar method_b = GMRuntime.gml_method(self, Callable(self, "_identity"))
+            \tvar method_c = GMRuntime.gml_method(GMRuntime.gml_struct({}), Callable(self, "_identity"))
+            \tif not _check(GMRuntime.gml_eq(method_a, method_b), "bound method identity failed"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_eq(method_a, method_c), "bound method self identity failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_method_get_self(method_a) == self, "method_get_self failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_method_get_index(method_a) == Callable(self, "_identity"), "method_get_index failed"):
+            \t\treturn
+
+            \t_parent_constructor_method = GMRuntime.gml_constructor(self, Callable(self, "_parent_constructor"))
+            \tvar child_constructor = GMRuntime.gml_constructor(self, Callable(self, "_child_constructor"))
+            \tvar parent_static = GMRuntime.gml_static_get(_parent_constructor_method)
+            \tvar child_static = GMRuntime.gml_static_get(child_constructor)
+            \tGMRuntime.gml_struct_set(parent_static, "kind", "parent")
+            \tGMRuntime.gml_struct_set(child_static, "kind", "child")
+            \tvar instance = GMRuntime.gml_new(child_constructor, [6])
+            \tif not _check(GMRuntime.gml_variable_instance_get(instance, "parent_value") == 6, "parent constructor did not run"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_variable_instance_get(instance, "child_value") == 7, "child constructor did not run"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_is_instanceof(instance, child_constructor), "child instanceof failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_is_instanceof(instance, _parent_constructor_method), "parent instanceof failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_struct_get(GMRuntime.gml_static_get(GMRuntime.gml_static_get(instance)), "kind") == "parent", "static chain parent lookup failed"):
             \t\treturn
 
             \tprint("SCRIPT_RUNTIME_SMOKE_OK")

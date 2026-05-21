@@ -82,6 +82,8 @@ pip install -r requirements.txt
 
 ## Usage
 
+### GUI
+
 1. **Launch the Application**
 ```bash
 python main.py
@@ -105,6 +107,24 @@ python main.py
 - Monitor progress through the progress bar
 - View detailed logs in the console
 - Use the stop button if needed
+
+### CLI
+
+The same entrypoint can run headless conversion, analysis, validation, and report generation:
+
+```bash
+python main.py report --report-dir reports
+python main.py analyze --gm-project path/to/GameMakerProject --report-dir reports --target-platform windows
+python main.py convert --gm-project path/to/GameMakerProject --godot-project path/to/GodotProject --groups assets,project --report-dir reports --target-platform windows
+python main.py validate --godot-project path/to/GodotProject --fail-on-unsupported
+```
+
+CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md` and `gml_api_compatibility.md`.
+
+Useful conversion filters:
+- `--groups assets,project,wip` selects conversion groups.
+- `--only asset_registry,scripts,objects` runs specific converter keys instead of groups.
+- `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, and `--max-unsupported` turn diagnostics into non-zero exit codes for CI.
 
 ## Contributing
 
@@ -147,6 +167,11 @@ The project uses PySide6 (not Tkinter). Required packages are:
 
 Run the application using:
 python main.py
+
+Headless verification examples:
+python main.py report --report-dir reports
+python main.py analyze --gm-project path/to/GameMakerProject --report-dir reports --target-platform windows
+python main.py validate --godot-project path/to/GodotProject --fail-on-unsupported
 
 Verification for coding agents:
 - If Python or generated-code logic changes, run ./venv/bin/pyright --warnings and relevant tests.

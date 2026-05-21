@@ -11,7 +11,14 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import map_event
 from src.conversion.gml_runtime import write_gml_runtime
-from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.gml_transpiler import (
+    GMLSourceMap,
+    GMLTranspileError,
+    analyze_gml_source_identifiers,
+    merge_gml_source_maps,
+    transpile_gml_code_with_source_map,
+    write_gml_source_map,
+)
 from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
@@ -30,6 +37,21 @@ class ObjectProcessResult(TypedDict):
     has_sprite: bool
     sprite_name: str | None
     event_count: int
+
+
+def _line_offset_for_block(script_content: str, block: str) -> int:
+    script_lines = script_content.splitlines()
+    block_lines = block.splitlines()
+    if not block_lines:
+        return 0
+    for index in range(0, len(script_lines) - len(block_lines) + 1):
+        if script_lines[index:index + len(block_lines)] == block_lines:
+            return index
+    first_line = block_lines[0]
+    for index, line in enumerate(script_lines):
+        if line == first_line:
+            return index
+    return 0
 
 
 class ObjectConverter(BaseConverter):
@@ -254,8 +276,9 @@ class ObjectConverter(BaseConverter):
         event_list: list[JsonDict],
         inherited_event_functions: set[str] | None = None,
         asset_names: set[str] | None = None,
-    ) -> tuple[dict[str, str], set[str]]:
+    ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap]]:
         code_bodies: dict[str, str] = {}
+        source_maps: dict[str, GMLSourceMap] = {}
         instance_variables: set[str] = set()
         inherited_functions = inherited_event_functions or set()
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
@@ -287,13 +310,24 @@ class ObjectConverter(BaseConverter):
                 else None
             )
             try:
-                code_bodies[mapping.godot_func] = transpile_gml_code(
+                self._record_event_source_diagnostics(
+                    source,
+                    source_path,
+                    object_name,
+                    mapping.godot_func,
+                )
+                result = transpile_gml_code_with_source_map(
                     source,
                     instance_variables=instance_variables,
                     inherited_event_call=inherited_event_call,
                     asset_names=asset_names,
                     static_scope_prefix=f"{object_name}.{mapping.godot_func}",
+                    source_path=source_path,
+                    event=mapping.godot_func,
+                    preserve_source_comments=True,
                 )
+                code_bodies[mapping.godot_func] = result.code
+                source_maps[mapping.godot_func] = result.source_map
             except GMLTranspileError as exc:
                 message = (
                     "Warning: Could not transpile GameMaker event code for "
@@ -303,6 +337,8 @@ class ObjectConverter(BaseConverter):
                     self.diagnostics.add_transpile_failure(
                         message,
                         source_path=source_path,
+                        line=exc.line,
+                        column=exc.column,
                         resource=object_name,
                         resource_type="object",
                         event=mapping.godot_func,
@@ -310,7 +346,38 @@ class ObjectConverter(BaseConverter):
                     )
                 self._safe_log(message)
 
-        return code_bodies, instance_variables
+        return code_bodies, instance_variables, source_maps
+
+    def _record_event_source_diagnostics(
+        self,
+        source: str,
+        source_path: str,
+        object_name: str,
+        event_name: str,
+    ) -> None:
+        if self.diagnostics is None:
+            return
+        for diagnostic in analyze_gml_source_identifiers(source):
+            self.diagnostics.add(
+                diagnostic.severity,
+                diagnostic.code,
+                diagnostic.message,
+                source_path=source_path,
+                line=diagnostic.line,
+                column=diagnostic.column,
+                resource=object_name,
+                resource_type="object",
+                event=event_name,
+                workaround=(
+                    f"Rename '{diagnostic.identifier}'"
+                    + (
+                        f" to '{diagnostic.suggested_name}'"
+                        if diagnostic.suggested_name
+                        else ""
+                    )
+                    + " before conversion."
+                ),
+            )
 
     def _inherited_event_call(self, mapping: EventMapping) -> str:
         if not mapping.params:
@@ -399,7 +466,7 @@ class ObjectConverter(BaseConverter):
             object_dir = os.path.join(self.godot_objects_path, object_name)
         script_res_path = self._object_script_res_path(object_name, subfolder)
 
-        code_bodies, instance_variables = self._load_event_code_bodies(
+        code_bodies, instance_variables, event_source_maps = self._load_event_code_bodies(
             object_name,
             event_list,
             inherited_event_functions=inherited_event_functions,
@@ -434,9 +501,27 @@ class ObjectConverter(BaseConverter):
         gd_path = os.path.join(object_dir, f"{object_name}.gd")
         with open(gd_path, 'w', encoding='utf-8') as f:
             f.write(script_content)
+        self._write_object_source_map(gd_path, script_content, code_bodies, event_source_maps)
 
         return {"success": True, "name": object_name, "has_sprite": sprite_name is not None,
                 "sprite_name": sprite_name, "event_count": len(event_list)}
+
+    def _write_object_source_map(
+        self,
+        gd_path: str,
+        script_content: str,
+        code_bodies: Mapping[str, str],
+        source_maps: Mapping[str, GMLSourceMap],
+    ) -> None:
+        offset_maps: list[GMLSourceMap] = []
+        for event_name, source_map in source_maps.items():
+            body = code_bodies.get(event_name)
+            if not body:
+                continue
+            offset = _line_offset_for_block(script_content, body)
+            offset_maps.append(source_map.with_generated_line_offset(offset))
+        if offset_maps:
+            write_gml_source_map(gd_path, merge_gml_source_maps(offset_maps))
 
     def convert_objects(self) -> None:
         os.makedirs(self.godot_objects_path, exist_ok=True)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from src.conversion.gml_transpiler_parts.api import transpile_gml_code
+from src.conversion.gml_transpiler_parts.api import transpile_gml_code_with_source_map
 from src.conversion.gml_transpiler_parts.constants import _BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.expression_parser import (
     _ExpressionParser,
@@ -78,6 +79,17 @@ from src.conversion.gml_transpiler_parts.preprocessor import (
     GMLPreprocessorDiagnostic,
     preprocess_gml_source,
 )
+from src.conversion.gml_transpiler_parts.source_map import (
+    GMLSourceDiagnostic,
+    GMLSourceMap,
+    GMLSourceMapEntry,
+    GMLTranspileResult,
+    analyze_gml_source_identifiers,
+    gml_source_map_path,
+    merge_gml_source_maps,
+    render_gml_source_header,
+    write_gml_source_map,
+)
 from src.conversion.gml_transpiler_parts.tokens import _expression_tokens, _tokenize
 
 __all__ = [
@@ -91,6 +103,10 @@ __all__ = [
     "GMLExtensionFunctionMapping",
     "GMLPreprocessResult",
     "GMLPreprocessorDiagnostic",
+    "GMLSourceDiagnostic",
+    "GMLSourceMap",
+    "GMLSourceMapEntry",
+    "GMLTranspileResult",
     "_ArrayLiteral",
     "_Binary",
     "_BuiltinVariableMetadata",
@@ -137,11 +153,17 @@ __all__ = [
     "load_gml_extension_function_mappings",
     "normalize_extension_function_mappings",
     "normalize_extension_functions",
+    "analyze_gml_source_identifiers",
+    "gml_source_map_path",
+    "merge_gml_source_maps",
     "preprocess_gml_source",
     "render_gml_manual_scope_markdown",
+    "render_gml_source_header",
     "transpile_gml_code",
+    "transpile_gml_code_with_source_map",
     "transpile_gml_condition",
     "transpile_gml_expression",
     "validate_gml_manual_scope_against_manifest",
     "validate_gml_function_arity",
+    "write_gml_source_map",
 ]

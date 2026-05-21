@@ -1,5 +1,6 @@
 import os
 # pyright: reportPrivateUsage=false
+import json
 import sys
 import shutil
 import tempfile
@@ -577,12 +578,18 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        with open(f"{gd_path}.gmlmap.json", "r", encoding="utf-8") as f:
+            source_map = json.load(f)
 
         self.assertIn("func _ready():", content)
         self.assertIn("\tvar speed = GMRuntime.gml_mul(base_speed, 2)", content)
         self.assertIn("\tif GMRuntime.gml_is_nullish(score):\n\t\tscore = 0", content)
         self.assertIn("\tscore = GMRuntime.gml_add(score, GMRuntime.gml_int_div(speed, 2))", content)
         self.assertNotIn("\tpass", content)
+        self.assertTrue(source_map["entries"])
+        self.assertEqual(source_map["entries"][0]["source_path"], source_path)
+        self.assertEqual(source_map["entries"][0]["event"], "_ready")
+        self.assertEqual(source_map["entries"][0]["source_line"], 1)
 
     def test_script_transpiles_infinity_runtime_support(self):
         """Infinity-sensitive GML should use the shared runtime support layer."""

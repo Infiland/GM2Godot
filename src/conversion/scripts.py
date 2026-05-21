@@ -17,9 +17,14 @@ from src.conversion.gml_transpiler import (
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
+    GMLSourceMap,
+    analyze_gml_source_identifiers,
+    merge_gml_source_maps,
+    render_gml_source_header,
     load_gml_extension_function_mappings,
-    transpile_gml_code,
+    transpile_gml_code_with_source_map,
     transpile_gml_expression,
+    write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.gml_transpiler_parts.identifiers import (
@@ -225,11 +230,13 @@ class ScriptConverter(BaseConverter):
         self,
         declaration: _ScriptFunctionDeclaration,
         *,
+        source_path: str,
         asset_names: set[str],
         static_scope_prefix: str,
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
-    ) -> str:
+        generated_line_offset: int = 0,
+    ) -> tuple[str, GMLSourceMap]:
         local_names = {parameter.name for parameter in declaration.parameters}
         lines: list[str] = []
         for parameter in declaration.parameters:
@@ -248,7 +255,7 @@ class ScriptConverter(BaseConverter):
                 f"\tif {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
                 f"{parameter_name} = {default_value}"
             )
-        body = transpile_gml_code(
+        result = transpile_gml_code_with_source_map(
             declaration.body,
             return_depth=1,
             asset_names=asset_names,
@@ -256,61 +263,113 @@ class ScriptConverter(BaseConverter):
             local_names=local_names,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
+            source_path=source_path,
+            event=f"script:{declaration.name}",
+            preserve_source_comments=True,
+            generated_line_offset=generated_line_offset + len(lines),
         )
-        lines.append(body)
-        return "\n".join(lines)
+        lines.append(result.code)
+        return "\n".join(lines), result.source_map
 
     def _render_script(
         self,
         entry: AssetRegistryEntry,
         source: str,
         *,
+        source_path: str,
         asset_names: set[str],
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, GMLSourceMap]:
+        header = render_gml_source_header(
+            source_path=source_path,
+            event=f"script:{entry.name}",
+            source=source,
+        )
         modern_declaration = self._modern_function_declaration(source)
         if modern_declaration is not None:
             params = ", ".join(
                 f"{_sanitize_gdscript_identifier(parameter.name)} = null"
                 for parameter in modern_declaration.parameters
             )
-            body = self._modern_function_body(
+            prefix = (
+                "extends RefCounted\n\n"
+                f"{header}"
+                'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
+                f"func _gm_script_call({params}):\n"
+            )
+            body, source_map = self._modern_function_body(
                 modern_declaration,
+                source_path=source_path,
                 asset_names=asset_names,
                 static_scope_prefix=f"{entry.name}.{modern_declaration.name}",
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
+                generated_line_offset=prefix.count("\n"),
             )
             return (
-                "extends RefCounted\n\n"
-                'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
-                f"func _gm_script_call({params}):\n"
-                f"{body}\n"
-                "\treturn GMRuntime.gml_undefined()\n\n"
-                "func gm2godot_callable():\n"
-                '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
+                prefix
+                + f"{body}\n"
+                + "\treturn GMRuntime.gml_undefined()\n\n"
+                + "func gm2godot_callable():\n"
+                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
                 False,
+                source_map,
             )
 
-        body = transpile_gml_code(
+        prefix = (
+            "extends RefCounted\n\n"
+            f"{header}"
+            'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
+            "func _gm_script_call():\n"
+        )
+        result = transpile_gml_code_with_source_map(
             source,
             return_depth=1,
             asset_names=asset_names,
             static_scope_prefix=f"{entry.name}.script",
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
+            source_path=source_path,
+            event=f"script:{entry.name}",
+            preserve_source_comments=True,
+            generated_line_offset=prefix.count("\n"),
         )
         return (
-            "extends RefCounted\n\n"
-            'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
-            "func _gm_script_call():\n"
-            f"{body}\n"
-            "\treturn GMRuntime.gml_undefined()\n\n"
-            "func gm2godot_callable():\n"
-            '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
+            prefix
+            + f"{result.code}\n"
+            + "\treturn GMRuntime.gml_undefined()\n\n"
+            + "func gm2godot_callable():\n"
+            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
             True,
+            result.source_map,
         )
+
+    def _record_source_diagnostics(
+        self, source: str, source_path: str, entry: AssetRegistryEntry
+    ) -> None:
+        if self.diagnostics is None:
+            return
+        for diagnostic in analyze_gml_source_identifiers(source):
+            self.diagnostics.add(
+                diagnostic.severity,
+                diagnostic.code,
+                diagnostic.message,
+                source_path=source_path,
+                line=diagnostic.line,
+                column=diagnostic.column,
+                resource=entry.name,
+                resource_type="script",
+                workaround=(
+                    f"Rename '{diagnostic.identifier}'"
+                    + (
+                        f" to '{diagnostic.suggested_name}'"
+                        if diagnostic.suggested_name
+                        else ""
+                    )
+                    + " before conversion."
+                ),
+            )
 
     def _write_script(
         self,
@@ -327,9 +386,11 @@ class ScriptConverter(BaseConverter):
         try:
             with open(source_path, "r", encoding="utf-8") as source_file:
                 source = source_file.read()
-            script_content, legacy_arguments = self._render_script(
+            self._record_source_diagnostics(source, source_path, entry)
+            script_content, legacy_arguments, source_map = self._render_script(
                 entry,
                 source,
+                source_path=source_path,
                 asset_names=asset_names,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
@@ -344,6 +405,8 @@ class ScriptConverter(BaseConverter):
                     self.diagnostics.add_transpile_failure(
                         message,
                         source_path=source_path,
+                        line=exc.line,
+                        column=exc.column,
                         resource=entry.name,
                         resource_type="script",
                         workaround="Split or rewrite unsupported GML for this script, or add the missing runtime/API support tracked by the linked issue.",
@@ -363,6 +426,10 @@ class ScriptConverter(BaseConverter):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(script_content)
+        write_gml_source_map(
+            output_path,
+            merge_gml_source_maps([source_map], source_path=source_path, event=f"script:{entry.name}"),
+        )
         return ScriptRegistryEntry(
             id=entry.id,
             name=entry.name,

@@ -9,6 +9,11 @@ from .extension_functions import (
     normalize_extension_functions,
 )
 from .preprocessor import preprocess_gml_source
+from .source_map import (
+    GMLTranspileResult,
+    build_gml_source_map,
+    render_gml_source_header,
+)
 from .statement_parser import _StatementParser
 from .tokens import _tokenize
 
@@ -27,8 +32,53 @@ def transpile_gml_code(
     return_depth: int = 0,
     extension_functions: object = None,
     extension_function_mappings: object = None,
+    source_path: str | None = None,
+    event: str | None = None,
+    preserve_source_comments: bool = False,
+    generated_line_offset: int = 0,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
+    return transpile_gml_code_with_source_map(
+        source,
+        indent=indent,
+        local_names=local_names,
+        instance_variables=instance_variables,
+        inherited_event_call=inherited_event_call,
+        macro_configuration=macro_configuration,
+        top_level_global_scope=top_level_global_scope,
+        legacy_global_builtins=legacy_global_builtins,
+        asset_names=asset_names,
+        static_scope_prefix=static_scope_prefix,
+        return_depth=return_depth,
+        extension_functions=extension_functions,
+        extension_function_mappings=extension_function_mappings,
+        source_path=source_path,
+        event=event,
+        preserve_source_comments=preserve_source_comments,
+        generated_line_offset=generated_line_offset,
+    ).code
+
+
+def transpile_gml_code_with_source_map(
+    source: str,
+    indent: str = "	",
+    local_names: Iterable[str] | None = None,
+    instance_variables: MutableSet[str] | None = None,
+    inherited_event_call: str | None = None,
+    macro_configuration: str | None = None,
+    top_level_global_scope: bool = False,
+    legacy_global_builtins: bool = False,
+    asset_names: Iterable[str] | None = None,
+    static_scope_prefix: str | None = None,
+    return_depth: int = 0,
+    extension_functions: object = None,
+    extension_function_mappings: object = None,
+    source_path: str | None = None,
+    event: str | None = None,
+    preserve_source_comments: bool = False,
+    generated_line_offset: int = 0,
+) -> GMLTranspileResult:
+    """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(source, macro_configuration=macro_configuration)
     parser = _StatementParser(
         _tokenize(preprocessed.source),
@@ -47,6 +97,21 @@ def transpile_gml_code(
     lines = parser.parse()
 
     if not lines:
-        return f"{indent}pass"
+        code = f"{indent}pass"
+    else:
+        code = "\n".join(f"{indent}{line}" if line else "" for line in lines)
 
-    return "\n".join(f"{indent}{line}" if line else "" for line in lines)
+    if preserve_source_comments:
+        header = render_gml_source_header(source_path=None, event=None, source=source)
+        if header:
+            comment_block = "".join(f"{indent}{line}\n" for line in header.rstrip().splitlines())
+            code = f"{comment_block}{code}"
+
+    source_map = build_gml_source_map(
+        source,
+        code,
+        source_path=source_path,
+        event=event,
+        generated_line_offset=generated_line_offset,
+    )
+    return GMLTranspileResult(code=code, source_map=source_map)

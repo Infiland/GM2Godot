@@ -16,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.asset_registry import (
     ASSET_REGISTRY_RELATIVE_PATH,
     AssetRegistryConverter,
+    GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
 )
 
 
@@ -226,6 +227,79 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertIn("static func gml_asset_registry_entries():", content)
         self.assertIn('"name": "s_player"', content)
         self.assertIn('"type": "sprite"', content)
+
+    def test_generates_actionable_texture_and_audio_group_registries(self) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "Groups.yyp"),
+            {
+                "resources": [_resource_entry("sprites", "s_player"), _resource_entry("sounds", "snd_theme")],
+                "TextureGroups": [
+                    {
+                        "%Name": "Characters",
+                        "isDynamic": True,
+                        "dynamicPath": "texturegroups/characters",
+                        "targets": ["windows"],
+                    }
+                ],
+                "AudioGroups": [
+                    {"%Name": "audiogroup_default"},
+                    {"%Name": "audiogroup_music", "targets": ["windows"], "gain": 0.75},
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites.yy",
+            {"textureGroupId": {"name": "Characters", "path": "texturegroups/Characters"}},
+        )
+        self._write_resource(
+            "sounds",
+            "snd_theme",
+            "GMSound",
+            "folders/Sounds.yy",
+            {
+                "soundFile": "theme.ogg",
+                "audioGroupId": {"name": "audiogroup_music", "path": "audiogroups/audiogroup_music.yy"},
+                "preload": False,
+                "compression": 1,
+                "type": 1,
+            },
+        )
+
+        converter = self._converter()
+        entries = converter.build_entries()
+        texture_groups, audio_groups = converter.build_group_registries(entries)
+        texture_by_name = {str(group["name"]): group for group in texture_groups}
+        audio_by_name = {str(group["name"]): group for group in audio_groups}
+
+        self.assertEqual(texture_by_name["Characters"]["asset_names"], ["s_player"])
+        self.assertTrue(texture_by_name["Characters"]["dynamic"])
+        self.assertEqual(texture_by_name["Characters"]["dynamic_path"], "texturegroups/characters")
+        self.assertEqual(texture_by_name["Characters"]["targets"], ["windows"])
+        self.assertEqual(audio_by_name["audiogroup_music"]["asset_names"], ["snd_theme"])
+        self.assertFalse(audio_by_name["audiogroup_music"]["loaded"])
+        self.assertEqual(audio_by_name["audiogroup_music"]["gain"], 0.75)
+        self.assertTrue(audio_by_name["audiogroup_default"]["loaded"])
+
+        registry_path = converter.convert_all()
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = f.read()
+        self.assertIn("const TEXTURE_GROUPS =", registry)
+        self.assertIn("static func gml_audio_group_registry_entries():", registry)
+        self.assertIn('"texture_group_dynamic": true', registry)
+
+        report_path = os.path.join(self.godot_dir, GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH)
+        with open(report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+        codes = {diagnostic["code"] for diagnostic in report["diagnostics"]}
+        self.assertIn("texture_group_dynamic_runtime", codes)
+        self.assertIn("audio_group_memory_runtime", codes)
+        self.assertIn("sound_preload_lazy", codes)
+        self.assertIn("sound_import_semantics", codes)
 
 
 if __name__ == "__main__":

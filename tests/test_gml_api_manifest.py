@@ -269,6 +269,12 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(texturegroup_get_names.status, "partial")
         self.assertEqual(texturegroup_get_names.issue_number, 568)
         self.assertIn("texture-page", texturegroup_get_names.notes)
+        audio_group_load = get_gml_api_entry("audio_group_load")
+        self.assertIsNotNone(audio_group_load)
+        assert audio_group_load is not None
+        self.assertEqual(audio_group_load.status, "partial")
+        self.assertEqual(audio_group_load.issue_number, 495)
+        self.assertIn("compatibility state", audio_group_load.notes)
         skeleton_animation_set = get_gml_api_entry("skeleton_animation_set")
         self.assertIsNotNone(skeleton_animation_set)
         assert skeleton_animation_set is not None

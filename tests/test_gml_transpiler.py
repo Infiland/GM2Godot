@@ -3267,9 +3267,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_sound_global_volume(0.8)",
         )
 
+    def test_audio_group_helpers_lower_to_runtime_and_group_constants(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "loaded = audio_group_is_loaded(audiogroup_music);"
+                "audio_group_load(audiogroup_music);"
+                "progress = audio_group_load_progress(audiogroup_music);"
+                "name = audio_group_name(audiogroup_music);"
+                "audio_group_set_gain(audiogroup_music, 0.5, 0);"
+                "gain = audio_group_get_gain(audiogroup_music);"
+                "audio_group_stop_all(audiogroup_music);"
+                "audio_group_unload(audiogroup_music);",
+                indent="",
+            ),
+            'loaded = GMRuntime.gml_audio_group_is_loaded("audiogroup_music")\n'
+            'GMRuntime.gml_audio_group_load("audiogroup_music")\n'
+            'progress = GMRuntime.gml_audio_group_load_progress("audiogroup_music")\n'
+            'name = GMRuntime.gml_audio_group_name("audiogroup_music")\n'
+            'GMRuntime.gml_audio_group_set_gain("audiogroup_music", 0.5, 0)\n'
+            'gain = GMRuntime.gml_audio_group_get_gain("audiogroup_music")\n'
+            'GMRuntime.gml_audio_group_stop_all("audiogroup_music")\n'
+            'GMRuntime.gml_audio_group_unload("audiogroup_music")',
+        )
+
     def test_audio_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound.*expects 3 to 7.*got 2"):
             transpile_gml_code("audio_play_sound(snd_hit, 10);", indent="", asset_names={"snd_hit"})
+        with self.assertRaisesRegex(GMLTranspileError, "audio_group_set_gain.*expects 2 to 3.*got 4"):
+            transpile_gml_code("audio_group_set_gain(audiogroup_music, 1, 0, 0);", indent="")
 
     def test_room_flow_helpers_lower_room_assets_to_runtime(self):
         self.assertEqual(

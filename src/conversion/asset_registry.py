@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectTextureGroup,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -17,7 +22,16 @@ from src.conversion.path_registry import write_path_registry
 
 ASSET_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_asset_registry.gd")
 ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"
+GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join("gm2godot", "group_compatibility_report.json")
 STATIC_ASSET_ID_MASK = 0x3FFFFFFF
+
+
+def _empty_int_list() -> list[int]:
+    return []
+
+
+def _empty_str_list() -> list[str]:
+    return []
 
 
 @dataclass(frozen=True)
@@ -57,6 +71,48 @@ class _ProjectResource:
     yy_path: str
     source_path: str
     raw_data: JsonDict
+
+
+@dataclass
+class _TextureGroupRegistryEntry:
+    name: str
+    parent: str = ""
+    dynamic: bool = False
+    dynamic_path: str = ""
+    targets: tuple[str, ...] = ()
+    asset_ids: list[int] = field(default_factory=_empty_int_list)
+    asset_names: list[str] = field(default_factory=_empty_str_list)
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "name": self.name,
+            "parent": self.parent,
+            "dynamic": self.dynamic,
+            "dynamic_path": self.dynamic_path,
+            "targets": list(self.targets),
+            "asset_ids": sorted(self.asset_ids),
+            "asset_names": sorted(self.asset_names),
+        }
+
+
+@dataclass
+class _AudioGroupRegistryEntry:
+    name: str
+    targets: tuple[str, ...] = ()
+    loaded: bool = False
+    gain: float = 1.0
+    asset_ids: list[int] = field(default_factory=_empty_int_list)
+    asset_names: list[str] = field(default_factory=_empty_str_list)
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "name": self.name,
+            "targets": list(self.targets),
+            "loaded": self.loaded,
+            "gain": self.gain,
+            "asset_ids": sorted(self.asset_ids),
+            "asset_names": sorted(self.asset_names),
+        }
 
 
 class AssetRegistryConverter(BaseConverter):
@@ -127,6 +183,9 @@ class AssetRegistryConverter(BaseConverter):
             max_workers=max_workers,
         )
         self.organize_sounds_by_audio_group = bool(organize_sounds_by_audio_group)
+        self.project_manifest: GameMakerProjectManifest = load_gamemaker_project_manifest(
+            self.gm_project_path
+        )
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
         resources = sorted(
@@ -163,11 +222,19 @@ class AssetRegistryConverter(BaseConverter):
 
     def convert_all(self) -> str:
         entries = self.build_entries()
+        texture_groups, audio_groups = self.build_group_registries(entries)
         registry_path = os.path.join(self.godot_project_path, ASSET_REGISTRY_RELATIVE_PATH)
         os.makedirs(os.path.dirname(registry_path), exist_ok=True)
 
         with open(registry_path, "w", encoding="utf-8") as f:
-            f.write(render_asset_registry_script(entries))
+            f.write(
+                render_asset_registry_script(
+                    entries,
+                    texture_groups=texture_groups,
+                    audio_groups=audio_groups,
+                )
+            )
+        self._write_group_compatibility_report(entries, texture_groups, audio_groups)
         write_path_registry(self.gm_project_path, self.godot_project_path, entries)
 
         self.log_callback(
@@ -177,6 +244,16 @@ class AssetRegistryConverter(BaseConverter):
             )
         )
         return registry_path
+
+    def build_group_registries(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> tuple[tuple[JsonDict, ...], tuple[JsonDict, ...]]:
+        """Return generated texture/audio group registry entries."""
+        return (
+            self._texture_group_registry(entries),
+            self._audio_group_registry(entries),
+        )
 
     def _load_project_resources(self) -> tuple[_ProjectResource, ...]:
         yyp_path = self._find_yyp_path()
@@ -367,7 +444,7 @@ class AssetRegistryConverter(BaseConverter):
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
             if texture_group:
-                return {"texture_group": texture_group}
+                return self._texture_group_asset_metadata(texture_group)
             return {}
 
         if resource.kind != "sounds":
@@ -384,6 +461,180 @@ class AssetRegistryConverter(BaseConverter):
             "compression": self._metadata_int(resource.raw_data.get("compression"), 0),
             "type": self._metadata_int(resource.raw_data.get("type"), 0),
         }
+
+    def _texture_group_asset_metadata(self, texture_group: str) -> JsonDict:
+        metadata: JsonDict = {"texture_group": texture_group}
+        group = self._manifest_texture_group(texture_group)
+        if group is None:
+            return metadata
+        metadata["texture_group_dynamic"] = group.is_dynamic
+        metadata["texture_group_targets"] = list(group.targets)
+        if group.dynamic_path:
+            metadata["texture_group_dynamic_path"] = group.dynamic_path
+        return metadata
+
+    def _texture_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonDict, ...]:
+        groups: dict[str, _TextureGroupRegistryEntry] = {}
+        for manifest_group in self.project_manifest.texture_groups:
+            if not manifest_group.name:
+                continue
+            groups[manifest_group.name] = _TextureGroupRegistryEntry(
+                name=manifest_group.name,
+                parent=manifest_group.parent,
+                dynamic=manifest_group.is_dynamic,
+                dynamic_path=manifest_group.dynamic_path,
+                targets=manifest_group.targets,
+            )
+
+        for entry in entries:
+            if entry.asset_type not in {"sprite", "font", "tileset"}:
+                continue
+            metadata = entry.metadata or {}
+            group_name = self._metadata_string(metadata.get("texture_group"), "Default")
+            group = groups.setdefault(group_name, _TextureGroupRegistryEntry(name=group_name))
+            group.asset_ids.append(entry.id)
+            group.asset_names.append(entry.name)
+
+        return tuple(groups[name].to_dict() for name in sorted(groups))
+
+    def _audio_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonDict, ...]:
+        groups: dict[str, _AudioGroupRegistryEntry] = {}
+        for manifest_group in self.project_manifest.audio_groups:
+            if not manifest_group.name:
+                continue
+            groups[manifest_group.name] = _AudioGroupRegistryEntry(
+                name=manifest_group.name,
+                targets=manifest_group.targets,
+                loaded=self._audio_group_initial_loaded(manifest_group.name, manifest_group.raw_data),
+                gain=self._metadata_float(manifest_group.raw_data.get("gain"), 1.0),
+            )
+
+        groups.setdefault(
+            "audiogroup_default",
+            _AudioGroupRegistryEntry(name="audiogroup_default", loaded=True),
+        )
+        for entry in entries:
+            if entry.asset_type != "sound":
+                continue
+            metadata = entry.metadata or {}
+            group_name = self._metadata_string(metadata.get("audio_group"), "audiogroup_default")
+            group = groups.setdefault(
+                group_name,
+                _AudioGroupRegistryEntry(
+                    name=group_name,
+                    loaded=group_name in {"", "audiogroup_default"},
+                ),
+            )
+            group.asset_ids.append(entry.id)
+            group.asset_names.append(entry.name)
+
+        return tuple(groups[name].to_dict() for name in sorted(groups))
+
+    def _write_group_compatibility_report(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+        texture_groups: tuple[JsonDict, ...],
+        audio_groups: tuple[JsonDict, ...],
+    ) -> str:
+        report_path = os.path.join(self.godot_project_path, GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH)
+        os.makedirs(os.path.dirname(report_path), exist_ok=True)
+        payload = self._group_compatibility_report(entries, texture_groups, audio_groups)
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write("\n")
+        return report_path
+
+    def _group_compatibility_report(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+        texture_groups: tuple[JsonDict, ...],
+        audio_groups: tuple[JsonDict, ...],
+    ) -> JsonDict:
+        diagnostics: list[JsonDict] = []
+        for group in texture_groups:
+            name = self._metadata_string(group.get("name"), "Default")
+            if bool(group.get("dynamic", False)):
+                diagnostics.append(self._group_diagnostic(
+                    "texture_group_dynamic_runtime",
+                    "warning",
+                    name,
+                    "Godot imports textures as resources; GM2Godot tracks dynamic texture-group load state but cannot evict packed texture pages exactly like GameMaker.",
+                ))
+            if group.get("targets"):
+                diagnostics.append(self._group_diagnostic(
+                    "texture_group_platform_targets",
+                    "info",
+                    name,
+                    "Texture group platform export targets are preserved in metadata; Godot export filtering must be handled by export presets or project-specific tooling.",
+                ))
+
+        for group in audio_groups:
+            name = self._metadata_string(group.get("name"), "audiogroup_default")
+            if name != "audiogroup_default":
+                diagnostics.append(self._group_diagnostic(
+                    "audio_group_memory_runtime",
+                    "warning",
+                    name,
+                    "Audio group load/unload updates GM2Godot compatibility state; Godot ResourceLoader may still cache imported streams after unload.",
+                ))
+            if group.get("targets"):
+                diagnostics.append(self._group_diagnostic(
+                    "audio_group_platform_targets",
+                    "info",
+                    name,
+                    "Audio group platform export targets are preserved in metadata; Godot export filtering must be handled by export presets or project-specific tooling.",
+                ))
+
+        for entry in entries:
+            if entry.asset_type != "sound":
+                continue
+            metadata = entry.metadata or {}
+            if metadata.get("preload") is False:
+                diagnostics.append(self._group_diagnostic(
+                    "sound_preload_lazy",
+                    "info",
+                    entry.name,
+                    "Sound preload=false is preserved; runtime loading occurs through ResourceLoader when the sound or audio group is used.",
+                ))
+            if self._metadata_int(metadata.get("compression"), 0) != 0 or self._metadata_int(metadata.get("type"), 0) != 0:
+                diagnostics.append(self._group_diagnostic(
+                    "sound_import_semantics",
+                    "warning",
+                    entry.name,
+                    "Sound compression/type metadata is preserved, but Godot import parameters cannot exactly reproduce every GameMaker audio packaging mode.",
+                ))
+
+        return {
+            "format_version": 1,
+            "texture_groups": list(texture_groups),
+            "audio_groups": list(audio_groups),
+            "diagnostics": diagnostics,
+        }
+
+    @staticmethod
+    def _group_diagnostic(code: str, severity: str, subject: str, message: str) -> JsonDict:
+        return {
+            "code": code,
+            "severity": severity,
+            "subject": subject,
+            "message": message,
+        }
+
+    def _manifest_texture_group(self, name: str) -> ProjectTextureGroup | None:
+        for group in self.project_manifest.texture_groups:
+            if group.name == name:
+                return group
+        return None
+
+    @staticmethod
+    def _audio_group_initial_loaded(name: str, raw_data: JsonDict) -> bool:
+        if name in {"", "audiogroup_default"}:
+            return True
+        for key in ("loaded", "preload", "loadOnStartup"):
+            value = raw_data.get(key)
+            if isinstance(value, bool):
+                return value
+        return False
 
     def _sequence_metadata(self, raw_data: JsonDict) -> JsonDict:
         length = raw_data.get("length")
@@ -558,22 +809,40 @@ class AssetRegistryConverter(BaseConverter):
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _metadata_string(value: object, default: str) -> str:
+        return value if isinstance(value, str) and value else default
 
-def render_asset_registry_script(entries: tuple[AssetRegistryEntry, ...]) -> str:
+
+def render_asset_registry_script(
+    entries: tuple[AssetRegistryEntry, ...],
+    *,
+    texture_groups: tuple[JsonDict, ...] = (),
+    audio_groups: tuple[JsonDict, ...] = (),
+) -> str:
     payload = [entry.to_godot_dict() for entry in entries]
     assets_literal = json.dumps(payload, indent=2, sort_keys=True)
+    texture_groups_literal = json.dumps(list(texture_groups), indent=2, sort_keys=True)
+    audio_groups_literal = json.dumps(list(audio_groups), indent=2, sort_keys=True)
     return (
         "extends RefCounted\n\n"
         "const FORMAT_VERSION = 1\n"
         f"const ASSETS = {assets_literal}\n\n"
+        f"const TEXTURE_GROUPS = {texture_groups_literal}\n\n"
+        f"const AUDIO_GROUPS = {audio_groups_literal}\n\n"
         "static func gml_asset_registry_entries():\n"
-        "\treturn ASSETS\n"
+        "\treturn ASSETS\n\n"
+        "static func gml_texture_group_registry_entries():\n"
+        "\treturn TEXTURE_GROUPS\n\n"
+        "static func gml_audio_group_registry_entries():\n"
+        "\treturn AUDIO_GROUPS\n"
     )
 
 
 __all__ = [
     "ASSET_REGISTRY_RELATIVE_PATH",
     "ASSET_REGISTRY_RESOURCE_PATH",
+    "GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH",
     "AssetRegistryConverter",
     "AssetRegistryEntry",
     "render_asset_registry_script",

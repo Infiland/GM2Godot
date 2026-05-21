@@ -94,13 +94,14 @@ class TestScriptConverter(unittest.TestCase):
             "function scr_modern(a, b = 4) { return a + b; }",
         )
 
-    def _converter(self) -> ScriptConverter:
+    def _converter(self, macro_configuration: str | None = None) -> ScriptConverter:
         return ScriptConverter(
             self.gm_dir,
             self.godot_dir,
             log_callback=lambda message: self.logs.append(str(message)),
             progress_callback=lambda _value: None,
             conversion_running=lambda: True,
+            macro_configuration=macro_configuration,
         )
 
     def test_converts_scripts_and_generated_registry(self) -> None:
@@ -164,6 +165,23 @@ class TestScriptConverter(unittest.TestCase):
 
         legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
         self.assertIn('AdBridge.show_rewarded("zone_1")', legacy_script)
+
+    def test_applies_macro_configuration_to_script_sources(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "#if Android\n"
+            "function scr_modern() { return 11; }\n"
+            "#else\n"
+            "function scr_modern() { return 22; }\n"
+            "#endif\n",
+        )
+
+        self._converter(macro_configuration="Android").convert_all()
+
+        modern_script = (self.godot_dir / "scripts" / "Game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertIn("return 11", modern_script)
+        self.assertNotIn("return 22", modern_script)
 
     def test_records_migration_diagnostic_for_unsupported_multi_function_script_assets(self) -> None:
         self._write_project()

@@ -1009,12 +1009,86 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "score = 4",
         )
 
+    def test_preprocessor_evaluates_boolean_and_comparison_expressions(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "#define BUILD 2\n"
+                "#if (BUILD >= 2 && defined(Android)) || false\n"
+                "score = 7\n"
+                "#else\n"
+                "score = 0\n"
+                "#endif\n",
+                indent="",
+                macro_configuration="Android",
+            ),
+            "score = 7",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro CHANNEL 'beta'\n"
+                "#if CHANNEL == 'beta' && !defined(DISABLED)\n"
+                "score = 3\n"
+                "#else\n"
+                "score = 0\n"
+                "#endif\n",
+                indent="",
+            ),
+            "score = 3",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#define BUILD 1\n"
+                "#if BUILD > 1 || Windows\n"
+                "score = 1\n"
+                "#else\n"
+                "score = 2\n"
+                "#endif\n",
+                indent="",
+                macro_configuration="Android",
+            ),
+            "score = 2",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "#define MASK $10\n"
+                "#define OFFSET -1\n"
+                "#if MASK == 0x10 && !OFFSET ^^ false\n"
+                "score = 5\n"
+                "#else\n"
+                "score = 0\n"
+                "#endif\n",
+                indent="",
+            ),
+            "score = 5",
+        )
+
     def test_preprocessor_reports_unsupported_directives_with_source_context(self):
         with self.assertRaisesRegex(
             GMLTranspileError,
             r"Unsupported preprocessor directive #import at line 1: #import \"native.gml\"",
         ):
             transpile_gml_code('#import "native.gml"\nscore = 1', indent="")
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            r"Unsupported preprocessor directive #include at line 1: #include \"shared.gml\"",
+        ):
+            transpile_gml_code('#include "shared.gml"\nscore = 1', indent="")
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            r"Unsupported preprocessor directive #gml_pragma at line 1: #gml_pragma global",
+        ):
+            transpile_gml_code("#gml_pragma global\nscore = 1", indent="")
+
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            r"Unsupported preprocessor condition 'BUILD &&' at line 2: #if BUILD &&",
+        ):
+            transpile_gml_code("#define BUILD 1\n#if BUILD &&\nscore = 1\n#endif", indent="")
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            r"Unsupported preprocessor condition 'BUILD == 2' at line 2: #if BUILD == 2",
+        ):
+            transpile_gml_code("#define BUILD 1 + 1\n#if BUILD == 2\nscore = 1\n#endif", indent="")
 
     def test_preprocessor_preserves_macro_lines_in_structured_result(self):
         result = preprocess_gml_source("#region R\n#macro VALUE 7\n#endregion\nscore = VALUE")

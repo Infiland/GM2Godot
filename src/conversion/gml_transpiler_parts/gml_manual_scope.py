@@ -243,8 +243,8 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "source_diagnostic",
         "GameMaker_Language/GML_Overview/Preprocessor.htm",
         ("Preprocessor",),
-        ("tests/test_gml_transpiler.py",),
-        "Directive policy and full preprocessor expressions are tracked by #586.",
+        ("tests/test_gml_transpiler.py", "tests/test_scripts.py", "tests/test_objects.py"),
+        "Boolean/comparison preprocessor expressions, selected configuration symbols, and unsupported directive diagnostics have regression coverage.",
     ),
     _entry(
         "reference_variable_functions",

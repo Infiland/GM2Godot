@@ -129,6 +129,7 @@ class Converter:
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
                 diagnostics=self.diagnostics,
+                macro_configuration=gm_platform,
             ).convert_all(), "Console_Convertor_Scripts"),
             ("objects", lambda: ObjectConverter(
                 gm_path, godot_path, self.log_callback,
@@ -137,6 +138,7 @@ class Converter:
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
                 diagnostics=self.diagnostics,
+                macro_configuration=gm_platform,
             ).convert_all(), "Console_Convertor_Objects"),
             ("rooms", lambda: RoomConverter(
                 gm_path, godot_path, self.log_callback,

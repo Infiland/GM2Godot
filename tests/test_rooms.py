@@ -596,6 +596,18 @@ class TestRoomConverter(unittest.TestCase):
         self.assertTrue(is_empty_gamemaker_tile(GAMEMAKER_EMPTY_TILE_SENTINEL))
         self.assertFalse(is_empty_gamemaker_tile(1))
 
+    def test_decodes_raw_gamemaker_tile_data_format_zero(self):
+        decoded = decode_tile_compressed_data(
+            2,
+            2,
+            [1, 0, GAMEMAKER_EMPTY_TILE_SENTINEL, 2],
+            tile_data_format=0,
+        )
+
+        self.assertEqual(decoded, [1, 0, GAMEMAKER_EMPTY_TILE_SENTINEL, 2])
+        with self.assertRaisesRegex(ValueError, "decoded 1 cells, expected 4"):
+            decode_tile_compressed_data(2, 2, [1], tile_data_format=0)
+
     def test_gamemaker_tile_flags_map_to_godot_alternative_bits(self):
         raw_tile = 3 | GAMEMAKER_TILE_MIRROR_BIT | GAMEMAKER_TILE_FLIP_BIT | GAMEMAKER_TILE_ROTATE_BIT
         tile = decode_gamemaker_tile(raw_tile)
@@ -642,6 +654,34 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
         self.assertIn('metadata/gamemaker_tile_empty_values = [0, -2147483648]', content)
+
+    def test_tile_layer_accepts_raw_tile_data_format_zero(self):
+        self._write_yyp(["r_raw_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_raw_tiles", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 2,
+                    "SerialiseHeight": 2,
+                    "TileDataFormat": 0,
+                    "TileCompressedData": [1, 0, GAMEMAKER_EMPTY_TILE_SENTINEL, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_raw_tiles")
+
+        self.assertIn('[node name="TileMap" type="TileMapLayer" parent="Tiles"]', content)
+        self.assertIn('metadata/gamemaker_tile_data_format = 0', content)
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 4', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 2', content)
+        self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
 
     def test_missing_tileset_warns_without_emitting_tilemaplayer(self):
         self._write_yyp(["r_tiles"])

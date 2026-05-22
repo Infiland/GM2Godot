@@ -81,7 +81,7 @@ def _write_registries(project_dir: Path) -> int:
             asset_type="path",
             type_name="Path",
             source_path="paths/path_patrol/path_patrol.yy",
-            godot_path="",
+            godot_path="res://paths/path_patrol/path_patrol.tscn",
             legacy_id="paths/path_patrol/path_patrol.yy",
         ),
     )
@@ -90,7 +90,9 @@ def _write_registries(project_dir: Path) -> int:
             id=path_id,
             name="path_patrol",
             closed=False,
+            kind=0,
             precision=4,
+            godot_path="res://paths/path_patrol/path_patrol.tscn",
             points=(PathPoint(0, 0), PathPoint(20, 0)),
         ),
     )

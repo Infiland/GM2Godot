@@ -19,6 +19,7 @@ from src.conversion.type_defs import (
     StrPath,
 )
 from src.conversion.path_registry import write_path_registry
+from src.conversion.animation_curve_registry import write_animation_curve_registry
 
 ASSET_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_asset_registry.gd")
 ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"
@@ -126,6 +127,7 @@ class AssetRegistryConverter(BaseConverter):
         "scripts": "script",
         "fonts": "font",
         "paths": "path",
+        "animcurves": "animation_curve",
         "shaders": "shader",
         "tilesets": "tileset",
         "timelines": "timeline",
@@ -140,6 +142,7 @@ class AssetRegistryConverter(BaseConverter):
         "scripts": "Script",
         "fonts": "Font",
         "paths": "Path",
+        "animcurves": "Animation Curve",
         "shaders": "Shader",
         "tilesets": "Tile Set",
         "timelines": "Timeline",
@@ -151,6 +154,7 @@ class AssetRegistryConverter(BaseConverter):
         "objects": ".tscn",
         "rooms": ".tscn",
         "tilesets": ".tres",
+        "paths": ".tscn",
     }
     KIND_ORDER: ClassVar[dict[str, int]] = {
         kind: index for index, kind in enumerate(RESOURCE_TYPE_BY_KIND)
@@ -236,6 +240,7 @@ class AssetRegistryConverter(BaseConverter):
             )
         self._write_group_compatibility_report(entries, texture_groups, audio_groups)
         write_path_registry(self.gm_project_path, self.godot_project_path, entries)
+        write_animation_curve_registry(self.gm_project_path, self.godot_project_path, entries)
 
         self.log_callback(
             "Generated GameMaker asset registry: {path} ({count} assets)".format(

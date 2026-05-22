@@ -143,6 +143,39 @@ class TestTileSetConverterBasic(unittest.TestCase):
         self.assertIn('TileSetAtlasSource', content)
         self.assertIn('Vector2i(16, 16)', content)
         self.assertIn('0:0/0 = 0', content)
+        self.assertIn('metadata/gamemaker_tileset_tile_count = 4', content)
+        self.assertIn('metadata/gamemaker_tileset_animation_frames = []', content)
+
+    def test_warns_when_preserving_tileset_metadata(self):
+        yy_content = (
+            '{\n'
+            '  "$GMTileSet": "v1",\n'
+            '  "%Name": "ts_ground",\n'
+            '  "spriteId": {"name": "s_ground", "path": "sprites/s_ground/s_ground.yy",},\n'
+            '  "tileWidth": 16,\n'
+            '  "tileHeight": 16,\n'
+            '  "tile_count": 2,\n'
+            '  "out_columns": 2,\n'
+            '  "tileAnimationFrames": [{"frames": [0, 1], "duration": 2,}],\n'
+            '  "brushes": [{"name": "grass",}],\n'
+            '  "autoTileSets": [{"name": "terrain",}],\n'
+            '  "tileSetCollisions": [{"tileId": 1, "points": [[0, 0], [16, 0]],}],\n'
+            '  "parent": {"name": "Tilesets", "path": "folders/Tilesets.yy",},\n'
+            '  "resourceType": "GMTileSet",\n'
+            '  "resourceVersion": "2.0",\n'
+            '}'
+        )
+        with open(os.path.join(self.gm_dir, "tilesets", "ts_ground", "ts_ground.yy"), "w") as f:
+            f.write(yy_content)
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertTrue(any(
+            "preserves animation frames, collision data, auto-tile metadata, brush metadata"
+            in log
+            for log in self.logs
+        ))
 
     def test_copies_sprite_image(self):
         converter = self._make_converter()
@@ -262,6 +295,36 @@ class TestParseTilesetYY(unittest.TestCase):
         result = cast(TilesetData, result)
         self.assertEqual(result["sprite_name"], "s_tc")
         self.assertEqual(result["tileWidth"], 16)
+
+    def test_preserves_animation_collision_and_autotile_metadata(self):
+        content = (
+            '{\n'
+            '  "spriteId": {"name": "s_meta", "path": "sprites/s_meta/s_meta.yy",},\n'
+            '  "tileWidth": 16,\n'
+            '  "tileHeight": 16,\n'
+            '  "tile_count": 2,\n'
+            '  "out_columns": 2,\n'
+            '  "tileAnimationFrames": [{"frames": [0, 1], "duration": 2,}],\n'
+            '  "tileAnimationSpeed": 12.5,\n'
+            '  "brushes": [{"name": "grass",}],\n'
+            '  "autoTileSets": [{"name": "terrain",}],\n'
+            '  "tileSetCollisions": [{"tileId": 1, "points": [[0, 0], [16, 0]],}],\n'
+            '  "out_tilehborder": 1,\n'
+            '  "out_tilevborder": 2,\n'
+            '}'
+        )
+        self._write_tileset_yy("ts_meta", content)
+
+        result = self.converter._parse_tileset_yy("ts_meta")
+        self.assertIsNotNone(result)
+        result = cast(TilesetData, result)
+        self.assertEqual(result["tileAnimationSpeed"], 12.5)
+        self.assertEqual(result["out_tilehborder"], 1)
+        tres = self.converter._generate_tileset_tres("ts_meta", result)
+        self.assertIn('metadata/gamemaker_tileset_animation_speed = 12.5', tres)
+        self.assertIn('metadata/gamemaker_tileset_animation_frames = [{"frames": [0, 1], "duration": 2}]', tres)
+        self.assertIn('metadata/gamemaker_tileset_auto_tile_sets = [{"name": "terrain"}]', tres)
+        self.assertIn('metadata/gamemaker_tileset_collisions = [{"tileId": 1', tres)
 
 
 class TestTileSetConverterSubfolders(unittest.TestCase):

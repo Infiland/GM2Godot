@@ -23,6 +23,13 @@ class TilesetData(TypedDict):
     tileyoff: int
     tile_count: int
     out_columns: int
+    tileAnimationFrames: list[JsonDict]
+    tileAnimationSpeed: float
+    brushes: list[JsonDict]
+    autoTileSets: list[JsonDict]
+    tileSetCollisions: list[JsonDict]
+    out_tilehborder: int
+    out_tilevborder: int
 
 
 class TilesetSuccess(TypedDict):
@@ -106,6 +113,13 @@ class TileSetConverter(BaseConverter):
                 "tileyoff": int(data.get('tileyoff', 0)),
                 "tile_count": int(data.get('tile_count', 0)),
                 "out_columns": int(data.get('out_columns', 0)),
+                "tileAnimationFrames": _json_dict_list(data.get("tileAnimationFrames")),
+                "tileAnimationSpeed": _float(data.get("tileAnimationSpeed"), 15.0),
+                "brushes": _json_dict_list(data.get("brushes")),
+                "autoTileSets": _json_dict_list(data.get("autoTileSets")),
+                "tileSetCollisions": _json_dict_list(data.get("tileSetCollisions")),
+                "out_tilehborder": int(data.get("out_tilehborder", 0)),
+                "out_tilevborder": int(data.get("out_tilevborder", 0)),
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
@@ -198,6 +212,21 @@ class TileSetConverter(BaseConverter):
         lines.append('[resource]')
         lines.append(f'tile_size = Vector2i({tile_w}, {tile_h})')
         lines.append('sources/0 = SubResource("TileSetAtlasSource_1")')
+        lines.append(f"metadata/gamemaker_tileset_tile_count = {tileset_data['tile_count']}")
+        lines.append(f"metadata/gamemaker_tileset_out_columns = {tileset_data['out_columns']}")
+        lines.append(f"metadata/gamemaker_tileset_animation_speed = {_format_number(tileset_data['tileAnimationSpeed'])}")
+        lines.append(
+            "metadata/gamemaker_tileset_animation_frames = "
+            + json.dumps(tileset_data["tileAnimationFrames"])
+        )
+        lines.append("metadata/gamemaker_tileset_brushes = " + json.dumps(tileset_data["brushes"]))
+        lines.append("metadata/gamemaker_tileset_auto_tile_sets = " + json.dumps(tileset_data["autoTileSets"]))
+        lines.append(
+            "metadata/gamemaker_tileset_collisions = "
+            + json.dumps(tileset_data["tileSetCollisions"])
+        )
+        lines.append(f"metadata/gamemaker_tileset_out_tilehborder = {tileset_data['out_tilehborder']}")
+        lines.append(f"metadata/gamemaker_tileset_out_tilevborder = {tileset_data['out_tilevborder']}")
         lines.append('')
 
         return '\n'.join(lines)
@@ -244,8 +273,29 @@ class TileSetConverter(BaseConverter):
         tres_path = os.path.join(output_dir, tileset_name + '.tres')
         with open(tres_path, 'w', encoding='utf-8') as f:
             f.write(tres_content)
+        self._warn_preserved_metadata(tileset_name, tileset_data)
 
         return {"success": True, "name": tileset_name, "tileset_data": tileset_data}
+
+    def _warn_preserved_metadata(self, tileset_name: str, tileset_data: TilesetData) -> None:
+        preserved_features: list[str] = []
+        if tileset_data["tileAnimationFrames"]:
+            preserved_features.append("animation frames")
+        if tileset_data["tileSetCollisions"]:
+            preserved_features.append("collision data")
+        if tileset_data["autoTileSets"]:
+            preserved_features.append("auto-tile metadata")
+        if tileset_data["brushes"]:
+            preserved_features.append("brush metadata")
+        if not preserved_features:
+            return
+        self._safe_log(
+            "Warning: GameMaker tileset {name} preserves {features} as Godot metadata; "
+            "native TileSet behavior may require follow-up runtime/editor support.".format(
+                name=tileset_name,
+                features=", ".join(preserved_features),
+            )
+        )
 
     def convert_tilesets(self) -> None:
         """Main tileset conversion method."""
@@ -316,3 +366,27 @@ class TileSetConverter(BaseConverter):
 
     def convert_all(self) -> None:
         self.convert_tilesets()
+
+
+def _json_dict_list(value: object) -> list[JsonDict]:
+    if not isinstance(value, list):
+        return []
+    items: list[JsonDict] = []
+    for item in cast(list[object], value):
+        if isinstance(item, dict):
+            items.append(cast(JsonDict, item))
+    return items
+
+
+def _float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, int | float):
+        return float(value)
+    return default
+
+
+def _format_number(value: float) -> str:
+    if value == int(value):
+        return str(int(value))
+    return ("{:.6f}".format(value)).rstrip("0").rstrip(".")

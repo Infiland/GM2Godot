@@ -8,6 +8,7 @@ from .extension_functions import (
     normalize_extension_function_mappings,
     normalize_extension_functions,
 )
+from .model import _ScopeContext
 from .preprocessor import preprocess_gml_source
 from .source_map import (
     GMLTranspileResult,
@@ -37,6 +38,9 @@ def transpile_gml_code(
     event: str | None = None,
     preserve_source_comments: bool = False,
     generated_line_offset: int = 0,
+    self_expression: str = "self",
+    other_expression: str = "other",
+    instance_target: str | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     return transpile_gml_code_with_source_map(
@@ -58,6 +62,9 @@ def transpile_gml_code(
         event=event,
         preserve_source_comments=preserve_source_comments,
         generated_line_offset=generated_line_offset,
+        self_expression=self_expression,
+        other_expression=other_expression,
+        instance_target=instance_target,
     ).code
 
 
@@ -80,6 +87,9 @@ def transpile_gml_code_with_source_map(
     event: str | None = None,
     preserve_source_comments: bool = False,
     generated_line_offset: int = 0,
+    self_expression: str = "self",
+    other_expression: str = "other",
+    instance_target: str | None = None,
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(
@@ -98,6 +108,11 @@ def transpile_gml_code_with_source_map(
         global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
         asset_names=asset_names,
         static_scope_prefix=static_scope_prefix,
+        scope_context=_ScopeContext(
+            self_expression=self_expression,
+            other_expression=other_expression,
+            instance_target=instance_target,
+        ),
         extension_functions=normalize_extension_functions(extension_functions),
         extension_function_mappings=normalize_extension_function_mappings(extension_function_mappings),
     )

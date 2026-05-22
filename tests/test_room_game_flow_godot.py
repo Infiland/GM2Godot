@@ -192,6 +192,132 @@ def _write_scripts(project_dir: Path) -> None:
 
 
 class TestRoomGameFlowGodotSmoke(unittest.TestCase):
+    def test_room_creation_code_lifecycle_trace_order(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                '[application]\nconfig/name="RoomLifecycleSmoke"\nrun/main_scene="res://rooms/r_one/r_one.tscn"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+            _write_registry(project_dir)
+            _write_text(
+                project_dir / "probe.gd",
+                textwrap.dedent(
+                    """\
+                    extends Node2D
+
+                    const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+                    func _ready():
+                    \tGMRuntime.gml_global_scope()["trace"] = []
+                    \tGMRuntime.gml_global_scope()["trace"].append("object_create")
+
+                    func _on_game_start():
+                    \tGMRuntime.gml_global_scope()["trace"].append("game_start")
+
+                    func _on_room_start():
+                    \tGMRuntime.gml_global_scope()["trace"].append("room_start")
+                    \tcall_deferred("_verify_trace")
+
+                    func _verify_trace():
+                    \tvar expected = ["object_create", "instance_creation_code", "game_start", "room_creation_code", "room_start"]
+                    \tvar trace = GMRuntime.gml_global_scope()["trace"]
+                    \tif trace != expected:
+                    \t\tpush_error("Lifecycle trace mismatch: " + str(trace))
+                    \t\tget_tree().quit(1)
+                    \t\treturn
+                    \tif GMRuntime.gml_variable_instance_get(self, "creation_ran") != true:
+                    \t\tpush_error("Instance creation code did not run against the instance scope")
+                    \t\tget_tree().quit(1)
+                    \t\treturn
+                    \tif int(position.x) != 42:
+                    \t\tpush_error("Instance creation code did not update scoped x")
+                    \t\tget_tree().quit(1)
+                    \t\treturn
+                    \tprint("ROOM_CREATION_LIFECYCLE_TRACE_OK")
+                    \tget_tree().quit(0)
+                    """
+                ),
+            )
+            _write_text(
+                project_dir / "rooms" / "r_one" / "r_one.gd",
+                textwrap.dedent(
+                    """\
+                    extends "res://gm2godot/gml_room_node.gd"
+
+                    func _gm2godot_run_instance_creation_code(_gm_instance):
+                    \tif _gm_instance == null:
+                    \t\treturn false
+                    \tif str(_gm_instance.get_meta("gamemaker_creation_code_source_path")) != "rooms/r_one/InstanceCreationCode_Probe.gml":
+                    \t\treturn false
+                    \tGMRuntime.gml_global_scope()["trace"].append("instance_creation_code")
+                    \tGMRuntime.gml_variable_instance_set(_gm_instance, "creation_ran", true)
+                    \tGMRuntime.gml_variable_instance_set(_gm_instance, "x", 42)
+                    \treturn true
+
+                    func _gm2godot_room_creation_code():
+                    \tGMRuntime.gml_global_scope()["trace"].append("room_creation_code")
+                    """
+                ),
+            )
+            _write_text(
+                project_dir / "rooms" / "r_one" / "r_one.tscn",
+                textwrap.dedent(
+                    """\
+                    [gd_scene load_steps=3 format=3]
+
+                    [ext_resource type="Script" path="res://rooms/r_one/r_one.gd" id="gm_room_runtime"]
+                    [ext_resource type="Script" path="res://probe.gd" id="probe"]
+
+                    [node name="r_one" type="Node2D"]
+                    script = ExtResource("gm_room_runtime")
+                    metadata/gamemaker_room_width = 320
+                    metadata/gamemaker_room_height = 180
+                    metadata/gamemaker_room_persistent = false
+
+                    [node name="Probe" type="Node2D" parent="."]
+                    script = ExtResource("probe")
+                    metadata/gamemaker_instance_name = "Probe"
+                    metadata/gamemaker_has_creation_code = true
+                    metadata/gamemaker_creation_code_file_exists = true
+                    metadata/gamemaker_creation_code_source_path = "rooms/r_one/InstanceCreationCode_Probe.gml"
+                    metadata/gamemaker_instance_creation_order_index = 0
+                    """
+                ),
+            )
+
+            godot_env = dict(os.environ)
+            godot_env["HOME"] = str(project_dir)
+            result = subprocess.run(
+                [
+                    godot_binary,
+                    "--headless",
+                    "--log-file",
+                    str(project_dir / "godot.log"),
+                    "--path",
+                    str(project_dir),
+                    "--scene",
+                    "res://rooms/r_one/r_one.tscn",
+                    "--quit-after",
+                    "10",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+                env=godot_env,
+            )
+            output = result.stdout + result.stderr
+
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("ROOM_CREATION_LIFECYCLE_TRACE_OK", output)
+
     def test_room_runtime_transitions_lifecycle_and_persistent_nodes(self) -> None:
         godot_binary = _find_godot_binary()
         if godot_binary is None:

@@ -21,9 +21,12 @@ static func gml_room_enter_scene(scene, force = false):
 	_gml_room_pending_entry = null
 	gml_layer_register_scene(scene)
 	_gml_room_update_current(entry, scene)
+	_gml_room_warn_persistent_room(scene)
+	_gml_room_run_instance_creation_code(scene)
 	if not _gml_room_game_started:
 		_gml_room_game_started = true
 		_gml_room_dispatch_lifecycle(scene, "_on_game_start")
+	_gml_room_run_room_creation_code(scene)
 	_gml_room_dispatch_lifecycle(scene, "_on_room_start")
 	return true
 
@@ -175,6 +178,55 @@ static func _gml_room_dispatch_lifecycle(root_node, method_name):
 			node.call(method_name)
 
 
+static func _gml_room_run_instance_creation_code(scene):
+	if scene == null or not scene.has_method("_gm2godot_run_instance_creation_code"):
+		return
+	for entry in _gml_room_instance_creation_code_entries(scene):
+		var node = entry["node"]
+		if _gml_room_node_was_restored_persistent(node):
+			_gml_room_warn_persistent_instance_creation_code(node)
+			continue
+		scene.call("_gm2godot_run_instance_creation_code", node)
+
+
+static func _gml_room_run_room_creation_code(scene):
+	if scene != null and scene.has_method("_gm2godot_room_creation_code"):
+		scene.call("_gm2godot_room_creation_code")
+
+
+static func _gml_room_instance_creation_code_entries(root_node):
+	var entries = []
+	var traversal_order = 0
+	for node in _gml_room_tree_nodes(root_node):
+		if node == root_node:
+			continue
+		if not node.has_meta("gamemaker_has_creation_code") or not bool(node.get_meta("gamemaker_has_creation_code")):
+			continue
+		if node.has_meta("gamemaker_creation_code_file_exists") and not bool(node.get_meta("gamemaker_creation_code_file_exists")):
+			continue
+		var order_index = 1073741824
+		if node.has_meta("gamemaker_instance_creation_order_index"):
+			var metadata_order = node.get_meta("gamemaker_instance_creation_order_index")
+			if metadata_order != null:
+				order_index = int(metadata_order)
+		entries.append({
+			"node": node,
+			"order_index": order_index,
+			"traversal_order": traversal_order,
+		})
+		traversal_order += 1
+	entries.sort_custom(_gml_room_creation_code_entry_less)
+	return entries
+
+
+static func _gml_room_creation_code_entry_less(left, right):
+	var left_order = int(left["order_index"])
+	var right_order = int(right["order_index"])
+	if left_order == right_order:
+		return int(left["traversal_order"]) < int(right["traversal_order"])
+	return left_order < right_order
+
+
 static func _gml_room_tree_nodes(root_node):
 	var nodes = []
 	if root_node == null:
@@ -208,6 +260,7 @@ static func _gml_room_restore_persistent_instances(scene):
 	for node in persistent_root.get_children():
 		node.reparent(scene, true)
 		node.set_meta("_gm2godot_room_preserving_persistent", false)
+		node.set_meta("_gm2godot_room_restored_persistent", true)
 
 
 static func _gml_room_node_is_persistent(node):
@@ -218,6 +271,37 @@ static func _gml_room_node_is_persistent(node):
 	if node is Object and _object_has_property(node, "persistent"):
 		return bool(node.get("persistent"))
 	return false
+
+
+static func _gml_room_node_was_restored_persistent(node):
+	return (
+		node != null
+		and node.has_meta("_gm2godot_room_restored_persistent")
+		and bool(node.get_meta("_gm2godot_room_restored_persistent"))
+	)
+
+
+static func _gml_room_warn_persistent_instance_creation_code(node):
+	if node == null:
+		return
+	if node.has_meta("_gm2godot_persistent_creation_code_warning_emitted") and bool(node.get_meta("_gm2godot_persistent_creation_code_warning_emitted")):
+		return
+	node.set_meta("_gm2godot_persistent_creation_code_warning_emitted", true)
+	var instance_name = str(node.name)
+	if node.has_meta("gamemaker_instance_name"):
+		instance_name = str(node.get_meta("gamemaker_instance_name"))
+	push_warning("GM2Godot preserves persistent instance " + instance_name + " across room transitions; its instance creation code is not rerun after restore.")
+
+
+static func _gml_room_warn_persistent_room(scene):
+	if scene == null:
+		return
+	if not scene.has_meta("gamemaker_room_persistent") or not bool(scene.get_meta("gamemaker_room_persistent")):
+		return
+	if scene.has_meta("_gm2godot_persistent_room_warning_emitted") and bool(scene.get_meta("_gm2godot_persistent_room_warning_emitted")):
+		return
+	scene.set_meta("_gm2godot_persistent_room_warning_emitted", true)
+	push_warning("GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.")
 
 
 static func _gml_room_persistent_root():

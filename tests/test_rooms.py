@@ -308,6 +308,17 @@ class TestRoomConverter(unittest.TestCase):
         with open(tscn_path, "r", encoding="utf-8") as f:
             return f.read()
 
+    def _read_room_script(self, room_name: str, *subfolders: str) -> str:
+        script_path = os.path.join(
+            self.godot_dir,
+            "rooms",
+            *subfolders,
+            room_name,
+            room_name + ".gd",
+        )
+        with open(script_path, "r", encoding="utf-8") as f:
+            return f.read()
+
     def test_generates_minimal_room_scene_with_metadata(self):
         self._write_yyp(["r_test"])
         room_yy_path = self._write_room(
@@ -976,16 +987,21 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_is_dnd = true', content)
         self.assertIn('metadata/gamemaker_creation_code_file_exists = true', content)
         self.assertIn(
-            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "room_creation_code", "room_start"]',
+            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "game_start", "room_creation_code", "room_start"]',
             content,
         )
         self.assertIn(
             'metadata/gamemaker_room_creation_code_execution_phase = "room_creation_code"',
             content,
         )
-        self.assertIn('metadata/gamemaker_room_creation_code_execution_phase_index = 2', content)
-        self.assertNotIn('func ', content)
-        self.assertNotIn('RoomCreationCode.gd', content)
+        self.assertIn('metadata/gamemaker_room_creation_code_execution_phase_index = 3', content)
+        self.assertIn(
+            '[ext_resource type="Script" path="res://rooms/r_code/r_code.gd" id="gm_room_runtime"]',
+            content,
+        )
+        script = self._read_room_script("r_code")
+        self.assertIn('extends "res://gm2godot/gml_room_node.gd"', script)
+        self.assertIn("func _gm2godot_room_creation_code():", script)
 
     def test_room_creation_code_missing_warns_and_marks_missing(self):
         self._write_yyp(["r_missing_code"])
@@ -1055,8 +1071,71 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('metadata/gamemaker_creation_code_execution_phase_index = 1', content)
-        self.assertNotIn('func ', content)
-        self.assertNotIn('InstanceCreationCode_inst_player.gd', content)
+        self.assertIn(
+            '[ext_resource type="Script" path="res://rooms/r_instance_code/r_instance_code.gd" id="gm_room_runtime"]',
+            content,
+        )
+        script = self._read_room_script("r_instance_code")
+        self.assertIn("func _gm2godot_run_instance_creation_code(_gm_instance):", script)
+        self.assertIn(
+            "func _gm2godot_instance_creation_code_inst_player(_gm_instance):",
+            script,
+        )
+        self.assertIn(json.dumps(instance_code_path), script)
+
+    def test_room_and_instance_creation_code_are_transpiled_with_correct_scope(self):
+        self._write_yyp(["r_exec"], extra_resources=[("objects", "o_player")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        room_creation_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_exec",
+            "RoomCreationCode.gml",
+        )
+        instance_code_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_exec",
+            "InstanceCreationCode_inst_player.gml",
+        )
+        _write_file(room_creation_path, 'room_trace = "room creation";\n')
+        _write_file(instance_code_path, 'x = 42; custom_value = "instance creation";\n')
+        self._write_room(
+            "r_exec",
+            creation_code_file="RoomCreationCode.gml",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": "inst_player",
+                            "objectId": {"name": "o_player"},
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self._make_converter().convert_all()
+        script = self._read_room_script("r_exec")
+
+        self.assertIn("func _gm2godot_room_creation_code():", script)
+        self.assertIn(
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "room_trace", "room creation")',
+            script,
+        )
+        self.assertIn("func _gm2godot_run_instance_creation_code(_gm_instance):", script)
+        self.assertIn(
+            'GMRuntime.gml_variable_instance_set(_gm_instance, "x", 42)',
+            script,
+        )
+        self.assertIn(
+            'GMRuntime.gml_variable_instance_set(_gm_instance, "custom_value", "instance creation")',
+            script,
+        )
 
     def test_instance_creation_code_missing_warns_and_marks_missing(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
@@ -1132,7 +1211,7 @@ class TestRoomConverter(unittest.TestCase):
         content = self._read_scene("r_lifecycle")
 
         self.assertIn(
-            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "room_creation_code", "room_start"]',
+            'metadata/gamemaker_execution_order = ["object_create", "instance_creation_code", "game_start", "room_creation_code", "room_start"]',
             content,
         )
         self.assertIn('metadata/gamemaker_instance_creation_order = ["inst_a", "inst_b"]', content)

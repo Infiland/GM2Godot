@@ -235,8 +235,13 @@ static func gml_struct_get(struct_value, member_name):
 			return struct_value[key]
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
+		if _gml_object_has_builtin_field(struct_value, key):
+			return _gml_object_builtin_field_get(struct_value, key)
 		if _object_has_property(struct_value, key):
 			return struct_value.get(key)
+		var dynamic_fields = _gml_object_dynamic_fields(struct_value)
+		if dynamic_fields.has(key):
+			return dynamic_fields[key]
 		return gml_undefined()
 	return gml_unsupported_type_error("GML struct access", struct_value)
 
@@ -365,7 +370,11 @@ static func gml_struct_exists(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.has(key)
 	if typeof(struct_value) == TYPE_OBJECT:
-		return _object_has_property(struct_value, key)
+		return (
+			_gml_object_has_builtin_field(struct_value, key)
+			or _object_has_property(struct_value, key)
+			or _gml_object_dynamic_fields(struct_value).has(key)
+		)
 	return false
 
 
@@ -375,7 +384,12 @@ static func gml_struct_set(struct_value, member_name, value):
 		struct_value[key] = value
 		return value
 	if typeof(struct_value) == TYPE_OBJECT:
-		struct_value.set(key, value)
+		if _gml_object_has_builtin_field(struct_value, key):
+			_gml_object_builtin_field_set(struct_value, key, value)
+		elif _object_has_property(struct_value, key):
+			struct_value.set(key, value)
+		else:
+			_gml_object_dynamic_fields(struct_value, true)[key] = value
 		return value
 	return gml_unsupported_type_error("GML struct access", struct_value)
 
@@ -385,6 +399,11 @@ static func gml_struct_remove(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value.erase(key)
 		return gml_undefined()
+	if typeof(struct_value) == TYPE_OBJECT:
+		var dynamic_fields = _gml_object_dynamic_fields(struct_value)
+		if dynamic_fields.has(key):
+			dynamic_fields.erase(key)
+			return gml_undefined()
 	return gml_unsupported_type_error("GML mutable struct access", struct_value)
 
 
@@ -395,6 +414,12 @@ static func gml_struct_get_names(struct_value):
 		var names = []
 		for property in struct_value.get_property_list():
 			names.append(property.get("name"))
+		for builtin_name in _gml_object_builtin_field_names(struct_value):
+			if not names.has(builtin_name):
+				names.append(builtin_name)
+		for dynamic_name in _gml_object_dynamic_fields(struct_value).keys():
+			if not names.has(dynamic_name):
+				names.append(dynamic_name)
 		return names
 	return []
 
@@ -403,8 +428,70 @@ static func gml_struct_names_count(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.size()
 	if typeof(struct_value) == TYPE_OBJECT:
-		return struct_value.get_property_list().size()
+		return gml_struct_get_names(struct_value).size()
 	return -1
+
+
+static func _gml_object_dynamic_fields(object_value, create = false):
+	if typeof(object_value) != TYPE_OBJECT:
+		return {}
+	var meta_name = "_gm2godot_dynamic_fields"
+	if object_value.has_meta(meta_name):
+		var fields = object_value.get_meta(meta_name)
+		if typeof(fields) == TYPE_DICTIONARY:
+			return fields
+	if not bool(create):
+		return {}
+	var new_fields = {}
+	object_value.set_meta(meta_name, new_fields)
+	return new_fields
+
+
+static func _gml_object_builtin_field_names(object_value):
+	if object_value is Node2D:
+		return ["x", "y", "image_angle", "image_xscale", "image_yscale"]
+	return []
+
+
+static func _gml_object_has_builtin_field(object_value, member_name):
+	return _gml_object_builtin_field_names(object_value).has(str(member_name))
+
+
+static func _gml_object_builtin_field_get(object_value, member_name):
+	var key = str(member_name)
+	if object_value is Node2D:
+		if key == "x":
+			return object_value.position.x
+		if key == "y":
+			return object_value.position.y
+		if key == "image_angle":
+			return object_value.rotation_degrees
+		if key == "image_xscale":
+			return object_value.scale.x
+		if key == "image_yscale":
+			return object_value.scale.y
+	return gml_undefined()
+
+
+static func _gml_object_builtin_field_set(object_value, member_name, value):
+	var key = str(member_name)
+	if object_value is Node2D:
+		if key == "x":
+			object_value.position.x = _to_real(value)
+			return value
+		if key == "y":
+			object_value.position.y = _to_real(value)
+			return value
+		if key == "image_angle":
+			object_value.rotation_degrees = _to_real(value)
+			return value
+		if key == "image_xscale":
+			object_value.scale.x = _to_real(value)
+			return value
+		if key == "image_yscale":
+			object_value.scale.y = _to_real(value)
+			return value
+	return value
 
 
 static func gml_struct_foreach(struct_value, callback):

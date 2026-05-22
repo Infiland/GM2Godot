@@ -27,6 +27,7 @@ class RoomCreationCodeRoom(Protocol):
 ROOM_EXECUTION_ORDER = [
     "object_create",
     "instance_creation_code",
+    "game_start",
     "room_creation_code",
     "room_start",
 ]

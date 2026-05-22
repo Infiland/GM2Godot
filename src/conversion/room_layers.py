@@ -366,12 +366,26 @@ def decode_tile_compressed_data(
     tile_data_format: int = 1,
 ) -> list[int]:
     """Expand GameMaker TileCompressedData format 1 into a row-major cell array."""
-    if tile_data_format != 1:
+    if tile_data_format not in (0, 1):
         raise ValueError(f"Unsupported GameMaker tile data format: {tile_data_format}")
     if serialise_width < 0 or serialise_height < 0:
         raise ValueError("GameMaker tile data dimensions must be non-negative")
 
     expected_length = serialise_width * serialise_height
+    if tile_data_format == 0:
+        decoded = [
+            _require_int(value, "TileCompressedData value")
+            for value in compressed_data
+        ]
+        if len(decoded) != expected_length:
+            raise ValueError(
+                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
+                    actual=len(decoded),
+                    expected=expected_length,
+                )
+            )
+        return decoded
+
     decoded: list[int] = []
     index = 0
     while index < len(compressed_data):

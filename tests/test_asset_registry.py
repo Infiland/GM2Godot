@@ -18,6 +18,8 @@ from src.conversion.asset_registry import (
     AssetRegistryConverter,
     GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
 )
+from src.conversion.animation_curve_registry import ANIMATION_CURVE_REGISTRY_RELATIVE_PATH
+from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
 
 
 def _write_json(path: str, data: dict[str, object]) -> None:
@@ -112,6 +114,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 ("objects", "o_player"),
                 ("scripts", "scr_spawn"),
                 ("fonts", "fnt_ui"),
+                ("paths", "path_patrol"),
+                ("animcurves", "ac_fade"),
                 ("sequences", "seq_intro"),
                 ("timelines", "tl_intro"),
             ],
@@ -140,6 +144,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self._write_resource("objects", "o_player", "GMObject", "folders/Objects/Actors.yy")
         self._write_resource("scripts", "scr_spawn", "GMScript", "folders/Scripts/Game.yy")
         self._write_resource("fonts", "fnt_ui", "GMFont", "folders/Fonts/UI.yy")
+        self._write_resource("paths", "path_patrol", "GMPath", "folders/Paths/Movement.yy")
+        self._write_resource("animcurves", "ac_fade", "GMAnimationCurve", "folders/Animation Curves.yy")
         self._write_resource(
             "sequences",
             "seq_intro",
@@ -182,6 +188,12 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(by_name["o_player"].godot_path, "res://objects/Actors/o_player/o_player.tscn")
         self.assertEqual(by_name["scr_spawn"].godot_path, "res://scripts/Game/scr_spawn.gd")
         self.assertEqual(by_name["fnt_ui"].godot_path, "res://fonts/UI/fnt_ui.tres")
+        self.assertEqual(by_name["path_patrol"].asset_type, "path")
+        self.assertEqual(
+            by_name["path_patrol"].godot_path,
+            "res://paths/Movement/path_patrol/path_patrol.tscn",
+        )
+        self.assertEqual(by_name["ac_fade"].asset_type, "animation_curve")
         self.assertEqual(by_name["seq_intro"].asset_type, "sequence")
         sequence_metadata = by_name["seq_intro"].metadata
         self.assertIsNotNone(sequence_metadata)
@@ -213,8 +225,29 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(first_ids, second_ids)
 
     def test_convert_all_writes_runtime_registry_script(self) -> None:
-        _write_yyp(self.gm_dir, [("sprites", "s_player")])
+        _write_yyp(
+            self.gm_dir,
+            [
+                ("sprites", "s_player"),
+                ("paths", "path_patrol"),
+                ("animcurves", "ac_fade"),
+            ],
+        )
         self._write_resource("sprites", "s_player", "GMSprite", "folders/Sprites.yy")
+        self._write_resource(
+            "paths",
+            "path_patrol",
+            "GMPath",
+            "folders/Paths.yy",
+            {"points": [{"x": 0, "y": 0}, {"x": 16, "y": 0}]},
+        )
+        self._write_resource(
+            "animcurves",
+            "ac_fade",
+            "GMAnimationCurve",
+            "folders/Animation Curves.yy",
+            {"channels": [{"name": "alpha", "points": [{"x": 0, "y": 1}]}]},
+        )
 
         registry_path = self._converter().convert_all()
 
@@ -227,6 +260,19 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertIn("static func gml_asset_registry_entries():", content)
         self.assertIn('"name": "s_player"', content)
         self.assertIn('"type": "sprite"', content)
+
+        path_registry_path = os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH)
+        path_scene_path = os.path.join(self.godot_dir, "paths", "path_patrol", "path_patrol.tscn")
+        animation_curve_registry_path = os.path.join(self.godot_dir, ANIMATION_CURVE_REGISTRY_RELATIVE_PATH)
+        self.assertTrue(os.path.isfile(path_registry_path))
+        self.assertTrue(os.path.isfile(path_scene_path))
+        self.assertTrue(os.path.isfile(animation_curve_registry_path))
+        with open(path_scene_path, "r", encoding="utf-8") as f:
+            path_scene = f.read()
+        with open(animation_curve_registry_path, "r", encoding="utf-8") as f:
+            curve_registry = f.read()
+        self.assertIn('[node name="path_patrol" type="Path2D"]', path_scene)
+        self.assertIn('"name": "ac_fade"', curve_registry)
 
     def test_generates_actionable_texture_and_audio_group_registries(self) -> None:
         _write_json(

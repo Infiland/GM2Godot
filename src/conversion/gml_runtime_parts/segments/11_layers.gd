@@ -47,6 +47,34 @@ static func gml_layer_get_depth(layer):
 	return _gml_layer_handle_depth(handle)
 
 
+static func gml_layer_get_x(layer):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return 0
+	return _gml_layer_node_axis(node, "x")
+
+
+static func gml_layer_get_y(layer):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return 0
+	return _gml_layer_node_axis(node, "y")
+
+
+static func gml_layer_get_hspeed(layer):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return 0
+	return _gml_layer_node_speed(node, "h")
+
+
+static func gml_layer_get_vspeed(layer):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return 0
+	return _gml_layer_node_speed(node, "v")
+
+
 static func gml_layer_depth(layer, depth):
 	var handle = _gml_layer_resolve_handle(layer)
 	if not gml_handle_is_valid(handle):
@@ -57,6 +85,62 @@ static func gml_layer_depth(layer, depth):
 	var resolved_depth = int(_to_real(depth))
 	node.z_index = -resolved_depth
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
+	return true
+
+
+static func gml_layer_x(layer, x):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	var value = _to_real(x)
+	_gml_layer_set_node_axis(node, "x", value)
+	return true
+
+
+static func gml_layer_y(layer, y):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	var value = _to_real(y)
+	_gml_layer_set_node_axis(node, "y", value)
+	return true
+
+
+static func gml_layer_hspeed(layer, speed):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	node.set_meta("gamemaker_layer_hspeed", _to_real(speed))
+	return true
+
+
+static func gml_layer_vspeed(layer, speed):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	node.set_meta("gamemaker_layer_vspeed", _to_real(speed))
+	return true
+
+
+static func gml_layer_set_visible(layer, visible):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	var resolved_visible = gml_bool(visible)
+	if node is CanvasItem:
+		node.visible = resolved_visible
+	node.set_meta("gamemaker_layer_visible", resolved_visible)
+	return true
+
+
+static func gml_layer_get_visible(layer):
+	var node = _gml_layer_resolve_node(layer)
+	if node == null:
+		return false
+	if node.has_meta("gamemaker_layer_visible"):
+		return bool(node.get_meta("gamemaker_layer_visible"))
+	if node is CanvasItem:
+		return bool(node.visible)
 	return true
 
 
@@ -74,6 +158,10 @@ static func gml_layer_create(depth, layer_name = ""):
 	node.set_meta("gamemaker_layer_type", "runtime")
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
 	node.set_meta("gamemaker_layer_visible", true)
+	node.set_meta("gamemaker_layer_x", 0)
+	node.set_meta("gamemaker_layer_y", 0)
+	node.set_meta("gamemaker_layer_hspeed", 0)
+	node.set_meta("gamemaker_layer_vspeed", 0)
 	node.set_meta("gamemaker_placeholder", true)
 	parent.add_child(node)
 	return _gml_layer_register_node(node)
@@ -143,10 +231,31 @@ static func gml_layer_get_all_elements(layer):
 	return elements
 
 
+static func gml_layer_element_move(element, layer):
+	var element_node = _gml_layer_element_resolve_node(element)
+	var layer_node = _gml_layer_resolve_node(layer)
+	if element_node == null or layer_node == null:
+		return false
+	if element_node == layer_node:
+		return false
+	if not (element_node is Node) or not (layer_node is Node):
+		return false
+	if element_node.get_parent() == layer_node:
+		return true
+	if element_node.get_parent() != null:
+		element_node.reparent(layer_node, true)
+	else:
+		layer_node.add_child(element_node)
+	_gml_layer_element_register(element_node)
+	return true
+
+
 static func gml_layer_get_element_type(element):
 	var node = _gml_layer_element_resolve_node(element)
 	if node == null:
 		return "undefined"
+	if node.has_meta("gamemaker_layer_element_type"):
+		return str(node.get_meta("gamemaker_layer_element_type"))
 	if (
 		node.has_meta("gamemaker_instance_name")
 		or node.has_meta("_gm2godot_instance_id")
@@ -164,9 +273,7 @@ static func gml_layer_get_element_type(element):
 		return "sequence"
 	if node.has_meta("gamemaker_asset_name"):
 		var asset_type = str(node.get_meta("gamemaker_asset_type", ""))
-		if asset_type.findn("sprite") >= 0:
-			return "sprite"
-		return "asset"
+		return _gml_layer_element_type_for_asset_type(asset_type)
 	return "undefined"
 
 
@@ -275,6 +382,49 @@ static func _gml_layer_handle_depth(handle):
 	if node is CanvasItem:
 		return -int(node.z_index)
 	return 0
+
+
+static func _gml_layer_node_axis(node, axis):
+	var key = "gamemaker_layer_" + str(axis)
+	if node.has_meta(key):
+		return _to_real(node.get_meta(key))
+	if node is Node2D:
+		return node.position.x if str(axis) == "x" else node.position.y
+	return 0
+
+
+static func _gml_layer_set_node_axis(node, axis, value):
+	var key = "gamemaker_layer_" + str(axis)
+	if node is Node2D:
+		if str(axis) == "x":
+			node.position.x = value
+		else:
+			node.position.y = value
+	node.set_meta(key, value)
+
+
+static func _gml_layer_node_speed(node, axis):
+	var key = "gamemaker_layer_hspeed" if str(axis) == "h" else "gamemaker_layer_vspeed"
+	if node.has_meta(key):
+		return _to_real(node.get_meta(key))
+	return 0
+
+
+static func _gml_layer_element_type_for_asset_type(asset_type):
+	var normalized = str(asset_type).to_lower()
+	if normalized.find("sprite") >= 0:
+		return "sprite"
+	if normalized.find("sequence") >= 0:
+		return "sequence"
+	if normalized.find("particle") >= 0:
+		return "particle_system"
+	if normalized.find("oldtile") >= 0 or normalized.find("old_tile") >= 0:
+		return "old_tilemap"
+	if normalized.find("tilemap") >= 0 or normalized.find("tile_map") >= 0:
+		return "tilemap"
+	if normalized.ends_with("tile") or normalized.find("tilegraphic") >= 0:
+		return "tile"
+	return "undefined"
 
 
 static func _gml_layer_handle_name(handle):

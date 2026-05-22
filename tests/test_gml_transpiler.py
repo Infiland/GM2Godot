@@ -3326,12 +3326,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "name = layer_get_name(layer_id);"
                 "layers = layer_get_all();"
                 "depth = layer_get_depth(layer_id);"
+                "lx = layer_get_x(layer_id);"
+                "ly = layer_get_y(layer_id);"
+                "hs = layer_get_hspeed(layer_id);"
+                "vs = layer_get_vspeed(layer_id);"
                 "layer_depth(layer_id, 50);"
+                "layer_x(layer_id, 8);"
+                "layer_y(layer_id, 16);"
+                "layer_hspeed(layer_id, 2);"
+                "layer_vspeed(layer_id, -1);"
                 "front = layer_get_id_at_depth(50);"
                 'fx = layer_create(25, "Effects");'
                 "layer_add_instance(fx, id);"
                 "elements = layer_get_all_elements(layer_id);"
+                "layer_element_move(elements[0], fx);"
                 "kind = layer_get_element_type(elements[0]);"
+                "layer_set_visible(fx, false);"
+                "visible = layer_get_visible(fx);"
                 "layer_destroy(fx);",
                 indent="",
             ),
@@ -3340,12 +3351,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "name = GMRuntime.gml_layer_get_name(layer_id)\n"
             "layers = GMRuntime.gml_layer_get_all()\n"
             "depth = GMRuntime.gml_layer_get_depth(layer_id)\n"
+            "lx = GMRuntime.gml_layer_get_x(layer_id)\n"
+            "ly = GMRuntime.gml_layer_get_y(layer_id)\n"
+            "hs = GMRuntime.gml_layer_get_hspeed(layer_id)\n"
+            "vs = GMRuntime.gml_layer_get_vspeed(layer_id)\n"
             "GMRuntime.gml_layer_depth(layer_id, 50)\n"
+            "GMRuntime.gml_layer_x(layer_id, 8)\n"
+            "GMRuntime.gml_layer_y(layer_id, 16)\n"
+            "GMRuntime.gml_layer_hspeed(layer_id, 2)\n"
+            "GMRuntime.gml_layer_vspeed(layer_id, -1)\n"
             "front = GMRuntime.gml_layer_get_id_at_depth(50)\n"
             'fx = GMRuntime.gml_layer_create(25, "Effects")\n'
             "GMRuntime.gml_layer_add_instance(fx, id)\n"
             "elements = GMRuntime.gml_layer_get_all_elements(layer_id)\n"
+            "GMRuntime.gml_layer_element_move(GMRuntime.gml_array_get(elements, 0), fx)\n"
             "kind = GMRuntime.gml_layer_get_element_type(GMRuntime.gml_array_get(elements, 0))\n"
+            "GMRuntime.gml_layer_set_visible(fx, false)\n"
+            "visible = GMRuntime.gml_layer_get_visible(fx)\n"
             "GMRuntime.gml_layer_destroy(fx)",
         )
 

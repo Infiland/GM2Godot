@@ -280,12 +280,20 @@ def _layer_node_lines(
     lines = [
         f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(visible)}",
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(layer.get("x", 0)),
+            y=_format_number(layer.get("y", 0)),
+        ),
         f"z_index = {z_index}",
         f"metadata/gamemaker_layer_name = {godot_value(original_name)}",
         f"metadata/gamemaker_layer_node_name = {godot_value(node_name)}",
         f"metadata/gamemaker_layer_type = {godot_value(resource_type)}",
         f"metadata/gamemaker_layer_depth = {godot_value(depth)}",
         f"metadata/gamemaker_layer_visible = {godot_value(visible)}",
+        f"metadata/gamemaker_layer_x = {godot_value(layer.get('x', 0))}",
+        f"metadata/gamemaker_layer_y = {godot_value(layer.get('y', 0))}",
+        f"metadata/gamemaker_layer_hspeed = {godot_value(layer.get('hspeed', 0))}",
+        f"metadata/gamemaker_layer_vspeed = {godot_value(layer.get('vspeed', 0))}",
         f"metadata/gamemaker_layer_grid_x = {godot_value(layer.get('gridX'))}",
         f"metadata/gamemaker_layer_grid_y = {godot_value(layer.get('gridY'))}",
         f"metadata/gamemaker_layer_properties = {godot_value(layer.get('properties', []))}",
@@ -485,15 +493,13 @@ def _tile_map_layer_lines(
     lines = [
         f'[node name="TileMap" type="TileMapLayer" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(bool(layer.get('visible', True)))}",
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(layer.get("x", 0)),
-            y=_format_number(layer.get("y", 0)),
-        ),
+        "position = Vector2(0, 0)",
         f'tile_set = ExtResource("{ext_resource_id}")',
     ]
     if tile_map_data:
         lines.append(f"tile_map_data = {tile_map_data}")
     lines.extend([
+        'metadata/gamemaker_layer_element_type = "tilemap"',
         "metadata/gamemaker_tile_layer = true",
         f"metadata/gamemaker_tileset = {godot_value(tileset_name)}",
         f"metadata/gamemaker_tile_width = {godot_value(width)}",
@@ -624,11 +630,13 @@ def _asset_node_lines(
         else:
             context.warn(
                 "Warning: Unsupported GameMaker room asset type {asset_type} in room {room_name}, "
-                "layer {layer_name}, asset {asset_name}; emitted Node2D placeholder.".format(
+                "layer {layer_name}, asset {asset_name}; emitted Node2D placeholder with "
+                "layer element type {element_type}.".format(
                     asset_type=asset_type,
                     room_name=context.room.name,
                     layer_name=layer_name,
                     asset_name=asset_name,
+                    element_type=_layer_element_type_for_asset_type(asset_type),
                 )
             )
             lines.extend(_unsupported_asset_lines(asset, node_name, parent_path, asset_type))
@@ -668,6 +676,7 @@ def _sprite_asset_lines(
 
     lines.extend(_asset_transform_lines(asset))
     lines.extend([
+        'metadata/gamemaker_layer_element_type = "sprite"',
         f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
         f"metadata/gamemaker_asset_node_name = {godot_value(node_name)}",
         f"metadata/gamemaker_asset_type = {godot_value(_asset_resource_type(asset))}",
@@ -695,6 +704,7 @@ def _unsupported_asset_lines(
     lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
     lines.extend(_asset_transform_lines(asset))
     lines.extend([
+        f"metadata/gamemaker_layer_element_type = {godot_value(_layer_element_type_for_asset_type(asset_type))}",
         f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
         f"metadata/gamemaker_asset_node_name = {godot_value(node_name)}",
         f"metadata/gamemaker_asset_type = {godot_value(asset_type)}",
@@ -835,10 +845,7 @@ def _background_color_lines(
     lines = [
         f'[node name="BackgroundVisual" type="ColorRect" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(bool(layer.get('visible', True)))}",
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(layer.get("x", 0)),
-            y=_format_number(layer.get("y", 0)),
-        ),
+        "position = Vector2(0, 0)",
         "size = Vector2({width}, {height})".format(
             width=_format_number(width),
             height=_format_number(height),
@@ -866,10 +873,7 @@ def _background_sprite_lines(
             resource_id=ext_resource_id,
         ),
         f"visible = {godot_value(bool(layer.get('visible', True)))}",
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(layer.get("x", 0)),
-            y=_format_number(layer.get("y", 0)),
-        ),
+        "position = Vector2(0, 0)",
         "modulate = {color}".format(color=_godot_color(layer.get("colour", 4294967295))),
     ]
     lines.extend(_background_metadata_lines(layer, "sprite"))
@@ -881,6 +885,7 @@ def _background_sprite_lines(
 def _background_metadata_lines(layer: JsonDict, visual_type: str) -> list[str]:
     colour = layer.get("colour")
     lines = [
+        'metadata/gamemaker_layer_element_type = "background"',
         "metadata/gamemaker_background_visual = true",
         f"metadata/gamemaker_background_visual_type = {godot_value(visual_type)}",
         f"metadata/gamemaker_background_sprite = {godot_value(_background_sprite_name(layer))}",
@@ -1075,6 +1080,7 @@ def _instance_scene_lines(
             scale_y=_format_number(instance.get("scaleY", 1)),
         ),
         f"metadata/gamemaker_instance_name = {godot_value(instance_name)}",
+        'metadata/gamemaker_layer_element_type = "instance"',
         f"metadata/gamemaker_instance_node_name = {godot_value(node_name)}",
         f"metadata/gamemaker_instance_object_name = {godot_value(object_name)}",
         f"metadata/gamemaker_instance_creation_order_index = {godot_value(order_index)}",
@@ -1157,6 +1163,23 @@ def _asset_resource_type(asset: JsonDict) -> str:
         if key.startswith("$GMR"):
             return key[1:]
     return "UnknownAsset"
+
+
+def _layer_element_type_for_asset_type(asset_type: str) -> str:
+    normalized = asset_type.lower()
+    if "sprite" in normalized:
+        return "sprite"
+    if "sequence" in normalized:
+        return "sequence"
+    if "particle" in normalized:
+        return "particle_system"
+    if "oldtile" in normalized or "old_tile" in normalized:
+        return "old_tilemap"
+    if "tilemap" in normalized or "tile_map" in normalized:
+        return "tilemap"
+    if normalized.endswith("tile") or "tilegraphic" in normalized:
+        return "tile"
+    return "undefined"
 
 
 def _layer_name(layer: JsonDict) -> str:

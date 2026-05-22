@@ -140,12 +140,23 @@ _LAYER_IMPLEMENTED_APIS = frozenset(
         "layer_get_name",
         "layer_get_all",
         "layer_get_depth",
+        "layer_get_x",
+        "layer_get_y",
+        "layer_get_hspeed",
+        "layer_get_vspeed",
         "layer_depth",
+        "layer_x",
+        "layer_y",
+        "layer_hspeed",
+        "layer_vspeed",
         "layer_create",
         "layer_destroy",
         "layer_add_instance",
         "layer_get_all_elements",
+        "layer_element_move",
         "layer_get_element_type",
+        "layer_set_visible",
+        "layer_get_visible",
     }
 )
 _LAYER_UNSUPPORTED_ELEMENT_APIS = (

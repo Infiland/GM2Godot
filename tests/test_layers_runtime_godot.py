@@ -90,6 +90,11 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tnode.set_meta("gamemaker_layer_node_name", name)
         \tnode.set_meta("gamemaker_layer_depth", depth)
         \tnode.set_meta("gamemaker_layer_type", "GMRInstanceLayer")
+        \tnode.set_meta("gamemaker_layer_x", 0)
+        \tnode.set_meta("gamemaker_layer_y", 0)
+        \tnode.set_meta("gamemaker_layer_hspeed", 0)
+        \tnode.set_meta("gamemaker_layer_vspeed", 0)
+        \tnode.set_meta("gamemaker_layer_visible", true)
         \tadd_child(node)
         \treturn node
 
@@ -111,6 +116,19 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(instances.z_index == -50 and GMRuntime.gml_layer_get_depth(layer_id) == 50, "layer_depth did not update z"):
         \t\treturn
+        \tif not _check(GMRuntime.gml_layer_x(layer_id, 8) and GMRuntime.gml_layer_y(layer_id, 16), "layer position setters failed"):
+        \t\treturn
+        \tif not _check(instances.position == Vector2(8, 16) and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_hspeed(layer_id, 2) and GMRuntime.gml_layer_vspeed(layer_id, -1), "layer speed setters failed"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_get_hspeed(layer_id) == 2 and GMRuntime.gml_layer_get_vspeed(layer_id) == -1, "layer speed getters mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_set_visible(layer_id, false) and not GMRuntime.gml_layer_get_visible(layer_id), "layer visibility setters failed"):
+        \t\treturn
+        \tif not _check(not instances.visible, "layer_set_visible did not update CanvasItem visibility"):
+        \t\treturn
+        \tGMRuntime.gml_layer_set_visible(layer_id, true)
         \tif not _check(GMRuntime.gml_layer_get_id_at_depth(50).index == layer_id.index, "layer_get_id_at_depth mismatch"):
         \t\treturn
 
@@ -149,6 +167,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\tGMRuntime.gml_layer_get_element_type(elements[1]),
         \t]
         \tif not _check(element_types.has("instance") and element_types.has("sprite"), "layer element type mismatch: " + str(element_types)):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_element_move(elements[1], fx), "layer_element_move returned false"):
+        \t\treturn
+        \tif not _check(sprite_element.get_parent() == fx_node, "layer_element_move did not reparent element"):
         \t\treturn
 
         \tvar particles = GMRuntime.gml_part_system_create_layer(fx, false)

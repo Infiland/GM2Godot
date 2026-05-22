@@ -426,9 +426,14 @@ class TestRoomConverter(unittest.TestCase):
 
         self.assertIn('[node name="Instances" type="Node2D" parent="."]', content)
         self.assertIn('visible = true', content)
+        self.assertIn('position = Vector2(0, 0)', content)
         self.assertIn('z_index = -100', content)
         self.assertIn('metadata/gamemaker_layer_type = "GMRInstanceLayer"', content)
         self.assertIn('metadata/gamemaker_layer_depth = 100', content)
+        self.assertIn('metadata/gamemaker_layer_x = 0', content)
+        self.assertIn('metadata/gamemaker_layer_y = 0', content)
+        self.assertIn('metadata/gamemaker_layer_hspeed = 0', content)
+        self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_layer_grid_x = 32', content)
         self.assertIn('metadata/gamemaker_layer_grid_y = 16', content)
         self.assertIn('metadata/gamemaker_layer_properties = {"alpha": 1}', content)
@@ -462,6 +467,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[node name="BackgroundVisual" type="ColorRect" parent="Backgrounds"]', content)
         self.assertIn('size = Vector2(320, 180)', content)
         self.assertIn('color = Color(1, 1, 1, 1)', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "background"', content)
         self.assertIn('metadata/gamemaker_background_visual = true', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "color"', content)
 
@@ -492,6 +498,7 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('position = Vector2(16, 32)', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "background"', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
 
@@ -518,6 +525,8 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_background_vtiled = false', content)
         self.assertIn('metadata/gamemaker_background_hspeed = 2', content)
         self.assertIn('metadata/gamemaker_background_vspeed = 0', content)
+        self.assertIn('metadata/gamemaker_layer_hspeed = 2', content)
+        self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_background_stretch = true', content)
         self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
         self.assertTrue(any(
@@ -537,10 +546,14 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_depths")
 
-        self.assertIn('[node name="Depth200" type="Node2D" parent="."]\nvisible = true\nz_index = -200', content)
-        self.assertIn('[node name="Depth100" type="Node2D" parent="."]\nvisible = true\nz_index = -100', content)
-        self.assertIn('[node name="Depth0" type="Node2D" parent="."]\nvisible = true\nz_index = 0', content)
-        self.assertIn('[node name="DepthMinus100" type="Node2D" parent="."]\nvisible = true\nz_index = 100', content)
+        self.assertIn('[node name="Depth200" type="Node2D" parent="."]', content)
+        self.assertIn("z_index = -200", content)
+        self.assertIn('[node name="Depth100" type="Node2D" parent="."]', content)
+        self.assertIn("z_index = -100", content)
+        self.assertIn('[node name="Depth0" type="Node2D" parent="."]', content)
+        self.assertIn("z_index = 0", content)
+        self.assertIn('[node name="DepthMinus100" type="Node2D" parent="."]', content)
+        self.assertIn("z_index = 100", content)
 
     def test_generates_nested_layer_placeholders_depth_first(self):
         self._write_yyp(["r_nested"])
@@ -625,6 +638,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('position = Vector2(8, 16)', content)
         self.assertIn('tile_set = ExtResource("1")', content)
         self.assertIn('tile_map_data = PackedByteArray(0, 0', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "tilemap"', content)
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
         self.assertIn('metadata/gamemaker_tile_empty_values = [0, -2147483648]', content)
@@ -755,6 +769,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('rotation_degrees = 90', content)
         self.assertIn('scale = Vector2(2, 0.5)', content)
         self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "instance"', content)
         self.assertIn('metadata/gamemaker_instance_object_name = "o_player"', content)
         self.assertIn('metadata/gamemaker_instance_x = 100', content)
         self.assertIn('metadata/gamemaker_instance_y = 200', content)
@@ -851,9 +866,43 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('rotation_degrees = 15', content)
         self.assertIn('scale = Vector2(2, 3)', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "sprite"', content)
         self.assertIn('metadata/gamemaker_asset_sprite_name = "s_decor"', content)
         self.assertIn('metadata/gamemaker_asset_head_position = 4', content)
         self.assertIn('metadata/gamemaker_asset_animation_speed = 0.5', content)
+
+    def test_asset_layer_classifies_unsupported_element_types_with_diagnostics(self):
+        self._write_yyp(["r_elements"])
+        self._write_room("r_elements", layers=[
+            {
+                "%Name": "MixedAssets",
+                "resourceType": "GMRAssetLayer",
+                "assets": [
+                    {"%Name": "seq_intro", "resourceType": "GMRSequenceGraphic", "x": 1},
+                    {"%Name": "ps_fx", "resourceType": "GMRParticleSystem", "x": 2},
+                    {"%Name": "legacy_tile", "resourceType": "GMRTileGraphic", "x": 3},
+                    {"%Name": "label", "resourceType": "GMRTextGraphic", "x": 4},
+                ],
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_elements")
+
+        self.assertIn('[node name="seq_intro" type="Node2D" parent="MixedAssets"]', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "sequence"', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "particle_system"', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "tile"', content)
+        self.assertIn('metadata/gamemaker_layer_element_type = "undefined"', content)
+        self.assertEqual(content.count("metadata/gamemaker_unsupported_asset = true"), 4)
+        self.assertTrue(any(
+            "GMRSequenceGraphic" in log and "layer element type sequence" in log
+            for log in self.logs
+        ))
+        self.assertTrue(any(
+            "GMRTextGraphic" in log and "layer element type undefined" in log
+            for log in self.logs
+        ))
 
     def test_ignored_asset_is_skipped_with_warning(self):
         self._write_yyp(["r_assets"], extra_resources=[("sprites", "s_decor")])

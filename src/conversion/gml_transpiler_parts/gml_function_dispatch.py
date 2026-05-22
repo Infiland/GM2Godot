@@ -629,12 +629,23 @@ _LAYER_ARITY: dict[str, tuple[int, int | None]] = {
     "layer_get_name": (1, 1),
     "layer_get_all": (0, 0),
     "layer_get_depth": (1, 1),
+    "layer_get_x": (1, 1),
+    "layer_get_y": (1, 1),
+    "layer_get_hspeed": (1, 1),
+    "layer_get_vspeed": (1, 1),
     "layer_depth": (2, 2),
+    "layer_x": (2, 2),
+    "layer_y": (2, 2),
+    "layer_hspeed": (2, 2),
+    "layer_vspeed": (2, 2),
     "layer_create": (1, 2),
     "layer_destroy": (1, 1),
     "layer_add_instance": (2, 2),
     "layer_get_all_elements": (1, 1),
+    "layer_element_move": (2, 2),
     "layer_get_element_type": (1, 1),
+    "layer_set_visible": (2, 2),
+    "layer_get_visible": (1, 1),
 }
 
 _SEQUENCE_TIMELINE_ARITY: dict[str, tuple[int, int | None]] = {

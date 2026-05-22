@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypedDict, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.project_godot import GodotProjectFile
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
@@ -89,6 +90,15 @@ def _iter_room_instances(layers: object) -> list[JsonDict]:
     return instances
 
 
+def _iter_room_effect_layers(layers: object) -> list[JsonDict]:
+    effect_layers: list[JsonDict] = []
+    for layer in _dict_items(layers):
+        if _layer_resource_type(layer) == "GMREffectLayer":
+            effect_layers.append(layer)
+        effect_layers.extend(_iter_room_effect_layers(layer.get("layers") or layer.get("children")))
+    return effect_layers
+
+
 class RoomProcessResult(TypedDict):
     success: bool
     name: str
@@ -107,11 +117,12 @@ class RoomConverter(BaseConverter):
                   update_log_callback: LogCallback | None = None,
                   compact_logging: bool = False,
                   max_workers: int | None = None,
-                  resource_index: GameMakerResourceIndex | None = None) -> None:
+                  resource_index: GameMakerResourceIndex | None = None,
+                  diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging,
-                         max_workers=max_workers)
+                         max_workers=max_workers, diagnostics=diagnostics)
         self.godot_rooms_path = os.path.join(self.godot_project_path, "rooms")
         self.resource_index = resource_index
 
@@ -142,6 +153,7 @@ class RoomConverter(BaseConverter):
             self.gm_project_path,
             warn_callback=self._safe_log,
         )
+        self._record_effect_layer_diagnostics(room)
         serialized_layers = serialize_room_layers(
             room,
             gm_project_path=self.gm_project_path,
@@ -365,6 +377,29 @@ class RoomConverter(BaseConverter):
             ])
 
         return "\n".join(lines).rstrip() + "\n"
+
+    def _record_effect_layer_diagnostics(self, room: IndexedRoom) -> None:
+        if self.diagnostics is None:
+            return
+        for layer in _iter_room_effect_layers(room.layers):
+            layer_name = layer.get("%Name") or layer.get("name")
+            effect_type = layer.get("effectType")
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-RESOURCE-UNSUPPORTED",
+                "GameMaker effect/filter layer {layer_name} in room {room_name} "
+                "is preserved as metadata; native shader/filter behavior requires "
+                "project-specific Godot material support.".format(
+                    layer_name=layer_name if isinstance(layer_name, str) and layer_name else "Layer",
+                    room_name=room.name,
+                ),
+                source_path=room.yy_path,
+                resource=room.name,
+                resource_type="room",
+                event=str(effect_type) if isinstance(effect_type, str) and effect_type else None,
+                issue_number=592,
+                workaround="Replace the effect with a Godot material/shader or add a project-specific compatibility mapping.",
+            )
 
     def _unique_instance_creation_method_name(
         self,

@@ -11,6 +11,7 @@ from src.conversion.project_manifest import (
     ProjectTextureGroup,
     load_gamemaker_project_manifest,
 )
+from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -130,6 +131,7 @@ class AssetRegistryConverter(BaseConverter):
         "animcurves": "animation_curve",
         "shaders": "shader",
         "tilesets": "tileset",
+        "particlesystems": "particle_system",
         "timelines": "timeline",
         "sequences": "sequence",
         "included_files": "included_file",
@@ -145,6 +147,7 @@ class AssetRegistryConverter(BaseConverter):
         "animcurves": "Animation Curve",
         "shaders": "Shader",
         "tilesets": "Tile Set",
+        "particlesystems": "Particle System",
         "timelines": "Timeline",
         "sequences": "Sequence",
         "included_files": "Included File",
@@ -239,6 +242,7 @@ class AssetRegistryConverter(BaseConverter):
                 )
             )
         self._write_group_compatibility_report(entries, texture_groups, audio_groups)
+        self._write_timeline_action_scripts(entries)
         write_path_registry(self.gm_project_path, self.godot_project_path, entries)
         write_animation_curve_registry(self.gm_project_path, self.godot_project_path, entries)
 
@@ -445,6 +449,12 @@ class AssetRegistryConverter(BaseConverter):
 
         if resource.kind == "sequences":
             return self._sequence_metadata(resource.raw_data)
+
+        if resource.kind == "timelines":
+            return self._timeline_metadata(resource)
+
+        if resource.kind == "particlesystems":
+            return self._particle_system_metadata(resource.raw_data)
 
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
@@ -655,7 +665,303 @@ class AssetRegistryConverter(BaseConverter):
             "playback_speed": self._metadata_float(playback_speed, 1.0),
             "loopmode": self._metadata_int(loopmode, 0),
             "tracks": tracks if isinstance(tracks, list) else [],
+            "moments": self._sequence_event_metadata(raw_data, ("moments", "momentEvents")),
+            "broadcasts": self._sequence_event_metadata(raw_data, ("broadcastMessages", "broadcasts")),
         }
+
+    def _timeline_metadata(self, resource: _ProjectResource) -> JsonDict:
+        moments = self._timeline_moment_metadata(resource)
+        frames = [
+            self._metadata_int(moment.get("frame"), 0)
+            for moment in moments
+            if isinstance(moment.get("frame"), int | float)
+        ]
+        return {
+            "moments": moments,
+            "moment_count": len(moments),
+            "max_moment": max(frames, default=-1),
+        }
+
+    def _timeline_moment_metadata(self, resource: _ProjectResource) -> list[JsonDict]:
+        raw_moments = resource.raw_data.get("momentList")
+        if not isinstance(raw_moments, list):
+            raw_moments = resource.raw_data.get("moments")
+        if not isinstance(raw_moments, list):
+            raw_moments = []
+
+        moments: list[JsonDict] = []
+        for index, raw_moment in enumerate(cast(list[object], raw_moments)):
+            if not isinstance(raw_moment, dict):
+                continue
+            moment = cast(JsonDict, raw_moment)
+            frame = self._metadata_int(
+                moment.get("moment", moment.get("frame", moment.get("time", index))),
+                index,
+            )
+            actions = self._timeline_action_metadata(resource, moment, frame)
+            moments.append({
+                "frame": frame,
+                "actions": actions,
+                "source_path": resource.source_path,
+            })
+
+        if not moments:
+            discovered_actions = self._timeline_discovered_source_actions(resource)
+            for frame, actions in discovered_actions:
+                moments.append({
+                    "frame": frame,
+                    "actions": actions,
+                    "source_path": resource.source_path,
+                })
+        return sorted(moments, key=lambda item: self._metadata_int(item.get("frame"), 0))
+
+    def _timeline_action_metadata(
+        self,
+        resource: _ProjectResource,
+        moment: JsonDict,
+        frame: int,
+    ) -> list[JsonDict]:
+        actions: list[JsonDict] = []
+        for raw_action in self._raw_action_items(moment):
+            action = self._timeline_action_from_raw(raw_action)
+            if action is not None:
+                actions.append(action)
+
+        source_filename = self._timeline_source_filename(resource, moment, frame)
+        if source_filename:
+            source_path = self._resource_relative_path(resource, source_filename)
+            actions.append({
+                "kind": "gml",
+                "source_path": source_path,
+                "script_path": self._timeline_action_script_resource_path(resource.name, frame),
+            })
+        return actions
+
+    def _timeline_discovered_source_actions(self, resource: _ProjectResource) -> list[tuple[int, list[JsonDict]]]:
+        discovered: list[tuple[int, list[JsonDict]]] = []
+        try:
+            filenames = sorted(os.listdir(os.path.dirname(resource.yy_path)))
+        except OSError:
+            return discovered
+
+        for filename in filenames:
+            if not filename.lower().endswith(".gml"):
+                continue
+            frame = self._timeline_frame_from_filename(filename)
+            if frame is None:
+                continue
+            discovered.append((
+                frame,
+                [{
+                    "kind": "gml",
+                    "source_path": self._resource_relative_path(resource, filename),
+                    "script_path": self._timeline_action_script_resource_path(resource.name, frame),
+                }],
+            ))
+        return discovered
+
+    def _timeline_source_filename(
+        self,
+        resource: _ProjectResource,
+        moment: JsonDict,
+        frame: int,
+    ) -> str:
+        for key in ("gmlFile", "eventFile", "filename", "source", "sourceFile"):
+            value = moment.get(key)
+            if isinstance(value, str) and value:
+                return value
+        for candidate in (
+            f"Moment_{frame}.gml",
+            f"moment_{frame}.gml",
+            f"Timeline_{frame}.gml",
+            f"{frame}.gml",
+        ):
+            if os.path.isfile(os.path.join(os.path.dirname(resource.yy_path), candidate)):
+                return candidate
+        return ""
+
+    def _raw_action_items(self, moment: JsonDict) -> list[object]:
+        raw_actions = moment.get("actions")
+        if not isinstance(raw_actions, list):
+            raw_actions = moment.get("actionList")
+        if isinstance(raw_actions, list):
+            return list(cast(list[object], raw_actions))
+        scripts = moment.get("scripts")
+        if isinstance(scripts, list):
+            return [{"script": script} for script in cast(list[object], scripts)]
+        callable_name = moment.get("callable")
+        if isinstance(callable_name, str) and callable_name:
+            return [{"callable": callable_name}]
+        return []
+
+    def _timeline_action_from_raw(self, raw_action: object) -> JsonDict | None:
+        if isinstance(raw_action, str) and raw_action:
+            return {"kind": "script", "script": raw_action}
+        if not isinstance(raw_action, dict):
+            return None
+        action = cast(JsonDict, raw_action)
+        callable_name = action.get("callable")
+        if isinstance(callable_name, str) and callable_name:
+            return {"kind": "callable", "callable": callable_name}
+        script = action.get("script") or action.get("scriptName") or action.get("name")
+        if isinstance(script, str) and script:
+            return {"kind": "script", "script": script}
+        return {"kind": "metadata", "raw": action}
+
+    def _sequence_event_metadata(self, raw_data: JsonDict, keys: tuple[str, ...]) -> list[JsonDict]:
+        events: list[JsonDict] = []
+        for key in keys:
+            raw_events = raw_data.get(key)
+            if not isinstance(raw_events, list):
+                continue
+            for index, raw_event in enumerate(cast(list[object], raw_events)):
+                if not isinstance(raw_event, dict):
+                    continue
+                event = cast(JsonDict, raw_event)
+                frame = self._metadata_float(
+                    event.get("frame", event.get("moment", event.get("time", index))),
+                    float(index),
+                )
+                normalized: JsonDict = {"frame": frame}
+                for name in ("name", "message", "event", "callable", "script"):
+                    value = event.get(name)
+                    if isinstance(value, str) and value:
+                        normalized[name] = value
+                normalized["raw"] = event
+                events.append(normalized)
+        return sorted(events, key=lambda item: self._metadata_float(item.get("frame"), 0.0))
+
+    def _particle_system_metadata(self, raw_data: JsonDict) -> JsonDict:
+        return {
+            "types": self._json_list(raw_data, ("particleTypes", "types")),
+            "emitters": self._json_list(raw_data, ("emitters",)),
+            "attractors": self._json_list(raw_data, ("attractors",)),
+            "destroyers": self._json_list(raw_data, ("destroyers",)),
+            "deflectors": self._json_list(raw_data, ("deflectors",)),
+            "changers": self._json_list(raw_data, ("changers",)),
+            "raw": raw_data,
+        }
+
+    def _write_timeline_action_scripts(self, entries: tuple[AssetRegistryEntry, ...]) -> None:
+        asset_names = {entry.name for entry in entries}
+        for entry in entries:
+            if entry.asset_type != "timeline":
+                continue
+            metadata = entry.metadata or {}
+            raw_moments = metadata.get("moments")
+            if not isinstance(raw_moments, list):
+                continue
+            for raw_moment in cast(list[object], raw_moments):
+                if not isinstance(raw_moment, dict):
+                    continue
+                moment = cast(JsonDict, raw_moment)
+                frame = self._metadata_int(moment.get("frame"), 0)
+                raw_actions = moment.get("actions")
+                if not isinstance(raw_actions, list):
+                    continue
+                for raw_action in cast(list[object], raw_actions):
+                    if not isinstance(raw_action, dict):
+                        continue
+                    action = cast(JsonDict, raw_action)
+                    source_path = action.get("source_path")
+                    script_path = action.get("script_path")
+                    if isinstance(source_path, str) and isinstance(script_path, str):
+                        self._write_timeline_action_script(entry.name, frame, source_path, script_path, asset_names)
+
+    def _write_timeline_action_script(
+        self,
+        timeline_name: str,
+        frame: int,
+        source_path: str,
+        script_path: str,
+        asset_names: set[str],
+    ) -> None:
+        if not script_path.startswith("res://"):
+            return
+        gm_source_path = os.path.join(self.gm_project_path, *source_path.split("/"))
+        try:
+            with open(gm_source_path, "r", encoding="utf-8") as source_file:
+                source = source_file.read()
+        except OSError:
+            self._safe_log(
+                "Warning: Could not read GameMaker timeline moment code for "
+                f"{timeline_name} frame {frame}: {gm_source_path}"
+            )
+            return
+
+        try:
+            body = transpile_gml_code(
+                source,
+                asset_names=asset_names,
+                source_path=gm_source_path,
+                event=f"timeline moment {frame}",
+                preserve_source_comments=True,
+                self_expression="_gm_instance",
+                other_expression="GMRuntime.gml_instance_noone()",
+                instance_target="_gm_instance",
+            )
+        except GMLTranspileError as exc:
+            message = (
+                "Warning: Could not transpile GameMaker timeline moment code for "
+                f"{timeline_name} frame {frame}: {gm_source_path}: {exc}"
+            )
+            if self.diagnostics is not None:
+                self.diagnostics.add_transpile_failure(
+                    message,
+                    source_path=gm_source_path,
+                    line=exc.line,
+                    column=exc.column,
+                    resource=timeline_name,
+                    resource_type="timeline",
+                    event=f"moment {frame}",
+                    workaround="Split or rewrite unsupported GML in this timeline moment.",
+                )
+            self._safe_log(message)
+            return
+
+        if not body.strip():
+            body = "\tpass"
+        output_path = os.path.join(self.godot_project_path, *script_path[len("res://"):].split("/"))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as script_file:
+            script_file.write(
+                "\n".join([
+                    "extends RefCounted",
+                    "",
+                    'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")',
+                    "",
+                    "static func execute(_gm_instance):",
+                    body.rstrip(),
+                    "",
+                ])
+            )
+
+    def _resource_relative_path(self, resource: _ProjectResource, filename: str) -> str:
+        return os.path.join(
+            os.path.dirname(resource.source_path),
+            filename,
+        ).replace(os.sep, "/")
+
+    @staticmethod
+    def _timeline_action_script_resource_path(timeline_name: str, frame: int) -> str:
+        safe_name = "".join(char if char.isalnum() or char == "_" else "_" for char in timeline_name)
+        return f"res://gm2godot/timelines/{safe_name}_{frame}.gd"
+
+    @staticmethod
+    def _timeline_frame_from_filename(filename: str) -> int | None:
+        stem = os.path.splitext(filename)[0]
+        digits = "".join(char for char in stem if char.isdigit())
+        if not digits:
+            return None
+        return int(digits)
+
+    @staticmethod
+    def _json_list(raw_data: JsonDict, keys: tuple[str, ...]) -> list[object]:
+        for key in keys:
+            value = raw_data.get(key)
+            if isinstance(value, list):
+                return list(cast(list[object], value))
+        return []
 
     def _room_order_indices(self, resources: Iterable[_ProjectResource]) -> dict[str, int]:
         rooms = {resource.name for resource in resources if resource.kind == "rooms"}

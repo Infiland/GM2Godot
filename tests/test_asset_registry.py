@@ -118,6 +118,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 ("animcurves", "ac_fade"),
                 ("sequences", "seq_intro"),
                 ("timelines", "tl_intro"),
+                ("particlesystems", "ps_spark"),
             ],
         )
         self._write_resource(
@@ -151,9 +152,38 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "seq_intro",
             "GMSequence",
             "folders/Sequences.yy",
-            {"length": 120, "playbackSpeed": 30, "playback": 1, "tracks": [{"name": "Title"}]},
+            {
+                "length": 120,
+                "playbackSpeed": 30,
+                "playback": 1,
+                "tracks": [{"name": "Title"}],
+                "moments": [{"frame": 2, "callable": "_on_sequence_moment"}],
+                "broadcastMessages": [{"frame": 4, "message": "beat"}],
+            },
         )
-        self._write_resource("timelines", "tl_intro", "GMTimeline", "folders/Timelines.yy")
+        self._write_resource(
+            "timelines",
+            "tl_intro",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {
+                "momentList": [
+                    {"moment": 2, "eventFile": "Moment_2.gml"},
+                    {"moment": 4, "actions": [{"script": "scr_spawn"}]},
+                ]
+            },
+        )
+        _write_file(os.path.join(self.gm_dir, "timelines", "tl_intro", "Moment_2.gml"), "x = 42;\n")
+        self._write_resource(
+            "particlesystems",
+            "ps_spark",
+            "GMParticleSystem",
+            "folders/Particles.yy",
+            {
+                "particleTypes": [{"name": "pt_spark", "lifeMin": 10, "lifeMax": 20}],
+                "emitters": [{"name": "pe_spark", "streamNumber": 4}],
+            },
+        )
         _write_file(os.path.join(self.gm_dir, "datafiles", "config", "game.json"), "{}")
 
         entries = self._converter(organize_sounds_by_audio_group=True).build_entries()
@@ -202,7 +232,23 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(sequence_metadata["playback_speed"], 30.0)
         self.assertEqual(sequence_metadata["loopmode"], 1)
         self.assertEqual(sequence_metadata["tracks"], [{"name": "Title"}])
+        self.assertEqual(sequence_metadata["moments"][0]["callable"], "_on_sequence_moment")
+        self.assertEqual(sequence_metadata["broadcasts"][0]["message"], "beat")
         self.assertEqual(by_name["tl_intro"].asset_type, "timeline")
+        timeline_metadata = by_name["tl_intro"].metadata
+        self.assertIsNotNone(timeline_metadata)
+        assert timeline_metadata is not None
+        self.assertEqual(timeline_metadata["moment_count"], 2)
+        self.assertEqual(timeline_metadata["max_moment"], 4)
+        first_timeline_action = timeline_metadata["moments"][0]["actions"][0]
+        self.assertEqual(first_timeline_action["source_path"], "timelines/tl_intro/Moment_2.gml")
+        self.assertEqual(first_timeline_action["script_path"], "res://gm2godot/timelines/tl_intro_2.gd")
+        self.assertEqual(by_name["ps_spark"].asset_type, "particle_system")
+        particle_metadata = by_name["ps_spark"].metadata
+        self.assertIsNotNone(particle_metadata)
+        assert particle_metadata is not None
+        self.assertEqual(particle_metadata["types"][0]["name"], "pt_spark")
+        self.assertEqual(particle_metadata["emitters"][0]["name"], "pe_spark")
         self.assertEqual(by_name["config/game.json"].asset_type, "included_file")
         self.assertEqual(by_name["config/game.json"].godot_path, "res://included_files/config/game.json")
 
@@ -231,6 +277,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 ("sprites", "s_player"),
                 ("paths", "path_patrol"),
                 ("animcurves", "ac_fade"),
+                ("timelines", "tl_intro"),
             ],
         )
         self._write_resource("sprites", "s_player", "GMSprite", "folders/Sprites.yy")
@@ -248,6 +295,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "folders/Animation Curves.yy",
             {"channels": [{"name": "alpha", "points": [{"x": 0, "y": 1}]}]},
         )
+        self._write_resource(
+            "timelines",
+            "tl_intro",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {"momentList": [{"moment": 3, "eventFile": "Moment_3.gml"}]},
+        )
+        _write_file(os.path.join(self.gm_dir, "timelines", "tl_intro", "Moment_3.gml"), "x = 42;\n")
 
         registry_path = self._converter().convert_all()
 
@@ -264,15 +319,21 @@ class TestAssetRegistryConverter(unittest.TestCase):
         path_registry_path = os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH)
         path_scene_path = os.path.join(self.godot_dir, "paths", "path_patrol", "path_patrol.tscn")
         animation_curve_registry_path = os.path.join(self.godot_dir, ANIMATION_CURVE_REGISTRY_RELATIVE_PATH)
+        timeline_script_path = os.path.join(self.godot_dir, "gm2godot", "timelines", "tl_intro_3.gd")
         self.assertTrue(os.path.isfile(path_registry_path))
         self.assertTrue(os.path.isfile(path_scene_path))
         self.assertTrue(os.path.isfile(animation_curve_registry_path))
+        self.assertTrue(os.path.isfile(timeline_script_path))
         with open(path_scene_path, "r", encoding="utf-8") as f:
             path_scene = f.read()
         with open(animation_curve_registry_path, "r", encoding="utf-8") as f:
             curve_registry = f.read()
+        with open(timeline_script_path, "r", encoding="utf-8") as f:
+            timeline_script = f.read()
         self.assertIn('[node name="path_patrol" type="Path2D"]', path_scene)
         self.assertIn('"name": "ac_fade"', curve_registry)
+        self.assertIn("static func execute(_gm_instance):", timeline_script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "x", 42)', timeline_script)
 
     def test_generates_actionable_texture_and_audio_group_registries(self) -> None:
         _write_json(

@@ -19,6 +19,10 @@ const GML_ASSET_TYPE_ALIASES = {
 	"shaders": "shader",
 	"tileset": "tileset",
 	"tilesets": "tileset",
+	"particle_system": "particle_system",
+	"particle_systems": "particle_system",
+	"particlesystem": "particle_system",
+	"particlesystems": "particle_system",
 	"timeline": "timeline",
 	"timelines": "timeline",
 	"sequence": "sequence",
@@ -36,6 +40,7 @@ const GML_ASSET_TYPE_NAMES = {
 	"path": "Path",
 	"shader": "Shader",
 	"tileset": "Tile Set",
+	"particle_system": "Particle System",
 	"timeline": "Timeline",
 	"sequence": "Sequence",
 	"included_file": "Included File"

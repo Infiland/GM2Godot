@@ -239,6 +239,16 @@ def _serialize_layer(
             )
         )
 
+    if resource_type == "GMREffectLayer":
+        context.warn(
+            "Warning: GameMaker effect/filter layer {layer_name} in room {room_name} "
+            "is preserved as metadata; native shader/filter behavior requires project-specific "
+            "Godot material support.".format(
+                room_name=context.room.name,
+                layer_name=original_name,
+            )
+        )
+
     lines.extend(_layer_node_lines(layer, node_name, parent_path, original_name, resource_type))
 
     child_parent_path = node_name if parent_path == "." else f"{parent_path}/{node_name}"
@@ -641,6 +651,8 @@ def _asset_node_lines(
         asset_type = _asset_resource_type(asset)
         if asset_type == "GMRSpriteGraphic":
             lines.extend(_sprite_asset_lines(asset, node_name, parent_path, layer_name, context))
+        elif asset_type == "GMRParticleSystem":
+            lines.extend(_particle_system_asset_lines(asset, node_name, parent_path))
         else:
             context.warn(
                 "Warning: Unsupported GameMaker room asset type {asset_type} in room {room_name}, "
@@ -709,6 +721,31 @@ def _sprite_asset_lines(
         lines.append("metadata/gamemaker_placeholder = true")
         lines.append("metadata/gamemaker_unresolved_sprite_scene = true")
     lines.append("")
+    return lines
+
+
+def _particle_system_asset_lines(
+    asset: JsonDict,
+    node_name: str,
+    parent_path: str,
+) -> list[str]:
+    particle_system_id = _dict_value(asset.get("particlesystemId"))
+    particle_system_name = particle_system_id.get("name")
+    if not isinstance(particle_system_name, str) or not particle_system_name:
+        particle_system_name = _asset_name(asset)
+    lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
+    lines.extend(_asset_transform_lines(asset))
+    lines.extend([
+        'metadata/gamemaker_layer_element_type = "particle_system"',
+        "metadata/gamemaker_particle_system_layer_element = true",
+        f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
+        f"metadata/gamemaker_asset_node_name = {godot_value(node_name)}",
+        f"metadata/gamemaker_asset_type = {godot_value(_asset_resource_type(asset))}",
+        f"metadata/gamemaker_particle_system_name = {godot_value(particle_system_name)}",
+        f"metadata/gamemaker_particle_system_id = {godot_value(particle_system_id)}",
+        f"metadata/gamemaker_asset_raw = {godot_value(asset)}",
+        "",
+    ])
     return lines
 
 

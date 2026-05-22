@@ -13,6 +13,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
     GAMEMAKER_TILE_FLIP_BIT,
@@ -723,6 +724,41 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_type = "GMREffectLayer"', content)
         self.assertIn('metadata/gamemaker_layer_effect_type = "_filter_whitenoise"', content)
         self.assertIn('metadata/gamemaker_layer_effect_properties = [{"name": "g_WhiteNoiseIntensity"', content)
+        self.assertTrue(any(
+            "effect/filter layer FX" in log and "preserved as metadata" in log
+            for log in self.logs
+        ))
+
+    def test_effect_layer_records_source_linked_diagnostic(self):
+        self._write_yyp(["r_effect_diag"])
+        room_path = self._write_room("r_effect_diag", layers=[
+            {
+                "%Name": "FX",
+                "resourceType": "GMREffectLayer",
+                "effectType": "_filter_whitenoise",
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        recorded = diagnostics.diagnostics()
+
+        self.assertTrue(any(
+            diagnostic.code == "GM2GD-RESOURCE-UNSUPPORTED"
+            and diagnostic.source_path == room_path
+            and diagnostic.resource == "r_effect_diag"
+            and diagnostic.event == "_filter_whitenoise"
+            for diagnostic in recorded
+        ))
 
     def test_unsupported_layer_type_warns_and_emits_placeholder(self):
         self._write_yyp(["r_unknown"])
@@ -932,9 +968,10 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[node name="seq_intro" type="Node2D" parent="MixedAssets"]', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "sequence"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "particle_system"', content)
+        self.assertIn("metadata/gamemaker_particle_system_layer_element = true", content)
         self.assertIn('metadata/gamemaker_layer_element_type = "tile"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "undefined"', content)
-        self.assertEqual(content.count("metadata/gamemaker_unsupported_asset = true"), 4)
+        self.assertEqual(content.count("metadata/gamemaker_unsupported_asset = true"), 3)
         self.assertTrue(any(
             "GMRSequenceGraphic" in log and "layer element type sequence" in log
             for log in self.logs

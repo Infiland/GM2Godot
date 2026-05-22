@@ -43,7 +43,14 @@ def _write_registry(project_dir: Path) -> None:
             source_path="sequences/seq_intro/seq_intro.yy",
             godot_path="",
             legacy_id="sequences/seq_intro/seq_intro.yy",
-            metadata={"length": 12.0, "playback_speed": 1.0, "loopmode": 0, "tracks": []},
+            metadata={
+                "length": 12.0,
+                "playback_speed": 1.0,
+                "loopmode": 0,
+                "tracks": [],
+                "moments": [{"frame": 1.0, "callable": "_sequence_callback"}],
+                "broadcasts": [{"frame": 2.0, "message": "beat", "callable": "_sequence_callback"}],
+            },
         ),
         AssetRegistryEntry(
             id=400,
@@ -54,6 +61,11 @@ def _write_registry(project_dir: Path) -> None:
             source_path="timelines/tl_intro/tl_intro.yy",
             godot_path="",
             legacy_id="timelines/tl_intro/tl_intro.yy",
+            metadata={
+                "moments": [
+                    {"frame": 1, "actions": [{"kind": "callable", "callable": "_timeline_seed_callback"}]}
+                ]
+            },
         ),
     )
     _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
@@ -84,6 +96,16 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif instance != self:
         \t\tGMRuntime.gml_global_scope()["timeline_wrong_self"] = true
 
+        func _timeline_seed_callback(instance, action):
+        \tGMRuntime.gml_global_scope()["timeline_seed_hits"] = GMRuntime.gml_global_scope().get("timeline_seed_hits", 0) + 1
+        \tif instance != self:
+        \t\tGMRuntime.gml_global_scope()["timeline_seed_wrong_self"] = true
+
+        func _sequence_callback(instance, action):
+        \tGMRuntime.gml_global_scope()["sequence_events"] = GMRuntime.gml_global_scope().get("sequence_events", 0) + 1
+        \tif action.get("message", "") == "beat":
+        \t\tGMRuntime.gml_global_scope()["sequence_broadcast"] = action["message"]
+
         func _ready():
         \tvar layer = Node2D.new()
         \tlayer.name = "Sequences"
@@ -108,6 +130,11 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tvar instance = GMRuntime.gml_layer_sequence_get_instance(element)
         \tif not _check(instance["sequence"]["name"] == "seq_intro" and instance["elementID"].index == element.index, "sequence instance mismatch"):
+        \t\treturn
+        \tGMRuntime.gml_layer_sequence_step(element, 2)
+        \tif not _check(GMRuntime.gml_global_scope().get("sequence_events", 0) == 2, "sequence authored events did not fire"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_global_scope().get("sequence_broadcast", "") == "beat", "sequence broadcast did not dispatch"):
         \t\treturn
         \tGMRuntime.gml_layer_sequence_headpos(element, 6)
         \tif not _check(GMRuntime.gml_layer_sequence_get_headpos(element) == 6, "sequence headpos mismatch"):
@@ -136,8 +163,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(GMRuntime.gml_timeline_get_name(timeline_asset) == "tl_intro", "timeline_get_name failed"):
         \t\treturn
+        \tif not _check(GMRuntime.gml_timeline_size(timeline_asset) == 1 and GMRuntime.gml_timeline_max_moment(timeline_asset) == 1, "authored timeline metadata failed"):
+        \t\treturn
         \tGMRuntime.gml_timeline_moment_add_script(timeline_asset, 2, Callable(self, "_timeline_callback"))
-        \tif not _check(GMRuntime.gml_timeline_size(timeline_asset) == 1 and GMRuntime.gml_timeline_max_moment(timeline_asset) == 2, "timeline moment metadata failed"):
+        \tif not _check(GMRuntime.gml_timeline_size(timeline_asset) == 2 and GMRuntime.gml_timeline_max_moment(timeline_asset) == 2, "timeline moment metadata failed"):
         \t\treturn
         \ttimeline_index = timeline_asset
         \ttimeline_position = 0
@@ -145,12 +174,16 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \ttimeline_running = true
         \tGMRuntime.gml_timeline_step(self)
         \tGMRuntime.gml_timeline_step(self)
+        \tif not _check(GMRuntime.gml_global_scope().get("timeline_seed_hits", 0) == 1, "authored timeline callback did not fire"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_global_scope().get("timeline_seed_wrong_self", false), "authored timeline callback self mismatch"):
+        \t\treturn
         \tif not _check(GMRuntime.gml_global_scope().get("timeline_hits", 0) == 1, "timeline callback did not fire"):
         \t\treturn
         \tif not _check(not GMRuntime.gml_global_scope().get("timeline_wrong_self", false), "timeline callback self mismatch"):
         \t\treturn
         \tGMRuntime.gml_timeline_moment_clear(timeline_asset, 2)
-        \tif not _check(GMRuntime.gml_timeline_size(timeline_asset) == 0, "timeline clear moment failed"):
+        \tif not _check(GMRuntime.gml_timeline_size(timeline_asset) == 1, "timeline clear moment failed"):
         \t\treturn
 
         \tGMRuntime.gml_layer_sequence_destroy(element)

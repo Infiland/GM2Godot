@@ -147,6 +147,7 @@ class Converter:
                 update_log_callback=self.update_log_callback,
                 compact_logging=self.compact_logging,
                 max_workers=self.max_workers,
+                diagnostics=self.diagnostics,
             ).convert_all(), "Console_Convertor_Rooms"),
             ("asset_registry", lambda: AssetRegistryConverter(
                 gm_path, godot_path, self.log_callback,

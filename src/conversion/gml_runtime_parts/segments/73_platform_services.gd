@@ -1,4 +1,5 @@
 static var _gml_platform_service_hooks = {}
+static var _gml_extension_async_schemas = {}
 static var _gml_platform_service_async_defaults = {
 	"steam": {"kind": "steam", "handler": "_on_async_steam"},
 	"iap": {"kind": "in_app_purchase", "handler": "_on_async_in_app_purchase"},
@@ -123,6 +124,49 @@ static func gml_platform_service_dispatch_async(service_name, payload, kind = ""
 		resolved_handler = str(defaults.get("handler", "_on_async_" + str(service_name)))
 	var resolved_payload = payload if payload is Dictionary else {}
 	return gml_async_dispatch(resolved_kind, resolved_payload, resolved_handler)
+
+
+static func gml_extension_async_schema_register(extension_name, callback_name, schema):
+	var extension_key = str(extension_name)
+	var callback_key = str(callback_name)
+	if is_undefined(schema) or schema == null:
+		var existing_callbacks = _gml_extension_async_schemas.get(extension_key, {})
+		if typeof(existing_callbacks) == TYPE_DICTIONARY:
+			existing_callbacks.erase(callback_key)
+			if existing_callbacks.is_empty():
+				_gml_extension_async_schemas.erase(extension_key)
+		return null
+	if not _gml_extension_async_schemas.has(extension_key):
+		_gml_extension_async_schemas[extension_key] = {}
+	_gml_extension_async_schemas[extension_key][callback_key] = schema if schema is Dictionary else {"schema": schema}
+	return null
+
+
+static func gml_extension_async_schema(extension_name, callback_name):
+	var callbacks = _gml_extension_async_schemas.get(str(extension_name), {})
+	if typeof(callbacks) != TYPE_DICTIONARY:
+		return {}
+	var schema = callbacks.get(str(callback_name), {})
+	if typeof(schema) != TYPE_DICTIONARY:
+		return {}
+	return _gml_clone_value(schema, 8)
+
+
+static func gml_extension_async_dispatch(extension_name, callback_name, payload):
+	var extension_key = str(extension_name)
+	var callback_key = str(callback_name)
+	var schema = gml_extension_async_schema(extension_key, callback_key)
+	var resolved_kind = str(schema.get("kind", schema.get("async_kind", "extension")))
+	if resolved_kind == "":
+		resolved_kind = "extension"
+	var resolved_handler = str(schema.get("handler", schema.get("handler_name", "")))
+	if resolved_handler == "":
+		resolved_handler = "_on_async_extension" if callback_key == "" else "_on_async_" + callback_key
+	var resolved_payload = payload if payload is Dictionary else {}
+	resolved_payload["extension"] = extension_key
+	resolved_payload["callback"] = callback_key
+	resolved_payload["schema"] = schema
+	return gml_platform_service_dispatch_async(extension_key, resolved_payload, resolved_kind, resolved_handler)
 
 
 static func _gml_platform_service_process_result(service_name, api_name, result):

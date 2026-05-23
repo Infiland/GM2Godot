@@ -116,6 +116,57 @@ class TestGodotProjectFile(unittest.TestCase):
 
         self.assertFalse(result)
 
+    def test_set_autoloads_adds_managed_entries_in_order(self) -> None:
+        _write_file(self.project_path, (
+            '[application]\n'
+            'config/name="Existing"\n'
+        ))
+
+        result = GodotProjectFile(self.project_path).set_autoloads((
+            ("GMRuntime", "res://gm2godot/managers/gm_runtime_manager.gd"),
+            ("GMAssets", "res://gm2godot/managers/gm_assets.gd"),
+        ))
+
+        content = self._read_project()
+        self.assertTrue(result)
+        self.assertIn("[autoload]", content)
+        self.assertLess(content.index("GMRuntime="), content.index("GMAssets="))
+        self.assertIn('GMRuntime="*res://gm2godot/managers/gm_runtime_manager.gd"', content)
+        self.assertIn('GMAssets="*res://gm2godot/managers/gm_assets.gd"', content)
+        self.assertIn('[application]', content)
+
+    def test_set_autoloads_reorders_managed_entries_and_preserves_unrelated(self) -> None:
+        _write_file(self.project_path, (
+            '[autoload]\n'
+            'Custom="*res://custom.gd"\n'
+            'GMAssets="*res://old_assets.gd"\n'
+            'GMRuntime="*res://old_runtime.gd"\n'
+            '\n'
+            '[application]\n'
+            'config/name="Existing"\n'
+        ))
+
+        result = GodotProjectFile(self.project_path).set_autoloads((
+            ("GMRuntime", "res://gm2godot/managers/gm_runtime_manager.gd"),
+            ("GMAssets", "res://gm2godot/managers/gm_assets.gd"),
+        ))
+
+        content = self._read_project()
+        self.assertTrue(result)
+        self.assertLess(content.index("GMRuntime="), content.index("GMAssets="))
+        self.assertLess(content.index("GMAssets="), content.index("Custom="))
+        self.assertIn('Custom="*res://custom.gd"', content)
+        self.assertNotIn("old_assets", content)
+        self.assertNotIn("old_runtime", content)
+        self.assertIn('[application]', content)
+
+    def test_set_autoloads_returns_false_when_project_missing(self) -> None:
+        result = GodotProjectFile(self.project_path).set_autoloads((
+            ("GMRuntime", "res://gm2godot/managers/gm_runtime_manager.gd"),
+        ))
+
+        self.assertFalse(result)
+
 
 if __name__ == "__main__":
     unittest.main()

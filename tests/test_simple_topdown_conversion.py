@@ -99,12 +99,12 @@ class TestSimpleTopDownConversion(unittest.TestCase):
     def test_player_step_transpiles_keyboard_movement(self):
         content = self._read_generated_file("objects", "o_player.gd")
 
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_LEFT):", content)
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_RIGHT):", content)
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_UP):", content)
         self.assertIn("if GMRuntime.gml_keyboard_check(KEY_DOWN):", content)
-        self.assertNotIn("func _process(delta):\n\tpass", content)
+        self.assertNotIn("func _process(delta):", content)
         self.assertNotRegex(content, r"(?<!gml_)keyboard_check\(")
         self.assertNotIn("vk_left", content)
         self.assertNotIn("vk_shift", content)
@@ -153,6 +153,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
 
         self.assertIn('run/main_scene=', content)
         self.assertIn('r_StartingRoom.tscn', content)
+        self.assertIn('GMEvents="*res://gm2godot/managers/gm_events.gd"', content)
 
     def test_no_tracebacks_in_logs(self):
         joined = "\n".join(str(msg) for msg in self.logs)

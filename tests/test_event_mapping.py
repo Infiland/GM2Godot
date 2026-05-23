@@ -70,16 +70,16 @@ class TestMapEventStatic(unittest.TestCase):
 
     def test_step_event(self):
         m = map_event({"eventType": 3, "eventNum": 0})
-        self.assertEqual(m.godot_func, "_process")
-        self.assertEqual(m.params, "delta")
-        self.assertEqual(m.sort_key, 1)
+        self.assertEqual(m.godot_func, "_on_step")
+        self.assertEqual(m.params, "")
+        self.assertEqual(m.sort_key, 2)
         self.assertEqual(m.gml_filename, "Step_0.gml")
 
     def test_begin_step(self):
         m = map_event({"eventType": 3, "eventNum": 1})
-        self.assertEqual(m.godot_func, "_physics_process")
-        self.assertEqual(m.params, "delta")
-        self.assertEqual(m.sort_key, 2)
+        self.assertEqual(m.godot_func, "_on_begin_step")
+        self.assertEqual(m.params, "")
+        self.assertEqual(m.sort_key, 1)
 
     def test_end_step(self):
         m = map_event({"eventType": 3, "eventNum": 2})

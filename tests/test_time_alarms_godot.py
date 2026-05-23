@@ -87,12 +87,23 @@ class TestTimeAlarmsGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_alarm_get(self, 0) == 1, "alarm 0 not decremented to 1"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_alarm_get(self, 3) == -1, "alarm 3 not reset after firing"):
+            \tif not _check(GMRuntime.gml_alarm_get(self, 3) == 0, "alarm 3 not left at 0 after firing"):
             \t\treturn
 
             \t# Tick 2: alarm 0 should fire (was 1, decrements to 0)
             \tGMRuntime.gml_alarm_tick(self, 1)
             \tif not _check(0 in _alarm_fired, "alarm 0 did not fire after tick 2"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_alarm_get(self, 0) == 0, "alarm 0 not left at 0 after firing"):
+            \t\treturn
+            \tGMRuntime.gml_alarm_tick(self, 1)
+            \tif not _check(GMRuntime.gml_alarm_get(self, 0) == -1, "alarm 0 did not clear to -1 on the next tick"):
+            \t\treturn
+            \tGMRuntime.gml_alarm_set(self, 0, 0)
+            \tGMRuntime.gml_alarm_tick(self, 1)
+            \tif not _check(_alarm_fired.count(0) == 1, "alarm 0 fired when explicitly set to 0"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_alarm_get(self, 0) == -1, "alarm 0 set to 0 did not clear to -1"):
             \t\treturn
 
             \t# Out of range alarm access

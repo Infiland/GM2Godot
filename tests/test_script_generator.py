@@ -57,7 +57,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         )
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
         self.assertIn("\t_gm_initialize_motion_runtime()", content)
-        self.assertIn("func _process(delta):\n\t_gm_apply_motion_step()", content)
+        self.assertNotIn("func _process(delta):", content)
         self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
 
     def test_object_runtime_preserves_inherited_lifecycle_when_no_local_event(self):
@@ -116,11 +116,11 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
     def test_step_event(self):
         content = generate_script_content([{"eventType": 3, "eventNum": 0}])
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
 
     def test_begin_step(self):
         content = generate_script_content([{"eventType": 3, "eventNum": 1}])
-        self.assertIn("func _physics_process(delta):", content)
+        self.assertIn("func _on_begin_step():", content)
 
     def test_draw_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 0}])
@@ -241,7 +241,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
             [{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
             code_bodies={
                 "_ready": '\tpayload = GMRuntime.gml_struct({"items": [1, "x"]})',
-                "_process": "\tlast_delta = delta",
+                "_on_step": "\tlast_delta = 1",
             },
             instance_variables=["payload", "last_delta"],
         )
@@ -249,10 +249,10 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn("var payload\n", content)
         self.assertIn("var last_delta\n", content)
         self.assertIn("func _ready():", content)
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
         self.assertNotIn("var payload:", content)
         self.assertNotIn("var last_delta:", content)
-        self.assertNotIn("func _process(delta:", content)
+        self.assertNotIn("func _on_step() -> ", content)
         self.assertNotIn(" -> ", content)
 
 
@@ -318,11 +318,11 @@ class TestScriptGeneratorOrdering(unittest.TestCase):
             {"eventType": 0, "eventNum": 0},   # Create (lifecycle)
         ])
         ready_pos = content.index("_ready")
-        process_pos = content.index("_process")
+        step_pos = content.index("_on_step")
         input_pos = content.index("_input")
         alarm_pos = content.index("_on_alarm")
-        self.assertLess(ready_pos, process_pos)
-        self.assertLess(process_pos, input_pos)
+        self.assertLess(ready_pos, step_pos)
+        self.assertLess(step_pos, input_pos)
         self.assertLess(input_pos, alarm_pos)
 
 
@@ -378,10 +378,9 @@ class TestScriptGeneratorCodeBodies(unittest.TestCase):
             code_bodies={"_ready": "\tprint('hello')"},
         )
         self.assertIn("\tprint('hello')", content)
-        # _process should still have pass
-        process_idx = content.index("func _process")
-        after_process = content[process_idx:]
-        self.assertIn("pass", after_process)
+        step_idx = content.index("func _on_step")
+        after_step = content[step_idx:]
+        self.assertIn("pass", after_step)
 
     def test_empty_code_bodies_dict(self):
         content = generate_script_content(

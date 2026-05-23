@@ -10,9 +10,80 @@ const GML_TIME_SOURCE_STATE_STOPPED = 3
 const GML_TIME_SOURCE_EXPIRY_AFTER = 0
 const GML_TIME_SOURCE_EXPIRY_NEAREST = 1
 const GML_TIME_SOURCE_HANDLE_KIND = "time_source"
+const GML_EVENT_PHASE_ORDER = [
+	"begin_step",
+	"time_sources",
+	"alarms",
+	"step",
+	"motion",
+	"end_step"
+]
 
 static var _gml_time_sources = {}
 static var _gml_time_source_next_id = 1
+static var _gml_event_scheduler_enabled = true
+static var _gml_event_scheduler_frame_index = 0
+static var _gml_event_scheduler_trace = []
+
+
+static func gml_event_scheduler_set_enabled(enabled):
+	_gml_event_scheduler_enabled = bool(enabled)
+	return null
+
+
+static func gml_event_scheduler_is_enabled():
+	return _gml_event_scheduler_enabled
+
+
+static func gml_event_scheduler_phase_order():
+	return _gml_clone_value(GML_EVENT_PHASE_ORDER, 2)
+
+
+static func gml_event_scheduler_trace():
+	return _gml_clone_value(_gml_event_scheduler_trace, 16)
+
+
+static func gml_event_scheduler_trace_clear():
+	_gml_event_scheduler_trace.clear()
+	return null
+
+
+static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
+	if not _gml_event_scheduler_enabled:
+		return null
+	var frame = _gml_event_scheduler_frame_index
+	_gml_event_scheduler_frame_index += 1
+	var frames = max(1, int(delta_frames))
+	var seconds = float(delta_seconds)
+	gml_event_scheduler_dispatch_phase("begin_step", "_on_begin_step", _gml_event_scheduler_live_instances(), frame)
+	gml_time_source_tick_all(seconds, frames)
+	_gml_event_scheduler_record_phase("time_sources", "", null, frame)
+	gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
+	gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
+	_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
+	gml_event_scheduler_dispatch_phase("end_step", "_on_end_step", _gml_event_scheduler_live_instances(), frame)
+	return frame
+
+
+static func gml_event_scheduler_dispatch_phase(phase, method_name, instances = null, frame = -1):
+	var targets = instances if instances is Array else _gml_event_scheduler_live_instances()
+	for inst in targets:
+		if not _gml_event_scheduler_instance_valid(inst):
+			continue
+		if inst.has_method(str(method_name)):
+			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
+			inst.call(str(method_name))
+	return null
+
+
+static func gml_event_scheduler_tick_alarms(instances = null, delta_frames = 1, frame = -1):
+	var targets = instances if instances is Array else _gml_event_scheduler_live_instances()
+	var frames = max(1, int(delta_frames))
+	for _frame in range(frames):
+		for inst in targets:
+			if _gml_event_scheduler_instance_valid(inst):
+				_gml_alarm_tick_instance(inst, frame)
+	return null
 
 
 static func gml_alarm_get(inst, index):
@@ -32,21 +103,30 @@ static func gml_alarm_set(inst, index, value):
 	if inst == null:
 		return
 	var alarms = _gml_alarm_array(inst)
-	alarms[idx] = value
+	alarms[idx] = int(value)
 
 
 static func gml_alarm_tick(inst, delta_frames):
 	if inst == null:
 		return
+	var frames = max(1, int(delta_frames))
+	for _frame in range(frames):
+		_gml_alarm_tick_instance(inst, -1)
+
+
+static func _gml_alarm_tick_instance(inst, frame):
 	var alarms = _gml_alarm_array(inst)
 	for i in range(GML_ALARM_COUNT):
 		if alarms[i] < 0:
 			continue
-		alarms[i] -= delta_frames
-		if alarms[i] <= 0:
+		if alarms[i] == 0:
 			alarms[i] = -1
+			continue
+		alarms[i] -= 1
+		if alarms[i] == 0:
 			var method_name = "_on_alarm_" + str(i)
 			if inst.has_method(method_name):
+				_gml_event_scheduler_record_phase("alarms", method_name, inst, frame)
 				inst.call(method_name)
 
 
@@ -60,6 +140,41 @@ static func _gml_alarm_array(inst):
 			alarms[i] = -1
 		inst.set_meta("_gml_alarms", alarms)
 	return inst.get_meta("_gml_alarms")
+
+
+static func _gml_event_scheduler_dispatch_motion(instances, frame):
+	for inst in instances:
+		if not _gml_event_scheduler_instance_valid(inst):
+			continue
+		if inst.has_method("_gm_apply_motion_step"):
+			_gml_event_scheduler_record_phase("motion", "_gm_apply_motion_step", inst, frame)
+			inst.call("_gm_apply_motion_step")
+	return null
+
+
+static func _gml_event_scheduler_live_instances():
+	var instances = []
+	for entry in _gml_live_instance_entries():
+		var inst = entry["instance"]
+		if _gml_event_scheduler_instance_valid(inst):
+			instances.append(inst)
+	return instances
+
+
+static func _gml_event_scheduler_instance_valid(inst):
+	return inst != null and is_instance_valid(inst)
+
+
+static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = null, frame = -1):
+	var entry = {
+		"frame": frame,
+		"phase": str(phase),
+		"method": str(method_name),
+		"instance": ""
+	}
+	if inst != null:
+		entry["instance"] = str(inst.name) if inst is Node else str(inst)
+	_gml_event_scheduler_trace.append(entry)
 
 
 static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):

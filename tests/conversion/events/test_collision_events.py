@@ -43,6 +43,9 @@ class TestCollisionEvents(unittest.TestCase):
             {"eventType": 4, "eventNum": 0},
         ])
 
+        self.assertIn("func _gm_collision_event_bindings():", content)
+        self.assertIn('{"target_object": "o_enemy", "method": "_on_collision_o_enemy"}', content)
+        self.assertIn('{"target_object": "", "method": "_on_collision"}', content)
         self.assertIn("func _on_collision_o_enemy():", content)
         self.assertIn("func _on_collision():", content)
 

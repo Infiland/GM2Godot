@@ -410,6 +410,7 @@ def _emit_object_runtime_prelude(
 ) -> None:
     member_lines = (
         "\n\nvar id = GMRuntime.gml_instance_noone()"
+        "\nvar other = GMRuntime.gml_instance_noone()"
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         "\nvar depth = 0"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
@@ -524,6 +525,21 @@ def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -
     return "\n".join(binding_lines)
 
 
+def _render_collision_event_bindings_body(collision_bindings: Sequence[tuple[str, str]]) -> str:
+    binding_lines = ["\treturn ["]
+    seen: set[tuple[str, str]] = set()
+    for target_object, method_name in collision_bindings:
+        key = (target_object, method_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        binding_lines.append(
+            f'\t\t{{"target_object": {_gd_string(target_object)}, "method": {_gd_string(method_name)}}},'
+        )
+    binding_lines.append("\t]")
+    return "\n".join(binding_lines)
+
+
 def generate_script_content(
     event_list: Sequence[JsonDict] | None,
     code_bodies: _CodeBodies | None = None,
@@ -563,6 +579,7 @@ def generate_script_content(
 
     functions: list[EventMapping] = []
     input_functions: list[EventMapping] = []
+    collision_bindings: list[tuple[str, str]] = []
 
     for event in event_list or []:
         if _is_input_event(event):
@@ -574,16 +591,31 @@ def generate_script_content(
         mapping = _map_event(event)
         if mapping is not None:
             functions.append(mapping)
+            if int(event.get("eventType", -1)) == 4:
+                collision_obj = event.get("collisionObjectId")
+                target_object = ""
+                if isinstance(collision_obj, dict):
+                    collision_data = cast(JsonDict, collision_obj)
+                    target_name = collision_data.get("name", "")
+                    target_object = str(target_name) if target_name is not None else ""
+                collision_bindings.append((target_object, mapping.godot_func))
 
     if input_functions:
         functions.append(EventMapping("_gm_input_event_bindings", "", 4, ""))
         functions.extend(input_functions)
+    if collision_bindings:
+        functions.append(EventMapping("_gm_collision_event_bindings", "", 13, ""))
 
     effective_code_bodies: dict[str, str] = dict(code_bodies or {})
     if input_functions:
         effective_code_bodies.setdefault(
             "_gm_input_event_bindings",
             _render_input_event_bindings_body(_deduplicate_functions(input_functions)),
+        )
+    if collision_bindings:
+        effective_code_bodies.setdefault(
+            "_gm_collision_event_bindings",
+            _render_collision_event_bindings_body(collision_bindings),
         )
 
     unique_functions = _deduplicate_functions(functions)

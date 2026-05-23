@@ -162,7 +162,7 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \t\t\tfirst_step_phase = i
             \tif not _check(first_alarm_phase > 0 and first_alarm_phase < first_step_phase, "alarms did not run before Step"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_event_scheduler_phase_order() == ["begin_step", "time_sources", "alarms", "step", "motion", "end_step"], "phase order mismatch"):
+            \tif not _check(GMRuntime.gml_event_scheduler_phase_order() == ["begin_step", "time_sources", "alarms", "step", "motion", "collision", "end_step"], "phase order mismatch"):
             \t\treturn
 
             \ttrace.clear()

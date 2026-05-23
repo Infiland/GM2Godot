@@ -1,3 +1,6 @@
+static var _gml_collision_event_trace = []
+
+
 static func gml_place_meeting(current_self, x, y, target):
 	return gml_handle_is_valid(gml_instance_place(current_self, x, y, target))
 
@@ -94,6 +97,46 @@ static func gml_collision_circle_list(current_self, x, y, radius, target, precis
 	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
 
 
+static func gml_collision_event_trace():
+	return _gml_clone_value(_gml_collision_event_trace, 16)
+
+
+static func gml_collision_event_trace_clear():
+	_gml_collision_event_trace = []
+	return null
+
+
+static func gml_collision_event_dispatch_frame(instances = null, frame = -1):
+	var targets = instances if instances is Array else _gml_collision_live_instances()
+	_gml_event_scheduler_record_phase("collision", "", null, frame)
+	var dispatched = 0
+	for inst in targets:
+		if not _gml_collision_instance_valid(inst):
+			continue
+		if not inst.has_method("_gm_collision_event_bindings"):
+			continue
+		var bindings = inst._gm_collision_event_bindings()
+		if not (bindings is Array):
+			continue
+		for binding in bindings:
+			if not (binding is Dictionary):
+				continue
+			for other_inst in targets:
+				if not _gml_collision_instance_valid(inst):
+					break
+				if not _gml_collision_instance_valid(other_inst):
+					continue
+				if _gml_collision_same_instance(inst, other_inst):
+					continue
+				if not _gml_collision_binding_target_matches(other_inst, binding):
+					continue
+				if not _gml_collision_pair_intersects(inst, other_inst):
+					continue
+				_gml_collision_restore_solid_contact(inst, other_inst)
+				dispatched += _gml_collision_dispatch_binding(inst, other_inst, binding, frame)
+	return dispatched
+
+
 static func _gml_collision_warn_precise_approximation(precise):
 	if not gml_bool(precise):
 		return
@@ -101,6 +144,98 @@ static func _gml_collision_warn_precise_approximation(precise):
 		return
 	_gml_collision_precise_warning_emitted = true
 	push_warning("GML precise collision masks are approximated with generated collision shape bounds")
+
+
+static func _gml_collision_live_instances():
+	var instances = []
+	for entry in _gml_live_instance_entries():
+		var inst = entry["instance"]
+		if _gml_collision_instance_valid(inst):
+			instances.append(inst)
+	return instances
+
+
+static func _gml_collision_instance_valid(inst):
+	return inst != null and is_instance_valid(inst)
+
+
+static func _gml_collision_binding_target_matches(other_inst, binding):
+	var target_object = str(binding.get("target_object", ""))
+	if target_object == "":
+		return true
+	var entry: Variant = _gml_instance_entry(other_inst)
+	if entry == null:
+		return false
+	if str(entry.get("object_name", "")) == target_object:
+		return true
+	for selector_name in entry.get("selector_names", []):
+		if str(selector_name) == target_object:
+			return true
+	return false
+
+
+static func _gml_collision_pair_intersects(left, right):
+	var left_rects = _gml_collision_rects_for_instance(left)
+	if left_rects.is_empty():
+		return false
+	var right_rects = _gml_collision_rects_for_instance(right)
+	if right_rects.is_empty():
+		return false
+	for left_rect in left_rects:
+		for right_rect in right_rects:
+			if left_rect.intersects(right_rect, true):
+				return true
+	return false
+
+
+static func _gml_collision_restore_solid_contact(inst, other_inst):
+	if not _gml_collision_instance_solid(other_inst):
+		return null
+	if not (inst is Node2D):
+		return null
+	var previous = Vector2(
+		_gml_motion_real(inst, "xprevious", inst.global_position.x),
+		_gml_motion_real(inst, "yprevious", inst.global_position.y)
+	)
+	if previous == inst.global_position:
+		return null
+	_gml_motion_set_position(inst, previous)
+	_gml_collision_event_trace.append({
+		"event": "solid_rollback",
+		"instance": str(inst.name) if inst is Node else "",
+		"other": str(other_inst.name) if other_inst is Node else "",
+		"x": previous.x,
+		"y": previous.y,
+	})
+	return null
+
+
+static func _gml_collision_instance_solid(inst):
+	var value = gml_struct_get(inst, "solid")
+	if is_undefined(value):
+		return false
+	return gml_bool(value)
+
+
+static func _gml_collision_dispatch_binding(inst, other_inst, binding, frame):
+	var method_name = str(binding.get("method", ""))
+	if method_name == "" or not inst.has_method(method_name):
+		return 0
+	var previous_other = gml_struct_get(inst, "other")
+	gml_struct_set(inst, "other", other_inst)
+	_gml_collision_event_trace.append({
+		"event": "collision",
+		"frame": frame,
+		"instance": str(inst.name) if inst is Node else "",
+		"other": str(other_inst.name) if other_inst is Node else "",
+		"method": method_name,
+		"target_object": str(binding.get("target_object", "")),
+	})
+	_gml_event_scheduler_record_phase("collision", method_name, inst, frame)
+	inst.call(method_name)
+	if _gml_collision_instance_valid(inst):
+		gml_struct_set(inst, "other", previous_other)
+	return 1
 
 
 static func _gml_collision_first_point_hit(point, target, current_self, notme):

@@ -19,6 +19,8 @@ The generated autoloads are:
 
 The `GMRuntime` autoload records each manager in `manager_registry_snapshot()` and exposes `manager_order()`. Each manager owns named state buckets so future runtime slices can move domain state out of the static compatibility facade without changing generated GML helper call sites.
 
+Collision events are dispatched by the central scheduler after motion/path updates and before End Step, matching the relevant GameMaker event-order window: https://manual.gamemaker.io/monthly/en/The_Asset_Editors/Object_Properties/Event_Order.htm. Dispatch uses generated Godot collision shape bounds, which aligns with Godot's 2D physics shape model: https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html. Pixel-perfect precise masks remain reported as a runtime fidelity limitation through the existing precise-collision warning path.
+
 ## Compatibility
 
 The manager layer is enabled by default when `write_gml_runtime()` runs and `project.godot` exists. Existing generated scripts remain compatible because they still preload and call `res://gm2godot/gml_runtime.gd`.

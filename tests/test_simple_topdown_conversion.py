@@ -153,7 +153,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
 
         self.assertIn('run/main_scene=', content)
         self.assertIn('r_StartingRoom.tscn', content)
-        self.assertIn('GMEvents="*res://autoload/GMEvents.gd"', content)
+        self.assertIn('GMEvents="*res://gm2godot/managers/gm_events.gd"', content)
 
     def test_no_tracebacks_in_logs(self):
         joined = "\n".join(str(msg) for msg in self.logs)

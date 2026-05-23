@@ -308,6 +308,14 @@ _FILE_ARITY: dict[str, tuple[int, int | None]] = {
     "file_text_write_string": (2, 2),
     "file_text_write_real": (2, 2),
     "file_text_writeln": (1, 1),
+    "file_bin_open": (2, 2),
+    "file_bin_rewrite": (1, 1),
+    "file_bin_close": (1, 1),
+    "file_bin_size": (1, 1),
+    "file_bin_position": (1, 1),
+    "file_bin_seek": (2, 2),
+    "file_bin_read_byte": (1, 1),
+    "file_bin_write_byte": (2, 2),
     "filename_name": (1, 1),
     "filename_ext": (1, 1),
     "filename_dir": (1, 1),
@@ -338,6 +346,7 @@ _BUFFER_ARITY: dict[str, tuple[int, int | None]] = {
     "buffer_get_size": (1, 1),
     "buffer_get_used_size": (1, 1),
     "buffer_resize": (2, 2),
+    "buffer_sizeof": (1, 1),
     "buffer_write": (3, 3),
     "buffer_read": (2, 2),
     "buffer_peek": (3, 3),
@@ -346,8 +355,12 @@ _BUFFER_ARITY: dict[str, tuple[int, int | None]] = {
     "buffer_copy": (5, 5),
     "buffer_save": (2, 2),
     "buffer_load": (1, 1),
+    "buffer_save_ext": (4, 4),
+    "buffer_load_ext": (3, 3),
     "buffer_save_async": (2, 4),
     "buffer_load_async": (1, 1),
+    "buffer_compress": (3, 3),
+    "buffer_decompress": (1, 1),
     "buffer_base64_encode": (3, 3),
     "buffer_base64_decode": (1, 1),
     "buffer_md5": (3, 3),
@@ -375,6 +388,7 @@ _NETWORK_ARITY: dict[str, tuple[int, int | None]] = {
     "network_send_packet": (3, 3),
     "network_send_udp": (5, 5),
     "network_send_udp_raw": (5, 5),
+    "network_send_broadcast": (4, 4),
     "network_destroy": (1, 1),
 }
 
@@ -527,6 +541,7 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _DS_COLLECTIONS_ARITY: dict[str, tuple[int, int | None]] = {
+    "ds_exists": (2, 2),
     "ds_list_create": (0, 0),
     "ds_list_destroy": (1, 1),
     "ds_list_clear": (1, 1),

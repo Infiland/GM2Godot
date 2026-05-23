@@ -1,6 +1,10 @@
 const GML_FILE_TEXT_HANDLE_KIND = "file_text"
+const GML_FILE_BINARY_HANDLE_KIND = "file_binary"
 const GML_FILE_USER_ROOT = "user://gm2godot"
 const GML_FILE_DATAFILES_ROOT = "res://datafiles"
+const GML_FILE_BIN_READ = 0
+const GML_FILE_BIN_WRITE = 1
+const GML_FILE_BIN_READ_WRITE = 2
 
 static var _gml_ini_config = ConfigFile.new()
 static var _gml_ini_path = ""
@@ -151,6 +155,97 @@ static func gml_file_text_writeln(file_id):
 	return null
 
 
+static func gml_file_bin_open(path, mode):
+	var mode_value = _to_int64_value(mode)
+	var write_enabled = mode_value != GML_FILE_BIN_READ
+	var resolved = _gml_file_resolve_path(path, write_enabled)
+	var access_mode = FileAccess.READ
+	if mode_value == GML_FILE_BIN_WRITE:
+		_gml_file_ensure_parent_directory(resolved)
+		access_mode = FileAccess.WRITE_READ
+	elif mode_value == GML_FILE_BIN_READ_WRITE:
+		_gml_file_ensure_parent_directory(resolved)
+		access_mode = FileAccess.READ_WRITE if FileAccess.file_exists(resolved) else FileAccess.WRITE_READ
+	elif not FileAccess.file_exists(resolved):
+		_gml_file_ensure_parent_directory(resolved)
+		var created_file = FileAccess.open(resolved, FileAccess.WRITE_READ)
+		if created_file == null:
+			return gml_error("GML file_bin_open failed: " + gml_string(path))
+		created_file.close()
+	var file = FileAccess.open(resolved, access_mode)
+	if file == null:
+		return gml_error("GML file_bin_open failed: " + gml_string(path))
+	return gml_handle_register(GML_FILE_BINARY_HANDLE_KIND, {
+		"file": file,
+		"mode": mode_value,
+		"path": resolved
+	})
+
+
+static func gml_file_bin_rewrite(file_id):
+	var state = _gml_file_bin_state(file_id)
+	if not (state is Dictionary):
+		return null
+	var path = str(state.get("path", ""))
+	if path == "":
+		return null
+	var current_file = state.get("file", null)
+	if current_file is FileAccess:
+		current_file.close()
+	_gml_file_ensure_parent_directory(path)
+	state["file"] = FileAccess.open(path, FileAccess.WRITE_READ)
+	state["mode"] = GML_FILE_BIN_READ_WRITE
+	return null
+
+
+static func gml_file_bin_close(file_id):
+	var handle = gml_handle_from_value(GML_FILE_BINARY_HANDLE_KIND, file_id)
+	if not gml_handle_is_valid(handle):
+		return null
+	var state = handle.reference
+	if state is Dictionary and state.get("file") is FileAccess:
+		state["file"].close()
+	gml_handle_invalidate(handle)
+	return null
+
+
+static func gml_file_bin_size(file_id):
+	var file = _gml_file_bin_file(file_id)
+	if file == null:
+		return 0
+	return file.get_length()
+
+
+static func gml_file_bin_position(file_id):
+	var file = _gml_file_bin_file(file_id)
+	if file == null:
+		return 0
+	return file.get_position()
+
+
+static func gml_file_bin_seek(file_id, position):
+	var file = _gml_file_bin_file(file_id)
+	if file == null:
+		return null
+	file.seek(max(0, _to_int64_value(position)))
+	return null
+
+
+static func gml_file_bin_read_byte(file_id):
+	var file = _gml_file_bin_file(file_id)
+	if file == null or file.eof_reached():
+		return 0
+	return file.get_8()
+
+
+static func gml_file_bin_write_byte(file_id, byte_value):
+	var file = _gml_file_bin_file(file_id)
+	if file == null:
+		return null
+	file.store_8(int(_to_int64_value(byte_value)) & 0xff)
+	return null
+
+
 static func gml_filename_name(path):
 	var file_name = _gml_file_plain_path(path).get_file()
 	var extension = file_name.get_extension()
@@ -286,6 +381,20 @@ static func _gml_file_text_file(file_id):
 	if not gml_handle_is_valid(handle):
 		return null
 	var state = handle.reference
+	if state is Dictionary and state.get("file") is FileAccess:
+		return state["file"]
+	return null
+
+
+static func _gml_file_bin_state(file_id):
+	var handle = gml_handle_from_value(GML_FILE_BINARY_HANDLE_KIND, file_id)
+	if not gml_handle_is_valid(handle):
+		return null
+	return handle.reference
+
+
+static func _gml_file_bin_file(file_id):
+	var state = _gml_file_bin_state(file_id)
 	if state is Dictionary and state.get("file") is FileAccess:
 		return state["file"]
 	return null

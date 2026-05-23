@@ -265,7 +265,9 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     ),
     RuntimeValueParityCase("json_encode(data)", "GMRuntime.gml_json_encode(data)"),
     RuntimeValueParityCase("json_decode(payload)", "GMRuntime.gml_json_decode(payload)"),
+    RuntimeValueParityCase("ds_exists(list, ds_type_list)", "GMRuntime.gml_ds_exists(list, 2)"),
     RuntimeValueParityCase("buffer_create(16, buffer_grow, 4)", "GMRuntime.gml_buffer_create(16, 1, 4)"),
+    RuntimeValueParityCase("buffer_sizeof(buffer_u16)", "GMRuntime.gml_buffer_sizeof(3)"),
     RuntimeValueParityCase("buffer_write(buf, buffer_u8, 7)", "GMRuntime.gml_buffer_write(buf, 1, 7)"),
     RuntimeValueParityCase("buffer_read(buf, buffer_s16)", "GMRuntime.gml_buffer_read(buf, 4)"),
     RuntimeValueParityCase("buffer_seek(buf, buffer_seek_start, 0)", "GMRuntime.gml_buffer_seek(buf, 0, 0)"),
@@ -273,6 +275,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("buffer_exists(buf)", "GMRuntime.gml_buffer_exists(buf)"),
     RuntimeValueParityCase("buffer_base64_encode(buf, 0, 4)", "GMRuntime.gml_buffer_base64_encode(buf, 0, 4)"),
     RuntimeValueParityCase("buffer_md5(buf, 0, 4)", "GMRuntime.gml_buffer_md5(buf, 0, 4)"),
+    RuntimeValueParityCase("file_bin_open('data.bin', fa_readwrite)", "GMRuntime.gml_file_bin_open('data.bin', 2)"),
     RuntimeValueParityCase("http_get(url)", "GMRuntime.gml_http_get(url)"),
     RuntimeValueParityCase("http_post_string(url, body)", "GMRuntime.gml_http_post_string(url, body)"),
     RuntimeValueParityCase(
@@ -291,6 +294,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "GMRuntime.gml_network_connect(sock, '127.0.0.1', 6502)",
     ),
     RuntimeValueParityCase("network_send_raw(sock, buf, 4)", "GMRuntime.gml_network_send_raw(sock, buf, 4)"),
+    RuntimeValueParityCase(
+        "network_send_broadcast(sock, 6502, buf, 4)",
+        "GMRuntime.gml_network_send_broadcast(sock, 6502, buf, 4)",
+    ),
     RuntimeValueParityCase(
         "network_send_udp_raw(sock, '127.0.0.1', 6502, buf, 4)",
         "GMRuntime.gml_network_send_udp_raw(sock, '127.0.0.1', 6502, buf, 4)",
@@ -1320,6 +1327,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_file_text_write_string",
             "gml_file_text_write_real",
             "gml_file_text_writeln",
+            "gml_file_bin_open",
+            "gml_file_bin_rewrite",
+            "gml_file_bin_close",
+            "gml_file_bin_size",
+            "gml_file_bin_position",
+            "gml_file_bin_seek",
+            "gml_file_bin_read_byte",
+            "gml_file_bin_write_byte",
             "gml_filename_name",
             "gml_filename_ext",
             "gml_filename_dir",
@@ -1347,6 +1362,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_buffer_get_size",
             "gml_buffer_get_used_size",
             "gml_buffer_resize",
+            "gml_buffer_sizeof",
             "gml_buffer_write",
             "gml_buffer_read",
             "gml_buffer_peek",
@@ -1355,8 +1371,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_buffer_copy",
             "gml_buffer_save",
             "gml_buffer_load",
+            "gml_buffer_save_ext",
+            "gml_buffer_load_ext",
             "gml_buffer_save_async",
             "gml_buffer_load_async",
+            "gml_buffer_compress",
+            "gml_buffer_decompress",
             "gml_buffer_base64_encode",
             "gml_buffer_base64_decode",
             "gml_buffer_md5",
@@ -1389,6 +1409,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_network_send_packet",
             "gml_network_send_udp",
             "gml_network_send_udp_raw",
+            "gml_network_send_broadcast",
             "gml_network_destroy",
             "gml_network_poll",
             "gml_gpu_set_blendmode",
@@ -2405,6 +2426,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn('const GML_DS_STACK_HANDLE_KIND = "ds_stack"', GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_DS_QUEUE_HANDLE_KIND = "ds_queue"', GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_DS_PRIORITY_HANDLE_KIND = "ds_priority"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_ds_exists(id_value, type_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_list_create():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_list_destroy(id_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_list_clear(id_value):", GML_RUNTIME_SCRIPT)

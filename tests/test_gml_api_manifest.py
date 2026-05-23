@@ -185,7 +185,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         network_send_broadcast = get_gml_api_entry("network_send_broadcast")
         self.assertIsNotNone(network_send_broadcast)
         assert network_send_broadcast is not None
-        self.assertEqual(network_send_broadcast.status, "unsupported")
+        self.assertEqual(network_send_broadcast.status, "implemented")
         self.assertEqual(network_send_broadcast.issue_number, 508)
         gpu_set_blendmode = get_gml_api_entry("gpu_set_blendmode")
         self.assertIsNotNone(gpu_set_blendmode)
@@ -827,8 +827,6 @@ class TestGMLAPIManifest(unittest.TestCase):
     def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
         with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):
             transpile_gml_expression('show_message_async("Hello")')
-        with self.assertRaisesRegex(GMLTranspileError, "network_send_broadcast.*unsupported"):
-            transpile_gml_expression("network_send_broadcast(sock, 6502, buf, 4)")
         with self.assertRaisesRegex(GMLTranspileError, "effect_create_above.*unsupported"):
             transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
         with self.assertRaisesRegex(GMLTranspileError, "shader_enable_corner_id.*unsupported"):

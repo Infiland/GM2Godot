@@ -1,5 +1,37 @@
 # --- Data Structures: Lists, Stacks, Queues, Priority Queues ---
 
+const GML_DS_TYPE_MAP = 1
+const GML_DS_TYPE_LIST = 2
+const GML_DS_TYPE_STACK = 3
+const GML_DS_TYPE_GRID = 4
+const GML_DS_TYPE_QUEUE = 5
+const GML_DS_TYPE_PRIORITY = 6
+
+
+static func gml_ds_exists(id_value, type_value):
+	var kind = _gml_ds_kind_from_type(type_value)
+	if kind == "":
+		return false
+	return gml_handle_is_valid(gml_handle_from_value(kind, id_value))
+
+
+static func _gml_ds_kind_from_type(type_value):
+	var resolved_type = _to_int64_value(type_value)
+	if resolved_type == GML_DS_TYPE_MAP:
+		return GML_DS_MAP_HANDLE_KIND
+	if resolved_type == GML_DS_TYPE_LIST:
+		return GML_DS_LIST_HANDLE_KIND
+	if resolved_type == GML_DS_TYPE_STACK:
+		return GML_DS_STACK_HANDLE_KIND
+	if resolved_type == GML_DS_TYPE_GRID:
+		return GML_DS_GRID_HANDLE_KIND
+	if resolved_type == GML_DS_TYPE_QUEUE:
+		return GML_DS_QUEUE_HANDLE_KIND
+	if resolved_type == GML_DS_TYPE_PRIORITY:
+		return GML_DS_PRIORITY_HANDLE_KIND
+	return ""
+
+
 static func _gml_resolve_ds_list(id_value):
 	if is_handle(id_value) or is_numeric(id_value) or is_string(id_value):
 		return gml_handle_resolve_for_kind(GML_DS_LIST_HANDLE_KIND, id_value)
@@ -101,8 +133,10 @@ static func _gml_ds_read(kind, id_value, str_val, _legacy = false):
 static func _gml_ds_serialize_reference(kind, ds, seen):
 	if kind == GML_DS_LIST_HANDLE_KIND:
 		var data = []
-		for item in ds["data"]:
-			data.append(_gml_ds_serialize_value(item, seen))
+		var mark_lookup = ds["marks"]
+		for index in range(ds["data"].size()):
+			var mark_kind = _gml_ds_mark_kind_to_handle_kind(mark_lookup.get(index, ""))
+			data.append(_gml_ds_serialize_marked_value(ds["data"][index], mark_kind, seen))
 		var marks = []
 		for index in ds["marks"].keys():
 			marks.append({"index": int(index), "kind": str(ds["marks"][index])})
@@ -137,6 +171,25 @@ static func _gml_ds_serialize_reference(kind, ds, seen):
 			rows.append(serialized_row)
 		return {"width": int(ds["width"]), "height": int(ds["height"]), "data": rows}
 	return {}
+
+
+static func _gml_ds_mark_kind_to_handle_kind(mark_kind):
+	var resolved_kind = str(mark_kind)
+	if resolved_kind == "list":
+		return GML_DS_LIST_HANDLE_KIND
+	if resolved_kind == "map":
+		return GML_DS_MAP_HANDLE_KIND
+	return ""
+
+
+static func _gml_ds_serialize_marked_value(value, handle_kind, seen):
+	var resolved_kind = str(handle_kind)
+	if resolved_kind == "":
+		return _gml_ds_serialize_value(value, seen)
+	var handle = gml_handle_from_value(resolved_kind, value)
+	if gml_handle_is_valid(handle):
+		return _gml_ds_serialize_value(handle, seen)
+	return _gml_ds_serialize_value(value, seen)
 
 
 static func _gml_ds_serialize_value(value, seen):
@@ -271,8 +324,8 @@ static func gml_ds_list_create():
 	return gml_handle_register(GML_DS_LIST_HANDLE_KIND, ds)
 
 static func gml_ds_list_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_LIST_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_LIST_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_list_clear(id_value):
@@ -425,6 +478,7 @@ static func gml_ds_list_mark_as_list(id_value, pos):
 	var idx = _to_int64_value(pos)
 	if ds is Dictionary:
 		if idx >= 0 and idx < ds["data"].size():
+			ds["data"][idx] = gml_handle_from_value(GML_DS_LIST_HANDLE_KIND, ds["data"][idx])
 			ds["marks"][idx] = "list"
 
 static func gml_ds_list_mark_as_map(id_value, pos):
@@ -432,6 +486,7 @@ static func gml_ds_list_mark_as_map(id_value, pos):
 	var idx = _to_int64_value(pos)
 	if ds is Dictionary:
 		if idx >= 0 and idx < ds["data"].size():
+			ds["data"][idx] = gml_handle_from_value(GML_DS_MAP_HANDLE_KIND, ds["data"][idx])
 			ds["marks"][idx] = "map"
 
 static func gml_ds_list_is_list(id_value, pos):
@@ -456,8 +511,8 @@ static func gml_ds_stack_create():
 	return gml_handle_register(GML_DS_STACK_HANDLE_KIND, ds)
 
 static func gml_ds_stack_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_STACK_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_STACK_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_stack_clear(id_value):
@@ -517,8 +572,8 @@ static func gml_ds_queue_create():
 	return gml_handle_register(GML_DS_QUEUE_HANDLE_KIND, ds)
 
 static func gml_ds_queue_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_QUEUE_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_QUEUE_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_queue_clear(id_value):
@@ -585,8 +640,8 @@ static func gml_ds_priority_create():
 	return gml_handle_register(GML_DS_PRIORITY_HANDLE_KIND, ds)
 
 static func gml_ds_priority_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_PRIORITY_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_PRIORITY_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_priority_clear(id_value):

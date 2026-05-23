@@ -83,6 +83,9 @@ class TestPlatformServicesGodotSmoke(unittest.TestCase):
             \tvar missing_iap = GMRuntime.gml_platform_service_call("iap", "iap_activate", [])
             \tif not _check(GMRuntime.is_undefined(missing_iap), "missing hook did not return undefined"):
             \t\treturn
+            \tvar unsupported = GMRuntime.gml_async_unsupported_diagnostics()
+            \tif not _check(not unsupported.is_empty() and unsupported[unsupported.size() - 1]["api"] == "iap_activate", "missing IAP async diagnostic failed"):
+            \t\treturn
 
             \tGMRuntime.gml_platform_service_register("steam", {
             \t\t"steam_is_initialized": func(): return true,

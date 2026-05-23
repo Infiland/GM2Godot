@@ -15,7 +15,7 @@ class TestAsyncHttpEvent(unittest.TestCase):
         mapping = map_event({"eventType": 7, "eventNum": 62})
         assert mapping is not None
 
-        self.assertEqual(mapping.godot_func, "_on_http_request_completed")
+        self.assertEqual(mapping.godot_func, "_on_async_http")
         self.assertEqual(mapping.params, "")
         self.assertEqual(mapping.sort_key, 14)
         self.assertEqual(mapping.gml_filename, "Other_62.gml")
@@ -23,7 +23,7 @@ class TestAsyncHttpEvent(unittest.TestCase):
     def test_generates_async_http_handler_stub(self):
         content = generate_script_content([{"eventType": 7, "eventNum": 62}])
 
-        self.assertIn("func _on_http_request_completed():", content)
+        self.assertIn("func _on_async_http():", content)
         self.assertIn("\tpass", content)
         self.assertNotIn("func _on_other_62():", content)
 

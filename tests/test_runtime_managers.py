@@ -119,6 +119,19 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn("func _process(_delta):", script)
         self.assertIn("GMRuntimeFacade.gml_draw_event_dispatch_frame()", script)
 
+    def test_async_manager_pumps_async_queue(self) -> None:
+        definition = next(
+            manager_definition
+            for manager_definition in runtime_manager_definitions()
+            if manager_definition.name == "GMAsync"
+        )
+
+        script = render_runtime_manager_script(definition)
+
+        self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn("func _process(_delta):", script)
+        self.assertIn("GMRuntimeFacade.gml_async_queue_flush()", script)
+
     def test_write_runtime_managers_writes_each_manager_script(self) -> None:
         output_paths = write_runtime_managers(self.godot_dir)
 

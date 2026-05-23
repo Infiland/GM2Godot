@@ -7,8 +7,8 @@ from src.conversion.type_defs import JsonDict
 STATIC_MAPPINGS: StaticMappings = {
     (0, 0): EventMapping("_ready", "", 0, "Create_0.gml"),
     (1, 0): EventMapping("_on_destroy", "", 10, "Destroy_0.gml"),
-    (3, 0): EventMapping("_process", "delta", 1, "Step_0.gml"),
-    (3, 1): EventMapping("_physics_process", "delta", 2, "Step_1.gml"),
+    (3, 1): EventMapping("_on_begin_step", "", 1, "Step_1.gml"),
+    (3, 0): EventMapping("_on_step", "", 2, "Step_0.gml"),
     (3, 2): EventMapping("_on_end_step", "", 12, "Step_2.gml"),
     (8, 0): EventMapping("_draw", "", 3, "Draw_0.gml"),
     (8, 64): EventMapping("_on_draw_gui", "", 15, "Draw_64.gml"),

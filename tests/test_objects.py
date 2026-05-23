@@ -755,7 +755,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("super._ready()", child_content)
 
     def test_script_with_step_event(self):
-        """eventType 3, eventNum 0 should produce func _process(delta)."""
+        """eventType 3, eventNum 0 should produce the scheduler Step callback."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -763,7 +763,8 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
+        self.assertNotIn("func _process(delta):", content)
 
     def test_script_transpiles_topdown_step_movement(self):
         """Step polling movement should become Godot held-input movement."""
@@ -784,7 +785,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
         self.assertIn(
             "\tif GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
@@ -875,7 +876,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("\n\nvar sprite_index\n", content)
 
     def test_script_with_begin_step(self):
-        """eventType 3, eventNum 1 should produce func _physics_process(delta)."""
+        """eventType 3, eventNum 1 should produce the scheduler Begin Step callback."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 1}])
         converter = self._make_converter()
         converter.convert_all()
@@ -883,7 +884,8 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _physics_process(delta):", content)
+        self.assertIn("func _on_begin_step():", content)
+        self.assertNotIn("func _physics_process(delta):", content)
 
     def test_script_with_draw_event(self):
         """eventType 8, eventNum 0 should produce func _draw()."""
@@ -945,7 +947,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertIn("func _ready():", content)
-        self.assertIn("func _process(delta):", content)
+        self.assertIn("func _on_step():", content)
         self.assertIn("func _on_destroy():", content)
 
     def test_input_events_merged(self):
@@ -1035,11 +1037,11 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         ready_pos = content.index("_ready")
-        process_pos = content.index("_process")
+        step_pos = content.index("_on_step")
         input_pos = content.index("_input")
         alarm_pos = content.index("_on_alarm")
-        self.assertLess(ready_pos, process_pos)
-        self.assertLess(process_pos, input_pos)
+        self.assertLess(ready_pos, step_pos)
+        self.assertLess(step_pos, input_pos)
         self.assertLess(input_pos, alarm_pos)
 
     def test_script_with_destroy_event(self):

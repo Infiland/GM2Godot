@@ -493,13 +493,6 @@ def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntime
     return "\n".join(cleanup_lines)
 
 
-def _wrap_motion_process_body(body: str) -> str:
-    motion_line = "\t_gm_apply_motion_step()"
-    if body.strip() == "pass":
-        return motion_line
-    return f"{body}\n{motion_line}"
-
-
 def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
     begin_line = f'\tGMRuntime.gml_draw_begin(self, {_gd_string(func.godot_func)})'
     end_line = "\tGMRuntime.gml_draw_end()"
@@ -570,8 +563,6 @@ def generate_script_content(
             required_functions.append(EventMapping("_ready", "", 0, ""))
         if "_exit_tree" not in function_names:
             required_functions.append(EventMapping("_exit_tree", "", 5, ""))
-        if uses_motion_runtime and "_process" not in function_names and base_script_path is None:
-            required_functions.append(EventMapping("_process", "delta", 1, ""))
         if required_functions:
             unique_functions = _deduplicate_functions(unique_functions + required_functions)
             function_names = {func.godot_func for func in unique_functions}
@@ -632,8 +623,6 @@ def generate_script_content(
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
             body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
-        if uses_motion_runtime and func.godot_func == "_process":
-            body = _wrap_motion_process_body(body)
         if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")

@@ -8,7 +8,7 @@ The generated autoloads are:
 - `GMAssets`: asset registry, texture groups, audio groups, and dynamic assets.
 - `GMRooms`: room order, current room, transitions, and layers.
 - `GMInstances`: live instances, handles, object indices, and creation order.
-- `GMEvents`: frame events, alarms, timelines, and sequences.
+- `GMEvents`: frame events, alarms, timelines, and sequences. This manager owns the generated `_process` frame pump and calls `GMRuntime.gml_event_scheduler_frame()` so Step phases do not depend on individual node callback order.
 - `GMDraw`: draw state, surfaces, shader cache, and texture-group state.
 - `GMInput`: keyboard, mouse, gamepad, and gesture state.
 - `GMAudio`: audio instances, groups, emitters, and listeners.

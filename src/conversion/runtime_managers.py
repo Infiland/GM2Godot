@@ -17,6 +17,7 @@ class RuntimeManagerDefinition:
     domain: str
     dependencies: tuple[str, ...] = ()
     state_keys: tuple[str, ...] = ()
+    frame_pump: bool = False
 
     @property
     def relative_path(self) -> str:
@@ -66,6 +67,7 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         "events",
         dependencies=("GMRuntime", "GMRooms", "GMInstances"),
         state_keys=("event_queue", "alarms", "timeline_dispatch", "sequence_dispatch"),
+        frame_pump=True,
     ),
     RuntimeManagerDefinition(
         "GMDraw",
@@ -140,9 +142,16 @@ def register_runtime_manager_autoloads(godot_project_path: str) -> bool:
 def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
     dependencies = _gdscript_string_array(definition.dependencies)
     state_keys = _gdscript_string_array(definition.state_keys)
-    return "\n".join([
+    lines = [
         "extends Node",
         "",
+    ]
+    if definition.frame_pump:
+        lines.extend([
+            'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
+            "",
+        ])
+    lines.extend([
         f'const MANAGER_NAME = "{definition.name}"',
         f'const MANAGER_DOMAIN = "{definition.domain}"',
         f"const INITIALIZATION_ORDER = {definition.order}",
@@ -160,6 +169,15 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "\tinitialize_runtime_manager()",
         "",
         "",
+    ])
+    if definition.frame_pump:
+        lines.extend([
+            "func _process(delta):",
+            "\tGMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)",
+            "",
+            "",
+        ])
+    lines.extend([
         "func initialize_runtime_manager():",
         "\tif initialized:",
         "\t\treturn state",
@@ -261,6 +279,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "\treturn tree.root.get_node_or_null(\"GMRuntime\")",
         "",
     ])
+    return "\n".join(lines)
 
 
 def _gdscript_string_array(values: Iterable[str]) -> str:

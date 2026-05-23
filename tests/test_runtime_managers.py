@@ -78,6 +78,19 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn("func manager_order():", script)
         self.assertIn("func state_bucket(key = \"default\"):", script)
 
+    def test_events_manager_pumps_central_scheduler(self) -> None:
+        definition = next(
+            manager_definition
+            for manager_definition in runtime_manager_definitions()
+            if manager_definition.name == "GMEvents"
+        )
+
+        script = render_runtime_manager_script(definition)
+
+        self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn("func _process(delta):", script)
+        self.assertIn("GMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)", script)
+
     def test_write_runtime_managers_writes_each_manager_script(self) -> None:
         output_paths = write_runtime_managers(self.godot_dir)
 

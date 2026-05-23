@@ -13,8 +13,8 @@ from src.conversion.script_generator import generate_script_content
 class TestStepEvents(unittest.TestCase):
     def test_maps_step_events(self):
         cases = [
-            (0, "_process", "delta", 1, "Step_0.gml"),
-            (1, "_physics_process", "delta", 2, "Step_1.gml"),
+            (0, "_on_step", "", 2, "Step_0.gml"),
+            (1, "_on_begin_step", "", 1, "Step_1.gml"),
             (2, "_on_end_step", "", 12, "Step_2.gml"),
         ]
 
@@ -35,8 +35,8 @@ class TestStepEvents(unittest.TestCase):
             {"eventType": 3, "eventNum": 2},
         ])
 
-        self.assertIn("func _process(delta):", content)
-        self.assertIn("func _physics_process(delta):", content)
+        self.assertIn("func _on_begin_step():", content)
+        self.assertIn("func _on_step():", content)
         self.assertIn("func _on_end_step():", content)
 
 

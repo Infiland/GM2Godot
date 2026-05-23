@@ -9,7 +9,7 @@ from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
-from src.conversion.event_mapping import map_event
+from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     GMLSourceMap,
@@ -286,7 +286,7 @@ class ObjectConverter(BaseConverter):
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
 
         for event in event_list or []:
-            mapping = map_event(event)
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
             if mapping is None or not mapping.gml_filename:
                 continue
 
@@ -397,7 +397,7 @@ class ObjectConverter(BaseConverter):
 
         function_names: set[str] = set()
         for event in parsed_parent["event_list"]:
-            mapping = map_event(event)
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
             if mapping is not None:
                 function_names.add(mapping.godot_func)
         return function_names
@@ -405,7 +405,7 @@ class ObjectConverter(BaseConverter):
     def _event_function_names(self, event_list: list[JsonDict]) -> set[str]:
         function_names: set[str] = set()
         for event in event_list:
-            mapping = map_event(event)
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
             if mapping is not None:
                 function_names.add(mapping.godot_func)
         return function_names

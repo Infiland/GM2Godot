@@ -89,7 +89,22 @@ class TestRuntimeManagers(unittest.TestCase):
 
         self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
         self.assertIn("func _process(delta):", script)
+        self.assertIn("GMRuntimeFacade.gml_input_dispatch_frame()", script)
         self.assertIn("GMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)", script)
+        self.assertIn("GMRuntimeFacade.gml_input_end_frame()", script)
+
+    def test_input_manager_captures_godot_input_events(self) -> None:
+        definition = next(
+            manager_definition
+            for manager_definition in runtime_manager_definitions()
+            if manager_definition.name == "GMInput"
+        )
+
+        script = render_runtime_manager_script(definition)
+
+        self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn("func _input(event):", script)
+        self.assertIn("GMRuntimeFacade.gml_input_event_capture(event)", script)
 
     def test_write_runtime_managers_writes_each_manager_script(self) -> None:
         output_paths = write_runtime_managers(self.godot_dir)

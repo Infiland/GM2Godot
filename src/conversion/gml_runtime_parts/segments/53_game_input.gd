@@ -15,9 +15,19 @@ static var _gml_input_mouse_wheel_down = false
 static var _gml_input_keyboard_key = 0
 static var _gml_input_keyboard_lastkey = 0
 static var _gml_input_keyboard_string = ""
+static var _gml_input_gesture_events = []
+static var _gml_input_dispatch_trace = []
 
 
 static func gml_input_begin_frame():
+	return _gml_input_clear_frame_edges()
+
+
+static func gml_input_end_frame():
+	return _gml_input_clear_frame_edges()
+
+
+static func _gml_input_clear_frame_edges():
 	_gml_input_key_pressed = {}
 	_gml_input_key_released = {}
 	_gml_input_mouse_pressed = {}
@@ -26,6 +36,7 @@ static func gml_input_begin_frame():
 	_gml_input_gamepad_released = {}
 	_gml_input_mouse_wheel_up = false
 	_gml_input_mouse_wheel_down = false
+	_gml_input_gesture_events = []
 	return null
 
 
@@ -86,6 +97,92 @@ static func gml_input_set_mouse_wheel(up, down):
 static func gml_input_append_text(text):
 	_gml_input_keyboard_string += str(text)
 	return null
+
+
+static func gml_input_dispatch_trace():
+	return _gml_clone_value(_gml_input_dispatch_trace, 16)
+
+
+static func gml_input_dispatch_trace_clear():
+	_gml_input_dispatch_trace = []
+	return null
+
+
+static func gml_input_event_capture(event):
+	if event == null:
+		return null
+	if event is InputEventKey:
+		var key_code = int(event.keycode)
+		if key_code == 0:
+			key_code = int(event.physical_keycode)
+		if key_code != 0 and not bool(event.echo):
+			gml_input_set_key_state(key_code, bool(event.pressed))
+		if bool(event.pressed) and int(event.unicode) > 0:
+			gml_input_append_text(char(int(event.unicode)))
+		return null
+	if event is InputEventMouseButton:
+		gml_input_set_mouse_position(event.position.x, event.position.y)
+		if int(event.button_index) == MOUSE_BUTTON_WHEEL_UP:
+			gml_input_set_mouse_wheel(bool(event.pressed), _gml_input_mouse_wheel_down)
+			return null
+		if int(event.button_index) == MOUSE_BUTTON_WHEEL_DOWN:
+			gml_input_set_mouse_wheel(_gml_input_mouse_wheel_up, bool(event.pressed))
+			return null
+		gml_input_set_mouse_button_state(int(event.button_index), bool(event.pressed))
+		return null
+	if event is InputEventMouseMotion:
+		gml_input_set_mouse_position(event.position.x, event.position.y)
+		return null
+	if event is InputEventJoypadButton:
+		gml_input_set_gamepad_button_state(int(event.device), int(event.button_index), bool(event.pressed))
+		return null
+	if event is InputEventJoypadMotion:
+		gml_input_set_gamepad_axis_value(int(event.device), int(event.axis), _to_real(event.axis_value))
+		return null
+	if event is InputEventScreenTouch:
+		gml_input_set_mouse_position(event.position.x, event.position.y)
+		gml_input_set_mouse_button_state(MOUSE_BUTTON_LEFT, bool(event.pressed))
+		if bool(event.pressed):
+			gml_input_enqueue_gesture(0, _gml_input_touch_payload(event, "tap"), false)
+		return null
+	if event is InputEventScreenDrag:
+		gml_input_set_mouse_position(event.position.x, event.position.y)
+		gml_input_enqueue_gesture(2, _gml_input_touch_payload(event, "drag"), false)
+		return null
+	return null
+
+
+static func gml_input_enqueue_gesture(event_num, payload = null, global_event = false):
+	var resolved_payload = payload if payload is Dictionary else {}
+	_gml_input_gesture_events.append({
+		"event_type": 13,
+		"event_num": int(_to_real(event_num)),
+		"payload": _gml_input_normalize_gesture_payload(resolved_payload),
+		"global": gml_bool(global_event),
+	})
+	return null
+
+
+static func gml_input_dispatch_frame(instances = null):
+	var instance_snapshot = _gml_input_instance_snapshot(instances)
+	var dispatched = 0
+	for inst in instance_snapshot:
+		if not _gml_input_instance_valid(inst):
+			continue
+		if not inst.has_method("_gm_input_event_bindings"):
+			continue
+		var bindings = inst._gm_input_event_bindings()
+		if not (bindings is Array):
+			continue
+		for binding in bindings:
+			if not (binding is Dictionary):
+				continue
+			if not _gml_input_binding_matches(inst, binding):
+				continue
+			dispatched += _gml_input_dispatch_binding(inst, binding)
+	_gml_builtin_globals["event_data"] = {}
+	_gml_input_gesture_events = []
+	return dispatched
 
 
 static func gml_keyboard_check(key):
@@ -243,3 +340,242 @@ static func _gml_mouse_room_to_gui(position):
 	var scale_x = gui_size.x / app_size.x if app_size.x > 0.0 else 1.0
 	var scale_y = gui_size.y / app_size.y if app_size.y > 0.0 else 1.0
 	return Vector2(position.x * scale_x, position.y * scale_y)
+
+
+static func _gml_input_instance_snapshot(instances):
+	if instances is Array:
+		var provided = []
+		for inst in instances:
+			provided.append(inst)
+		return provided
+	var snapshot = []
+	for entry in _gml_live_instance_entries():
+		var inst = entry.get("instance")
+		if inst != null:
+			snapshot.append(inst)
+	return snapshot
+
+
+static func _gml_input_instance_valid(inst):
+	if inst == null:
+		return false
+	if inst is Object and not is_instance_valid(inst):
+		return false
+	return true
+
+
+static func _gml_input_binding_matches(inst, binding):
+	var event_type = int(_to_real(binding.get("event_type", -1)))
+	var event_num = int(_to_real(binding.get("event_num", 0)))
+	if event_type == 5:
+		return _gml_input_keyboard_held_matches(event_num)
+	if event_type == 9:
+		return _gml_input_keyboard_pressed_matches(event_num)
+	if event_type == 10:
+		return _gml_input_keyboard_released_matches(event_num)
+	if event_type == 6:
+		return _gml_input_mouse_event_matches(inst, event_num)
+	if event_type == 13:
+		return _gml_input_gesture_event_matches(inst, event_num, binding)
+	return false
+
+
+static func _gml_input_dispatch_binding(inst, binding):
+	var method_name = str(binding.get("method", ""))
+	if method_name == "" or not inst.has_method(method_name):
+		return 0
+	var event_type = int(_to_real(binding.get("event_type", -1)))
+	var event_num = int(_to_real(binding.get("event_num", 0)))
+	var previous_event_data = _gml_builtin_globals["event_data"] if _gml_builtin_globals.has("event_data") else {}
+	var payload = _gml_input_binding_payload(inst, binding)
+	_gml_builtin_globals["event_data"] = payload
+	_gml_input_dispatch_trace.append({
+		"instance": str(inst.name) if inst is Node else "",
+		"event_type": event_type,
+		"event_num": event_num,
+		"method": method_name,
+	})
+	inst.call(method_name)
+	_gml_builtin_globals["event_data"] = previous_event_data
+	return 1
+
+
+static func _gml_input_binding_payload(inst, binding):
+	var event_type = int(_to_real(binding.get("event_type", -1)))
+	if event_type != 13:
+		return {}
+	var event_num = int(_to_real(binding.get("event_num", 0)))
+	for gesture in _gml_input_gesture_events:
+		if not (gesture is Dictionary):
+			continue
+		if int(_to_real(gesture.get("event_num", -1))) != event_num:
+			continue
+		if gml_bool(gesture.get("global", false)) or _gml_input_instance_contains_mouse(inst):
+			var payload = gesture.get("payload", {})
+			return payload if payload is Dictionary else {}
+	return {}
+
+
+static func _gml_input_keyboard_held_matches(event_num):
+	if event_num == 0:
+		return not _gml_input_any_key_down()
+	if event_num == 1:
+		return _gml_input_any_key_down()
+	return gml_keyboard_check(event_num)
+
+
+static func _gml_input_keyboard_pressed_matches(event_num):
+	if event_num == 0:
+		return false
+	if event_num == 1:
+		return not _gml_input_key_pressed.is_empty()
+	return gml_keyboard_check_pressed(event_num)
+
+
+static func _gml_input_keyboard_released_matches(event_num):
+	if event_num == 0:
+		return false
+	if event_num == 1:
+		return not _gml_input_key_released.is_empty()
+	return gml_keyboard_check_released(event_num)
+
+
+static func _gml_input_any_key_down():
+	for value in _gml_input_key_current.values():
+		if bool(value):
+			return true
+	return Input.is_anything_pressed()
+
+
+static func _gml_input_mouse_event_matches(inst, event_num):
+	var button_event = _gml_input_mouse_event_button_and_phase(event_num)
+	if button_event["phase"] == "none":
+		return false
+	if not gml_bool(button_event["global"]) and not _gml_input_instance_contains_mouse(inst):
+		return false
+	var phase = str(button_event["phase"])
+	var button = int(_to_real(button_event["button"]))
+	if phase == "held":
+		return gml_mouse_check_button(button)
+	if phase == "pressed":
+		return gml_mouse_check_button_pressed(button)
+	if phase == "released":
+		return gml_mouse_check_button_released(button)
+	if phase == "no_button":
+		return not _gml_input_any_mouse_button_down()
+	if phase == "enter":
+		return _gml_input_instance_contains_mouse(inst)
+	if phase == "leave":
+		return false
+	if phase == "wheel_up":
+		return _gml_input_mouse_wheel_up
+	if phase == "wheel_down":
+		return _gml_input_mouse_wheel_down
+	return false
+
+
+static func _gml_input_mouse_event_button_and_phase(event_num):
+	var mapping = {
+		0: {"button": MOUSE_BUTTON_LEFT, "phase": "held", "global": false},
+		1: {"button": MOUSE_BUTTON_RIGHT, "phase": "held", "global": false},
+		2: {"button": MOUSE_BUTTON_MIDDLE, "phase": "held", "global": false},
+		3: {"button": -1, "phase": "no_button", "global": false},
+		4: {"button": MOUSE_BUTTON_LEFT, "phase": "pressed", "global": false},
+		5: {"button": MOUSE_BUTTON_RIGHT, "phase": "pressed", "global": false},
+		6: {"button": MOUSE_BUTTON_MIDDLE, "phase": "pressed", "global": false},
+		7: {"button": MOUSE_BUTTON_LEFT, "phase": "released", "global": false},
+		8: {"button": MOUSE_BUTTON_RIGHT, "phase": "released", "global": false},
+		9: {"button": MOUSE_BUTTON_MIDDLE, "phase": "released", "global": false},
+		10: {"button": -1, "phase": "enter", "global": false},
+		11: {"button": -1, "phase": "leave", "global": false},
+		50: {"button": MOUSE_BUTTON_LEFT, "phase": "held", "global": true},
+		51: {"button": MOUSE_BUTTON_RIGHT, "phase": "held", "global": true},
+		52: {"button": MOUSE_BUTTON_MIDDLE, "phase": "held", "global": true},
+		53: {"button": MOUSE_BUTTON_LEFT, "phase": "pressed", "global": true},
+		54: {"button": MOUSE_BUTTON_RIGHT, "phase": "pressed", "global": true},
+		55: {"button": MOUSE_BUTTON_MIDDLE, "phase": "pressed", "global": true},
+		56: {"button": MOUSE_BUTTON_LEFT, "phase": "released", "global": true},
+		57: {"button": MOUSE_BUTTON_RIGHT, "phase": "released", "global": true},
+		58: {"button": MOUSE_BUTTON_MIDDLE, "phase": "released", "global": true},
+		60: {"button": -1, "phase": "wheel_up", "global": true},
+		61: {"button": -1, "phase": "wheel_down", "global": true},
+	}
+	return mapping.get(int(_to_real(event_num)), {"button": -1, "phase": "none", "global": false})
+
+
+static func _gml_input_any_mouse_button_down():
+	for value in _gml_input_mouse_current.values():
+		if bool(value):
+			return true
+	return false
+
+
+static func _gml_input_instance_contains_mouse(inst):
+	if inst == null:
+		return false
+	if inst.has_method("_gm_input_contains_point"):
+		return bool(inst.call("_gm_input_contains_point", _gml_input_mouse_position.x, _gml_input_mouse_position.y))
+	if inst is Control:
+		return inst.get_global_rect().has_point(_gml_input_mouse_position)
+	if inst is Node2D:
+		var radius = 0.0
+		if inst.has_meta("gamemaker_collision_radius"):
+			radius = max(_to_real(inst.get_meta("gamemaker_collision_radius")), 0.0)
+		if radius > 0.0:
+			return inst.global_position.distance_to(_gml_input_mouse_position) <= radius
+	_gml_input_dispatch_trace.append({
+		"diagnostic": "missing_mouse_mask",
+		"instance": str(inst.name) if inst is Node else "",
+	})
+	return true
+
+
+static func _gml_input_gesture_event_matches(inst, event_num, binding):
+	for gesture in _gml_input_gesture_events:
+		if not (gesture is Dictionary):
+			continue
+		if int(_to_real(gesture.get("event_num", -1))) != int(_to_real(event_num)):
+			continue
+		if gml_bool(gesture.get("global", false)) or _gml_input_instance_contains_mouse(inst):
+			return true
+	return false
+
+
+static func _gml_input_normalize_gesture_payload(payload):
+	var result = {}
+	for key in payload.keys():
+		result[key] = payload[key]
+	if not result.has("posX"):
+		result["posX"] = _gml_input_mouse_position.x
+	if not result.has("posY"):
+		result["posY"] = _gml_input_mouse_position.y
+	if not result.has("rawposX"):
+		result["rawposX"] = result["posX"]
+	if not result.has("rawposY"):
+		result["rawposY"] = result["posY"]
+	var gui_position = _gml_mouse_room_to_gui(Vector2(_to_real(result["posX"]), _to_real(result["posY"])))
+	if not result.has("guiposX"):
+		result["guiposX"] = gui_position.x
+	if not result.has("guiposY"):
+		result["guiposY"] = gui_position.y
+	if not result.has("touch"):
+		result["touch"] = 0
+	if not result.has("gesture"):
+		result["gesture"] = 0
+	return result
+
+
+static func _gml_input_touch_payload(event, gesture_name):
+	var payload = {
+		"gesture": 0,
+		"touch": int(event.index),
+		"posX": event.position.x,
+		"posY": event.position.y,
+		"rawposX": event.position.x,
+		"rawposY": event.position.y,
+		"name": str(gesture_name),
+	}
+	var gui_position = _gml_mouse_room_to_gui(event.position)
+	payload["guiposX"] = gui_position.x
+	payload["guiposY"] = gui_position.y
+	return payload

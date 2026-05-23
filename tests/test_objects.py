@@ -951,7 +951,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _on_destroy():", content)
 
     def test_input_events_merged(self):
-        """Mouse and keyboard events should merge into a single _input(event)."""
+        """Mouse and keyboard events should produce GMInput dispatch bindings."""
         self._setup_object("o_test", event_list=[
             {"eventType": 6, "eventNum": 4},   # Mouse left click
             {"eventType": 9, "eventNum": 32},   # KeyPress space
@@ -963,11 +963,14 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1, "Should have exactly one _input function")
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertIn("func _gm_input_mouse_4():", content)
+        self.assertIn("func _gm_input_key_press_32():", content)
+        self.assertIn("func _gm_input_key_release_13():", content)
+        self.assertNotIn("func _input(event):", content)
 
     def test_mouse_event_ranges_merged(self):
-        """All ev_mouse ranges should still merge into one _input(event)."""
+        """All ev_mouse ranges should be listed in one binding table."""
         self._setup_object("o_test", event_list=[
             {"eventType": 6, "eventNum": 0},
             {"eventType": 6, "eventNum": 11},
@@ -982,8 +985,33 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertIn("func _gm_input_mouse_0():", content)
+        self.assertIn("func _gm_input_mouse_61():", content)
+        self.assertNotIn("func _input(event):", content)
+
+    def test_input_event_code_files_transpile_to_dispatch_methods(self):
+        """Input .gml source should load into the event-specific GMInput method."""
+        self._setup_object("o_test", event_list=[
+            {"eventType": 9, "eventNum": 32},
+            {"eventType": 13, "eventNum": 0},
+        ])
+        with open(os.path.join(self.gm_dir, "objects", "o_test", "KeyPress_32.gml"), "w", encoding="utf-8") as f:
+            f.write("pressed_space = true;")
+        with open(os.path.join(self.gm_dir, "objects", "o_test", "Gesture_0.gml"), "w", encoding="utf-8") as f:
+            f.write('tap_x = event_data[? "posX"];')
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("func _gm_input_key_press_32():", content)
+        self.assertIn("\tpressed_space = true", content)
+        self.assertIn("func _gm_input_gesture_0():", content)
+        self.assertIn('tap_x = GMRuntime.gml_ds_map_find_value(GMRuntime.gml_builtin_global("event_data"), "posX")', content)
+        self.assertIn('{"event_type": 9, "event_num": 32, "method": "_gm_input_key_press_32"}', content)
 
     def test_script_attached_to_tscn(self):
         """The .tscn file should reference the .gd script."""
@@ -1038,7 +1066,7 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         ready_pos = content.index("_ready")
         step_pos = content.index("_on_step")
-        input_pos = content.index("_input")
+        input_pos = content.index("_gm_input_event_bindings")
         alarm_pos = content.index("_on_alarm")
         self.assertLess(ready_pos, step_pos)
         self.assertLess(step_pos, input_pos)

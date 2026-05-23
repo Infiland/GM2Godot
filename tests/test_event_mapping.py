@@ -9,7 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.event_mapping import (
     EventMapping, map_event as _map_event, is_input_event,
-    INPUT_MERGED_MAPPING,
+    INPUT_MERGED_MAPPING, map_input_event,
 )
 from src.conversion.type_defs import JsonDict
 
@@ -226,6 +226,34 @@ class TestMapEventInputReturnsNone(unittest.TestCase):
         for event_num in range(13):
             with self.subTest(event_num=event_num):
                 self.assertIsNone(map_event_optional({"eventType": 13, "eventNum": event_num}))
+
+
+class TestMapInputEvent(unittest.TestCase):
+    """Input events keep source-backed generated handlers for GMInput dispatch."""
+
+    def test_keyboard_mapping(self):
+        m = map_input_event({"eventType": 5, "eventNum": 65})
+        self.assertIsNotNone(m)
+        assert m is not None
+        self.assertEqual(m.godot_func, "_gm_input_keyboard_65")
+        self.assertEqual(m.gml_filename, "Keyboard_65.gml")
+
+    def test_key_press_mapping(self):
+        m = map_input_event({"eventType": 9, "eventNum": 32})
+        self.assertIsNotNone(m)
+        assert m is not None
+        self.assertEqual(m.godot_func, "_gm_input_key_press_32")
+        self.assertEqual(m.gml_filename, "KeyPress_32.gml")
+
+    def test_mouse_mapping(self):
+        m = map_input_event({"eventType": 6, "eventNum": 53})
+        self.assertIsNotNone(m)
+        assert m is not None
+        self.assertEqual(m.godot_func, "_gm_input_mouse_53")
+        self.assertEqual(m.gml_filename, "Mouse_53.gml")
+
+    def test_non_input_mapping_returns_none(self):
+        self.assertIsNone(map_input_event({"eventType": 0, "eventNum": 0}))
 
 
 class TestMapEventUnknown(unittest.TestCase):

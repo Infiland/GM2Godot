@@ -1140,6 +1140,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_keyboard_clear",
             "gml_keyboard_key_press",
             "gml_keyboard_key_release",
+            "gml_input_event_capture",
+            "gml_input_dispatch_frame",
+            "gml_input_enqueue_gesture",
             "gml_mouse_check_button",
             "gml_mouse_check_button_pressed",
             "gml_mouse_check_button_released",
@@ -2518,6 +2521,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_time_source_destroy(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_input_event_dispatch_helpers(self):
+        self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_dispatch_frame(instances = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_enqueue_gesture(event_num, payload = null, global_event = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_end_frame():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_dispatch_trace():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_mouse_event_button_and_phase(event_num):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_later(period, units, callback, repeat = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_cancel(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn('inst.call(method_name)', GML_RUNTIME_SCRIPT)

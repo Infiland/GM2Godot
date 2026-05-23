@@ -257,15 +257,18 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
 
 class TestScriptGeneratorInputMerging(unittest.TestCase):
-    """Input events (mouse, keyboard) should merge into a single _input."""
+    """Input events should produce GMInput-dispatchable bindings."""
 
     def test_keyboard_event_produces_input(self):
         content = generate_script_content([{"eventType": 5, "eventNum": 65}])
-        self.assertIn("func _input(event):", content)
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertIn("func _gm_input_keyboard_65():", content)
+        self.assertNotIn("func _input(event):", content)
 
     def test_mouse_event_produces_input(self):
         content = generate_script_content([{"eventType": 6, "eventNum": 4}])
-        self.assertIn("func _input(event):", content)
+        self.assertIn("func _gm_input_mouse_4():", content)
+        self.assertIn('{"event_type": 6, "event_num": 4, "method": "_gm_input_mouse_4"}', content)
 
     def test_mouse_event_ranges_produce_input(self):
         content = generate_script_content([
@@ -276,16 +279,19 @@ class TestScriptGeneratorInputMerging(unittest.TestCase):
             {"eventType": 6, "eventNum": 60},
             {"eventType": 6, "eventNum": 61},
         ])
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertEqual(content.count("func _gm_input_mouse_"), 6)
+        self.assertNotIn("func _input(event):", content)
 
     def test_gesture_event_produces_input(self):
         content = generate_script_content([
             {"eventType": 13, "eventNum": event_num}
             for event_num in range(13)
         ])
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertIn("func _gm_input_gesture_0():", content)
+        self.assertIn("func _gm_input_gesture_12():", content)
+        self.assertNotIn("func _input(event):", content)
 
     def test_multiple_input_events_merged(self):
         content = generate_script_content([
@@ -295,8 +301,12 @@ class TestScriptGeneratorInputMerging(unittest.TestCase):
             {"eventType": 10, "eventNum": 13},
             {"eventType": 13, "eventNum": 3},
         ])
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertEqual(content.count("func _gm_input_event_bindings"), 1)
+        self.assertIn("func _gm_input_keyboard_65():", content)
+        self.assertIn("func _gm_input_mouse_4():", content)
+        self.assertIn("func _gm_input_key_press_32():", content)
+        self.assertIn("func _gm_input_key_release_13():", content)
+        self.assertIn("func _gm_input_gesture_3():", content)
 
     def test_input_mixed_with_lifecycle(self):
         content = generate_script_content([
@@ -304,7 +314,7 @@ class TestScriptGeneratorInputMerging(unittest.TestCase):
             {"eventType": 6, "eventNum": 4},
         ])
         self.assertIn("func _ready():", content)
-        self.assertIn("func _input(event):", content)
+        self.assertIn("func _gm_input_event_bindings():", content)
 
 
 class TestScriptGeneratorOrdering(unittest.TestCase):
@@ -319,7 +329,7 @@ class TestScriptGeneratorOrdering(unittest.TestCase):
         ])
         ready_pos = content.index("_ready")
         step_pos = content.index("_on_step")
-        input_pos = content.index("_input")
+        input_pos = content.index("_gm_input_event_bindings")
         alarm_pos = content.index("_on_alarm")
         self.assertLess(ready_pos, step_pos)
         self.assertLess(step_pos, input_pos)
@@ -341,7 +351,8 @@ class TestScriptGeneratorDeduplication(unittest.TestCase):
             {"eventType": 6, "eventNum": 0},
             {"eventType": 6, "eventNum": 4},
         ])
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertEqual(content.count("func _gm_input_event_bindings"), 1)
+        self.assertEqual(content.count("func _gm_input_mouse_"), 2)
 
 
 class TestScriptGeneratorCodeBodies(unittest.TestCase):

@@ -6,7 +6,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(o
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.event_mapping import is_input_event, map_event
+from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.script_generator import generate_script_content
 
 
@@ -16,6 +16,7 @@ class TestKeyboardEvents(unittest.TestCase):
             with self.subTest(event_type=event_type):
                 self.assertTrue(is_input_event({"eventType": event_type, "eventNum": 65}))
                 self.assertIsNone(map_event({"eventType": event_type, "eventNum": 65}))
+                self.assertIsNotNone(map_input_event({"eventType": event_type, "eventNum": 65}))
 
     def test_keyboard_special_keys_merge_into_one_input_stub(self):
         content = generate_script_content([
@@ -25,8 +26,11 @@ class TestKeyboardEvents(unittest.TestCase):
             {"eventType": 10, "eventNum": 112},
         ])
 
-        self.assertIn("func _input(event):", content)
-        self.assertEqual(content.count("func _input"), 1)
+        self.assertIn("func _gm_input_event_bindings():", content)
+        self.assertIn("func _gm_input_keyboard_0():", content)
+        self.assertIn("func _gm_input_key_press_37():", content)
+        self.assertIn("func _gm_input_key_release_112():", content)
+        self.assertNotIn("func _input(event):", content)
 
 
 if __name__ == "__main__":

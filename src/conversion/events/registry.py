@@ -85,3 +85,12 @@ def map_event(event: JsonDict) -> EventMapping | None:
         return handler(event, gml_filename)
 
     return EventMapping(f"_on_event_{event_type}_{event_num}", "", 20, gml_filename)
+
+
+def map_input_event(event: JsonDict) -> EventMapping | None:
+    """Map an input event to its source-backed generated handler."""
+    from src.conversion.events.mappings.input import map_input_event as _map_input_event
+
+    if not is_input_event(event):
+        return None
+    return _map_input_event(event)

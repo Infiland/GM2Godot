@@ -18,6 +18,7 @@ class RuntimeManagerDefinition:
     dependencies: tuple[str, ...] = ()
     state_keys: tuple[str, ...] = ()
     frame_pump: bool = False
+    input_capture: bool = False
 
     @property
     def relative_path(self) -> str:
@@ -84,6 +85,7 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         "input",
         dependencies=("GMRuntime", "GMEvents"),
         state_keys=("keyboard", "mouse", "gamepad", "gestures"),
+        input_capture=True,
     ),
     RuntimeManagerDefinition(
         "GMAudio",
@@ -146,7 +148,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "extends Node",
         "",
     ]
-    if definition.frame_pump:
+    if definition.frame_pump or definition.input_capture:
         lines.extend([
             'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
             "",
@@ -173,7 +175,16 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
     if definition.frame_pump:
         lines.extend([
             "func _process(delta):",
+            "\tGMRuntimeFacade.gml_input_dispatch_frame()",
             "\tGMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)",
+            "\tGMRuntimeFacade.gml_input_end_frame()",
+            "",
+            "",
+        ])
+    if definition.input_capture:
+        lines.extend([
+            "func _input(event):",
+            "\tGMRuntimeFacade.gml_input_event_capture(event)",
             "",
             "",
         ])

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Callable, TypeAlias, cast
 
-from src.conversion.event_mapping import INPUT_MERGED_MAPPING, is_input_event, map_event
+from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
@@ -19,6 +19,7 @@ _EmitPrelude: TypeAlias = Callable[[list[str], set[str]], None]
 _WrapBody: TypeAlias = Callable[[EventMapping, str, set[str]], str]
 
 _map_event = cast(_MapEvent, map_event)
+_map_input_event = cast(_MapEvent, map_input_event)
 _is_input_event = cast(_IsInputEvent, is_input_event)
 
 
@@ -501,6 +502,28 @@ def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
     return f"{begin_line}\n{body}\n{end_line}"
 
 
+def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -> str:
+    binding_lines = ["\treturn ["]
+    for func in input_functions:
+        match = re.match(r"^_gm_input_(keyboard|mouse|key_press|key_release|gesture)_(-?\d+)$", func.godot_func)
+        if match is None:
+            continue
+        family = match.group(1)
+        event_type = {
+            "keyboard": 5,
+            "mouse": 6,
+            "key_press": 9,
+            "key_release": 10,
+            "gesture": 13,
+        }[family]
+        event_num = int(match.group(2))
+        binding_lines.append(
+            f'\t\t{{"event_type": {event_type}, "event_num": {event_num}, "method": {_gd_string(func.godot_func)}}},'
+        )
+    binding_lines.append("\t]")
+    return "\n".join(binding_lines)
+
+
 def generate_script_content(
     event_list: Sequence[JsonDict] | None,
     code_bodies: _CodeBodies | None = None,
@@ -511,9 +534,10 @@ def generate_script_content(
 ) -> str:
     """Generate .gd script content with function stubs for each event.
 
-    Events are mapped to Godot callback functions. Input events (mouse,
-    keyboard) are merged into a single _input() function. Functions are
-    ordered canonically: lifecycle callbacks first, then custom functions.
+    Events are mapped to Godot callback functions. Input events become
+    source-backed _gm_input_* methods plus a binding table for GMInput.
+    Functions are ordered canonically: lifecycle callbacks first, then
+    generated input handlers, then custom functions.
 
     Args:
         event_list: List of event dicts from a parsed .yy file.
@@ -538,19 +562,29 @@ def generate_script_content(
         return _extends_line(base_script_path)
 
     functions: list[EventMapping] = []
-    has_input = False
+    input_functions: list[EventMapping] = []
 
     for event in event_list or []:
         if _is_input_event(event):
-            has_input = True
+            input_mapping = _map_input_event(event)
+            if input_mapping is not None:
+                input_functions.append(input_mapping)
             continue
 
         mapping = _map_event(event)
         if mapping is not None:
             functions.append(mapping)
 
-    if has_input:
-        functions.append(INPUT_MERGED_MAPPING)
+    if input_functions:
+        functions.append(EventMapping("_gm_input_event_bindings", "", 4, ""))
+        functions.extend(input_functions)
+
+    effective_code_bodies: dict[str, str] = dict(code_bodies or {})
+    if input_functions:
+        effective_code_bodies.setdefault(
+            "_gm_input_event_bindings",
+            _render_input_event_bindings_body(_deduplicate_functions(input_functions)),
+        )
 
     unique_functions = _deduplicate_functions(functions)
     function_names = {func.godot_func for func in unique_functions}
@@ -589,7 +623,7 @@ def generate_script_content(
 
     lines = [_extends_line(base_script_path)]
     runtime_const_inherited = base_script_path is not None and uses_object_runtime
-    if (_uses_gml_runtime(code_bodies) or uses_object_runtime or uses_draw_runtime) and not runtime_const_inherited:
+    if (_uses_gml_runtime(effective_code_bodies) or uses_object_runtime or uses_draw_runtime) and not runtime_const_inherited:
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
@@ -612,7 +646,7 @@ def generate_script_content(
         lines.append(f"\n\nvar {variable_name}\n")
 
     for func in unique_functions:
-        body = _get_function_body(func, code_bodies)
+        body = _get_function_body(func, effective_code_bodies)
         for feature in script_features:
             wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
             if wrap_body is not None:

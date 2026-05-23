@@ -12,7 +12,7 @@ The generated autoloads are:
 - `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases.
 - `GMInput`: keyboard, mouse, gamepad, and gesture state. This manager owns the generated `_input(event)` capture hook; converted object scripts expose `_gm_input_event_bindings()` plus `_gm_input_*` methods for deterministic frame dispatch.
 - `GMAudio`: audio instances, groups, emitters, and listeners.
-- `GMAsync`: async_load, HTTP, buffer, and networking queues.
+- `GMAsync`: async_load, HTTP, buffer, networking, platform, and extension queues. This manager owns the generated async queue pump so callback delivery is FIFO and `async_load` is scoped to each Async event.
 - `GMPlatform`: service hooks, extension callback schemas, OS/debug, and GC state.
 
 `project.godot` registers the managers in that order in `[autoload]`. Godot loads autoload nodes before the main scene and evaluates them in project order, which gives the runtime a stable startup sequence for later event, room, draw, input, audio, async, and platform migrations.

@@ -1365,7 +1365,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_buffer_crc32",
             "gml_async_next_request_id",
             "gml_async_dispatch",
+            "gml_async_enqueue",
+            "gml_async_queue_flush",
+            "gml_async_queue_size",
+            "gml_async_queue_snapshot",
             "gml_async_event_log",
+            "gml_async_event_log_clear",
+            "gml_async_payload_schema",
+            "gml_async_unsupported_diagnostics",
+            "gml_async_dispatch_unsupported",
             "gml_http_get",
             "gml_http_post_string",
             "gml_http_request",
@@ -2854,6 +2862,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_cloud_synchronise", GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "browser_width":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "webgl_enabled":', GML_RUNTIME_SCRIPT)
+
+    def test_runtime_contains_async_queue_lifecycle_helpers(self):
+        self.assertIn("static var _gml_async_queue = []", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_ASYNC_PAYLOAD_SCHEMAS", GML_RUNTIME_SCRIPT)
+        self.assertIn('"lifetime": "async_load is set only while', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_async_queue_flush", GML_RUNTIME_SCRIPT)
+        self.assertIn('"_on_async_http"', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_async_dispatch_unsupported", GML_RUNTIME_SCRIPT)
 
     def test_write_gml_runtime_writes_support_script(self):
         with tempfile.TemporaryDirectory() as tmpdir:

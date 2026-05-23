@@ -92,6 +92,7 @@ static func gml_platform_service_call(service_name, api_name, args = []):
 
 
 static func gml_platform_service_unsupported(api_name, service_name, detail = ""):
+	var contract = _gml_platform_service_contract(str(service_name), str(api_name))
 	var message = (
 		"GML platform-service API "
 		+ str(api_name)
@@ -101,6 +102,15 @@ static func gml_platform_service_unsupported(api_name, service_name, detail = ""
 	)
 	if str(detail) != "":
 		message += " " + str(detail)
+	var async_kind = str(contract.get("async_kind", ""))
+	if async_kind != "":
+		gml_async_dispatch_unsupported(
+			async_kind,
+			api_name,
+			service_name,
+			str(contract.get("handler", "")),
+			message,
+		)
 	return gml_error(message)
 
 

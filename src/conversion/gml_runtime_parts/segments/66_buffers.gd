@@ -18,9 +18,6 @@ const GML_BUFFER_BOOL = 9
 const GML_BUFFER_STRING = 10
 const GML_BUFFER_TEXT = 11
 
-static var _gml_buffer_async_next_id = 1
-
-
 class GMLBuffer:
 	var data = PackedByteArray()
 	var cursor = 0
@@ -198,7 +195,7 @@ static func gml_buffer_load(path):
 
 static func gml_buffer_save_async(buffer_id, path, offset = 0, size = -1):
 	var buffer = _gml_buffer_resolve(buffer_id)
-	var async_id = _gml_buffer_next_async_id()
+	var async_id = gml_async_next_request_id()
 	var status = -1
 	if buffer != null:
 		var byte_count = _to_int64_value(size)
@@ -223,7 +220,7 @@ static func gml_buffer_save_async(buffer_id, path, offset = 0, size = -1):
 
 
 static func gml_buffer_load_async(path):
-	var async_id = _gml_buffer_next_async_id()
+	var async_id = gml_async_next_request_id()
 	var buffer = gml_buffer_load(path)
 	gml_async_dispatch("save_load", {
 		"id": async_id,
@@ -285,12 +282,6 @@ static func _gml_buffer_resolve(buffer_id):
 	if gml_handle_is_valid(handle) and handle.reference is GMLBuffer:
 		return handle.reference
 	return null
-
-
-static func _gml_buffer_next_async_id():
-	var async_id = _gml_buffer_async_next_id
-	_gml_buffer_async_next_id += 1
-	return async_id
 
 
 static func _gml_buffer_hash(buffer_id, offset, size, hash_type):

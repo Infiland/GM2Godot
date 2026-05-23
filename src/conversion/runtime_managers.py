@@ -20,6 +20,7 @@ class RuntimeManagerDefinition:
     frame_pump: bool = False
     input_capture: bool = False
     draw_pump: bool = False
+    async_pump: bool = False
 
     @property
     def relative_path(self) -> str:
@@ -104,6 +105,7 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         "async",
         dependencies=("GMRuntime", "GMEvents"),
         state_keys=("async_load", "event_log", "http", "buffers", "networking"),
+        async_pump=True,
     ),
     RuntimeManagerDefinition(
         "GMPlatform",
@@ -150,7 +152,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "extends Node",
         "",
     ]
-    if definition.frame_pump or definition.input_capture or definition.draw_pump:
+    if definition.frame_pump or definition.input_capture or definition.draw_pump or definition.async_pump:
         lines.extend([
             'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
             "",
@@ -194,6 +196,13 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         lines.extend([
             "func _process(_delta):",
             "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
+            "",
+            "",
+        ])
+    if definition.async_pump:
+        lines.extend([
+            "func _process(_delta):",
+            "\tGMRuntimeFacade.gml_async_queue_flush()",
             "",
             "",
         ])

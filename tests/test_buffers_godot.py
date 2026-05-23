@@ -115,12 +115,16 @@ class TestBuffersGodotSmoke(unittest.TestCase):
             \t\treturn
 
             \tvar async_id = GMRuntime.gml_buffer_save_async(text, "save/async_buffer.bin")
-            \tvar async_load = GMRuntime.gml_builtin_global("async_load")
-            \tif not _check(async_load["id"] == async_id and async_load["status"] == 0, "buffer_save_async async_load mismatch"):
+            \tvar async_log = GMRuntime.gml_async_event_log()
+            \tvar async_load = async_log[async_log.size() - 1]["payload"]
+            \tif not _check(async_load["id"] == async_id and async_load["status"] == 0, "buffer_save_async payload mismatch"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_builtin_global("async_load").is_empty(), "async_load leaked after buffer_save_async"):
             \t\treturn
             \tvar load_async_id = GMRuntime.gml_buffer_load_async("save/async_buffer.bin")
-            \tasync_load = GMRuntime.gml_builtin_global("async_load")
-            \tif not _check(async_load["id"] == load_async_id and async_load["status"] == 0, "buffer_load_async async_load mismatch"):
+            \tasync_log = GMRuntime.gml_async_event_log()
+            \tasync_load = async_log[async_log.size() - 1]["payload"]
+            \tif not _check(async_load["id"] == load_async_id and async_load["status"] == 0, "buffer_load_async payload mismatch"):
             \t\treturn
             \tif not _check(GMRuntime.gml_buffer_peek(async_load["buffer"], 0, 11) == "abc", "buffer_load_async buffer mismatch"):
             \t\treturn

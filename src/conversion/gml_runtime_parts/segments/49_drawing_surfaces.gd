@@ -76,6 +76,11 @@ static func gml_surface_reset_target():
 	return true
 
 
+static func gml_surface_target_stack_depth():
+	_gml_surface_active_handle()
+	return _gml_surface_target_stack.size()
+
+
 static func gml_surface_get_width(surface):
 	var resolved_surface = _gml_surface_resolve(surface)
 	if resolved_surface == null:

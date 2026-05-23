@@ -1082,6 +1082,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mp_grid_path",
             "gml_draw_begin",
             "gml_draw_end",
+            "gml_draw_event_dispatch_frame",
+            "gml_draw_event_phase_order",
             "gml_draw_self",
             "gml_draw_sprite",
             "gml_draw_sprite_ext",
@@ -1110,6 +1112,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_surface_free",
             "gml_surface_set_target",
             "gml_surface_reset_target",
+            "gml_surface_target_stack_depth",
             "gml_surface_get_width",
             "gml_surface_get_height",
             "gml_draw_surface",
@@ -2528,6 +2531,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_collision_binding_target_matches(other_inst, binding):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_collision_restore_solid_contact(inst, other_inst):", GML_RUNTIME_SCRIPT)
         self.assertIn('"collision",', GML_RUNTIME_SCRIPT)
+
+    def test_runtime_draw_event_dispatch_helpers(self):
+        self.assertIn("const GML_DRAW_EVENT_PHASES = [", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_draw_event_dispatch_frame(instances = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_draw_event_phase_order():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_draw_event_trace():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_surface_target_stack_depth():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_draw_instance_order_less(left, right):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_input_event_dispatch_helpers(self):
         self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)

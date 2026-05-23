@@ -931,6 +931,8 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        self.assertIn("func _gm_collision_event_bindings():", content)
+        self.assertIn('{"target_object": "o_bullet", "method": "_on_collision_o_bullet"}', content)
         self.assertIn("func _on_collision_o_bullet():", content)
 
     def test_script_with_multiple_events(self):

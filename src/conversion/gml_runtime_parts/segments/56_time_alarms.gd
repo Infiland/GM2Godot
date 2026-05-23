@@ -16,6 +16,7 @@ const GML_EVENT_PHASE_ORDER = [
 	"alarms",
 	"step",
 	"motion",
+	"collision",
 	"end_step"
 ]
 
@@ -61,6 +62,7 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 	gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
 	gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
 	_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
+	gml_collision_event_dispatch_frame(_gml_event_scheduler_live_instances(), frame)
 	gml_event_scheduler_dispatch_phase("end_step", "_on_end_step", _gml_event_scheduler_live_instances(), frame)
 	return frame
 

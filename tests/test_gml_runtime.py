@@ -2522,6 +2522,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_collision_event_dispatch_helpers(self):
+        self.assertIn("static func gml_collision_event_dispatch_frame(instances = null, frame = -1):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_event_trace():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_binding_target_matches(other_inst, binding):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_restore_solid_contact(inst, other_inst):", GML_RUNTIME_SCRIPT)
+        self.assertIn('"collision",', GML_RUNTIME_SCRIPT)
+
     def test_runtime_input_event_dispatch_helpers(self):
         self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_dispatch_frame(instances = null):", GML_RUNTIME_SCRIPT)

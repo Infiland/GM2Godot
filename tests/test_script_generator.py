@@ -46,6 +46,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
 
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn("var id = GMRuntime.gml_instance_noone()", content)
+        self.assertIn("var other = GMRuntime.gml_instance_noone()", content)
         self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
         self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
@@ -75,6 +76,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertNotIn("const GMRuntime = preload", content)
         self.assertNotIn("\n\nvar id =", content)
+        self.assertNotIn("\nvar other =", content)
         self.assertNotIn("\nvar object_index =", content)
         self.assertNotIn("\nvar depth = 0", content)
         self.assertIn(
@@ -146,6 +148,8 @@ class TestScriptGeneratorEvents(unittest.TestCase):
             "eventType": 4, "eventNum": 0,
             "collisionObjectId": {"name": "o_bullet"},
         }])
+        self.assertIn("func _gm_collision_event_bindings():", content)
+        self.assertIn('{"target_object": "o_bullet", "method": "_on_collision_o_bullet"}', content)
         self.assertIn("func _on_collision_o_bullet():", content)
 
     def test_timeline_builtin_variables_are_declared(self):

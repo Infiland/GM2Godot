@@ -21,6 +21,12 @@ from src.conversion.type_defs import (
 )
 from src.conversion.path_registry import write_path_registry
 from src.conversion.animation_curve_registry import write_animation_curve_registry
+from src.conversion.extension_registry import (
+    extension_entry_from_yy,
+    extension_entry_metadata,
+    extension_stub_resource_path,
+    write_extension_compatibility_outputs,
+)
 
 ASSET_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_asset_registry.gd")
 ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"
@@ -134,6 +140,7 @@ class AssetRegistryConverter(BaseConverter):
         "particlesystems": "particle_system",
         "timelines": "timeline",
         "sequences": "sequence",
+        "extensions": "extension",
         "included_files": "included_file",
     }
     TYPE_NAME_BY_KIND: ClassVar[dict[str, str]] = {
@@ -150,6 +157,7 @@ class AssetRegistryConverter(BaseConverter):
         "particlesystems": "Particle System",
         "timelines": "Timeline",
         "sequences": "Sequence",
+        "extensions": "Extension",
         "included_files": "Included File",
     }
     STATIC_RESOURCE_EXTENSIONS: ClassVar[dict[str, str]] = {
@@ -245,6 +253,7 @@ class AssetRegistryConverter(BaseConverter):
         self._write_timeline_action_scripts(entries)
         write_path_registry(self.gm_project_path, self.godot_project_path, entries)
         write_animation_curve_registry(self.gm_project_path, self.godot_project_path, entries)
+        write_extension_compatibility_outputs(self.gm_project_path, self.godot_project_path)
 
         self.log_callback(
             "Generated GameMaker asset registry: {path} ({count} assets)".format(
@@ -415,6 +424,8 @@ class AssetRegistryConverter(BaseConverter):
             return self._flat_resource_path("shaders", self._get_subfolder_from_resource(resource), resource.name, ".gdshader")
         if resource.kind == "included_files":
             return "res://included_files/" + resource.name
+        if resource.kind == "extensions":
+            return extension_stub_resource_path(resource.name)
         return ""
 
     def _sound_godot_path(self, resource: _ProjectResource) -> str:
@@ -455,6 +466,11 @@ class AssetRegistryConverter(BaseConverter):
 
         if resource.kind == "particlesystems":
             return self._particle_system_metadata(resource.raw_data)
+
+        if resource.kind == "extensions":
+            return extension_entry_metadata(
+                extension_entry_from_yy(self.gm_project_path, resource.yy_path, resource.raw_data)
+            )
 
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))

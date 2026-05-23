@@ -138,6 +138,31 @@ class TestPlatformServicesGodotSmoke(unittest.TestCase):
             \tif not _check(push_log[push_log.size() - 1]["handler"] == "_on_async_push_notification", "push async handler failed"):
             \t\treturn
 
+            \tGMRuntime.gml_extension_async_schema_register("AdSDK", "ads_rewarded", {
+            \t\t"kind": "ads",
+            \t\t"handler": "_on_async_ads",
+            \t\t"fields": {"rewarded": "bool", "placement": "string"}
+            \t})
+            \tvar ads_schema = GMRuntime.gml_extension_async_schema("AdSDK", "ads_rewarded")
+            \tif not _check(ads_schema["fields"]["rewarded"] == "bool", "extension schema register failed"):
+            \t\treturn
+            \tGMRuntime.gml_extension_async_dispatch("AdSDK", "ads_rewarded", {"rewarded": true, "placement": "main_menu"})
+            \tvar ads_log = GMRuntime.gml_async_event_log()
+            \tvar ads_event = ads_log[ads_log.size() - 1]
+            \tif not _check(ads_event["kind"] == "ads", "extension async kind failed"):
+            \t\treturn
+            \tif not _check(ads_event["handler"] == "_on_async_ads", "extension async handler failed"):
+            \t\treturn
+            \tif not _check(ads_event["payload"]["extension"] == "AdSDK", "extension async payload extension failed"):
+            \t\treturn
+            \tif not _check(ads_event["payload"]["callback"] == "ads_rewarded", "extension async payload callback failed"):
+            \t\treturn
+            \tif not _check(ads_event["payload"]["schema"]["fields"]["placement"] == "string", "extension async schema payload failed"):
+            \t\treturn
+            \tGMRuntime.gml_extension_async_schema_register("AdSDK", "ads_rewarded", null)
+            \tif not _check(GMRuntime.gml_extension_async_schema("AdSDK", "ads_rewarded").is_empty(), "extension schema unregister failed"):
+            \t\treturn
+
             \tGMRuntime.gml_platform_service_register("steam", null)
             \tGMRuntime.gml_platform_service_register("web", null)
             \tGMRuntime.gml_platform_service_register("xboxlive", null)

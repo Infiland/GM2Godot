@@ -17,6 +17,7 @@ const GML_BUFFER_F64 = 8
 const GML_BUFFER_BOOL = 9
 const GML_BUFFER_STRING = 10
 const GML_BUFFER_TEXT = 11
+const GML_BUFFER_COMPRESSED_MAGIC = "GMZ1"
 
 class GMLBuffer:
 	var data = PackedByteArray()
@@ -162,6 +163,10 @@ static func gml_buffer_copy(src_buffer_id, src_offset, size, dest_buffer_id, des
 	return null
 
 
+static func gml_buffer_sizeof(value_type):
+	return _gml_buffer_value_size_for_type(_to_int64_value(value_type))
+
+
 static func gml_buffer_save(buffer_id, path):
 	var buffer = _gml_buffer_resolve(buffer_id)
 	if buffer == null:
@@ -191,6 +196,37 @@ static func gml_buffer_load(path):
 		buffer.data = bytes
 		buffer.used_size = bytes.size()
 	return handle
+
+
+static func gml_buffer_save_ext(buffer_id, path, offset, size):
+	var buffer = _gml_buffer_resolve(buffer_id)
+	if buffer == null:
+		return false
+	var bytes = _gml_buffer_read_bytes(buffer, max(0, _to_int64_value(offset)), max(0, _to_int64_value(size)))
+	var resolved = _gml_file_resolve_path(path, true)
+	_gml_file_ensure_parent_directory(resolved)
+	var file = FileAccess.open(resolved, FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_buffer(bytes)
+	file.close()
+	return true
+
+
+static func gml_buffer_load_ext(buffer_id, path, offset):
+	var buffer = _gml_buffer_resolve(buffer_id)
+	if buffer == null:
+		return null
+	var resolved = _gml_file_resolve_path(path, false)
+	if not FileAccess.file_exists(resolved):
+		return gml_error("GML buffer_load_ext missing file: " + gml_string(path))
+	var file = FileAccess.open(resolved, FileAccess.READ)
+	if file == null:
+		return gml_error("GML buffer_load_ext failed: " + gml_string(path))
+	var bytes = file.get_buffer(file.get_length())
+	file.close()
+	_gml_buffer_write_bytes(buffer, max(0, _to_int64_value(offset)), bytes)
+	return null
 
 
 static func gml_buffer_save_async(buffer_id, path, offset = 0, size = -1):
@@ -229,6 +265,39 @@ static func gml_buffer_load_async(path):
 		"buffer": buffer
 	}, "_on_async_save_load")
 	return async_id
+
+
+static func gml_buffer_compress(buffer_id, offset, size):
+	var buffer = _gml_buffer_resolve(buffer_id)
+	if buffer == null:
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	var bytes = _gml_buffer_read_bytes(buffer, max(0, _to_int64_value(offset)), max(0, _to_int64_value(size)))
+	var compressed = bytes.compress(FileAccess.COMPRESSION_DEFLATE)
+	if compressed.is_empty() and not bytes.is_empty():
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	var encoded = PackedByteArray()
+	encoded.append_array(GML_BUFFER_COMPRESSED_MAGIC.to_utf8_buffer())
+	encoded.append_array(_gml_buffer_uint32_bytes(bytes.size()))
+	encoded.append_array(compressed)
+	return _gml_buffer_from_bytes(encoded)
+
+
+static func gml_buffer_decompress(buffer_id):
+	var buffer = _gml_buffer_resolve(buffer_id)
+	if buffer == null:
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	var bytes = _gml_buffer_used_bytes(buffer)
+	if bytes.size() < 8:
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	var magic = bytes.slice(0, 4).get_string_from_utf8()
+	if magic != GML_BUFFER_COMPRESSED_MAGIC:
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	var original_size = _gml_buffer_uint32_from_bytes(bytes, 4)
+	var compressed = bytes.slice(8)
+	var decompressed = compressed.decompress(original_size, FileAccess.COMPRESSION_DEFLATE)
+	if decompressed.size() != original_size:
+		return gml_handle_invalid(GML_BUFFER_HANDLE_KIND)
+	return _gml_buffer_from_bytes(decompressed)
 
 
 static func gml_buffer_base64_encode(buffer_id, offset, size):
@@ -307,6 +376,16 @@ static func _gml_buffer_value_size(buffer, offset, value_type):
 		return length + 1
 	if value_type == GML_BUFFER_TEXT:
 		return max(0, buffer.used_size - offset)
+	if value_type == GML_BUFFER_F64:
+		return 8
+	if value_type in [GML_BUFFER_U32, GML_BUFFER_S32, GML_BUFFER_F32]:
+		return 4
+	if value_type in [GML_BUFFER_U16, GML_BUFFER_S16]:
+		return 2
+	return 1
+
+
+static func _gml_buffer_value_size_for_type(value_type):
 	if value_type == GML_BUFFER_F64:
 		return 8
 	if value_type in [GML_BUFFER_U32, GML_BUFFER_S32, GML_BUFFER_F32]:
@@ -402,6 +481,30 @@ static func _gml_buffer_write_uint(buffer, offset, value, byte_count):
 	for index in range(byte_count):
 		bytes.append((int(value) >> (8 * index)) & 0xff)
 	_gml_buffer_write_bytes(buffer, offset, bytes)
+
+
+static func _gml_buffer_uint32_bytes(value):
+	var bytes = PackedByteArray()
+	for index in range(4):
+		bytes.append((int(value) >> (8 * index)) & 0xff)
+	return bytes
+
+
+static func _gml_buffer_uint32_from_bytes(bytes, offset):
+	var value = 0
+	for index in range(4):
+		value |= int(bytes[int(offset) + index]) << (8 * index)
+	return value
+
+
+static func _gml_buffer_from_bytes(bytes):
+	var handle = gml_buffer_create(bytes.size(), GML_BUFFER_GROW, 1)
+	var buffer = _gml_buffer_resolve(handle)
+	if buffer != null:
+		buffer.data = bytes
+		buffer.used_size = bytes.size()
+		buffer.cursor = 0
+	return handle
 
 
 static func _gml_buffer_read_u8(buffer, offset):

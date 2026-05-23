@@ -5,8 +5,8 @@ static func gml_ds_map_create():
 	return gml_handle_register(GML_DS_MAP_HANDLE_KIND, ds)
 
 static func gml_ds_map_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_MAP_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_MAP_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_map_clear(id_value):
@@ -144,24 +144,24 @@ static func gml_ds_map_write(id_value):
 static func gml_ds_map_add_list(id_value, key, list_id):
 	var ds = _gml_resolve_ds_map(id_value)
 	if ds is Dictionary:
-		ds[key] = list_id
+		ds[key] = gml_handle_from_value(GML_DS_LIST_HANDLE_KIND, list_id)
 
 static func gml_ds_map_add_map(id_value, key, map_id):
 	var ds = _gml_resolve_ds_map(id_value)
 	if ds is Dictionary:
-		ds[key] = map_id
+		ds[key] = gml_handle_from_value(GML_DS_MAP_HANDLE_KIND, map_id)
 
 static func gml_ds_map_replace_list(id_value, key, list_id):
 	var ds = _gml_resolve_ds_map(id_value)
 	if ds is Dictionary:
 		if ds.has(key):
-			ds[key] = list_id
+			ds[key] = gml_handle_from_value(GML_DS_LIST_HANDLE_KIND, list_id)
 
 static func gml_ds_map_replace_map(id_value, key, map_id):
 	var ds = _gml_resolve_ds_map(id_value)
 	if ds is Dictionary:
 		if ds.has(key):
-			ds[key] = map_id
+			ds[key] = gml_handle_from_value(GML_DS_MAP_HANDLE_KIND, map_id)
 
 static func gml_ds_map_is_list(id_value, key):
 	var ds = _gml_resolve_ds_map(id_value)

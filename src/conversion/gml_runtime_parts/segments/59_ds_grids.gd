@@ -6,8 +6,8 @@ static func gml_ds_grid_create(w, h):
 	return gml_handle_register(GML_DS_GRID_HANDLE_KIND, grid)
 
 static func gml_ds_grid_destroy(id_value):
-	var handle = gml_handle_get(GML_DS_GRID_HANDLE_KIND, id_value)
-	if handle != null:
+	var handle = gml_handle_from_value(GML_DS_GRID_HANDLE_KIND, id_value)
+	if gml_handle_is_valid(handle):
 		gml_handle_invalidate(handle)
 
 static func gml_ds_grid_width(id_value):

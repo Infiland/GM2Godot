@@ -151,6 +151,10 @@ static func gml_network_send_udp_raw(socket, host, port, buffer_id, size):
 	return _gml_network_send_udp(socket, host, port, buffer_id, size)
 
 
+static func gml_network_send_broadcast(socket, port, buffer_id, size):
+	return _gml_network_send_udp(socket, "255.255.255.255", port, buffer_id, size, true)
+
+
 static func gml_network_destroy(socket):
 	var handle = gml_handle_from_value(GML_NETWORK_HANDLE_KIND, socket)
 	if not gml_handle_is_valid(handle) or not _gml_network_entries.has(handle.index):
@@ -335,13 +339,15 @@ static func _gml_network_send_buffer(socket, buffer_id, size):
 	return -1
 
 
-static func _gml_network_send_udp(socket, host, port, buffer_id, size):
+static func _gml_network_send_udp(socket, host, port, buffer_id, size, broadcast = false):
 	var entry: Variant = _gml_network_entry(socket)
 	if entry == null or not entry.has("peer") or not (entry["peer"] is PacketPeerUDP):
 		return -1
 	var bytes = _gml_network_bytes_from_buffer(buffer_id, size)
 	var resolved_host = str(host)
 	var resolved_port = max(0, _to_int64_value(port))
+	if bool(broadcast) and entry["peer"].has_method("set_broadcast_enabled"):
+		entry["peer"].set_broadcast_enabled(true)
 	var err = entry["peer"].set_dest_address(resolved_host, resolved_port)
 	if err != OK:
 		return -1

@@ -1,4 +1,5 @@
 import os
+from collections.abc import Iterable
 from typing import Any
 
 
@@ -11,6 +12,24 @@ class GodotProjectFile:
     def set_main_scene(self, scene_path: str) -> bool:
         """Set [application] run/main_scene while preserving unrelated settings."""
         return self.set_setting("application", "run/main_scene", scene_path)
+
+    def set_autoloads(self, autoloads: Iterable[tuple[str, str]]) -> bool:
+        """Set managed [autoload] entries in deterministic order."""
+        if not os.path.isfile(self.project_godot_path):
+            return False
+
+        with open(self.project_godot_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        autoload_lines = tuple(
+            (name, self._format_value(self._autoload_value(path)))
+            for name, path in autoloads
+        )
+        updated = self._set_autoloads(content, autoload_lines)
+        with open(self.project_godot_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+
+        return True
 
     def set_setting(self, section: str, key: str, value: Any) -> bool:
         if not os.path.isfile(self.project_godot_path):
@@ -72,6 +91,47 @@ class GodotProjectFile:
         lines.insert(insert_at, setting_line + newline)
         return "".join(lines)
 
+    @classmethod
+    def _set_autoloads(
+        cls,
+        content: str,
+        autoloads: tuple[tuple[str, str], ...],
+    ) -> str:
+        managed_names = {name for name, _value in autoloads}
+        setting_lines = [
+            f"{name}={formatted_value}"
+            for name, formatted_value in autoloads
+        ]
+        lines = content.splitlines(keepends=True)
+        newline = cls._detect_newline(content)
+        section_header = "[autoload]"
+
+        section_start = None
+        section_end = len(lines)
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == section_header:
+                section_start = index
+                section_end = len(lines)
+                continue
+            if section_start is not None and cls._is_section_header(stripped):
+                section_end = index
+                break
+
+        if section_start is None:
+            return cls._append_section(content, section_header, "\n".join(setting_lines), newline)
+
+        preserved_body: list[str] = []
+        for line in lines[section_start + 1:section_end]:
+            stripped = line.lstrip()
+            if any(stripped.startswith(f"{name}=") for name in managed_names):
+                continue
+            preserved_body.append(line)
+
+        managed_body = [line + newline for line in setting_lines]
+        lines[section_start + 1:section_end] = managed_body + preserved_body
+        return "".join(lines)
+
     @staticmethod
     def _append_section(
         content: str, section_header: str, setting_line: str, newline: str
@@ -81,6 +141,10 @@ class GodotProjectFile:
 
         separator = "" if content.endswith(("\n", "\r")) else newline
         return f"{content}{separator}{newline}{section_header}{newline}{setting_line}{newline}"
+
+    @staticmethod
+    def _autoload_value(path: str) -> str:
+        return path if path.startswith("*") else "*" + path
 
     @staticmethod
     def _is_section_header(stripped_line: str) -> bool:

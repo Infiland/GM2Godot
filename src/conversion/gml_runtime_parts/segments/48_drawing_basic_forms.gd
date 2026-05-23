@@ -22,8 +22,19 @@ const GML_TEXTUREGROUP_STATUS_UNLOADED = 0
 const GML_TEXTUREGROUP_STATUS_LOADING = 1
 const GML_TEXTUREGROUP_STATUS_LOADED = 2
 const GML_TEXTUREGROUP_STATUS_FETCHED = 3
+const GML_DRAW_EVENT_PHASES = [
+	{"phase": "pre_draw", "method": "_on_pre_draw"},
+	{"phase": "draw_begin", "method": "_on_draw_begin"},
+	{"phase": "draw", "method": "_draw"},
+	{"phase": "draw_end", "method": "_on_draw_end"},
+	{"phase": "post_draw", "method": "_on_post_draw"},
+	{"phase": "draw_gui_begin", "method": "_on_draw_gui_begin"},
+	{"phase": "draw_gui", "method": "_on_draw_gui"},
+	{"phase": "draw_gui_end", "method": "_on_draw_gui_end"},
+]
 
 static var _gml_draw_context_stack = []
+static var _gml_draw_event_trace = []
 static var _gml_draw_sprite_cache = {}
 static var _gml_draw_font_cache = {}
 static var _gml_draw_tileset_cache = {}
@@ -75,6 +86,45 @@ static func gml_draw_end():
 	_gml_draw_state = context["state"]
 	_gml_draw_apply_gpu_state(context["target"])
 	return null
+
+
+static func gml_draw_event_phase_order():
+	var phases = []
+	for phase in GML_DRAW_EVENT_PHASES:
+		phases.append(phase["phase"])
+	return phases
+
+
+static func gml_draw_event_trace():
+	return _gml_clone_value(_gml_draw_event_trace, 16)
+
+
+static func gml_draw_event_trace_clear():
+	_gml_draw_event_trace = []
+	return null
+
+
+static func gml_draw_event_dispatch_frame(instances = null):
+	if gml_application_surface_is_enabled():
+		_gml_application_surface_ensure()
+	var targets = _gml_draw_sorted_instances(instances)
+	var dispatched = 0
+	for phase in GML_DRAW_EVENT_PHASES:
+		var phase_name = str(phase["phase"])
+		var method_name = str(phase["method"])
+		_gml_draw_record_event(phase_name, "", null, "phase")
+		for inst in targets:
+			if not _gml_draw_instance_visible(inst):
+				continue
+			if method_name == "_draw" and not inst.has_method(method_name):
+				_gml_draw_record_event(phase_name, "draw_self", inst, "default")
+				dispatched += 1
+				continue
+			if inst.has_method(method_name):
+				_gml_draw_record_event(phase_name, method_name, inst, "custom")
+				inst.call(method_name)
+				dispatched += 1
+	return dispatched
 
 
 static func gml_draw_self(instance):
@@ -732,6 +782,72 @@ static func _gml_draw_current_context_target():
 	if _gml_draw_context_stack.is_empty():
 		return null
 	return _gml_draw_context_stack[_gml_draw_context_stack.size() - 1]["target"]
+
+
+static func _gml_draw_sorted_instances(instances):
+	var targets = []
+	if instances is Array:
+		for inst in instances:
+			if inst != null and is_instance_valid(inst):
+				targets.append(inst)
+	else:
+		for entry in _gml_live_instance_entries():
+			var inst = entry["instance"]
+			if inst != null and is_instance_valid(inst):
+				targets.append(inst)
+	targets.sort_custom(_gml_draw_instance_order_less)
+	return targets
+
+
+static func _gml_draw_instance_order_less(left, right):
+	var left_depth = _gml_draw_instance_depth(left)
+	var right_depth = _gml_draw_instance_depth(right)
+	if left_depth == right_depth:
+		return _gml_draw_instance_creation_order(left) < _gml_draw_instance_creation_order(right)
+	return left_depth > right_depth
+
+
+static func _gml_draw_instance_depth(inst):
+	var value = gml_struct_get(inst, "depth")
+	if not is_undefined(value):
+		return int(_to_real(value))
+	if inst is CanvasItem:
+		return -int(inst.z_index)
+	return 0
+
+
+static func _gml_draw_instance_creation_order(inst):
+	var entry: Variant = _gml_instance_entry(inst)
+	if entry == null:
+		return 0
+	return int(entry.get("creation_order", 0))
+
+
+static func _gml_draw_instance_visible(inst):
+	if inst == null or not is_instance_valid(inst):
+		return false
+	var value = gml_struct_get(inst, "visible")
+	if not is_undefined(value):
+		if not gml_bool(value):
+			return false
+	if inst is CanvasItem and not inst.visible:
+		return false
+	return true
+
+
+static func _gml_draw_record_event(phase, method_name, inst, kind):
+	var entry = {
+		"phase": str(phase),
+		"method": str(method_name),
+		"kind": str(kind),
+		"instance": "",
+		"depth": 0,
+	}
+	if inst != null:
+		entry["instance"] = str(inst.name) if inst is Node else str(inst)
+		entry["depth"] = _gml_draw_instance_depth(inst)
+	_gml_draw_event_trace.append(entry)
+	return null
 
 
 static func _gml_draw_current_color():

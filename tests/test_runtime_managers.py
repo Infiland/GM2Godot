@@ -106,6 +106,19 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn("func _input(event):", script)
         self.assertIn("GMRuntimeFacade.gml_input_event_capture(event)", script)
 
+    def test_draw_manager_pumps_draw_dispatch(self) -> None:
+        definition = next(
+            manager_definition
+            for manager_definition in runtime_manager_definitions()
+            if manager_definition.name == "GMDraw"
+        )
+
+        script = render_runtime_manager_script(definition)
+
+        self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn("func _process(_delta):", script)
+        self.assertIn("GMRuntimeFacade.gml_draw_event_dispatch_frame()", script)
+
     def test_write_runtime_managers_writes_each_manager_script(self) -> None:
         output_paths = write_runtime_managers(self.godot_dir)
 

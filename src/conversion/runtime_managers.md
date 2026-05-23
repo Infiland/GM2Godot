@@ -9,7 +9,7 @@ The generated autoloads are:
 - `GMRooms`: room order, current room, transitions, and layers.
 - `GMInstances`: live instances, handles, object indices, and creation order.
 - `GMEvents`: frame events, alarms, timelines, and sequences. This manager owns the generated `_process` frame pump, dispatches queued GMInput events, calls `GMRuntime.gml_event_scheduler_frame()`, then clears one-frame input edges so Step phases do not depend on individual node callback order.
-- `GMDraw`: draw state, surfaces, shader cache, and texture-group state.
+- `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases.
 - `GMInput`: keyboard, mouse, gamepad, and gesture state. This manager owns the generated `_input(event)` capture hook; converted object scripts expose `_gm_input_event_bindings()` plus `_gm_input_*` methods for deterministic frame dispatch.
 - `GMAudio`: audio instances, groups, emitters, and listeners.
 - `GMAsync`: async_load, HTTP, buffer, and networking queues.

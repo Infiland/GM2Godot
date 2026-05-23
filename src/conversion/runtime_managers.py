@@ -19,6 +19,7 @@ class RuntimeManagerDefinition:
     state_keys: tuple[str, ...] = ()
     frame_pump: bool = False
     input_capture: bool = False
+    draw_pump: bool = False
 
     @property
     def relative_path(self) -> str:
@@ -77,6 +78,7 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         "draw",
         dependencies=("GMRuntime", "GMAssets", "GMRooms", "GMInstances"),
         state_keys=("draw_state", "surfaces", "shader_cache", "texture_groups"),
+        draw_pump=True,
     ),
     RuntimeManagerDefinition(
         "GMInput",
@@ -148,7 +150,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "extends Node",
         "",
     ]
-    if definition.frame_pump or definition.input_capture:
+    if definition.frame_pump or definition.input_capture or definition.draw_pump:
         lines.extend([
             'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
             "",
@@ -185,6 +187,13 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         lines.extend([
             "func _input(event):",
             "\tGMRuntimeFacade.gml_input_event_capture(event)",
+            "",
+            "",
+        ])
+    if definition.draw_pump:
+        lines.extend([
+            "func _process(_delta):",
+            "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
             "",
             "",
         ])

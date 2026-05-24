@@ -3267,6 +3267,48 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_sound_global_volume(0.8)",
         )
 
+    def test_advanced_audio_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "emitter = audio_emitter_create();"
+                "audio_emitter_position(emitter, 10, 20, 0);"
+                "audio_emitter_gain(emitter, 0.75);"
+                "spatial = audio_play_sound_at(snd_hit, 10, 20, 0, 64, 512, 1, false, 5, 0.8);"
+                "attached = audio_play_sound_on(emitter, snd_hit, true, 3);"
+                "gain = audio_sound_get_gain(attached);"
+                "asset = audio_sound_get_asset(attached);"
+                "audio_channel_num(8);"
+                "queue = audio_create_play_queue(1, 44100, 2);"
+                "audio_queue_sound(queue, buffer_id, 0, 128);"
+                "audio_free_play_queue(queue);"
+                "recorders = audio_get_recorder_count();"
+                "audio_start_recording(0);"
+                "group = audio_create_sync_group(false);"
+                "audio_play_in_sync_group(group, snd_hit);"
+                "audio_start_sync_group(group);"
+                "audio_destroy_sync_group(group);",
+                indent="",
+                asset_names={"snd_hit"},
+            ),
+            "emitter = GMRuntime.gml_audio_emitter_create()\n"
+            "GMRuntime.gml_audio_emitter_position(emitter, 10, 20, 0)\n"
+            "GMRuntime.gml_audio_emitter_gain(emitter, 0.75)\n"
+            'spatial = GMRuntime.gml_audio_play_sound_at(GMRuntime.gml_asset_get_index("snd_hit"), 10, 20, 0, 64, 512, 1, false, 5, 0.8)\n'
+            'attached = GMRuntime.gml_audio_play_sound_on(emitter, GMRuntime.gml_asset_get_index("snd_hit"), true, 3)\n'
+            "gain = GMRuntime.gml_audio_sound_get_gain(attached)\n"
+            "asset = GMRuntime.gml_audio_sound_get_asset(attached)\n"
+            "GMRuntime.gml_audio_channel_num(8)\n"
+            "queue = GMRuntime.gml_audio_create_play_queue(1, 44100, 2)\n"
+            "GMRuntime.gml_audio_queue_sound(queue, buffer_id, 0, 128)\n"
+            "GMRuntime.gml_audio_free_play_queue(queue)\n"
+            "recorders = GMRuntime.gml_audio_get_recorder_count()\n"
+            "GMRuntime.gml_audio_start_recording(0)\n"
+            "group = GMRuntime.gml_audio_create_sync_group(false)\n"
+            'GMRuntime.gml_audio_play_in_sync_group(group, GMRuntime.gml_asset_get_index("snd_hit"))\n'
+            "GMRuntime.gml_audio_start_sync_group(group)\n"
+            "GMRuntime.gml_audio_destroy_sync_group(group)",
+        )
+
     def test_audio_group_helpers_lower_to_runtime_and_group_constants(self):
         self.assertEqual(
             transpile_gml_code(
@@ -3293,6 +3335,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_audio_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound.*expects 3 to 7.*got 2"):
             transpile_gml_code("audio_play_sound(snd_hit, 10);", indent="", asset_names={"snd_hit"})
+        with self.assertRaisesRegex(GMLTranspileError, "audio_play_sound_at.*expects 9 to 13.*got 8"):
+            transpile_gml_code("audio_play_sound_at(snd_hit, 0, 0, 0, 1, 10, 1, false);", indent="", asset_names={"snd_hit"})
         with self.assertRaisesRegex(GMLTranspileError, "audio_group_set_gain.*expects 2 to 3.*got 4"):
             transpile_gml_code("audio_group_set_gain(audiogroup_music, 1, 0, 0);", indent="")
 
@@ -4032,8 +4076,6 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("xboxlive_achievements_set_progress(user_id, 'Achievement');", indent="")
 
     def test_os_device_media_unsupported_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "audio_get_recorder_count.*unsupported.*#569.*Microphone"):
-            transpile_gml_code("audio_get_recorder_count();", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "video_draw.*unsupported.*#569.*VideoStreamPlayer"):
             transpile_gml_code("video_draw();", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):

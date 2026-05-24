@@ -737,7 +737,6 @@ class TestGMLAPIManifest(unittest.TestCase):
             "browser_input_capture",
             "url_open_full",
             "webgl_enabled",
-            "audio_start_recording",
             "video_open",
             "video_get_status",
             "device_get_tilt_x",
@@ -751,7 +750,6 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(entries["clipboard_get_text"].status, "implemented")
         self.assertEqual(entries["browser_width"].status, "partial")
         self.assertEqual(entries["url_open_full"].runtime_support, "no")
-        self.assertEqual(entries["audio_start_recording"].status, "unsupported")
         self.assertEqual(entries["video_open"].status, "unsupported")
         self.assertIn("VideoStreamPlayer", entries["video_open"].notes)
         self.assertEqual(entries["device_get_tilt_x"].status, "unsupported")
@@ -837,8 +835,6 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("sequence_track_new(seqtracktype_graphic)")
         with self.assertRaisesRegex(GMLTranspileError, "skeleton_animation_set.*unsupported.*#568"):
             transpile_gml_expression("skeleton_animation_set('walk')")
-        with self.assertRaisesRegex(GMLTranspileError, "audio_start_recording.*unsupported.*#569.*Microphone"):
-            transpile_gml_expression("audio_start_recording(0)")
         with self.assertRaisesRegex(GMLTranspileError, "video_open.*unsupported.*#569.*VideoStreamPlayer"):
             transpile_gml_expression('video_open("intro.mp4")')
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_x.*unsupported.*#569.*sensor"):

@@ -737,7 +737,6 @@ _OS_DEVICE_MEDIA_PLATFORM_OWNER_MODULE = "src.conversion.gml_runtime_parts.segme
 _OS_DEVICE_MEDIA_CLIPBOARD_DOCS_PATH = "GameMaker_Language/GML_Reference/Strings/clipboard_set_text.htm"
 _OS_DEVICE_MEDIA_WEB_DOCS_PATH = "GameMaker_Language/GML_Reference/Web_And_HTML5/Web_And_HTML5.htm"
 _OS_DEVICE_MEDIA_VIDEO_DOCS_PATH = "GameMaker_Language/GML_Reference/Drawing/Videos/Videos.htm"
-_OS_DEVICE_MEDIA_AUDIO_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Buffers/Audio_Buffers.htm"
 _OS_DEVICE_MEDIA_INPUT_DOCS_PATH = "GameMaker_Language/GML_Reference/Game_Input/Device_Input/Device_Input.htm"
 _OS_DEVICE_MEDIA_IMPLEMENTED_APIS = (
     ("clipboard_has_text", "Uses DisplayServer clipboard support and emits a one-time fallback warning when native clipboard support is unavailable."),
@@ -755,16 +754,6 @@ _OS_DEVICE_MEDIA_PARTIAL_APIS: tuple[tuple[str, str, GMLAPISupportFlag, str], ..
     ("webgl_enabled", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Matches GameMaker's non-browser true fallback unless a web hook reports otherwise."),
 )
 _OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS = (
-    (
-        (
-            "audio_get_recorder_count",
-            "audio_get_recorder_info",
-            "audio_start_recording",
-            "audio_stop_recording",
-        ),
-        _OS_DEVICE_MEDIA_AUDIO_DOCS_PATH,
-        "Microphone/audio recorder APIs require target permission handling and a Godot audio-input addon before GM2Godot can produce recording buffers or async payloads.",
-    ),
     (
         (
             "video_open",
@@ -1052,6 +1041,97 @@ def _platform_service_entries() -> tuple[GMLAPIEntry, ...]:
         for name, docs_path, owner_module, notes in _PLATFORM_EVENT_APIS
     )
     return partial_entries + hook_contract_entries + event_entries
+
+
+_AUDIO_RUNTIME_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.54_audio_runtime"
+_AUDIO_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio.htm"
+_AUDIO_EMITTER_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Emitters/Audio_Emitters.htm"
+_AUDIO_BUFFER_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Buffers/Audio_Buffers.htm"
+_AUDIO_GROUP_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Synchronisation/Audio_Synchronisation.htm"
+_AUDIO_ADVANCED_RUNTIME_APIS: tuple[
+    tuple[str, GMLAPISupportStatus, GMLAPISupportFlag, GMLAPISupportFlag, str, str],
+    ...,
+] = (
+    ("audio_play_sound_at", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Creates a positional AudioStreamPlayer2D with GameMaker falloff/listener metadata mapped to Godot attenuation fields."),
+    ("audio_play_sound_on", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Plays from a tracked emitter; emitter position, gain, pitch, falloff, and listener mask update active sounds."),
+    ("audio_stop_all", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Stops and invalidates all active GM2Godot audio handles."),
+    ("audio_pause_all", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Pauses all active GM2Godot audio handles."),
+    ("audio_resume_all", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Resumes all paused GM2Godot audio handles."),
+    ("audio_is_paused", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Checks individual sound handles or active sound asset instances for paused playback."),
+    ("audio_sound_get_gain", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Returns active instance gain or generated asset gain state."),
+    ("audio_sound_get_pitch", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Returns active instance pitch or generated asset pitch state."),
+    ("audio_sound_loop", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Updates runtime loop state for active handles; generated players restart from the finished signal."),
+    ("audio_sound_get_loop", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Reads loop state for active handles or any active asset instance."),
+    ("audio_sound_set_listener_mask", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores listener masks for active handles; Godot area masks are updated for positional players."),
+    ("audio_sound_get_listener_mask", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Reads listener mask state for active handles."),
+    ("audio_sound_get_asset", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Returns the generated asset ID associated with a sound handle or sound asset."),
+    ("audio_channel_num", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Caps active compatibility channels and stops lowest-priority runtime handles when the cap is exceeded."),
+    ("audio_master_gain", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Legacy/global master gain setter routed to the generated runtime master multiplier."),
+    ("audio_set_master_gain", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Sets the generated runtime master gain multiplier."),
+    ("audio_get_master_gain", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Returns the generated runtime master gain multiplier."),
+    ("audio_throw_on_error", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Toggles whether compatibility diagnostics are also pushed as Godot errors."),
+    ("audio_emitter_create", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Creates a tracked emitter handle with position, velocity, falloff, gain, pitch, and listener mask state."),
+    ("audio_emitter_exists", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Checks whether a generated emitter handle is still valid."),
+    ("audio_emitter_free", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Invalidates a generated emitter handle."),
+    ("audio_emitter_position", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Updates emitter position and active positional players using Godot 2D coordinates."),
+    ("audio_emitter_velocity", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Stores emitter velocity for compatibility state and future Doppler integration."),
+    ("audio_emitter_falloff", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Maps emitter falloff to Godot positional attenuation/max-distance fields."),
+    ("audio_emitter_gain", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Applies emitter gain to active sounds played on the emitter."),
+    ("audio_emitter_get_gain", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter gain state."),
+    ("audio_emitter_pitch", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Applies emitter pitch to active sounds played on the emitter."),
+    ("audio_emitter_get_pitch", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter pitch state."),
+    ("audio_emitter_set_listener_mask", "partial", "partial", "yes", _AUDIO_EMITTER_DOCS_PATH, "Stores emitter listener masks and applies them to active positional players."),
+    ("audio_emitter_get_listener_mask", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter listener-mask state."),
+    ("audio_emitter_get_x", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter X position."),
+    ("audio_emitter_get_y", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter Y position."),
+    ("audio_emitter_get_z", "implemented", "yes", "yes", _AUDIO_EMITTER_DOCS_PATH, "Returns generated emitter Z position."),
+    ("audio_listener_position", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores default listener position compatibility state."),
+    ("audio_listener_velocity", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores default listener velocity compatibility state."),
+    ("audio_listener_orientation", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores default listener orientation compatibility state."),
+    ("audio_listener_set_position", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores indexed listener position compatibility state."),
+    ("audio_listener_set_velocity", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores indexed listener velocity compatibility state."),
+    ("audio_listener_set_orientation", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Stores indexed listener orientation compatibility state."),
+    ("audio_get_listener_count", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Reports one compatibility listener while preserving indexed listener state calls."),
+    ("audio_get_listener_info", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Returns deterministic listener metadata for generated runtime listener slots."),
+    ("audio_get_listener_mask", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Returns the generated runtime global listener mask."),
+    ("audio_set_listener_mask", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Sets the generated runtime global listener mask."),
+    ("audio_create_play_queue", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Creates a handle backed by AudioStreamGenerator and tracks queued buffers."),
+    ("audio_queue_sound", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Tracks queued buffer lifecycle and dispatches audio playback async payloads; PCM synthesis remains diagnostic-only."),
+    ("audio_free_play_queue", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Invalidates a play queue and dispatches a queue-shutdown async payload."),
+    ("audio_get_recorder_count", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Returns zero and records a deterministic diagnostic for unsupported microphone capture."),
+    ("audio_get_recorder_info", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Returns deterministic unavailable-recorder metadata."),
+    ("audio_start_recording", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Dispatches a failed audio recording async payload with a platform-permission diagnostic."),
+    ("audio_stop_recording", "partial", "partial", "yes", _AUDIO_BUFFER_DOCS_PATH, "Returns false and records a diagnostic when no generated recording channel exists."),
+    ("audio_create_stream", "partial", "partial", "yes", _AUDIO_DOCS_PATH, "Registers a dynamic sound asset from an existing Godot AudioStream resource path."),
+    ("audio_destroy_stream", "implemented", "yes", "yes", _AUDIO_DOCS_PATH, "Releases a generated dynamic audio stream asset."),
+    ("audio_create_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Creates a sync-group compatibility handle for grouped playback."),
+    ("audio_play_in_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Adds generated sound assets to a sync group."),
+    ("audio_start_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Starts all sync-group tracks in one runtime tick and emits a sample-sync diagnostic."),
+    ("audio_stop_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Stops all active handles tracked by a sync group."),
+    ("audio_pause_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Pauses all active handles tracked by a sync group."),
+    ("audio_resume_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Resumes all active handles tracked by a sync group."),
+    ("audio_sync_group_is_playing", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Checks whether any handle in a sync group is still playing."),
+    ("audio_sync_group_get_track_pos", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Returns the first active sync-group track playback position."),
+    ("audio_destroy_sync_group", "partial", "partial", "yes", _AUDIO_GROUP_DOCS_PATH, "Stops and invalidates a generated sync-group handle."),
+)
+
+
+def _advanced_audio_entries() -> tuple[GMLAPIEntry, ...]:
+    return tuple(
+        _entry(
+            name,
+            "Audio",
+            status,
+            _AUDIO_RUNTIME_OWNER_MODULE,
+            "yes",
+            "yes",
+            runtime_support,
+            smoke_coverage,
+            docs_path,
+            notes,
+        )
+        for name, status, runtime_support, smoke_coverage, docs_path, notes in _AUDIO_ADVANCED_RUNTIME_APIS
+    )
 
 
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
@@ -3203,6 +3283,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Properties.htm",
         "Legacy global gain alias applies an immediate multiplier to active runtime audio players.",
     ),
+    *_advanced_audio_entries(),
     _entry(
         "room_goto",
         "General Game Control",

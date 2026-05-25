@@ -74,6 +74,32 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tvar created = GMRuntime.gml_camera_create_view(1, 2, 3, 4, 5, -1, 0, 0, 0, 0)
         \tif not _check(GMRuntime.gml_camera_get_view_x(created) == 1 and GMRuntime.gml_camera_get_view_y(created) == 2, "created camera position mismatch"):
         \t\treturn
+        \tGMRuntime.gml_view_set_camera(1, created)
+        \tif not _check(GMRuntime.gml_view_get_camera(1) == created, "view_set_camera did not assign camera handle"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_camera"), 1) == created, "view_camera array did not mirror assigned camera"):
+        \t\treturn
+        \tGMRuntime.gml_camera_apply(created)
+        \tif not _check(GMRuntime.gml_camera_get_active() == created, "camera_apply did not update active camera"):
+        \t\treturn
+        \tvar surf = GMRuntime.gml_surface_create(32, 16)
+        \tif not _check(GMRuntime.gml_view_set_surface_id(1, surf) == surf, "view_set_surface_id did not return assigned surface"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_view_get_surface_id(1) == surf, "view_get_surface_id did not return assigned surface"):
+        \t\treturn
+        \tGMRuntime.gml_view_set_surface_id(1, -1)
+        \tif not _check(GMRuntime.gml_view_get_surface_id(1) == -1, "view surface clear did not reset to -1"):
+        \t\treturn
+        \tGMRuntime.gml_surface_free(surf)
+        \tGMRuntime.gml_view_set_camera(1, -1)
+        \tif not _check(GMRuntime.gml_view_get_camera(1) == -1, "view camera clear did not reset to -1"):
+        \t\treturn
+        \tvar empty = GMRuntime.gml_camera_create()
+        \tif not _check(GMRuntime.gml_handle_is_valid(empty), "camera_create did not return a valid handle"):
+        \t\treturn
+        \tGMRuntime.gml_camera_destroy(empty)
+        \tif not _check(not GMRuntime.gml_handle_is_valid(empty), "camera_destroy did not invalidate handle"):
+        \t\treturn
         \tGMRuntime.gml_display_set_gui_size(800, 450)
         \tif not _check(GMRuntime.gml_display_get_gui_width() == 800, "GUI width mismatch"):
         \t\treturn

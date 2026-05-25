@@ -182,9 +182,18 @@
       "id": "camera_view_behavior",
       "bucket": "camera_view",
       "title": "Legacy view arrays synchronized with camera helpers",
-      "issue_numbers": [493],
+      "issue_numbers": [492, 493],
       "manifest_entries": [
         "camera_create_view",
+        "camera_create",
+        "camera_destroy",
+        "camera_apply",
+        "camera_get_active",
+        "view_get_camera",
+        "view_set_camera",
+        "view_get_surface_id",
+        "view_set_surface_id",
+        "surface_create",
         "camera_set_view_pos",
         "camera_set_view_size",
         "camera_set_view_angle",
@@ -195,9 +204,11 @@
         "display_get_gui_height"
       ],
       "game_maker_source_path": "source/camera_view_behavior.gml",
-      "game_maker_expectation": "A camera assigned through legacy view arrays stays synchronized with camera setters/getters, Camera2D transform, and GUI display size helpers.",
+      "game_maker_expectation": "A camera assigned through legacy view arrays or view slot functions stays synchronized with camera setters/getters, Camera2D transform, view-surface state, active camera state, and GUI display size helpers.",
       "expected_godot_assertions": [
         "view_xview/view_yview writes update the backing camera state.",
+        "view_set_camera/view_get_camera and camera_apply/camera_get_active preserve camera handles.",
+        "view_set_surface_id/view_get_surface_id preserve surface assignments and support clearing.",
         "camera_set_view_pos, camera_set_view_size, and camera_set_view_angle update Camera2D state.",
         "display_set_gui_size is visible through display_get_gui_width/height."
       ],

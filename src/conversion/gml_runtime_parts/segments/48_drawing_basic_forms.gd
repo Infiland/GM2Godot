@@ -22,6 +22,13 @@ const GML_TEXTUREGROUP_STATUS_UNLOADED = 0
 const GML_TEXTUREGROUP_STATUS_LOADING = 1
 const GML_TEXTUREGROUP_STATUS_LOADED = 2
 const GML_TEXTUREGROUP_STATUS_FETCHED = 3
+const GML_VIDEO_MANAGER_NODE_NAME = "_GM2GodotVideoRuntime"
+const GML_VIDEO_STATUS_CLOSED = 0
+const GML_VIDEO_STATUS_PREPARING = 1
+const GML_VIDEO_STATUS_PLAYING = 2
+const GML_VIDEO_STATUS_PAUSED = 3
+const GML_VIDEO_FORMAT_RGBA = 0
+const GML_VIDEO_FORMAT_YUV = 1
 const GML_DRAW_EVENT_PHASES = [
 	{"phase": "pre_draw", "method": "_on_pre_draw"},
 	{"phase": "draw_begin", "method": "_on_draw_begin"},
@@ -47,6 +54,16 @@ static var _gml_texturegroup_mode = {
 	"default_sprite": -1,
 	"global_scale": 1
 }
+static var _gml_video_state = {
+	"player": null,
+	"status": GML_VIDEO_STATUS_CLOSED,
+	"format": GML_VIDEO_FORMAT_RGBA,
+	"volume": 1.0,
+	"loop": false,
+	"source": "",
+	"surface_handle": null
+}
+static var _gml_video_diagnostics = []
 static var _gml_draw_state = {
 	"color": 0xffffff,
 	"alpha": 1.0,
@@ -618,6 +635,160 @@ static func gml_texturegroup_get_textures(groupname):
 	return textures
 
 
+static func gml_video_open(path):
+	gml_video_close()
+	var stream = _gml_video_stream_for_source(path)
+	if stream == null:
+		_gml_video_report_diagnostic("video_open", "Video source could not be resolved as a Godot VideoStream. Godot supports Ogg Theora by default; other formats need a GDExtension-backed VideoStream.")
+		return null
+	var player = VideoStreamPlayer.new()
+	player.name = "_gm_video_player"
+	player.visible = false
+	player.expand = false
+	player.stream = stream
+	player.volume = _to_real(_gml_video_state.get("volume", 1.0))
+	player.loop = bool(_gml_video_state.get("loop", false))
+	player.finished.connect(func(): _gml_video_finished())
+	var root = _gml_video_root_node()
+	if root != null:
+		root.add_child(player)
+	_gml_video_state["player"] = player
+	_gml_video_state["status"] = GML_VIDEO_STATUS_PREPARING
+	_gml_video_state["format"] = GML_VIDEO_FORMAT_RGBA
+	_gml_video_state["source"] = str(path)
+	if player.is_inside_tree():
+		player.play()
+	else:
+		player.call_deferred("play")
+	_gml_video_state["status"] = GML_VIDEO_STATUS_PLAYING
+	return null
+
+
+static func gml_video_close():
+	var player = _gml_video_player()
+	if player != null:
+		player.stop()
+		if player.is_inside_tree():
+			player.queue_free()
+	var surface_handle = _gml_video_state.get("surface_handle", null)
+	if gml_handle_is_valid(surface_handle):
+		var surface = surface_handle.reference
+		if typeof(surface) == TYPE_DICTIONARY:
+			surface["valid"] = false
+		gml_handle_invalidate(surface_handle)
+	_gml_video_state["player"] = null
+	_gml_video_state["surface_handle"] = null
+	_gml_video_state["status"] = GML_VIDEO_STATUS_CLOSED
+	_gml_video_state["source"] = ""
+	return null
+
+
+static func gml_video_draw():
+	var player = _gml_video_player()
+	if player == null:
+		return [-1]
+	var texture = player.get_video_texture()
+	var surface_handle = _gml_video_surface_handle(texture)
+	if not gml_handle_is_valid(surface_handle):
+		return [-1]
+	return [0, surface_handle]
+
+
+static func gml_video_set_volume(volume):
+	var volume_value = max(_to_real(volume), 0.0)
+	_gml_video_state["volume"] = volume_value
+	var player = _gml_video_player()
+	if player != null:
+		player.volume = volume_value
+	return null
+
+
+static func gml_video_pause():
+	var player = _gml_video_player()
+	if player == null:
+		return null
+	player.paused = true
+	_gml_video_state["status"] = GML_VIDEO_STATUS_PAUSED
+	return null
+
+
+static func gml_video_resume():
+	var player = _gml_video_player()
+	if player == null:
+		return null
+	player.paused = false
+	if not player.is_playing():
+		player.play()
+	_gml_video_state["status"] = GML_VIDEO_STATUS_PLAYING
+	return null
+
+
+static func gml_video_enable_loop(enable):
+	var loop_enabled = gml_bool(enable)
+	_gml_video_state["loop"] = loop_enabled
+	var player = _gml_video_player()
+	if player != null:
+		player.loop = loop_enabled
+	return null
+
+
+static func gml_video_seek_to(position):
+	var position_value = max(_to_real(position), 0.0)
+	var player = _gml_video_player()
+	if player != null:
+		player.stream_position = position_value
+	return null
+
+
+static func gml_video_is_looping():
+	var player = _gml_video_player()
+	if player != null:
+		return bool(player.loop)
+	return bool(_gml_video_state.get("loop", false))
+
+
+static func gml_video_get_volume():
+	var player = _gml_video_player()
+	if player != null:
+		return _to_real(player.volume)
+	return _to_real(_gml_video_state.get("volume", 1.0))
+
+
+static func gml_video_get_duration():
+	var player = _gml_video_player()
+	if player == null:
+		return 0.0
+	return max(_to_real(player.get_stream_length()), 0.0)
+
+
+static func gml_video_get_position():
+	var player = _gml_video_player()
+	if player == null:
+		return 0.0
+	return max(_to_real(player.stream_position), 0.0)
+
+
+static func gml_video_get_status():
+	var player = _gml_video_player()
+	if player == null:
+		return GML_VIDEO_STATUS_CLOSED
+	if bool(player.paused):
+		return GML_VIDEO_STATUS_PAUSED
+	if player.is_playing() or int(_gml_video_state.get("status", GML_VIDEO_STATUS_CLOSED)) == GML_VIDEO_STATUS_PLAYING:
+		return GML_VIDEO_STATUS_PLAYING
+	return int(_gml_video_state.get("status", GML_VIDEO_STATUS_PREPARING))
+
+
+static func gml_video_get_format():
+	if _gml_video_player() == null:
+		return GML_VIDEO_FORMAT_RGBA
+	return int(_gml_video_state.get("format", GML_VIDEO_FORMAT_RGBA))
+
+
+static func gml_video_runtime_diagnostics():
+	return _gml_clone_value(_gml_video_diagnostics, 16)
+
+
 static func gml_shader_set(shader):
 	var material = _gml_shader_material(shader)
 	if material == null:
@@ -1000,6 +1171,98 @@ static func _gml_texturegroup_name_for_entry(entry):
 	if typeof(metadata) == TYPE_DICTIONARY and str(metadata.get("texture_group", "")) != "":
 		return str(metadata.get("texture_group", ""))
 	return "Default"
+
+
+static func _gml_video_root_node():
+	var main_loop = Engine.get_main_loop()
+	if not (main_loop is SceneTree):
+		return null
+	var root = main_loop.root
+	if root == null:
+		return null
+	var existing = root.get_node_or_null(GML_VIDEO_MANAGER_NODE_NAME)
+	if existing != null:
+		return existing
+	var manager = Node.new()
+	manager.name = GML_VIDEO_MANAGER_NODE_NAME
+	root.add_child(manager)
+	return manager
+
+
+static func _gml_video_player():
+	var player = _gml_video_state.get("player", null)
+	if player is VideoStreamPlayer and is_instance_valid(player):
+		return player
+	return null
+
+
+static func _gml_video_stream_for_source(source):
+	if source is VideoStream:
+		return source
+	if typeof(source) == TYPE_DICTIONARY:
+		_gml_video_report_diagnostic("video_open", "Camera/constraint video sources require platform-specific permission and capture bridges.")
+		return null
+	var source_path = str(source)
+	if source_path.strip_edges() == "":
+		return null
+	var candidates = []
+	if source_path.contains("://"):
+		candidates.append(source_path)
+	else:
+		candidates.append("res://" + source_path)
+		candidates.append("user://" + source_path)
+	for candidate in candidates:
+		if ResourceLoader.exists(candidate):
+			var loaded = load(candidate)
+			if loaded is VideoStream:
+				return loaded
+	if source_path.get_extension().to_lower() == "ogv":
+		var stream = VideoStreamTheora.new()
+		stream.file = candidates[0]
+		return stream
+	return null
+
+
+static func _gml_video_surface_handle(texture):
+	var size = Vector2(1, 1)
+	if texture is Texture2D:
+		var texture_size = texture.get_size()
+		if texture_size.x > 0 and texture_size.y > 0:
+			size = texture_size
+	var surface_handle = _gml_video_state.get("surface_handle", null)
+	if gml_handle_is_valid(surface_handle) and typeof(surface_handle.reference) == TYPE_DICTIONARY:
+		var surface = surface_handle.reference
+		if int(surface.get("width", 0)) == int(size.x) and int(surface.get("height", 0)) == int(size.y):
+			if texture is Texture2D:
+				surface["texture"] = texture
+			return surface_handle
+		surface["valid"] = false
+		gml_handle_invalidate(surface_handle)
+	var new_surface = _gml_surface_make(int(size.x), int(size.y), false, 0)
+	if texture is Texture2D:
+		new_surface["texture"] = texture
+	var handle = gml_handle_register("surface", new_surface, "video_surface")
+	_gml_video_state["surface_handle"] = handle
+	return handle
+
+
+static func _gml_video_finished():
+	if bool(_gml_video_state.get("loop", false)):
+		_gml_video_state["status"] = GML_VIDEO_STATUS_PLAYING
+	else:
+		_gml_video_state["status"] = GML_VIDEO_STATUS_CLOSED
+	return null
+
+
+static func _gml_video_report_diagnostic(api_name, detail):
+	var diagnostic = {
+		"severity": "partial",
+		"api": str(api_name),
+		"message": str(detail),
+	}
+	_gml_video_diagnostics.append(diagnostic)
+	push_warning("GM2Godot video runtime: " + str(api_name) + ": " + str(detail))
+	return diagnostic
 
 
 static func _gml_shader_entry(shader):

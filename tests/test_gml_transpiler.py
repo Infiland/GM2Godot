@@ -3800,6 +3800,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "texturegroup_set_mode.*1 to 3.*got 4"):
             transpile_gml_code("texturegroup_set_mode(true, false, spr_player, 0);", indent="", asset_names={"spr_player"})
 
+    def test_video_helpers_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "video_open('intro.ogv');"
+                "video_set_volume(0.5);"
+                "video_enable_loop(true);"
+                "video_pause();"
+                "video_resume();"
+                "video_seek_to(1.25);"
+                "frame = video_draw();"
+                "looping = video_is_looping();"
+                "volume = video_get_volume();"
+                "duration = video_get_duration();"
+                "position = video_get_position();"
+                "status = video_get_status();"
+                "format = video_get_format();"
+                "video_close();",
+                indent="",
+            ),
+            "GMRuntime.gml_video_open('intro.ogv')\n"
+            "GMRuntime.gml_video_set_volume(0.5)\n"
+            "GMRuntime.gml_video_enable_loop(true)\n"
+            "GMRuntime.gml_video_pause()\n"
+            "GMRuntime.gml_video_resume()\n"
+            "GMRuntime.gml_video_seek_to(1.25)\n"
+            "frame = GMRuntime.gml_video_draw()\n"
+            "looping = GMRuntime.gml_video_is_looping()\n"
+            "volume = GMRuntime.gml_video_get_volume()\n"
+            "duration = GMRuntime.gml_video_get_duration()\n"
+            "position = GMRuntime.gml_video_get_position()\n"
+            "status = GMRuntime.gml_video_get_status()\n"
+            "format = GMRuntime.gml_video_get_format()\n"
+            "GMRuntime.gml_video_close()",
+        )
+
     def test_shader_helpers_lower_to_runtime(self):
         self.assertEqual(
             transpile_gml_code(
@@ -4076,8 +4111,6 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("xboxlive_achievements_set_progress(user_id, 'Achievement');", indent="")
 
     def test_os_device_media_unsupported_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "video_draw.*unsupported.*#569.*VideoStreamPlayer"):
-            transpile_gml_code("video_draw();", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):
             transpile_gml_code("device_get_tilt_y();", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "display_get_orientation.*unsupported.*#569.*sensor"):

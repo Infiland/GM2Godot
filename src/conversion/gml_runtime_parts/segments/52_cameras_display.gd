@@ -1,4 +1,5 @@
 const GML_CAMERA_HANDLE_KIND = "camera"
+const GML_VIEW_INVALID_INDEX = -1
 const GML_VIEW_ARRAY_NAMES = {
 	"view_angle": true,
 	"view_camera": true,
@@ -22,7 +23,14 @@ const GML_VIEW_ARRAY_NAMES = {
 }
 
 static var _gml_camera_entries_by_index = {}
+static var _gml_active_camera_handle = null
 static var _gml_display_gui_size = Vector2.ZERO
+
+
+static func gml_camera_create():
+	var size = _gml_application_surface_size()
+	var camera = _gml_camera_make(0, 0, size.x, size.y, 0, -1, -1, -1, -1, -1, GML_VIEW_INVALID_INDEX)
+	return gml_handle_register(GML_CAMERA_HANDLE_KIND, camera)
 
 
 static func gml_camera_create_view(x, y, w, h, angle, object, hborder, vborder, hspeed, vspeed):
@@ -40,6 +48,53 @@ static func gml_camera_create_view(x, y, w, h, angle, object, hborder, vborder, 
 		-1
 	)
 	return gml_handle_register(GML_CAMERA_HANDLE_KIND, camera)
+
+
+static func gml_camera_destroy(camera):
+	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
+	if not gml_handle_is_valid(handle):
+		return null
+	if _gml_builtin_arrays.has("view_camera"):
+		for view_index in range(GML_BUILTIN_ARRAY_SIZE):
+			var assigned_camera = _gml_array_get_default("view_camera", view_index, -1)
+			if _gml_camera_handles_match(assigned_camera, handle):
+				_gml_array_set_default("view_camera", view_index, -1)
+				_gml_camera_entries_by_index.erase(view_index)
+	if _gml_camera_handles_match(_gml_active_camera_handle, handle):
+		_gml_active_camera_handle = null
+	var camera_state = handle.reference
+	if typeof(camera_state) == TYPE_DICTIONARY:
+		var node = camera_state.get("node", null)
+		if node is Camera2D and is_instance_valid(node):
+			node.enabled = false
+	gml_handle_invalidate(handle)
+	return null
+
+
+static func gml_camera_apply(camera):
+	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
+	if not gml_handle_is_valid(handle) or typeof(handle.reference) != TYPE_DICTIONARY:
+		return null
+	var camera_state = handle.reference
+	_gml_camera_sync_from_view_arrays(camera_state)
+	_gml_camera_apply_state(camera_state)
+	_gml_active_camera_handle = handle
+	var node = camera_state.get("node", null)
+	if node is Camera2D and is_instance_valid(node):
+		node.enabled = true
+		if node.is_inside_tree():
+			node.make_current()
+	return null
+
+
+static func gml_camera_get_active():
+	if gml_handle_is_valid(_gml_active_camera_handle):
+		return _gml_active_camera_handle
+	var view_index = int(_gml_array_get_default("view_current", 0, 0))
+	var view_camera = gml_view_get_camera(view_index)
+	if _gml_is_invalid_view_reference(view_camera):
+		return gml_view_get_camera(0)
+	return view_camera
 
 
 static func gml_camera_set_view_pos(camera, x, y):
@@ -114,6 +169,68 @@ static func gml_camera_get_view_angle(camera):
 	return camera_state["angle"]
 
 
+static func gml_view_get_camera(view_port):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return -1
+	var camera = _gml_array_get_default("view_camera", view_index, -1)
+	if _gml_is_invalid_view_reference(camera):
+		return -1
+	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
+	if gml_handle_is_valid(handle):
+		return handle
+	_gml_array_set_default("view_camera", view_index, -1)
+	_gml_camera_entries_by_index.erase(view_index)
+	return -1
+
+
+static func gml_view_set_camera(view_port, camera):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return null
+	if _gml_is_invalid_view_reference(camera):
+		_gml_array_set_default("view_camera", view_index, -1)
+		_gml_camera_entries_by_index.erase(view_index)
+		return null
+	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
+	if not gml_handle_is_valid(handle) or typeof(handle.reference) != TYPE_DICTIONARY:
+		return null
+	var camera_state = handle.reference
+	camera_state["view_index"] = view_index
+	_gml_camera_entries_by_index[view_index] = {"handle": handle, "camera": camera_state}
+	_gml_array_set_default("view_camera", view_index, handle)
+	_gml_camera_sync_view_arrays(camera_state)
+	_gml_camera_apply_state(camera_state)
+	return null
+
+
+static func gml_view_get_surface_id(view_port):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return -1
+	var surface = _gml_array_get_default("view_surface_id", view_index, -1)
+	if _gml_is_invalid_view_reference(surface):
+		return -1
+	if gml_surface_exists(surface):
+		return surface
+	_gml_array_set_default("view_surface_id", view_index, -1)
+	return -1
+
+
+static func gml_view_set_surface_id(view_port, surface):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return -1
+	if _gml_is_invalid_view_reference(surface):
+		_gml_array_set_default("view_surface_id", view_index, -1)
+		return -1
+	if not gml_surface_exists(surface):
+		_gml_array_set_default("view_surface_id", view_index, -1)
+		return -1
+	_gml_array_set_default("view_surface_id", view_index, surface)
+	return surface
+
+
 static func gml_display_get_gui_width():
 	return _gml_display_gui_dimensions().x
 
@@ -184,6 +301,27 @@ static func _gml_view_camera_handle(index):
 	_gml_camera_sync_view_arrays(camera)
 	_gml_camera_apply_state(camera)
 	return handle
+
+
+static func _gml_view_index(view_port):
+	var view_index = int(_to_real(view_port))
+	if view_index < 0 or view_index >= GML_BUILTIN_ARRAY_SIZE:
+		return GML_VIEW_INVALID_INDEX
+	return view_index
+
+
+static func _gml_is_invalid_view_reference(value):
+	if is_undefined(value) or value == null:
+		return true
+	if is_numeric(value):
+		return int(_to_real(value)) == -1
+	return false
+
+
+static func _gml_camera_handles_match(left, right):
+	if not is_handle(left) or not is_handle(right):
+		return false
+	return left.kind == right.kind and left.index == right.index and left.type_id == right.type_id
 
 
 static func _gml_camera_make(x, y, width, height, angle, object, hborder, vborder, hspeed, vspeed, view_index):

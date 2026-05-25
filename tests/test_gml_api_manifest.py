@@ -64,7 +64,9 @@ class TestGMLAPIManifest(unittest.TestCase):
         draw_line = get_gml_api_entry("draw_line")
         draw_sprite = get_gml_api_entry("draw_sprite")
         surface_create = get_gml_api_entry("surface_create")
+        camera_create = get_gml_api_entry("camera_create")
         camera_create_view = get_gml_api_entry("camera_create_view")
+        view_set_surface_id = get_gml_api_entry("view_set_surface_id")
 
         self.assertIsNotNone(array_push)
         self.assertIsNotNone(asset_get_index)
@@ -75,7 +77,9 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIsNotNone(draw_line)
         self.assertIsNotNone(draw_sprite)
         self.assertIsNotNone(surface_create)
+        self.assertIsNotNone(camera_create)
         self.assertIsNotNone(camera_create_view)
+        self.assertIsNotNone(view_set_surface_id)
         assert array_push is not None
         assert asset_get_index is not None
         assert instance_create_layer is not None
@@ -85,7 +89,9 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert draw_line is not None
         assert draw_sprite is not None
         assert surface_create is not None
+        assert camera_create is not None
         assert camera_create_view is not None
+        assert view_set_surface_id is not None
 
         self.assertEqual(array_push.status, "implemented")
         self.assertEqual(array_push.issue_number, 502)
@@ -105,8 +111,12 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(draw_sprite.issue_number, 491)
         self.assertEqual(surface_create.status, "partial")
         self.assertEqual(surface_create.issue_number, 492)
+        self.assertEqual(camera_create.status, "partial")
+        self.assertEqual(camera_create.issue_number, 493)
         self.assertEqual(camera_create_view.status, "partial")
         self.assertEqual(camera_create_view.issue_number, 493)
+        self.assertEqual(view_set_surface_id.status, "partial")
+        self.assertEqual(view_set_surface_id.issue_number, 493)
         audio_play_sound = get_gml_api_entry("audio_play_sound")
         self.assertIsNotNone(audio_play_sound)
         assert audio_play_sound is not None

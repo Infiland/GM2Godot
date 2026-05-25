@@ -2778,19 +2778,31 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_camera_and_display_helpers_lower_to_runtime(self):
         self.assertEqual(
             transpile_gml_code(
+                "empty_cam = camera_create();"
                 "cam = camera_create_view(0, 0, 320, 180, 0, o_player, 16, 16, 4, 4);"
+                "view_set_camera(0, cam);"
+                "active_before = view_get_camera(0);"
+                "camera_apply(cam); active_after = camera_get_active();"
                 "camera_set_view_pos(cam, 10, 20);"
                 "camera_set_view_size(cam, 640, 360);"
                 "camera_set_view_angle(cam, 15);"
                 "vx = camera_get_view_x(cam); vy = camera_get_view_y(cam);"
                 "vw = camera_get_view_width(cam); vh = camera_get_view_height(cam);"
                 "va = camera_get_view_angle(cam);"
+                "surface_id = view_get_surface_id(0);"
+                "view_set_surface_id(0, surface_id);"
                 "display_set_gui_size(800, 450);"
-                "gw = display_get_gui_width(); gh = display_get_gui_height();",
+                "gw = display_get_gui_width(); gh = display_get_gui_height();"
+                "camera_destroy(empty_cam);",
                 indent="",
                 asset_names={"o_player"},
             ),
+            "empty_cam = GMRuntime.gml_camera_create()\n"
             'cam = GMRuntime.gml_camera_create_view(0, 0, 320, 180, 0, GMRuntime.gml_asset_get_index("o_player"), 16, 16, 4, 4)\n'
+            "GMRuntime.gml_view_set_camera(0, cam)\n"
+            "active_before = GMRuntime.gml_view_get_camera(0)\n"
+            "GMRuntime.gml_camera_apply(cam)\n"
+            "active_after = GMRuntime.gml_camera_get_active()\n"
             "GMRuntime.gml_camera_set_view_pos(cam, 10, 20)\n"
             "GMRuntime.gml_camera_set_view_size(cam, 640, 360)\n"
             "GMRuntime.gml_camera_set_view_angle(cam, 15)\n"
@@ -2799,9 +2811,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "vw = GMRuntime.gml_camera_get_view_width(cam)\n"
             "vh = GMRuntime.gml_camera_get_view_height(cam)\n"
             "va = GMRuntime.gml_camera_get_view_angle(cam)\n"
+            "surface_id = GMRuntime.gml_view_get_surface_id(0)\n"
+            "GMRuntime.gml_view_set_surface_id(0, surface_id)\n"
             "GMRuntime.gml_display_set_gui_size(800, 450)\n"
             "gw = GMRuntime.gml_display_get_gui_width()\n"
-            "gh = GMRuntime.gml_display_get_gui_height()",
+            "gh = GMRuntime.gml_display_get_gui_height()\n"
+            "GMRuntime.gml_camera_destroy(empty_cam)",
         )
 
     def test_transpiles_array_assignments_through_runtime(self):

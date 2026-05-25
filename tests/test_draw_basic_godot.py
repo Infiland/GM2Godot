@@ -116,6 +116,31 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tawait get_tree().process_frame
         \tif not _check(abs(float(drawer.draw_ok) - 0.5) <= 0.01, "draw event did not execute through runtime helpers"):
         \t\treturn
+        \tvar stream = VideoStreamTheora.new()
+        \tGMRuntime.gml_video_open(stream)
+        \tif not _check(GMRuntime.gml_video_get_status() == 2, "video_open did not enter playing compatibility state"):
+        \t\treturn
+        \tGMRuntime.gml_video_set_volume(0.25)
+        \tif not _check(abs(GMRuntime.gml_video_get_volume() - 0.25) <= 0.001, "video volume state did not update"):
+        \t\treturn
+        \tGMRuntime.gml_video_enable_loop(true)
+        \tif not _check(GMRuntime.gml_video_is_looping(), "video loop state did not update"):
+        \t\treturn
+        \tGMRuntime.gml_video_pause()
+        \tif not _check(GMRuntime.gml_video_get_status() == 3, "video_pause did not enter paused state"):
+        \t\treturn
+        \tGMRuntime.gml_video_resume()
+        \tif not _check(GMRuntime.gml_video_get_status() == 2, "video_resume did not enter playing state"):
+        \t\treturn
+        \tGMRuntime.gml_video_seek_to(1.25)
+        \tvar frame = GMRuntime.gml_video_draw()
+        \tif not _check(frame.size() == 2 and frame[0] == 0 and GMRuntime.gml_surface_exists(frame[1]), "video_draw did not return a surface payload"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_video_get_format() == 0, "video format should default to RGBA"):
+        \t\treturn
+        \tGMRuntime.gml_video_close()
+        \tif not _check(GMRuntime.gml_video_get_status() == 0, "video_close did not reset status"):
+        \t\treturn
         \tprint("DRAW_SMOKE_OK")
         \tget_tree().quit(0)
         """

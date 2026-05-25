@@ -753,27 +753,26 @@ _OS_DEVICE_MEDIA_PARTIAL_APIS: tuple[tuple[str, str, GMLAPISupportFlag, str], ..
     ("browser_input_capture", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "No-ops unless a web hook implements browser input capture policy."),
     ("webgl_enabled", _OS_DEVICE_MEDIA_WEB_DOCS_PATH, "yes", "Matches GameMaker's non-browser true fallback unless a web hook reports otherwise."),
 )
-_OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS = (
+_OS_DEVICE_MEDIA_VIDEO_PARTIAL_APIS: tuple[tuple[str, str], ...] = (
     (
-        (
-            "video_open",
-            "video_close",
-            "video_draw",
-            "video_set_volume",
-            "video_pause",
-            "video_resume",
-            "video_enable_loop",
-            "video_seek_to",
-            "video_is_looping",
-            "video_get_volume",
-            "video_get_duration",
-            "video_get_position",
-            "video_get_status",
-            "video_get_format",
-        ),
-        _OS_DEVICE_MEDIA_VIDEO_DOCS_PATH,
-        "Video playback and camera-feed constraints require a VideoStreamPlayer/camera addon policy before GM2Godot can preserve surfaces, status values, and async callbacks.",
+        "video_open",
+        "Creates a hidden Godot VideoStreamPlayer for Ogg Theora/GDExtension-backed streams; camera constraints and unsupported formats emit diagnostics.",
     ),
+    ("video_close", "Stops and releases the generated VideoStreamPlayer and invalidates the compatibility surface."),
+    ("video_draw", "Returns GameMaker-style status/surface data backed by the current Godot video texture or a deterministic placeholder surface."),
+    ("video_set_volume", "Maps linear video volume to VideoStreamPlayer.volume."),
+    ("video_pause", "Maps to VideoStreamPlayer.paused."),
+    ("video_resume", "Unpauses the generated VideoStreamPlayer and restarts playback if necessary."),
+    ("video_enable_loop", "Maps loop state to VideoStreamPlayer.loop."),
+    ("video_seek_to", "Maps to VideoStreamPlayer.stream_position."),
+    ("video_is_looping", "Returns generated video loop state."),
+    ("video_get_volume", "Returns generated VideoStreamPlayer linear volume state."),
+    ("video_get_duration", "Returns VideoStreamPlayer stream length when available."),
+    ("video_get_position", "Returns VideoStreamPlayer stream position when available."),
+    ("video_get_status", "Returns GameMaker-compatible closed/preparing/playing/paused status constants."),
+    ("video_get_format", "Returns RGBA format for Godot video texture playback; YUV platform paths remain diagnostic-only."),
+)
+_OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS = (
     (
         (
             "device_get_tilt_x",
@@ -827,6 +826,21 @@ def _os_device_media_entries() -> tuple[GMLAPIEntry, ...]:
         )
         for name, docs_path, runtime_support, notes in _OS_DEVICE_MEDIA_PARTIAL_APIS
     )
+    video_entries = tuple(
+        _entry(
+            name,
+            "OS and Device Media",
+            "partial",
+            "src.conversion.gml_runtime_parts.segments.48_drawing_basic_forms",
+            "n/a",
+            "yes",
+            "partial",
+            "yes",
+            _OS_DEVICE_MEDIA_VIDEO_DOCS_PATH,
+            notes,
+        )
+        for name, notes in _OS_DEVICE_MEDIA_VIDEO_PARTIAL_APIS
+    )
     unsupported_entries = tuple(
         _entry(
             name,
@@ -843,7 +857,7 @@ def _os_device_media_entries() -> tuple[GMLAPIEntry, ...]:
         for names, docs_path, notes in _OS_DEVICE_MEDIA_UNSUPPORTED_GROUPS
         for name in names
     )
-    return implemented_entries + partial_entries + unsupported_entries
+    return implemented_entries + partial_entries + video_entries + unsupported_entries
 
 
 _PLATFORM_SERVICE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.73_platform_services"

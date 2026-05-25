@@ -750,7 +750,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(entries["clipboard_get_text"].status, "implemented")
         self.assertEqual(entries["browser_width"].status, "partial")
         self.assertEqual(entries["url_open_full"].runtime_support, "no")
-        self.assertEqual(entries["video_open"].status, "unsupported")
+        self.assertEqual(entries["video_open"].status, "partial")
         self.assertIn("VideoStreamPlayer", entries["video_open"].notes)
         self.assertEqual(entries["device_get_tilt_x"].status, "unsupported")
         self.assertIn("sensor", entries["device_get_tilt_x"].notes)
@@ -835,8 +835,6 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("sequence_track_new(seqtracktype_graphic)")
         with self.assertRaisesRegex(GMLTranspileError, "skeleton_animation_set.*unsupported.*#568"):
             transpile_gml_expression("skeleton_animation_set('walk')")
-        with self.assertRaisesRegex(GMLTranspileError, "video_open.*unsupported.*#569.*VideoStreamPlayer"):
-            transpile_gml_expression('video_open("intro.mp4")')
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_x.*unsupported.*#569.*sensor"):
             transpile_gml_expression("device_get_tilt_x()")
         with self.assertRaisesRegex(GMLTranspileError, "os_request_permission.*unsupported.*#569.*permission"):

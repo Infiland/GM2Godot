@@ -24,6 +24,7 @@ const GML_VIEW_ARRAY_NAMES = {
 
 static var _gml_camera_entries_by_index = {}
 static var _gml_active_camera_handle = null
+static var _gml_default_camera_handle = null
 static var _gml_display_gui_size = Vector2.ZERO
 
 
@@ -33,7 +34,7 @@ static func gml_camera_create():
 	return gml_handle_register(GML_CAMERA_HANDLE_KIND, camera)
 
 
-static func gml_camera_create_view(x, y, w, h, angle, object, hborder, vborder, hspeed, vspeed):
+static func gml_camera_create_view(x, y, w, h, angle, object, x_speed, y_speed, x_border, y_border):
 	var camera = _gml_camera_make(
 		_to_real(x),
 		_to_real(y),
@@ -41,10 +42,10 @@ static func gml_camera_create_view(x, y, w, h, angle, object, hborder, vborder, 
 		_to_real(h),
 		_to_real(angle),
 		object,
-		_to_real(hborder),
-		_to_real(vborder),
-		_to_real(hspeed),
-		_to_real(vspeed),
+		_to_real(x_border),
+		_to_real(y_border),
+		_to_real(x_speed),
+		_to_real(y_speed),
 		-1
 	)
 	return gml_handle_register(GML_CAMERA_HANDLE_KIND, camera)
@@ -62,6 +63,8 @@ static func gml_camera_destroy(camera):
 				_gml_camera_entries_by_index.erase(view_index)
 	if _gml_camera_handles_match(_gml_active_camera_handle, handle):
 		_gml_active_camera_handle = null
+	if _gml_camera_handles_match(_gml_default_camera_handle, handle):
+		_gml_default_camera_handle = null
 	var camera_state = handle.reference
 	if typeof(camera_state) == TYPE_DICTIONARY:
 		var node = camera_state.get("node", null)
@@ -77,6 +80,7 @@ static func gml_camera_apply(camera):
 		return null
 	var camera_state = handle.reference
 	_gml_camera_sync_from_view_arrays(camera_state)
+	_gml_camera_update_follow(camera_state)
 	_gml_camera_apply_state(camera_state)
 	_gml_active_camera_handle = handle
 	var node = camera_state.get("node", null)
@@ -93,8 +97,120 @@ static func gml_camera_get_active():
 	var view_index = int(_gml_array_get_default("view_current", 0, 0))
 	var view_camera = gml_view_get_camera(view_index)
 	if _gml_is_invalid_view_reference(view_camera):
-		return gml_view_get_camera(0)
+		return gml_camera_get_default()
 	return view_camera
+
+
+static func gml_camera_get_default():
+	if gml_handle_is_valid(_gml_default_camera_handle):
+		return _gml_default_camera_handle
+	_gml_default_camera_handle = _gml_camera_create_default()
+	return _gml_default_camera_handle
+
+
+static func gml_camera_set_default(camera):
+	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
+	if gml_handle_is_valid(handle) and typeof(handle.reference) == TYPE_DICTIONARY:
+		_gml_default_camera_handle = handle
+	return null
+
+
+static func gml_camera_set_view_mat(camera, matrix):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return null
+	camera_state["view_matrix"] = _gml_clone_value(matrix, 16)
+	camera_state["view_matrix_custom"] = true
+	return null
+
+
+static func gml_camera_get_view_mat(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return _gml_camera_identity_matrix()
+	_gml_camera_refresh_matrices(camera_state, false)
+	return _gml_clone_value(camera_state["view_matrix"], 16)
+
+
+static func gml_camera_set_proj_mat(camera, matrix):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return null
+	camera_state["projection_matrix"] = _gml_clone_value(matrix, 16)
+	camera_state["projection_matrix_custom"] = true
+	return null
+
+
+static func gml_camera_get_proj_mat(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return _gml_camera_identity_matrix()
+	_gml_camera_refresh_matrices(camera_state, false)
+	return _gml_clone_value(camera_state["projection_matrix"], 16)
+
+
+static func gml_camera_set_view_target(camera, target):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return null
+	camera_state["object"] = target
+	_gml_camera_sync_view_arrays(camera_state)
+	return null
+
+
+static func gml_camera_get_view_target(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return -1
+	return camera_state["object"]
+
+
+static func gml_camera_set_view_speed(camera, x_speed, y_speed):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return null
+	camera_state["hspeed"] = _to_real(x_speed)
+	camera_state["vspeed"] = _to_real(y_speed)
+	_gml_camera_sync_view_arrays(camera_state)
+	return null
+
+
+static func gml_camera_get_view_speed_x(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return 0
+	return camera_state["hspeed"]
+
+
+static func gml_camera_get_view_speed_y(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return 0
+	return camera_state["vspeed"]
+
+
+static func gml_camera_set_view_border(camera, x_border, y_border):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return null
+	camera_state["hborder"] = _to_real(x_border)
+	camera_state["vborder"] = _to_real(y_border)
+	_gml_camera_sync_view_arrays(camera_state)
+	return null
+
+
+static func gml_camera_get_view_border_x(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return 0
+	return camera_state["hborder"]
+
+
+static func gml_camera_get_view_border_y(camera):
+	var camera_state = _gml_camera_resolve(camera)
+	if camera_state == null:
+		return 0
+	return camera_state["vborder"]
 
 
 static func gml_camera_set_view_pos(camera, x, y):
@@ -325,7 +441,7 @@ static func _gml_camera_handles_match(left, right):
 
 
 static func _gml_camera_make(x, y, width, height, angle, object, hborder, vborder, hspeed, vspeed, view_index):
-	return {
+	var camera = {
 		"x": float(x),
 		"y": float(y),
 		"width": max(float(width), 1.0),
@@ -337,8 +453,14 @@ static func _gml_camera_make(x, y, width, height, angle, object, hborder, vborde
 		"hspeed": float(hspeed),
 		"vspeed": float(vspeed),
 		"view_index": int(view_index),
-		"node": null
+		"node": null,
+		"view_matrix": [],
+		"projection_matrix": [],
+		"view_matrix_custom": false,
+		"projection_matrix_custom": false
 	}
+	_gml_camera_refresh_matrices(camera, true)
+	return camera
 
 
 static func _gml_camera_resolve(camera):
@@ -377,6 +499,12 @@ static func _gml_camera_sync_from_view_arrays(camera):
 	camera["width"] = max(_to_real(_gml_array_get_default("view_wview", view_index, camera["width"])), 1.0)
 	camera["height"] = max(_to_real(_gml_array_get_default("view_hview", view_index, camera["height"])), 1.0)
 	camera["angle"] = _to_real(_gml_array_get_default("view_angle", view_index, camera["angle"]))
+	camera["object"] = _gml_array_get_default("view_object", view_index, camera["object"])
+	camera["hborder"] = _to_real(_gml_array_get_default("view_hborder", view_index, camera["hborder"]))
+	camera["vborder"] = _to_real(_gml_array_get_default("view_vborder", view_index, camera["vborder"]))
+	camera["hspeed"] = _to_real(_gml_array_get_default("view_hspeed", view_index, camera["hspeed"]))
+	camera["vspeed"] = _to_real(_gml_array_get_default("view_vspeed", view_index, camera["vspeed"]))
+	_gml_camera_refresh_matrices(camera, false)
 
 
 static func _gml_camera_sync_from_node(camera, node):
@@ -390,11 +518,25 @@ static func _gml_camera_sync_from_node(camera, node):
 		camera["width"] = max(_to_real(node.get_meta("gamemaker_view_wview")), 1.0)
 	if node.has_meta("gamemaker_view_hview"):
 		camera["height"] = max(_to_real(node.get_meta("gamemaker_view_hview")), 1.0)
+	if node.has_meta("gamemaker_view_object_id") and not _gml_is_invalid_view_reference(node.get_meta("gamemaker_view_object_id")):
+		camera["object"] = node.get_meta("gamemaker_view_object_id")
+	elif node.has_meta("gamemaker_view_object_name") and str(node.get_meta("gamemaker_view_object_name")) != "":
+		camera["object"] = str(node.get_meta("gamemaker_view_object_name"))
+	if node.has_meta("gamemaker_view_hborder"):
+		camera["hborder"] = _to_real(node.get_meta("gamemaker_view_hborder"))
+	if node.has_meta("gamemaker_view_vborder"):
+		camera["vborder"] = _to_real(node.get_meta("gamemaker_view_vborder"))
+	if node.has_meta("gamemaker_view_hspeed"):
+		camera["hspeed"] = _to_real(node.get_meta("gamemaker_view_hspeed"))
+	if node.has_meta("gamemaker_view_vspeed"):
+		camera["vspeed"] = _to_real(node.get_meta("gamemaker_view_vspeed"))
 	camera["angle"] = node.rotation_degrees
+	_gml_camera_refresh_matrices(camera, false)
 
 
 static func _gml_camera_apply_state(camera):
 	var node = camera["node"]
+	_gml_camera_refresh_matrices(camera, false)
 	if not (node is Camera2D):
 		return
 	node.position = Vector2(_to_real(camera["x"]) + (_to_real(camera["width"]) * 0.5), _to_real(camera["y"]) + (_to_real(camera["height"]) * 0.5))
@@ -403,6 +545,110 @@ static func _gml_camera_apply_state(camera):
 	node.limit_top = int(_to_real(camera["y"]))
 	node.limit_right = int(_to_real(camera["x"]) + _to_real(camera["width"]))
 	node.limit_bottom = int(_to_real(camera["y"]) + _to_real(camera["height"]))
+
+
+static func _gml_camera_update_visible_views():
+	if not _gml_builtin_arrays.has("view_camera"):
+		return null
+	var values = _gml_builtin_arrays["view_camera"]
+	for view_index in range(min(values.size(), GML_BUILTIN_ARRAY_SIZE)):
+		var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, values[view_index])
+		if not gml_handle_is_valid(handle) or typeof(handle.reference) != TYPE_DICTIONARY:
+			continue
+		var camera = handle.reference
+		if _gml_camera_update_follow(camera):
+			_gml_camera_apply_state(camera)
+	return null
+
+
+static func _gml_camera_update_follow(camera):
+	if typeof(camera) != TYPE_DICTIONARY:
+		return false
+	var target = camera.get("object", -1)
+	if _gml_is_invalid_view_reference(target):
+		return false
+	var targets = gml_with_targets(target)
+	if targets.is_empty():
+		return false
+	var target_position = _gml_instance_position(targets[0])
+	var next_x = _gml_camera_follow_axis(camera["x"], camera["width"], target_position.x, camera["hborder"], camera["hspeed"])
+	var next_y = _gml_camera_follow_axis(camera["y"], camera["height"], target_position.y, camera["vborder"], camera["vspeed"])
+	if abs(float(next_x) - float(camera["x"])) < 0.0001 and abs(float(next_y) - float(camera["y"])) < 0.0001:
+		return false
+	camera["x"] = next_x
+	camera["y"] = next_y
+	_gml_camera_refresh_matrices(camera, true)
+	_gml_camera_sync_view_arrays(camera)
+	return true
+
+
+static func _gml_camera_follow_axis(position, size, target_position, border, speed):
+	var current = _to_real(position)
+	var span = max(_to_real(size), 1.0)
+	var safe_border = max(_to_real(border), 0.0)
+	var desired = current
+	if _to_real(target_position) < current + safe_border:
+		desired = _to_real(target_position) - safe_border
+	elif _to_real(target_position) > current + span - safe_border:
+		desired = _to_real(target_position) + safe_border - span
+	var delta = desired - current
+	if abs(delta) < 0.0001:
+		return current
+	var max_speed = _to_real(speed)
+	if max_speed < 0:
+		return desired
+	if max_speed == 0:
+		return current
+	return current + sign(delta) * min(abs(delta), max_speed)
+
+
+static func _gml_camera_create_default():
+	var size = _gml_application_surface_size()
+	var camera = _gml_camera_make(0, 0, size.x, size.y, 0, -1, -1, -1, -1, -1, GML_VIEW_INVALID_INDEX)
+	return gml_handle_register(GML_CAMERA_HANDLE_KIND, camera, "default")
+
+
+static func _gml_camera_refresh_matrices(camera, force_generated):
+	if force_generated or not bool(camera.get("view_matrix_custom", false)):
+		camera["view_matrix"] = _gml_camera_build_view_matrix(camera)
+		camera["view_matrix_custom"] = false
+	if force_generated or not bool(camera.get("projection_matrix_custom", false)):
+		camera["projection_matrix"] = _gml_camera_build_projection_matrix(camera)
+		camera["projection_matrix_custom"] = false
+
+
+static func _gml_camera_build_view_matrix(camera):
+	var angle = deg_to_rad(-_to_real(camera.get("angle", 0)))
+	var cosine = cos(angle)
+	var sine = sin(angle)
+	var x = _to_real(camera.get("x", 0))
+	var y = _to_real(camera.get("y", 0))
+	return [
+		cosine, -sine, 0.0, 0.0,
+		sine, cosine, 0.0, 0.0,
+		0.0, 0.0, 1.0, 0.0,
+		-x, -y, 0.0, 1.0
+	]
+
+
+static func _gml_camera_build_projection_matrix(camera):
+	var width = max(_to_real(camera.get("width", 1)), 1.0)
+	var height = max(_to_real(camera.get("height", 1)), 1.0)
+	return [
+		2.0 / width, 0.0, 0.0, 0.0,
+		0.0, -2.0 / height, 0.0, 0.0,
+		0.0, 0.0, 1.0, 0.0,
+		-1.0, 1.0, 0.0, 1.0
+	]
+
+
+static func _gml_camera_identity_matrix():
+	return [
+		1.0, 0.0, 0.0, 0.0,
+		0.0, 1.0, 0.0, 0.0,
+		0.0, 0.0, 1.0, 0.0,
+		0.0, 0.0, 0.0, 1.0
+	]
 
 
 static func _gml_view_find_camera_node(view_index):

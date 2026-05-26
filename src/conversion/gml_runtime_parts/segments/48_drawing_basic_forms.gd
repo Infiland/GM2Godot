@@ -85,6 +85,7 @@ static var _gml_draw_state = {
 
 
 static func gml_draw_begin(target, context_name = "draw"):
+	_gml_camera_update_visible_views()
 	_gml_draw_context_stack.append({
 		"target": target,
 		"context": str(context_name),

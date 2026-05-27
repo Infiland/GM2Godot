@@ -377,8 +377,8 @@ class TestRoomConverter(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(
             self.godot_dir,
             "rooms",
-            "Game",
-            "Intro",
+            "game",
+            "intro",
             "r_intro",
             "r_intro.tscn",
         )))
@@ -889,7 +889,7 @@ class TestRoomConverter(unittest.TestCase):
     def test_instance_layer_resolves_object_subfolder_path(self):
         self._write_yyp(["r_subfolder"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player", parent_path="folders/Objects/Game/Actors.yy")
-        self._write_object_scene("o_player", "Game", "Actors")
+        self._write_object_scene("o_player", "game", "actors")
         self._write_room("r_subfolder", layers=[
             {
                 "%Name": "Instances",
@@ -902,7 +902,7 @@ class TestRoomConverter(unittest.TestCase):
         content = self._read_scene("r_subfolder")
 
         self.assertIn(
-            'path="res://objects/Game/Actors/o_player/o_player.tscn"',
+            'path="res://objects/game/actors/o_player/o_player.tscn"',
             content,
         )
 
@@ -1476,7 +1476,7 @@ class TestRoomConverter(unittest.TestCase):
             content = f.read()
 
         self.assertIn(
-            'run/main_scene="res://rooms/Game/Intro/r_intro/r_intro.tscn"',
+            'run/main_scene="res://rooms/game/intro/r_intro/r_intro.tscn"',
             content,
         )
         self.assertIn('config/name="Existing"', content)

@@ -23,6 +23,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertIn("GODOT_VERSION: 4.4.1-stable", content)
         self.assertIn("GODOT_BIN=$godot_bin", content)
         self.assertIn("actions/cache@v4", content)
+        self.assertIn("tests.test_godot_validation", content)
         self.assertIn("tests.test_cameras_display_godot", content)
         self.assertIn("tests.test_room_game_flow_godot", content)
         self.assertIn("tests.test_physics_runtime_godot", content)

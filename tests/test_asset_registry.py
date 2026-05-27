@@ -217,7 +217,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         by_name = {entry.name: entry for entry in entries}
 
         self.assertEqual(by_name["s_player"].asset_type, "sprite")
-        self.assertEqual(by_name["s_player"].godot_path, "res://sprites/Actors/s_player/s_player.tscn")
+        self.assertEqual(by_name["s_player"].godot_path, "res://sprites/actors/s_player/s_player.tscn")
         self.assertEqual(by_name["s_player"].tags, ("player", "visible"))
         sprite_metadata = by_name["s_player"].metadata
         self.assertIsNotNone(sprite_metadata)
@@ -226,7 +226,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(by_name["snd_jump"].asset_type, "sound")
         self.assertEqual(
             by_name["snd_jump"].godot_path,
-            "res://sounds/audio_sfx/SFX/snd_jump/snd_jump.ogg",
+            "res://sounds/audio_sfx/sfx/snd_jump/snd_jump.ogg",
         )
         sound_metadata = by_name["snd_jump"].metadata
         self.assertIsNotNone(sound_metadata)
@@ -234,7 +234,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(sound_metadata["audio_group"], "audio_sfx")
         self.assertEqual(sound_metadata["sound_file"], "snd_jump.ogg")
         self.assertEqual(sound_metadata["volume"], 1.0)
-        self.assertEqual(by_name["r_title"].godot_path, "res://rooms/Menus/r_title/r_title.tscn")
+        self.assertEqual(by_name["r_title"].godot_path, "res://rooms/menus/r_title/r_title.tscn")
         room_metadata = by_name["r_title"].metadata
         self.assertIsNotNone(room_metadata)
         assert room_metadata is not None
@@ -242,13 +242,13 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(room_metadata["width"], 1024)
         self.assertEqual(room_metadata["height"], 768)
         self.assertFalse(room_metadata["persistent"])
-        self.assertEqual(by_name["o_player"].godot_path, "res://objects/Actors/o_player/o_player.tscn")
-        self.assertEqual(by_name["scr_spawn"].godot_path, "res://scripts/Game/scr_spawn.gd")
-        self.assertEqual(by_name["fnt_ui"].godot_path, "res://fonts/UI/fnt_ui.tres")
+        self.assertEqual(by_name["o_player"].godot_path, "res://objects/actors/o_player/o_player.tscn")
+        self.assertEqual(by_name["scr_spawn"].godot_path, "res://scripts/game/scr_spawn.gd")
+        self.assertEqual(by_name["fnt_ui"].godot_path, "res://fonts/ui/fnt_ui.tres")
         self.assertEqual(by_name["path_patrol"].asset_type, "path")
         self.assertEqual(
             by_name["path_patrol"].godot_path,
-            "res://paths/Movement/path_patrol/path_patrol.tscn",
+            "res://paths/movement/path_patrol/path_patrol.tscn",
         )
         self.assertEqual(by_name["ac_fade"].asset_type, "animation_curve")
         self.assertEqual(by_name["seq_intro"].asset_type, "sequence")

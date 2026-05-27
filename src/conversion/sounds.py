@@ -10,6 +10,7 @@ from typing import TypedDict, cast
 # Import localization manager
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -87,12 +88,13 @@ class SoundConverter(BaseConverter):
         output_parts: list[str] = []
 
         if self.organize_by_audio_group:
-            output_parts.append(audio_group or 'audiogroup_default')
+            output_parts.append(generated_path_segment(audio_group or 'audiogroup_default', 'audiogroup_default'))
 
-        if subfolder:
-            output_parts.extend(part for part in subfolder.split('/') if part)
+        safe_subfolder = generated_subfolder_path(subfolder)
+        if safe_subfolder:
+            output_parts.extend(part for part in safe_subfolder.split('/') if part)
 
-        output_parts.append(sound_name)
+        output_parts.append(generated_resource_stem(sound_name))
 
         output_dir = os.path.join(self.godot_sounds_path, *output_parts)
         res_subfolder = '/'.join(output_parts)

@@ -359,7 +359,7 @@ class TestTileSetConverterSubfolders(unittest.TestCase):
         )
         converter.convert_all()
 
-        tres_path = os.path.join(self.godot_dir, "tilesets", "World", "ts_terrain", "ts_terrain.tres")
+        tres_path = os.path.join(self.godot_dir, "tilesets", "world", "ts_terrain", "ts_terrain.tres")
         self.assertTrue(os.path.isfile(tres_path),
                         f"Expected tileset at {tres_path}")
 
@@ -372,11 +372,11 @@ class TestTileSetConverterSubfolders(unittest.TestCase):
         )
         converter.convert_all()
 
-        tres_path = os.path.join(self.godot_dir, "tilesets", "World", "ts_terrain", "ts_terrain.tres")
+        tres_path = os.path.join(self.godot_dir, "tilesets", "world", "ts_terrain", "ts_terrain.tres")
         with open(tres_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        self.assertIn('res://tilesets/World/ts_terrain/ts_terrain.png', content)
+        self.assertIn('res://tilesets/world/ts_terrain/ts_terrain.png', content)
 
 
 if __name__ == "__main__":

@@ -122,7 +122,7 @@ class TestNoteConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "notes", "Design", "my_note", "my_note.txt")
+        expected = os.path.join(self.godot_dir, "notes", "design", "my_note", "my_note.txt")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected note at {expected}")
 

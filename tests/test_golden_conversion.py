@@ -71,13 +71,13 @@ def _snapshot_output(godot_dir: Path, gm_project_dir: Path) -> dict[str, object]
     text_files = [
         "project.godot",
         "gm2godot/gml_script_registry.gd",
-        "scripts/Game/scr_add.gd",
-        "scripts/Game/scr_stats.gd",
+        "scripts/game/scr_add.gd",
+        "scripts/game/scr_stats.gd",
     ]
     json_files = [
         "gm2godot/conversion_diagnostics.json",
-        "scripts/Game/scr_add.gd.gmlmap.json",
-        "scripts/Game/scr_stats.gd.gmlmap.json",
+        "scripts/game/scr_add.gd.gmlmap.json",
+        "scripts/game/scr_stats.gd.gmlmap.json",
     ]
     hash_files = [
         "gm2godot/gml_runtime.gd",

@@ -1,9 +1,9 @@
 {
   "files": {
-    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/Game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/Game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
+    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
     "project.godot": "[application]\nconfig/name=\"Golden Fixture\"\n\n[autoload]\nGMRuntime=\"*res://gm2godot/managers/gm_runtime_manager.gd\"\nGMAssets=\"*res://gm2godot/managers/gm_assets.gd\"\nGMRooms=\"*res://gm2godot/managers/gm_rooms.gd\"\nGMInstances=\"*res://gm2godot/managers/gm_instances.gd\"\nGMEvents=\"*res://gm2godot/managers/gm_events.gd\"\nGMDraw=\"*res://gm2godot/managers/gm_draw.gd\"\nGMInput=\"*res://gm2godot/managers/gm_input.gd\"\nGMAudio=\"*res://gm2godot/managers/gm_audio.gd\"\nGMAsync=\"*res://gm2godot/managers/gm_async.gd\"\nGMPlatform=\"*res://gm2godot/managers/gm_platform.gd\"\n",
-    "scripts/Game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n",
-    "scripts/Game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n"
+    "scripts/game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n",
+    "scripts/game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n"
   },
   "fixture": "basic_scripts",
   "hashes": {
@@ -45,7 +45,7 @@
         "warning": 0
       }
     },
-    "scripts/Game/scr_add.gd.gmlmap.json": {
+    "scripts/game/scr_add.gd.gmlmap.json": {
       "entries": [
         {
           "event": "script:scr_add",
@@ -61,7 +61,7 @@
       "source_path": "<GM_PROJECT>/scripts/scr_add/scr_add.gml",
       "version": 1
     },
-    "scripts/Game/scr_stats.gd.gmlmap.json": {
+    "scripts/game/scr_stats.gd.gmlmap.json": {
       "entries": [
         {
           "event": "script:scr_stats",

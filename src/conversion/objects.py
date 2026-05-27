@@ -10,6 +10,11 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.generated_paths import (
+    generated_nested_resource_path,
+    generated_resource_directory,
+    generated_resource_stem,
+)
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     GMLSourceMap,
@@ -190,9 +195,7 @@ class ObjectConverter(BaseConverter):
         return None
 
     def _object_script_res_path(self, object_name: str, subfolder: str = "") -> str:
-        if subfolder:
-            return f"res://objects/{subfolder}/{object_name}/{object_name}.gd"
-        return f"res://objects/{object_name}/{object_name}.gd"
+        return generated_nested_resource_path("objects", subfolder, object_name, ".gd")
 
     def _get_object_subfolder(self, object_name: str) -> str:
         yy_path = os.path.join(self.gm_project_path, 'objects', object_name, object_name + '.yy')
@@ -205,10 +208,8 @@ class ObjectConverter(BaseConverter):
 
     def _sprite_scene_exists(self, sprite_name: str, sprite_subfolder: str = "") -> bool:
         """Check whether the converted sprite scene exists in the Godot project."""
-        if sprite_subfolder:
-            tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_subfolder, sprite_name, sprite_name + '.tscn')
-        else:
-            tscn_path = os.path.join(self.godot_project_path, 'sprites', sprite_name, sprite_name + '.tscn')
+        relative_path = generated_nested_resource_path("sprites", sprite_subfolder, sprite_name, ".tscn")[len("res://"):]
+        tscn_path = os.path.join(self.godot_project_path, *relative_path.split("/"))
         return os.path.isfile(tscn_path)
 
     def _get_available_sprite_scene_paths(self) -> dict[str, str]:
@@ -252,10 +253,7 @@ class ObjectConverter(BaseConverter):
         if has_sprite:
             sprite_id = str(next_id)
             next_id += 1
-            if sprite_subfolder:
-                sprite_path = f"res://sprites/{sprite_subfolder}/{sprite_name}/{sprite_name}.tscn"
-            else:
-                sprite_path = f"res://sprites/{sprite_name}/{sprite_name}.tscn"
+            sprite_path = generated_nested_resource_path("sprites", sprite_subfolder, sprite_name or "sprite", ".tscn")
             parts.append(f'\n[ext_resource type="PackedScene" path="{sprite_path}" id="{sprite_id}"]\n')
 
         if has_script:
@@ -463,10 +461,7 @@ class ObjectConverter(BaseConverter):
                     object_name=object_name, sprite_name=sprite_name))
                 sprite_name = None
 
-        if subfolder:
-            object_dir = os.path.join(self.godot_objects_path, subfolder, object_name)
-        else:
-            object_dir = os.path.join(self.godot_objects_path, object_name)
+        object_dir = generated_resource_directory(self.godot_objects_path, subfolder, object_name)
         script_res_path = self._object_script_res_path(object_name, subfolder)
 
         code_bodies, instance_variables, event_source_maps = self._load_event_code_bodies(
@@ -497,11 +492,12 @@ class ObjectConverter(BaseConverter):
 
         os.makedirs(object_dir, exist_ok=True)
 
-        tscn_path = os.path.join(object_dir, f"{object_name}.tscn")
+        object_stem = generated_resource_stem(object_name)
+        tscn_path = os.path.join(object_dir, f"{object_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(scene_content)
 
-        gd_path = os.path.join(object_dir, f"{object_name}.gd")
+        gd_path = os.path.join(object_dir, f"{object_stem}.gd")
         with open(gd_path, 'w', encoding='utf-8') as f:
             f.write(script_content)
         self._write_object_source_map(gd_path, script_content, code_bodies, event_source_maps)

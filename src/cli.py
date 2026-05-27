@@ -18,6 +18,10 @@ from src.conversion.gml_transpiler import (
     generate_gml_api_compatibility_report,
     render_gml_manual_scope_markdown,
 )
+from src.conversion.godot_validation import (
+    validate_generated_godot_project,
+    write_godot_validation_report,
+)
 from src.conversion.platform_capabilities import (
     generate_platform_capability_report,
     render_platform_capability_markdown,
@@ -52,7 +56,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_convert(args)
 
     if args.command == "validate":
-        diagnostics = _validate_project(args.godot_project)
+        diagnostics = _validate_project(
+            args.godot_project,
+            godot_binary=args.godot_bin,
+            run_godot_validation=not args.skip_godot_validation,
+        )
         if args.report_dir:
             _write_static_reports(args.report_dir)
             diagnostics.write_reports(args.report_dir)
@@ -121,6 +129,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "validate", help="Validate generated output reports and project presence."
     )
     validate_parser.add_argument("--godot-project", required=True, help="Godot project directory.")
+    validate_parser.add_argument(
+        "--godot-bin",
+        default=None,
+        help="Optional Godot executable for generated GDScript/scene/resource validation.",
+    )
+    validate_parser.add_argument(
+        "--skip-godot-validation",
+        action="store_true",
+        help="Skip headless Godot generated resource validation.",
+    )
     _add_report_args(validate_parser, required=False)
     _add_threshold_args(validate_parser)
 
@@ -220,7 +238,12 @@ def _analyze_project(gm_project_path: str, platform_name: str) -> DiagnosticColl
     return diagnostics
 
 
-def _validate_project(godot_project_path: str) -> DiagnosticCollector:
+def _validate_project(
+    godot_project_path: str,
+    *,
+    godot_binary: str | None = None,
+    run_godot_validation: bool = True,
+) -> DiagnosticCollector:
     diagnostics = DiagnosticCollector()
     if not os.path.isdir(godot_project_path):
         diagnostics.add(
@@ -261,6 +284,8 @@ def _validate_project(godot_project_path: str) -> DiagnosticCollector:
             f"Diagnostics report does not exist: {report_path}",
             source_path=report_path,
         )
+    if run_godot_validation:
+        _add_godot_validation_diagnostic(diagnostics, godot_project_path, godot_binary)
     return diagnostics
 
 
@@ -273,6 +298,42 @@ def _add_platform_diagnostic(
         f"Target platform filter: {platform_name}",
         resource_type="platform",
         resource=platform_name,
+    )
+
+
+def _add_godot_validation_diagnostic(
+    diagnostics: DiagnosticCollector,
+    godot_project_path: str,
+    godot_binary: str | None,
+) -> None:
+    report = validate_generated_godot_project(
+        godot_project_path,
+        godot_binary=godot_binary,
+    )
+    write_godot_validation_report(godot_project_path, report)
+    if report.status == "passed":
+        diagnostics.add(
+            "info",
+            "GM2GD-GODOT-VALIDATION",
+            report.message,
+            source_path=godot_project_path,
+        )
+        return
+    if report.status == "skipped":
+        diagnostics.add(
+            "info",
+            "GM2GD-GODOT-VALIDATION-SKIPPED",
+            report.message,
+            source_path=godot_project_path,
+            workaround="Install Godot and set GODOT_BIN, or pass --godot-bin to validate generated resources.",
+        )
+        return
+    diagnostics.add(
+        "error",
+        "GM2GD-GODOT-VALIDATION-FAILED",
+        report.message,
+        source_path=godot_project_path,
+        workaround="Open the generated project with the pinned Godot version and fix the first parser/resource error reported in gm2godot/godot_validation_report.json.",
     )
 
 

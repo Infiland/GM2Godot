@@ -298,19 +298,19 @@ class TestGameMakerResourceIndex(unittest.TestCase):
 
         self.assertEqual(
             index.resolve_godot_path("rooms", "r_intro"),
-            "res://rooms/Game/Intro/r_intro/r_intro.tscn",
+            "res://rooms/game/intro/r_intro/r_intro.tscn",
         )
         self.assertEqual(
             index.resolve_godot_path("objects", "o_player"),
-            "res://objects/Game/Actors/o_player/o_player.tscn",
+            "res://objects/game/actors/o_player/o_player.tscn",
         )
         self.assertEqual(
             index.resolve_godot_path("sprites", "s_player"),
-            "res://sprites/Game/Actors/s_player/s_player.tscn",
+            "res://sprites/game/actors/s_player/s_player.tscn",
         )
         self.assertEqual(
             index.resolve_godot_path("tilesets", "ts_ground"),
-            "res://tilesets/World/ts_ground/ts_ground.tres",
+            "res://tilesets/world/ts_ground/ts_ground.tres",
         )
 
     def test_handles_trailing_commas_in_yyp_and_room_yy(self) -> None:

@@ -402,9 +402,9 @@ class TestObjectConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        tscn_path = os.path.join(self.godot_dir, "objects", "Game", "Enemies", "o_boss", "o_boss.tscn")
+        tscn_path = os.path.join(self.godot_dir, "objects", "game", "enemies", "o_boss", "o_boss.tscn")
         self.assertTrue(os.path.isfile(tscn_path),
-                        "Object should be in objects/Game/Enemies/o_boss/")
+                        "Object should be in objects/game/enemies/o_boss/")
 
     def test_object_with_sprite_in_subfolder(self):
         """Object should resolve sprite cross-reference with correct subfolder path."""
@@ -424,7 +424,7 @@ class TestObjectConverterSubfolders(unittest.TestCase):
             f.write(sprite_yy)
 
         # Create converted sprite scene at the subfolder location
-        _create_fake_sprite_scene(self.godot_dir, "s_player", subfolder="Player")
+        _create_fake_sprite_scene(self.godot_dir, "s_player", subfolder="player")
 
         converter = self._make_converter()
         converter.convert_all()
@@ -433,7 +433,7 @@ class TestObjectConverterSubfolders(unittest.TestCase):
         with open(tscn_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        self.assertIn('res://sprites/Player/s_player/s_player.tscn', content)
+        self.assertIn('res://sprites/player/s_player/s_player.tscn', content)
 
     def test_root_level_object_stays_flat(self):
         """Object with root-level parent should stay in flat structure."""

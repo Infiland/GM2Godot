@@ -14,6 +14,7 @@ from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.conversion_manifest import write_conversion_manifest
 from src.conversion.diagnostics import DiagnosticCollector, write_conversion_diagnostic_reports
 from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
 
@@ -159,6 +160,14 @@ class Converter:
             ).convert_all(), "Console_Convertor_AssetRegistry"),
         ]
 
+        enabled_converters = tuple(
+            sorted(
+                key
+                for key, setting in settings.items()
+                if key != "sound_group_folders" and setting.get()
+            )
+        )
+
         try:
             for setting_key, converter_fn, log_key in converters:
                 setting = settings.get(setting_key)
@@ -170,3 +179,9 @@ class Converter:
                     self.progress_callback(0)
         finally:
             write_conversion_diagnostic_reports(godot_path, self.diagnostics)
+            write_conversion_manifest(
+                gm_path,
+                godot_path,
+                target_platform=gm_platform,
+                enabled_converters=enabled_converters,
+            )

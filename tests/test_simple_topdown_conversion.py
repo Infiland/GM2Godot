@@ -140,7 +140,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
         self.assertIn('script = ExtResource', content)
 
     def test_starting_room_instantiates_player(self):
-        content = self._read_generated_file("rooms", "r_StartingRoom.tscn")
+        content = self._read_generated_file("rooms", "r_starting_room.tscn")
 
         self.assertIn('metadata/gamemaker_room_width = 1366', content)
         self.assertIn('metadata/gamemaker_room_height = 768', content)
@@ -152,7 +152,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
             content = f.read()
 
         self.assertIn('run/main_scene=', content)
-        self.assertIn('r_StartingRoom.tscn', content)
+        self.assertIn('r_starting_room.tscn', content)
         self.assertIn('GMEvents="*res://gm2godot/managers/gm_events.gd"', content)
 
     def test_no_tracebacks_in_logs(self):

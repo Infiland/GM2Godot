@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectResourceReference,
@@ -126,6 +127,7 @@ class GameMakerResourceIndex(BaseConverter):
 
         if self.yyp_data is not None:
             self._index_yyp_resources()
+            self._stabilize_resource_paths()
             self._parse_indexed_rooms()
             self._apply_yyp_room_order(self.yyp_data)
             self._resolve_room_inheritance()
@@ -139,6 +141,7 @@ class GameMakerResourceIndex(BaseConverter):
                     "No GameMaker project .yyp found; falling back to disk scan."
                 )
             self._index_disk_resources()
+            self._stabilize_resource_paths()
             self._parse_indexed_rooms()
             self._resolve_room_inheritance()
             self.used_room_order_fallback = True
@@ -641,15 +644,35 @@ class GameMakerResourceIndex(BaseConverter):
             tags=resource_ref.tags if resource_ref is not None else (),
         )
 
+    def _stabilize_resource_paths(self) -> None:
+        used_paths: set[str] = set()
+        for kind in self.RESOURCE_EXTENSIONS:
+            resources = self.resources.get(kind, {})
+            for name in sorted(resources):
+                resource = resources[name]
+                suffix_index = 0
+                while True:
+                    suffix = "" if suffix_index == 0 else f"_{suffix_index + 1}"
+                    path = self.godot_res_path(kind, name, resource.subfolder, suffix=suffix)
+                    folded_path = path.casefold()
+                    if folded_path not in used_paths:
+                        break
+                    suffix_index += 1
+                used_paths.add(folded_path)
+                resources[name] = replace(resource, godot_path=path)
+
     @classmethod
-    def godot_res_path(cls, kind: str, name: str, subfolder: str = "") -> str:
+    def godot_res_path(
+        cls,
+        kind: str,
+        name: str,
+        subfolder: str = "",
+        *,
+        suffix: str = "",
+    ) -> str:
         """Build a generated res:// path using existing converter conventions."""
         extension = cls.RESOURCE_EXTENSIONS[kind]
-        path_parts = ["res:/", kind]
-        if subfolder:
-            path_parts.extend(part for part in subfolder.split("/") if part)
-        path_parts.extend([name, name + extension])
-        return "/".join(path_parts)
+        return generated_nested_resource_path(kind, subfolder, name, extension, suffix=suffix)
 
     @staticmethod
     def _kind_from_yyp_path(yyp_path: str) -> str:

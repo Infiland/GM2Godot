@@ -1,0 +1,18 @@
+{
+  "resources": [
+    {
+      "id": {
+        "name": "scr_add",
+        "path": "scripts/scr_add/scr_add.yy"
+      }
+    },
+    {
+      "id": {
+        "name": "scr_stats",
+        "path": "scripts/scr_stats/scr_stats.yy"
+      }
+    }
+  ],
+  "RoomOrderNodes": [],
+  "resourceType": "GMProject"
+}

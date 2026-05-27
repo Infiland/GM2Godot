@@ -1,0 +1,99 @@
+{
+  "files": {
+    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/Game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/Game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
+    "project.godot": "[application]\nconfig/name=\"Golden Fixture\"\n\n[autoload]\nGMRuntime=\"*res://gm2godot/managers/gm_runtime_manager.gd\"\nGMAssets=\"*res://gm2godot/managers/gm_assets.gd\"\nGMRooms=\"*res://gm2godot/managers/gm_rooms.gd\"\nGMInstances=\"*res://gm2godot/managers/gm_instances.gd\"\nGMEvents=\"*res://gm2godot/managers/gm_events.gd\"\nGMDraw=\"*res://gm2godot/managers/gm_draw.gd\"\nGMInput=\"*res://gm2godot/managers/gm_input.gd\"\nGMAudio=\"*res://gm2godot/managers/gm_audio.gd\"\nGMAsync=\"*res://gm2godot/managers/gm_async.gd\"\nGMPlatform=\"*res://gm2godot/managers/gm_platform.gd\"\n",
+    "scripts/Game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n",
+    "scripts/Game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n"
+  },
+  "fixture": "basic_scripts",
+  "hashes": {
+    "gm2godot/gml_runtime.gd": "sha256:3eb7d907d6f79a0b8024ddd83625fe533105ed974a6bf5bd6162c8f6d8fff693",
+    "gm2godot/managers/gm_assets.gd": "sha256:ba3484b8ab88635c0c4e8ce93b1a47b8a6707eddc5de78c16d3dd4a5b51d3b59",
+    "gm2godot/managers/gm_async.gd": "sha256:828d94a3261d873b779e0729a692dbb4afca83ae0cde3913cf7fbf3d0a0d97de",
+    "gm2godot/managers/gm_audio.gd": "sha256:ffb84c7dfee53c765ba846d348609ba9eba97ee433b3d52187c39a0c12d0f05e",
+    "gm2godot/managers/gm_draw.gd": "sha256:d4214689547f4b049d86076f6b40ba791c2a646e8adbe4c9be9a7aabfd90b3d2",
+    "gm2godot/managers/gm_events.gd": "sha256:12f9c652aba9615553f03aaae04f903f72823e415a01b11e5bf416254db732ee",
+    "gm2godot/managers/gm_input.gd": "sha256:9b6acda37e0fc1bbe369c14cb86233710429ef0db53a157ab3dffa422a37f69f",
+    "gm2godot/managers/gm_instances.gd": "sha256:32a8c3c00351cc61e068e69aff6b9cd3e38d4b645a70d096d9128d38f3b6f867",
+    "gm2godot/managers/gm_platform.gd": "sha256:18041dfa5d80380dbd2e3c931713af040a5a1a392f2adf6e889ccfe91e32eff4",
+    "gm2godot/managers/gm_rooms.gd": "sha256:925175dccadca68d5fa9d6af4bfa8115179002dd9480ab364101acba5e98782e",
+    "gm2godot/managers/gm_runtime_manager.gd": "sha256:667950a25725c49d7be7daa6638477deb4f676646d93834e85b5d01a7f82719c"
+  },
+  "json_files": {
+    "gm2godot/conversion_diagnostics.json": {
+      "diagnostics": [
+        {
+          "api": null,
+          "code": "GM2GD-CLI-TARGET-PLATFORM",
+          "column": null,
+          "event": null,
+          "issue_number": null,
+          "line": null,
+          "manifest_entry": null,
+          "message": "Target platform filter: windows",
+          "resource": "windows",
+          "resource_type": "platform",
+          "severity": "info",
+          "source_path": null,
+          "workaround": null
+        }
+      ],
+      "summary": {
+        "error": 0,
+        "info": 1,
+        "total": 1,
+        "warning": 0
+      }
+    },
+    "scripts/Game/scr_add.gd.gmlmap.json": {
+      "entries": [
+        {
+          "event": "script:scr_add",
+          "generated_line": 9,
+          "generated_text": "return GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))",
+          "source_column": 1,
+          "source_line": 1,
+          "source_path": "<GM_PROJECT>/scripts/scr_add/scr_add.gml",
+          "source_text": "return argument0 + argument1;"
+        }
+      ],
+      "event": "script:scr_add",
+      "source_path": "<GM_PROJECT>/scripts/scr_add/scr_add.gml",
+      "version": 1
+    },
+    "scripts/Game/scr_stats.gd.gmlmap.json": {
+      "entries": [
+        {
+          "event": "script:scr_stats",
+          "generated_line": 11,
+          "generated_text": "var values = [a]",
+          "source_column": 5,
+          "source_line": 2,
+          "source_path": "<GM_PROJECT>/scripts/scr_stats/scr_stats.gml",
+          "source_text": "var values = [a];"
+        },
+        {
+          "event": "script:scr_stats",
+          "generated_line": 12,
+          "generated_text": "GMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])",
+          "source_column": 5,
+          "source_line": 3,
+          "source_path": "<GM_PROJECT>/scripts/scr_stats/scr_stats.gml",
+          "source_text": "array_push(values, min(4, 1, 2), max(4, 1, 2), choose(7, 8, 9));"
+        },
+        {
+          "event": "script:scr_stats",
+          "generated_line": 13,
+          "generated_text": "return GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)",
+          "source_column": 5,
+          "source_line": 4,
+          "source_path": "<GM_PROJECT>/scripts/scr_stats/scr_stats.gml",
+          "source_text": "return values[0] + values[1] + values[2] + b;"
+        }
+      ],
+      "event": "script:scr_stats",
+      "source_path": "<GM_PROJECT>/scripts/scr_stats/scr_stats.gml",
+      "version": 1
+    }
+  }
+}

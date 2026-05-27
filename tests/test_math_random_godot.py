@@ -73,9 +73,9 @@ class TestMathRandomGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _near(GMRuntime.gml_lerp(10, 20, 0.25), 12.5, "lerp mismatch"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_min(3, 1, 2) == 1, "min mismatch"):
+            \tif not _check(GMRuntime.gml_min([3, 1, 2]) == 1, "min mismatch"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_max(3, 1, 2) == 3, "max mismatch"):
+            \tif not _check(GMRuntime.gml_max([3, 1, 2]) == 3, "max mismatch"):
             \t\treturn
             \tif not _near(GMRuntime.gml_dcos(180), -1.0, "dcos mismatch"):
             \t\treturn
@@ -111,7 +111,7 @@ class TestMathRandomGodotSmoke(unittest.TestCase):
             \tvar first_irandom = GMRuntime.gml_irandom(5)
             \tvar first_range = GMRuntime.gml_random_range(5, 10)
             \tvar first_irange = GMRuntime.gml_irandom_range(2, 4)
-            \tvar first_choice = GMRuntime.gml_choose("a", "b", "c")
+            \tvar first_choice = GMRuntime.gml_choose(["a", "b", "c"])
             \tvar first_seed = GMRuntime.gml_random_get_seed()
 
             \tif not _check(first_random >= 0 and first_random < 10, "random out of range"):
@@ -134,7 +134,7 @@ class TestMathRandomGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_irandom_range(2, 4) == first_irange, "irandom_range seed replay mismatch"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_choose("a", "b", "c") == first_choice, "choose seed replay mismatch"):
+            \tif not _check(GMRuntime.gml_choose(["a", "b", "c"]) == first_choice, "choose seed replay mismatch"):
             \t\treturn
             \tif not _check(GMRuntime.gml_random_get_seed() == first_seed, "random_get_seed replay mismatch"):
             \t\treturn

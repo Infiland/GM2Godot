@@ -442,9 +442,15 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(descriptor.category, "Arrays")
         self.assertEqual(descriptor.min_args, 2)
         self.assertIsNone(descriptor.max_args)
-        self.assertEqual(descriptor.lowering_kind, "runtime")
+        self.assertEqual(descriptor.lowering_kind, "runtime_variadic_1")
         self.assertEqual(descriptor.lowering_target, "gml_array_push")
         self.assertEqual(descriptor.issue_url, "https://github.com/Infiland/GM2Godot/issues/502")
+
+        min_descriptor = get_gml_function_descriptor("min")
+        self.assertIsNotNone(min_descriptor)
+        assert min_descriptor is not None
+        self.assertEqual(min_descriptor.lowering_kind, "runtime_variadic_all")
+        self.assertEqual(min_descriptor.lowering_target, "gml_min")
 
         platform_descriptor = get_gml_function_descriptor("steam_set_achievement")
         self.assertIsNotNone(platform_descriptor)

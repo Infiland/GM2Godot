@@ -58,6 +58,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_sequence_api",
     "runtime_self_default",
     "runtime_time_api",
+    "runtime_variadic_all",
     "runtime_variadic_1",
     "with_targets",
 ]
@@ -1310,7 +1311,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _ARRAY_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ARRAY_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name == "array_push":
+            lowering_kind = "runtime_variadic_1"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _STRING_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRING_ARITY[name]
@@ -1318,7 +1322,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _MATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MATH_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind: GMLFunctionLoweringKind = "runtime"
+        if name in ("min", "max", "choose"):
+            lowering_kind = "runtime_variadic_all"
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _FILE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _FILE_ARITY[name]

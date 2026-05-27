@@ -19,7 +19,7 @@ static func gml_array_set(array_value, index, value):
 	return value
 
 
-static func gml_array_push(array_value, ...values):
+static func gml_array_push(array_value, values):
 	if GML_ARRAY_COPY_ON_WRITE_ENABLED:
 		return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)
 	if typeof(array_value) != TYPE_ARRAY:
@@ -72,7 +72,7 @@ static func gml_array_resize(array_value, size):
 
 
 static func gml_array_push_back(array_value, value):
-	return gml_array_push(array_value, value)
+	return gml_array_push(array_value, [value])
 
 
 static func gml_array_pop(array_value):

@@ -1387,6 +1387,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]', content)
         self.assertIn('position = Vector2(420, 380)', content)
         self.assertIn('enabled = true', content)
+        self.assertIn('metadata/gamemaker_view_visible = true', content)
         self.assertIn('limit_left = 100', content)
         self.assertIn('limit_top = 200', content)
         self.assertIn('limit_right = 740', content)
@@ -1411,6 +1412,7 @@ class TestRoomConverter(unittest.TestCase):
 
         self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\nenabled = true', content)
         self.assertIn('[node name="ViewCamera_2" type="Camera2D" parent="."]\nposition = Vector2(480, 90)\nenabled = false', content)
+        self.assertEqual(content.count("metadata/gamemaker_view_visible = true"), 2)
         self.assertTrue(any("multiple visible GameMaker views" in log for log in self.logs))
 
     def test_room_inheritance_resolves_settings_and_layers(self):

@@ -25,6 +25,8 @@ const GML_VIEW_ARRAY_NAMES = {
 static var _gml_camera_entries_by_index = {}
 static var _gml_active_camera_handle = null
 static var _gml_default_camera_handle = null
+static var _gml_view_backend_diagnostics = []
+static var _gml_view_backend_diagnostic_keys = {}
 static var _gml_display_gui_size = Vector2.ZERO
 static var _gml_display_gui_maximised = false
 static var _gml_display_gui_scale = Vector2.ONE
@@ -314,6 +316,7 @@ static func gml_view_set_camera(view_port, camera):
 	if _gml_is_invalid_view_reference(camera):
 		_gml_array_set_default("view_camera", view_index, -1)
 		_gml_camera_entries_by_index.erase(view_index)
+		_gml_view_sync_backend()
 		return null
 	var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, camera)
 	if not gml_handle_is_valid(handle) or typeof(handle.reference) != TYPE_DICTIONARY:
@@ -324,6 +327,7 @@ static func gml_view_set_camera(view_port, camera):
 	_gml_array_set_default("view_camera", view_index, handle)
 	_gml_camera_sync_view_arrays(camera_state)
 	_gml_camera_apply_state(camera_state)
+	_gml_view_sync_backend()
 	return null
 
 
@@ -351,7 +355,67 @@ static func gml_view_set_surface_id(view_port, surface):
 		_gml_array_set_default("view_surface_id", view_index, -1)
 		return -1
 	_gml_array_set_default("view_surface_id", view_index, surface)
+	_gml_view_backend_record_diagnostic(
+		"view_surface_id:" + str(view_index),
+		"GM2Godot stores view_surface_id for view " + str(view_index) + " as compatibility state; render-to-surface view backends require a custom SubViewport pipeline."
+	)
+	_gml_view_sync_backend()
 	return surface
+
+
+static func gml_view_get_visible(view_port):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return false
+	return gml_bool(_gml_array_get_default("view_visible", view_index, false))
+
+
+static func gml_view_set_visible(view_port, visible):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return null
+	_gml_array_set_default("view_visible", view_index, gml_bool(visible))
+	var node = _gml_view_find_camera_node(view_index)
+	if node is Camera2D:
+		node.set_meta("gamemaker_view_visible", gml_bool(visible))
+	_gml_view_sync_backend()
+	return null
+
+
+static func gml_view_get_xport(view_port):
+	return _gml_view_get_port_value(view_port, "view_xport", 0)
+
+
+static func gml_view_get_yport(view_port):
+	return _gml_view_get_port_value(view_port, "view_yport", 0)
+
+
+static func gml_view_get_wport(view_port):
+	return _gml_view_get_port_value(view_port, "view_wport", _gml_application_surface_size().x)
+
+
+static func gml_view_get_hport(view_port):
+	return _gml_view_get_port_value(view_port, "view_hport", _gml_application_surface_size().y)
+
+
+static func gml_view_set_xport(view_port, value):
+	return _gml_view_set_port_value(view_port, "view_xport", value)
+
+
+static func gml_view_set_yport(view_port, value):
+	return _gml_view_set_port_value(view_port, "view_yport", value)
+
+
+static func gml_view_set_wport(view_port, value):
+	return _gml_view_set_port_value(view_port, "view_wport", value)
+
+
+static func gml_view_set_hport(view_port, value):
+	return _gml_view_set_port_value(view_port, "view_hport", value)
+
+
+static func gml_view_backend_diagnostics():
+	return _gml_clone_value(_gml_view_backend_diagnostics, 8)
 
 
 static func gml_display_get_gui_width():
@@ -427,6 +491,34 @@ static func gml_window_get_visible_rects():
 		var size = DisplayServer.screen_get_size(i)
 		rects.append([pos.x, pos.y, size.x, size.y])
 	return rects
+
+
+static func gml_window_mouse_get_x():
+	return gml_display_mouse_get_x()
+
+
+static func gml_window_mouse_get_y():
+	return gml_display_mouse_get_y()
+
+
+static func gml_window_mouse_set(x, y):
+	return gml_display_mouse_set(x, y)
+
+
+static func gml_window_view_mouse_get_x(view_port):
+	return _gml_window_view_mouse_position(view_port).x
+
+
+static func gml_window_view_mouse_get_y(view_port):
+	return _gml_window_view_mouse_position(view_port).y
+
+
+static func gml_window_views_mouse_get_x():
+	return gml_display_mouse_get_x()
+
+
+static func gml_window_views_mouse_get_y():
+	return gml_display_mouse_get_y()
 
 
 static func gml_window_set_fullscreen(full):
@@ -668,6 +760,19 @@ static func _gml_view_default_value(name, index):
 		return _gml_view_camera_handle(index)
 	if name == "view_current":
 		return 0
+	var camera_node = _gml_view_find_camera_node(index)
+	if camera_node is Camera2D:
+		var metadata_name = "gamemaker_" + name
+		if camera_node.has_meta(metadata_name):
+			var metadata_value = camera_node.get_meta(metadata_name)
+			if name == "view_visible" or name == "view_enabled":
+				return gml_bool(metadata_value)
+			if is_numeric(metadata_value):
+				return _to_real(metadata_value)
+		if name == "view_visible":
+			return true
+		if name == "view_enabled":
+			return bool(camera_node.enabled)
 	if name == "view_visible" or name == "view_enabled":
 		return false
 	if name == "view_wview" or name == "view_wport":
@@ -699,6 +804,7 @@ static func _gml_view_camera_handle(index):
 	)
 	camera["node"] = camera_node
 	if camera_node != null:
+		_gml_view_sync_port_arrays_from_node(view_index, camera_node)
 		_gml_camera_sync_from_node(camera, camera_node)
 	var handle = gml_handle_register(GML_CAMERA_HANDLE_KIND, camera, "view_" + str(view_index))
 	_gml_camera_entries_by_index[view_index] = {"handle": handle, "camera": camera}
@@ -959,6 +1065,86 @@ static func _gml_find_camera_node_recursive(node, view_index):
 		if result != null:
 			return result
 	return null
+
+
+static func _gml_view_get_port_value(view_port, name, fallback):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return fallback
+	return _gml_array_get_default(name, view_index, fallback)
+
+
+static func _gml_view_set_port_value(view_port, name, value):
+	var view_index = _gml_view_index(view_port)
+	if view_index < 0:
+		return null
+	_gml_array_set_default(name, view_index, max(_to_real(value), 0.0))
+	_gml_view_apply_port_metadata(view_index)
+	_gml_view_sync_backend()
+	return null
+
+
+static func _gml_view_sync_port_arrays_from_node(view_index, node):
+	if not (node is Camera2D):
+		return
+	for name in ["view_xport", "view_yport", "view_wport", "view_hport", "view_visible"]:
+		var metadata_name = "gamemaker_" + name
+		if node.has_meta(metadata_name):
+			var value = node.get_meta(metadata_name)
+			_gml_array_set_default(name, view_index, gml_bool(value) if name == "view_visible" else _to_real(value))
+
+
+static func _gml_view_apply_port_metadata(view_index):
+	var node = _gml_view_find_camera_node(view_index)
+	if not (node is Camera2D):
+		return
+	for name in ["view_xport", "view_yport", "view_wport", "view_hport"]:
+		node.set_meta("gamemaker_" + name, _gml_array_get_default(name, view_index, 0))
+
+
+static func _gml_view_sync_backend():
+	var visible_indices = []
+	for view_index in range(GML_BUILTIN_ARRAY_SIZE):
+		if gml_bool(_gml_array_get_default("view_visible", view_index, false)):
+			visible_indices.append(view_index)
+	if visible_indices.size() > 1:
+		_gml_view_backend_record_diagnostic(
+			"multi_view",
+			"GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline."
+		)
+	var main_view_index = visible_indices[0] if visible_indices.size() > 0 else -1
+	for view_index in range(GML_BUILTIN_ARRAY_SIZE):
+		var node = _gml_view_find_camera_node(view_index)
+		if node is Camera2D:
+			node.enabled = view_index == main_view_index
+	return null
+
+
+static func _gml_view_backend_record_diagnostic(key, message):
+	if _gml_view_backend_diagnostic_keys.has(key):
+		return
+	_gml_view_backend_diagnostic_keys[key] = true
+	_gml_view_backend_diagnostics.append(str(message))
+	push_warning(str(message))
+
+
+static func _gml_window_view_mouse_position(view_port):
+	var view_index = _gml_view_index(view_port)
+	var mouse_position = Vector2(gml_display_mouse_get_x(), gml_display_mouse_get_y())
+	if view_index < 0:
+		return mouse_position
+	var xport = _to_real(_gml_array_get_default("view_xport", view_index, 0))
+	var yport = _to_real(_gml_array_get_default("view_yport", view_index, 0))
+	var wport = max(_to_real(_gml_array_get_default("view_wport", view_index, _gml_application_surface_size().x)), 1.0)
+	var hport = max(_to_real(_gml_array_get_default("view_hport", view_index, _gml_application_surface_size().y)), 1.0)
+	var xview = _to_real(_gml_array_get_default("view_xview", view_index, 0))
+	var yview = _to_real(_gml_array_get_default("view_yview", view_index, 0))
+	var wview = max(_to_real(_gml_array_get_default("view_wview", view_index, wport)), 1.0)
+	var hview = max(_to_real(_gml_array_get_default("view_hview", view_index, hport)), 1.0)
+	return Vector2(
+		xview + ((mouse_position.x - xport) * (wview / wport)),
+		yview + ((mouse_position.y - yport) * (hview / hport))
+	)
 
 
 static func _gml_array_get_default(name, index, fallback):

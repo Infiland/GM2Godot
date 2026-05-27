@@ -24,6 +24,7 @@ REQUIRED_BUCKETS = {
     "ds_collections_save_files",
     "async_http",
     "camera_view",
+    "multi_view_viewports",
 }
 
 
@@ -114,6 +115,7 @@ class TestPart2FixtureCatalog(unittest.TestCase):
             "part2_fixture_ds_collections_save_files",
             "part2_fixture_async_http_bridge",
             "part2_fixture_camera_view_behavior",
+            "part2_fixture_multiview_viewport_backend",
         }
 
         for api_name in expected_fixture_entries:

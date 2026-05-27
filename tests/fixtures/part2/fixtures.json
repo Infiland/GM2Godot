@@ -7,7 +7,8 @@
     "audio_playback",
     "ds_collections_save_files",
     "async_http",
-    "camera_view"
+    "camera_view",
+    "multi_view_viewports"
   ],
   "unsupported_api_policy": "Fixtures must record unsupported APIs only when the fixture source reaches them; each recorded API must include the manifest API name and issue number.",
   "fixtures": [
@@ -216,6 +217,52 @@
         "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_camera_helpers_sync_view_arrays_and_gui_size"
       ],
       "unsupported_api_issue_refs": []
+    },
+    {
+      "id": "multiview_viewport_backend",
+      "bucket": "multi_view_viewports",
+      "title": "Multi-view viewport state and diagnostics",
+      "issue_numbers": [492, 493, 494],
+      "manifest_entries": [
+        "view_get_visible",
+        "view_set_visible",
+        "view_get_xport",
+        "view_get_yport",
+        "view_get_wport",
+        "view_get_hport",
+        "view_set_xport",
+        "view_set_yport",
+        "view_set_wport",
+        "view_set_hport",
+        "window_mouse_set",
+        "window_view_mouse_get_x",
+        "window_view_mouse_get_y",
+        "view_get_surface_id",
+        "view_set_surface_id",
+        "surface_create",
+        "display_set_gui_size",
+        "device_mouse_x_to_gui",
+        "device_mouse_y_to_gui"
+      ],
+      "game_maker_source_path": "source/multiview_viewport_backend.gml",
+      "game_maker_expectation": "Two visible views preserve viewport rectangles, convert window mouse coordinates through the selected view, and store view_surface_id while reporting the unsupported render-backed SubViewport behavior.",
+      "expected_godot_assertions": [
+        "Converted Camera2D metadata initializes view visibility and viewport rectangles.",
+        "view_set_xport/yport/wport/hport update runtime state.",
+        "window_view_mouse_get_x/y convert through view viewport and view rectangle scale.",
+        "GUI mouse conversion remains available while multi-view compatibility state is active.",
+        "Multiple active views and view_surface_id assignments record deterministic backend diagnostics."
+      ],
+      "godot_assertion_paths": [
+        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_multiview_viewport_state_and_diagnostics"
+      ],
+      "unsupported_api_issue_refs": [
+        {
+          "api": "view_set_surface_id",
+          "issue": 493,
+          "note": "Render-to-surface view backends are stored as compatibility state until a custom SubViewport renderer exists."
+        }
+      ]
     }
   ]
 }

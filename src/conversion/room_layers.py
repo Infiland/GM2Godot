@@ -845,6 +845,7 @@ def _camera_node_lines(context: RoomLayerSerializationContext) -> list[str]:
         lines.extend([
             f"metadata/gamemaker_view_camera = {godot_value(True)}",
             f"metadata/gamemaker_view_enabled_camera = {godot_value(visible_index == 0)}",
+            f"metadata/gamemaker_view_visible = {godot_value(True)}",
             f"metadata/gamemaker_view_index = {godot_value(visible_index)}",
             f"metadata/gamemaker_view_xview = {godot_value(view.get('xview'))}",
             f"metadata/gamemaker_view_yview = {godot_value(view.get('yview'))}",

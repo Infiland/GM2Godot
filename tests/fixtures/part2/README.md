@@ -11,5 +11,6 @@ The fixture catalog covers the required P0 buckets:
 - `ds_collections_save_files`: DS lists/maps/grids, text files, included file mapping, INI persistence, and JSON encoding/decoding.
 - `async_http`: HTTP GET/POST/custom requests, async event dispatch, and async buffer save.
 - `camera_view`: camera helper state, legacy view array synchronization, Camera2D transforms, and GUI display sizing.
+- `multi_view_viewports`: multi-view viewport rectangles, view mouse coordinate conversion, view-surface state, and backend diagnostics.
 
 Unsupported APIs discovered by a fixture must be added to that fixture's `unsupported_api_issue_refs` list with the manifest API name and issue number. Empty lists mean the current fixture path did not encounter a new unsupported API.

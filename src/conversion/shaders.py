@@ -5,6 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import generated_resource_stem, generated_subfolder_path
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
 
@@ -65,11 +66,13 @@ class ShaderConverter(BaseConverter):
         if not self.conversion_running():
             return None
         filename = os.path.basename(input_path)
-        output_name = os.path.splitext(filename)[0] + '.gdshader'
-        if subfolder:
-            output_dir = os.path.join(self.godot_shaders_path, subfolder)
-        else:
-            output_dir = self.godot_shaders_path
+        output_name = generated_resource_stem(os.path.splitext(filename)[0]) + '.gdshader'
+        safe_subfolder = generated_subfolder_path(subfolder)
+        output_dir = (
+            os.path.join(self.godot_shaders_path, *safe_subfolder.split("/"))
+            if safe_subfolder
+            else self.godot_shaders_path
+        )
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, output_name)
         self.convert_shader(input_path, output_path)

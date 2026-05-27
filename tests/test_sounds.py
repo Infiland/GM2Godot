@@ -383,7 +383,7 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "sounds", "SFX", "explosion", "explosion.wav")
+        expected = os.path.join(self.godot_dir, "sounds", "sfx", "explosion", "explosion.wav")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} in subfolder")
 
@@ -395,11 +395,11 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter = self._make_converter()
         converter.convert_all()
 
-        import_path = os.path.join(self.godot_dir, "sounds", "SFX", "explosion", "explosion.wav.import")
+        import_path = os.path.join(self.godot_dir, "sounds", "sfx", "explosion", "explosion.wav.import")
         self.assertTrue(os.path.isfile(import_path))
         with open(import_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn('source_file="res://sounds/SFX/explosion/explosion.wav"', content)
+        self.assertIn('source_file="res://sounds/sfx/explosion/explosion.wav"', content)
 
     def test_root_level_sound(self):
         _make_sound_yy(self.gm_dir, "beep")
@@ -421,7 +421,7 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter.convert_all()
 
         expected = os.path.join(
-            self.godot_dir, "sounds", "audiogroup_music", "SFX", "theme", "theme.wav"
+            self.godot_dir, "sounds", "audiogroup_music", "sfx", "theme", "theme.wav"
         )
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} in grouped folder hierarchy")
@@ -436,13 +436,13 @@ class TestSoundConverterSubfolders(unittest.TestCase):
         converter.convert_all()
 
         import_path = os.path.join(
-            self.godot_dir, "sounds", "audiogroup_music", "SFX", "theme", "theme.wav.import"
+            self.godot_dir, "sounds", "audiogroup_music", "sfx", "theme", "theme.wav.import"
         )
         self.assertTrue(os.path.isfile(import_path))
         with open(import_path, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn(
-            'source_file="res://sounds/audiogroup_music/SFX/theme/theme.wav"',
+            'source_file="res://sounds/audiogroup_music/sfx/theme/theme.wav"',
             content,
         )
 

@@ -169,7 +169,7 @@ class TestShaderConverterSubfolders(unittest.TestCase):
         )
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "shaders", "Effects", "sh_blur.gdshader")
+        expected = os.path.join(self.godot_dir, "shaders", "effects", "sh_blur.gdshader")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected shader at {expected}")
 

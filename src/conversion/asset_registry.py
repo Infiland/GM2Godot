@@ -12,6 +12,12 @@ from src.conversion.project_manifest import (
     load_gamemaker_project_manifest,
 )
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.generated_paths import (
+    generated_flat_resource_path,
+    generated_nested_resource_path,
+    generated_path_segment,
+    generated_resource_stem,
+)
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -212,6 +218,7 @@ class AssetRegistryConverter(BaseConverter):
             ),
         )
         room_order_indices = self._room_order_indices(resources)
+        godot_paths = self._stable_godot_paths(resources)
         used_ids: set[int] = set()
         entries: list[AssetRegistryEntry] = []
 
@@ -226,7 +233,7 @@ class AssetRegistryConverter(BaseConverter):
                 asset_type=asset_type,
                 type_name=self.TYPE_NAME_BY_KIND[resource.kind],
                 source_path=resource.source_path,
-                godot_path=self._godot_path(resource),
+                godot_path=godot_paths[self._resource_key(resource)],
                 legacy_id=self._legacy_id(resource),
                 tags=self._extract_tags(resource.raw_data),
                 metadata=self._metadata(resource, room_order_indices),
@@ -406,29 +413,66 @@ class AssetRegistryConverter(BaseConverter):
             deduped.setdefault((resource.kind, resource.name), resource)
         return tuple(deduped.values())
 
-    def _godot_path(self, resource: _ProjectResource) -> str:
+    def _stable_godot_paths(
+        self,
+        resources: Iterable[_ProjectResource],
+    ) -> dict[tuple[str, str, str], str]:
+        paths: dict[tuple[str, str, str], str] = {}
+        used_paths: set[str] = set()
+        for resource in resources:
+            suffix_index = 0
+            base_path = ""
+            while True:
+                suffix = "" if suffix_index == 0 else f"_{suffix_index + 1}"
+                path = self._godot_path(resource, suffix=suffix)
+                if suffix_index == 0:
+                    base_path = path
+                elif path == base_path:
+                    path = self._suffix_resource_path(path, suffix)
+                folded_path = path.casefold()
+                if not folded_path or folded_path not in used_paths:
+                    break
+                suffix_index += 1
+            if path:
+                used_paths.add(folded_path)
+            paths[self._resource_key(resource)] = path
+        return paths
+
+    @staticmethod
+    def _resource_key(resource: _ProjectResource) -> tuple[str, str, str]:
+        return (resource.kind, resource.name, resource.source_path)
+
+    @staticmethod
+    def _suffix_resource_path(path: str, suffix: str) -> str:
+        if not suffix:
+            return path
+        stem, extension = os.path.splitext(path)
+        return f"{stem}{suffix}{extension}"
+
+    def _godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         if resource.kind in self.STATIC_RESOURCE_EXTENSIONS:
             return self._nested_resource_path(
                 resource.kind,
                 self._get_subfolder_from_resource(resource),
                 resource.name,
                 self.STATIC_RESOURCE_EXTENSIONS[resource.kind],
+                suffix=suffix,
             )
         if resource.kind == "sounds":
-            return self._sound_godot_path(resource)
+            return self._sound_godot_path(resource, suffix=suffix)
         if resource.kind == "fonts":
-            return self._font_godot_path(resource)
+            return self._font_godot_path(resource, suffix=suffix)
         if resource.kind == "scripts":
-            return self._flat_resource_path("scripts", self._get_subfolder_from_resource(resource), resource.name, ".gd")
+            return self._flat_resource_path("scripts", self._get_subfolder_from_resource(resource), resource.name, ".gd", suffix=suffix)
         if resource.kind == "shaders":
-            return self._flat_resource_path("shaders", self._get_subfolder_from_resource(resource), resource.name, ".gdshader")
+            return self._flat_resource_path("shaders", self._get_subfolder_from_resource(resource), resource.name, ".gdshader", suffix=suffix)
         if resource.kind == "included_files":
             return "res://included_files/" + resource.name
         if resource.kind == "extensions":
             return extension_stub_resource_path(resource.name)
         return ""
 
-    def _sound_godot_path(self, resource: _ProjectResource) -> str:
+    def _sound_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         sound_file = resource.raw_data.get("soundFile")
         if not isinstance(sound_file, str) or not sound_file:
             return ""
@@ -436,10 +480,10 @@ class AssetRegistryConverter(BaseConverter):
         parts = ["sounds"]
         if self.organize_sounds_by_audio_group:
             audio_group = self._reference_name(resource.raw_data.get("audioGroupId"))
-            parts.append(audio_group or "audiogroup_default")
+            parts.append(generated_path_segment(audio_group or "audiogroup_default", "audiogroup_default"))
         subfolder = self._get_subfolder_from_resource(resource)
         parts.extend(part for part in subfolder.split("/") if part)
-        parts.extend([resource.name, sound_file])
+        parts.extend([generated_resource_stem(resource.name) + suffix, sound_file])
         return "res://" + "/".join(parts)
 
     def _metadata(
@@ -960,7 +1004,7 @@ class AssetRegistryConverter(BaseConverter):
 
     @staticmethod
     def _timeline_action_script_resource_path(timeline_name: str, frame: int) -> str:
-        safe_name = "".join(char if char.isalnum() or char == "_" else "_" for char in timeline_name)
+        safe_name = generated_resource_stem(timeline_name)
         return f"res://gm2godot/timelines/{safe_name}_{frame}.gd"
 
     @staticmethod
@@ -1008,7 +1052,7 @@ class AssetRegistryConverter(BaseConverter):
                 ordered.append(name)
         return {name: index for index, name in enumerate(ordered)}
 
-    def _font_godot_path(self, resource: _ProjectResource) -> str:
+    def _font_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         subfolder = self._get_subfolder_from_resource(resource)
         ttf_name = resource.raw_data.get("TTFName")
         include_ttf = bool(resource.raw_data.get("includeTTF", False))
@@ -1020,7 +1064,7 @@ class AssetRegistryConverter(BaseConverter):
         generated_path = self._find_generated_font_path(resource.name, subfolder)
         if generated_path is not None:
             return generated_path
-        return self._flat_resource_path("fonts", subfolder, resource.name, ".tres")
+        return self._flat_resource_path("fonts", subfolder, resource.name, ".tres", suffix=suffix)
 
     def _find_generated_font_path(self, font_name: str, subfolder: str) -> str | None:
         search_dir = os.path.join(self.godot_project_path, "fonts", *subfolder.split("/")) if subfolder else os.path.join(self.godot_project_path, "fonts")
@@ -1045,18 +1089,26 @@ class AssetRegistryConverter(BaseConverter):
         return self._get_subfolder_from_yy(resource.yy_path)
 
     @staticmethod
-    def _nested_resource_path(kind: str, subfolder: str, name: str, extension: str) -> str:
-        parts = [kind]
-        parts.extend(part for part in subfolder.split("/") if part)
-        parts.extend([name, name + extension])
-        return "res://" + "/".join(parts)
+    def _nested_resource_path(
+        kind: str,
+        subfolder: str,
+        name: str,
+        extension: str,
+        *,
+        suffix: str = "",
+    ) -> str:
+        return generated_nested_resource_path(kind, subfolder, name, extension, suffix=suffix)
 
     @staticmethod
-    def _flat_resource_path(kind: str, subfolder: str, name: str, extension: str) -> str:
-        parts = [kind]
-        parts.extend(part for part in subfolder.split("/") if part)
-        parts.append(name + extension)
-        return "res://" + "/".join(parts)
+    def _flat_resource_path(
+        kind: str,
+        subfolder: str,
+        name: str,
+        extension: str,
+        *,
+        suffix: str = "",
+    ) -> str:
+        return generated_flat_resource_path(kind, subfolder, name, extension, suffix=suffix)
 
     def _legacy_id(self, resource: _ProjectResource) -> str:
         for key in ("id", "resourceId", "guid"):

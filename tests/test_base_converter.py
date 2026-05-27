@@ -247,11 +247,11 @@ class TestGetSubfolderFromYY(unittest.TestCase):
 
     def test_nested_path(self):
         yy_path = self._write_yy("folders/Sprites/Player/Abilities.yy")
-        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "Player/Abilities")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "player/abilities")
 
     def test_deeply_nested_path(self):
         yy_path = self._write_yy("folders/Objects/Game/Enemies/Bosses.yy")
-        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "Game/Enemies/Bosses")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "game/enemies/bosses")
 
     def test_root_level_path(self):
         yy_path = self._write_yy("folders/Sprites.yy")
@@ -259,7 +259,7 @@ class TestGetSubfolderFromYY(unittest.TestCase):
 
     def test_single_subfolder(self):
         yy_path = self._write_yy("folders/Objects/CLASSIC.yy")
-        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "CLASSIC")
+        self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "classic")
 
     def test_missing_parent_field(self):
         yy_path = os.path.join(self.tmp_dir, "no_parent.yy")

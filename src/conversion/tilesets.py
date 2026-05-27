@@ -9,6 +9,11 @@ from typing import Literal, NotRequired, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import (
+    generated_nested_resource_path,
+    generated_resource_directory,
+    generated_resource_stem,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -186,10 +191,7 @@ class TileSetConverter(BaseConverter):
         tilexoff = tileset_data["tilexoff"]
         tileyoff = tileset_data["tileyoff"]
 
-        if subfolder:
-            res_path = f"res://tilesets/{subfolder}/{tileset_name}/{tileset_name}.png"
-        else:
-            res_path = f"res://tilesets/{tileset_name}/{tileset_name}.png"
+        res_path = generated_nested_resource_path("tilesets", subfolder, tileset_name, ".png")
 
         lines: list[str] = []
         lines.append('[gd_resource type="TileSet" format=3]')
@@ -258,19 +260,17 @@ class TileSetConverter(BaseConverter):
                     "sprite_name": sprite_name}
 
         # Create output directory
-        if subfolder:
-            output_dir = os.path.join(self.godot_tilesets_path, subfolder, tileset_name)
-        else:
-            output_dir = os.path.join(self.godot_tilesets_path, tileset_name)
+        output_dir = generated_resource_directory(self.godot_tilesets_path, subfolder, tileset_name)
         os.makedirs(output_dir, exist_ok=True)
 
         # Copy the sprite image as the tileset texture
-        dest_image = os.path.join(output_dir, tileset_name + '.png')
+        tileset_stem = generated_resource_stem(tileset_name)
+        dest_image = os.path.join(output_dir, tileset_stem + '.png')
         shutil.copy2(image_path, dest_image)
 
         # Generate and write the .tres file
         tres_content = self._generate_tileset_tres(tileset_name, tileset_data, subfolder)
-        tres_path = os.path.join(output_dir, tileset_name + '.tres')
+        tres_path = os.path.join(output_dir, tileset_stem + '.tres')
         with open(tres_path, 'w', encoding='utf-8') as f:
             f.write(tres_content)
         self._warn_preserved_metadata(tileset_name, tileset_data)

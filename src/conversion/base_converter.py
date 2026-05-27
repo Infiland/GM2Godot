@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from src.localization import get_localized
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -104,7 +105,7 @@ class BaseConverter(ABC):
             parts = parent_path.split('/')
             if len(parts) <= 1:
                 return ""
-            return '/'.join(parts[1:])
+            return generated_subfolder_path('/'.join(parts[1:]))
         except (KeyError, TypeError, AttributeError):
             return ""
 

@@ -14,6 +14,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.generated_paths import generated_resource_stem
 from src.gui.setting_value import SettingValue
 
 
@@ -95,18 +96,24 @@ class TestTCCConversion(unittest.TestCase):
         for _root, dirs, _ in os.walk(sprites_dir):
             all_dirs.update(dirs)
         for name in ("s_C1AIcon", "s_C2AIcon", "s_C3AIcon"):
-            self.assertIn(name, all_dirs, f"Expected sprites/{name}/ directory (nested)")
+            expected = generated_resource_stem(name)
+            self.assertIn(expected, all_dirs, f"Expected sprites/{expected}/ directory (nested)")
 
     def test_sprites_contain_png_files(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")
         sprite_path = None
         for root, dirs, _ in os.walk(sprites_dir):
-            if "s_C1AIcon" in dirs:
-                sprite_path = os.path.join(root, "s_C1AIcon")
+            expected = generated_resource_stem("s_C1AIcon")
+            if expected in dirs:
+                sprite_path = os.path.join(root, expected)
                 break
         if sprite_path and os.path.isdir(sprite_path):
             pngs = [f for f in os.listdir(sprite_path) if f.endswith(".png")]
-            self.assertGreater(len(pngs), 0, "Expected at least one PNG in s_C1AIcon/")
+            self.assertGreater(
+                len(pngs),
+                0,
+                f"Expected at least one PNG in {generated_resource_stem('s_C1AIcon')}/",
+            )
 
     def test_sprites_count(self):
         sprites_dir = os.path.join(self.godot_dir, "sprites")

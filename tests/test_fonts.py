@@ -388,7 +388,7 @@ class TestFontConverterSubfolders(unittest.TestCase):
         )
         converter.convert_all()
 
-        expected = os.path.join(self.godot_dir, "fonts", "UI", "fnt_ui.tres")
+        expected = os.path.join(self.godot_dir, "fonts", "ui", "fnt_ui.tres")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected font at {expected}")
 

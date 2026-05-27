@@ -10,6 +10,7 @@ from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -82,9 +83,8 @@ class SpriteConverter(BaseConverter):
     @staticmethod
     def _sprite_res_path(subfolder: str, sprite_name: str) -> str:
         """Build a res://sprites/... path, avoiding double slashes."""
-        if subfolder:
-            return f"res://sprites/{subfolder}/{sprite_name}"
-        return f"res://sprites/{sprite_name}"
+        scene_path = generated_nested_resource_path("sprites", subfolder, sprite_name, ".tscn")
+        return scene_path.rsplit("/", 1)[0]
 
     def _find_all_sprite_images(self) -> defaultdict[str, list[str]]:
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
@@ -318,9 +318,10 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+        sprite_stem = generated_resource_stem(sprite_name)
+        tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
-        tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
+        tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
@@ -374,9 +375,10 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+        sprite_stem = generated_resource_stem(sprite_name)
+        tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
-        tscn_path = os.path.join(tscn_dir, f"{sprite_name}.tscn")
+        tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
 
@@ -458,8 +460,9 @@ class SpriteConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        new_filename = f"{sprite_name}_{index}.png" if images_count > 1 else f"{sprite_name}.png"
-        sprite_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+        sprite_stem = generated_resource_stem(sprite_name)
+        new_filename = f"{sprite_stem}_{index}.png" if images_count > 1 else f"{sprite_stem}.png"
+        sprite_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
         godot_sprite_path = os.path.join(sprite_dir, new_filename)
 
         if len(gm_sprite_paths) == 1:
@@ -507,7 +510,7 @@ class SpriteConverter(BaseConverter):
         # Pre-create all sprite directories
         for sprite_name in sprite_images:
             subfolder = sprite_subfolders.get(sprite_name, "")
-            sprite_dir = os.path.join(self.godot_sprites_path, subfolder, sprite_name) if subfolder else os.path.join(self.godot_sprites_path, sprite_name)
+            sprite_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
             os.makedirs(sprite_dir, exist_ok=True)
 
         # Flatten all work items

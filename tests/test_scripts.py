@@ -110,10 +110,10 @@ class TestScriptConverter(unittest.TestCase):
         registry_path = self._converter().convert_all()
 
         self.assertEqual(registry_path, str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH))
-        legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
-        modern_script = (self.godot_dir / "scripts" / "Game" / "scr_modern.gd").read_text(encoding="utf-8")
+        legacy_script = (self.godot_dir / "scripts" / "game" / "scr_add.gd").read_text(encoding="utf-8")
+        modern_script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
         legacy_source_map = json.loads(
-            (self.godot_dir / "scripts" / "Game" / "scr_add.gd.gmlmap.json").read_text(encoding="utf-8")
+            (self.godot_dir / "scripts" / "game" / "scr_add.gd.gmlmap.json").read_text(encoding="utf-8")
         )
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
 
@@ -131,9 +131,9 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn("func gm2godot_callable():", modern_script)
         self.assertIn("func _gm_script_call(a = null, b = null):", modern_script)
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)
-        self.assertIn('preload("res://scripts/Game/scr_add.gd").new().gm2godot_callable()', registry)
+        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_callable()', registry)
         self.assertIn('"legacy_arguments": true', registry)
-        self.assertIn('preload("res://scripts/Game/scr_modern.gd").new().gm2godot_callable()', registry)
+        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
         self.assertIn('"legacy_arguments": false', registry)
 
     def test_converts_scripts_with_mapped_extension_calls(self) -> None:
@@ -163,7 +163,7 @@ class TestScriptConverter(unittest.TestCase):
 
         self._converter().convert_all()
 
-        legacy_script = (self.godot_dir / "scripts" / "Game" / "scr_add.gd").read_text(encoding="utf-8")
+        legacy_script = (self.godot_dir / "scripts" / "game" / "scr_add.gd").read_text(encoding="utf-8")
         self.assertIn('AdBridge.show_rewarded("zone_1")', legacy_script)
 
     def test_applies_macro_configuration_to_script_sources(self) -> None:
@@ -179,7 +179,7 @@ class TestScriptConverter(unittest.TestCase):
 
         self._converter(macro_configuration="Android").convert_all()
 
-        modern_script = (self.godot_dir / "scripts" / "Game" / "scr_modern.gd").read_text(encoding="utf-8")
+        modern_script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
         self.assertIn("return 11", modern_script)
         self.assertNotIn("return 22", modern_script)
 

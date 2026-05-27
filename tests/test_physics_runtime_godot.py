@@ -88,12 +88,24 @@ class TestPhysicsRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(abs(body.linear_damp - 0.3) < 0.001 and abs(body.angular_damp - 0.4) < 0.001, "fixture damping not applied"):
             \t\treturn
+            \tvar sensor_fixture = GMRuntime.gml_physics_fixture_create()
+            \tGMRuntime.gml_physics_fixture_set_circle_shape(sensor_fixture, 6)
+            \tGMRuntime.gml_physics_fixture_set_sensor(sensor_fixture, true)
+            \tif not _check(GMRuntime.gml_physics_fixture_bind(sensor_fixture, body_b), "sensor fixture bind failed"):
+            \t\treturn
+            \tvar sensor_shape = body_b.get_node_or_null("_gm_physics_fixture_" + str(sensor_fixture.index))
+            \tif not _check(sensor_shape is CollisionShape2D, "sensor fixture did not create CollisionShape2D"):
+            \t\treturn
+            \tif not _check(sensor_shape.shape is CircleShape2D and sensor_shape.disabled, "sensor fixture did not preserve circle/disabled state"):
+            \t\treturn
 
             \tGMRuntime.gml_physics_apply_impulse(0, 0, 20, 0, body)
             \tawait get_tree().physics_frame
             \tif not _check(body.linear_velocity.x > 0.0, "impulse did not affect body velocity"):
             \t\treturn
             \tGMRuntime.gml_physics_apply_force(0, 0, 5, 0, body)
+            \tGMRuntime.gml_physics_apply_local_force(0, 0, 0, 5, body)
+            \tGMRuntime.gml_physics_apply_local_impulse(0, 0, 0, 2, body)
             \tGMRuntime.gml_physics_apply_angular_impulse(1, body)
             \tGMRuntime.gml_physics_apply_torque(0.5, body)
             \tvar distance_joint = GMRuntime.gml_physics_joint_distance_create(body, body_b, 0, 0, 32, 0, false)
@@ -125,6 +137,7 @@ class TestPhysicsRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
 
             \tGMRuntime.gml_physics_fixture_delete(fixture)
+            \tGMRuntime.gml_physics_fixture_delete(sensor_fixture)
             \tprint("PHYSICS_RUNTIME_SMOKE_OK")
             \tget_tree().quit(0)
             """

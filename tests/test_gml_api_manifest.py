@@ -67,6 +67,11 @@ class TestGMLAPIManifest(unittest.TestCase):
         camera_create = get_gml_api_entry("camera_create")
         camera_create_view = get_gml_api_entry("camera_create_view")
         view_set_surface_id = get_gml_api_entry("view_set_surface_id")
+        display_get_width = get_gml_api_entry("display_get_width")
+        display_set_gui_maximise = get_gml_api_entry("display_set_gui_maximise")
+        window_get_width = get_gml_api_entry("window_get_width")
+        screen_save = get_gml_api_entry("screen_save")
+        gif_open = get_gml_api_entry("gif_open")
 
         self.assertIsNotNone(array_push)
         self.assertIsNotNone(asset_get_index)
@@ -80,6 +85,11 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIsNotNone(camera_create)
         self.assertIsNotNone(camera_create_view)
         self.assertIsNotNone(view_set_surface_id)
+        self.assertIsNotNone(display_get_width)
+        self.assertIsNotNone(display_set_gui_maximise)
+        self.assertIsNotNone(window_get_width)
+        self.assertIsNotNone(screen_save)
+        self.assertIsNotNone(gif_open)
         assert array_push is not None
         assert asset_get_index is not None
         assert instance_create_layer is not None
@@ -92,6 +102,11 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert camera_create is not None
         assert camera_create_view is not None
         assert view_set_surface_id is not None
+        assert display_get_width is not None
+        assert display_set_gui_maximise is not None
+        assert window_get_width is not None
+        assert screen_save is not None
+        assert gif_open is not None
 
         self.assertEqual(array_push.status, "implemented")
         self.assertEqual(array_push.issue_number, 502)
@@ -117,6 +132,16 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(camera_create_view.issue_number, 493)
         self.assertEqual(view_set_surface_id.status, "partial")
         self.assertEqual(view_set_surface_id.issue_number, 493)
+        self.assertEqual(display_get_width.status, "implemented")
+        self.assertEqual(display_get_width.issue_number, 493)
+        self.assertEqual(display_set_gui_maximise.status, "implemented")
+        self.assertEqual(display_set_gui_maximise.issue_number, 493)
+        self.assertEqual(window_get_width.status, "implemented")
+        self.assertEqual(window_get_width.issue_number, 493)
+        self.assertEqual(screen_save.status, "implemented")
+        self.assertEqual(screen_save.issue_number, 493)
+        self.assertEqual(gif_open.status, "unsupported")
+        self.assertEqual(gif_open.issue_number, 493)
         audio_play_sound = get_gml_api_entry("audio_play_sound")
         self.assertIsNotNone(audio_play_sound)
         assert audio_play_sound is not None
@@ -750,7 +775,6 @@ class TestGMLAPIManifest(unittest.TestCase):
             "video_open",
             "video_get_status",
             "device_get_tilt_x",
-            "display_get_orientation",
             "os_request_permission",
         ):
             with self.subTest(name=name):
@@ -847,6 +871,8 @@ class TestGMLAPIManifest(unittest.TestCase):
             transpile_gml_expression("skeleton_animation_set('walk')")
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_x.*unsupported.*#569.*sensor"):
             transpile_gml_expression("device_get_tilt_x()")
+        with self.assertRaisesRegex(GMLTranspileError, "gif_open.*unsupported.*#493.*GIF"):
+            transpile_gml_expression("gif_open(320, 180)")
         with self.assertRaisesRegex(GMLTranspileError, "os_request_permission.*unsupported.*#569.*permission"):
             transpile_gml_expression('os_request_permission("DeviceMotion")')
         with self.assertRaisesRegex(GMLTranspileError, "external_call.*unsupported"):

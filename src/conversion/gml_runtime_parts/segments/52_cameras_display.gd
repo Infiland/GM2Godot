@@ -26,6 +26,13 @@ static var _gml_camera_entries_by_index = {}
 static var _gml_active_camera_handle = null
 static var _gml_default_camera_handle = null
 static var _gml_display_gui_size = Vector2.ZERO
+static var _gml_display_gui_maximised = false
+static var _gml_display_gui_scale = Vector2.ONE
+static var _gml_display_gui_offset = Vector2.ZERO
+static var _gml_display_aa = 0
+static var _gml_display_timing_method = 1
+static var _gml_display_sleep_margin = 10
+static var _gml_display_ui_visibility = 0
 
 
 static func gml_camera_create():
@@ -356,8 +363,289 @@ static func gml_display_get_gui_height():
 
 
 static func gml_display_set_gui_size(width, height):
-	_gml_display_gui_size = Vector2(max(_to_real(width), 1.0), max(_to_real(height), 1.0))
+	if _to_real(width) < 0.0 and _to_real(height) < 0.0:
+		_gml_display_gui_size = Vector2.ZERO
+		_gml_display_gui_maximised = false
+		_gml_display_gui_scale = Vector2.ONE
+		_gml_display_gui_offset = Vector2.ZERO
+	else:
+		_gml_display_gui_size = Vector2(max(_to_real(width), 1.0), max(_to_real(height), 1.0))
 	return null
+
+
+static func gml_display_set_gui_maximise(xscale = 1.0, yscale = 1.0, xoffset = 0.0, yoffset = 0.0):
+	if _to_real(xscale) < 0.0 and _to_real(yscale) < 0.0:
+		_gml_display_gui_maximised = false
+		_gml_display_gui_scale = Vector2.ONE
+		_gml_display_gui_offset = Vector2.ZERO
+	else:
+		_gml_display_gui_maximised = true
+		_gml_display_gui_scale = Vector2(max(_to_real(xscale), 0.0001), max(_to_real(yscale), 0.0001))
+		_gml_display_gui_offset = Vector2(_to_real(xoffset), _to_real(yoffset))
+	return null
+
+
+# -----------------------------------------------------------------------------
+# Window helpers
+# -----------------------------------------------------------------------------
+
+
+static func gml_window_center():
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_position(Vector2i.ZERO + DisplayServer.screen_get_position() + (DisplayServer.screen_get_size() - DisplayServer.window_get_size()) / 2)
+	return null
+
+
+static func gml_window_get_fullscreen():
+	if _gml_window_mode() >= DisplayServer.WINDOW_MODE_WINDOWED:
+		return _gml_window_mode() >= DisplayServer.WINDOW_MODE_FULLSCREEN
+	return false
+
+
+static func gml_window_get_width():
+	return DisplayServer.window_get_size().x
+
+
+static func gml_window_get_height():
+	return DisplayServer.window_get_size().y
+
+
+static func gml_window_get_x():
+	return float(DisplayServer.window_get_position().x)
+
+
+static func gml_window_get_y():
+	return float(DisplayServer.window_get_position().y)
+
+
+static func gml_window_get_visible_rects():
+	var screen_count = DisplayServer.get_screen_count()
+	var rects = []
+	for i in range(screen_count):
+		var pos = DisplayServer.screen_get_position(i)
+		var size = DisplayServer.screen_get_size(i)
+		rects.append([pos.x, pos.y, size.x, size.y])
+	return rects
+
+
+static func gml_window_set_fullscreen(full):
+	if gml_bool(full):
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	return null
+
+
+static func gml_window_set_position(x, y):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_position(Vector2i(int(_to_real(x)), int(_to_real(y))))
+	return null
+
+
+static func gml_window_set_size(w, h):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_size(Vector2i(max(int(_to_real(w)), 1), max(int(_to_real(h)), 1)))
+	return null
+
+
+static func gml_window_set_rectangle(x, y, w, h):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_position(Vector2i(int(_to_real(x)), int(_to_real(y))))
+	DisplayServer.window_set_size(Vector2i(max(int(_to_real(w)), 1), max(int(_to_real(h)), 1)))
+	return null
+
+
+static func gml_window_set_min_width(w):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_min_size(Vector2i(max(int(_to_real(w)), 1), DisplayServer.window_get_min_size().y))
+	return null
+
+
+static func gml_window_set_max_width(w):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_max_size(Vector2i(max(int(_to_real(w)), 1), DisplayServer.window_get_max_size().y))
+	return null
+
+
+static func gml_window_set_min_height(h):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_min_size(Vector2i(DisplayServer.window_get_min_size().x, max(int(_to_real(h)), 1)))
+	return null
+
+
+static func gml_window_set_max_height(h):
+	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
+		return null
+	DisplayServer.window_set_max_size(Vector2i(DisplayServer.window_get_max_size().x, max(int(_to_real(h)), 1)))
+	return null
+
+
+static func gml_window_minimise():
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MINIMIZED)
+	return null
+
+
+static func gml_window_restore():
+	if _gml_window_mode() >= DisplayServer.WINDOW_MODE_MINIMIZED:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	return null
+
+
+# -----------------------------------------------------------------------------
+# Display helpers
+# -----------------------------------------------------------------------------
+
+
+static func gml_display_get_width():
+	return DisplayServer.screen_get_size().x
+
+
+static func gml_display_get_height():
+	return DisplayServer.screen_get_size().y
+
+
+static func gml_display_get_dpi_x():
+	var screen = DisplayServer.screen_get_size()
+	var dpi = DisplayServer.screen_get_dpi()
+	return _gml_dpi_to_x(dpi, screen)
+
+
+static func gml_display_get_dpi_y():
+	var screen = DisplayServer.screen_get_size()
+	var dpi = DisplayServer.screen_get_dpi()
+	return _gml_dpi_to_y(dpi, screen)
+
+
+static func gml_display_get_orientation():
+	var screen_index = DisplayServer.window_get_current_screen()
+	return DisplayServer.screen_get_orientation(screen_index)
+
+
+static func gml_display_set_orientation(orientation):
+	if is_numeric(orientation):
+		DisplayServer.screen_set_orientation(DisplayServer.window_get_current_screen(), int(_to_real(orientation)))
+	return null
+
+
+static func gml_display_get_frequency():
+	return DisplayServer.screen_get_refresh_rate()
+
+
+static func gml_display_reset(aa, vsync):
+	_gml_display_aa = int(_to_real(aa))
+	_gml_builtin_globals["display_aa"] = _gml_display_aa
+	if DisplayServer.get_name() != "headless":
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if gml_bool(vsync) else DisplayServer.VSYNC_DISABLED)
+	return 0
+
+
+static func gml_display_get_timing_method():
+	return _gml_display_timing_method
+
+
+static func gml_display_set_timing_method(method):
+	if is_numeric(method):
+		_gml_display_timing_method = int(_to_real(method))
+	return null
+
+
+static func gml_display_get_sleep_margin():
+	return _gml_display_sleep_margin
+
+
+static func gml_display_set_sleep_margin(margin):
+	if is_numeric(margin):
+		_gml_display_sleep_margin = max(int(_to_real(margin)), 0)
+	return null
+
+
+static func gml_display_mouse_set(x, y):
+	gml_input_set_mouse_position(_to_real(x), _to_real(y))
+	if DisplayServer.get_name() != "headless":
+		Input.warp_mouse(Vector2(_to_real(x), _to_real(y)))
+	return null
+
+
+static func gml_display_set_ui_visibility(flags):
+	_gml_display_ui_visibility = int(_to_real(flags))
+	return null
+
+
+# -----------------------------------------------------------------------------
+# Screenshot helpers
+# -----------------------------------------------------------------------------
+
+
+static func gml_screen_save(fname):
+	var img = _gml_capture_screen_image()
+	if img == null:
+		return -1
+	var path = _gml_screen_save_path(fname)
+	if path.is_empty():
+		return -1
+	var err = img.save_png(path)
+	return 0 if err == OK else -1
+
+
+static func gml_screen_save_part(fname, x, y, w, h):
+	var capture = _gml_capture_screen_image()
+	if capture == null:
+		return -1
+	var path = _gml_screen_save_path(fname)
+	if path.is_empty():
+		return -1
+	var region = Rect2i(max(int(_to_real(x)), 0), max(int(_to_real(y)), 0), max(int(_to_real(w)), 1), max(int(_to_real(h)), 1))
+	var img = capture.get_region(region)
+	var err = img.save_png(path)
+	return 0 if err == OK else -1
+
+
+# -----------------------------------------------------------------------------
+# Private helpers
+# -----------------------------------------------------------------------------
+
+
+static func _gml_window_mode():
+	if DisplayServer.get_name() == "headless":
+		return DisplayServer.WINDOW_MODE_MINIMIZED
+	return DisplayServer.window_get_mode()
+
+
+static func _gml_dpi_to_x(dpi, screen_size):
+	if screen_size.x <= 0:
+		return 96.0
+	return max(float(dpi), 96.0)
+
+
+static func _gml_dpi_to_y(dpi, screen_size):
+	if screen_size.y <= 0:
+		return 96.0
+	return max(float(dpi), 96.0)
+
+
+static func _gml_capture_screen_image():
+	if DisplayServer.get_name() == "headless":
+		return null
+	return DisplayServer.screen_get_image_rect(Rect2i(Vector2i.ZERO, DisplayServer.screen_get_size()))
+
+
+static func _gml_screen_save_path(fname):
+	var path = str(fname).replace("\\", "/").strip_edges()
+	if path.is_empty():
+		return ""
+	if not path.contains("://"):
+		path = "user://" + path
+	var directory = path.get_base_dir()
+	if not directory.is_empty():
+		DirAccess.make_dir_recursive_absolute(directory)
+	return path
 
 
 static func _gml_view_is_builtin_array(name):
@@ -697,4 +985,21 @@ static func _gml_array_set_default(name, index, value):
 static func _gml_display_gui_dimensions():
 	if _gml_display_gui_size.x > 0.0 and _gml_display_gui_size.y > 0.0:
 		return _gml_display_gui_size
-	return _gml_application_surface_size()
+	var source = _gml_display_gui_source_dimensions()
+	if _gml_display_gui_maximised:
+		return Vector2(max(source.x / _gml_display_gui_scale.x, 1.0), max(source.y / _gml_display_gui_scale.y, 1.0))
+	return source
+
+
+static func _gml_display_gui_source_dimensions():
+	var app_size = _gml_application_surface_size()
+	if not _gml_display_gui_maximised:
+		return app_size
+	var window_size = DisplayServer.window_get_size()
+	if window_size.x > 0 and window_size.y > 0:
+		return Vector2(window_size.x, window_size.y)
+	return app_size
+
+
+static func _gml_display_gui_origin():
+	return _gml_display_gui_offset if _gml_display_gui_maximised else Vector2.ZERO

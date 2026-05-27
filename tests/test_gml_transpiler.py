@@ -2793,6 +2793,26 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "view_set_surface_id(0, surface_id);"
                 "display_set_gui_size(800, 450);"
                 "gw = display_get_gui_width(); gh = display_get_gui_height();"
+                "display_set_gui_maximise(0.5, 0.5, 2, 4);"
+                "display_w = display_get_width(); display_h = display_get_height();"
+                "dpi_x = display_get_dpi_x(); dpi_y = display_get_dpi_y();"
+                "orientation = display_get_orientation(); display_set_orientation(orientation);"
+                "frequency = display_get_frequency();"
+                "display_reset(0, false);"
+                "timing = display_get_timing_method(); display_set_timing_method(tm_sleep);"
+                "sleep_margin = display_get_sleep_margin(); display_set_sleep_margin(12);"
+                "display_mouse_set(10, 20); display_set_ui_visibility(0);"
+                "window_center();"
+                "fullscreen = window_get_fullscreen();"
+                "ww = window_get_width(); wh = window_get_height();"
+                "wx = window_get_x(); wy = window_get_y(); rects = window_get_visible_rects();"
+                "window_set_fullscreen(false);"
+                "window_set_position(10, 20); window_set_size(640, 480);"
+                "window_set_rectangle(0, 0, 320, 240);"
+                "window_set_min_width(200); window_set_max_width(2000);"
+                "window_set_min_height(150); window_set_max_height(1500);"
+                "window_minimise(); window_restore();"
+                "screen_save('shot.png'); screen_save_part('shot_part.png', 0, 0, 8, 8);"
                 "camera_destroy(empty_cam);",
                 indent="",
                 asset_names={"o_player"},
@@ -2816,8 +2836,50 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_display_set_gui_size(800, 450)\n"
             "gw = GMRuntime.gml_display_get_gui_width()\n"
             "gh = GMRuntime.gml_display_get_gui_height()\n"
+            "GMRuntime.gml_display_set_gui_maximise(0.5, 0.5, 2, 4)\n"
+            "display_w = GMRuntime.gml_display_get_width()\n"
+            "display_h = GMRuntime.gml_display_get_height()\n"
+            "dpi_x = GMRuntime.gml_display_get_dpi_x()\n"
+            "dpi_y = GMRuntime.gml_display_get_dpi_y()\n"
+            "orientation = GMRuntime.gml_display_get_orientation()\n"
+            "GMRuntime.gml_display_set_orientation(orientation)\n"
+            "frequency = GMRuntime.gml_display_get_frequency()\n"
+            "GMRuntime.gml_display_reset(0, false)\n"
+            "timing = GMRuntime.gml_display_get_timing_method()\n"
+            "GMRuntime.gml_display_set_timing_method(0)\n"
+            "sleep_margin = GMRuntime.gml_display_get_sleep_margin()\n"
+            "GMRuntime.gml_display_set_sleep_margin(12)\n"
+            "GMRuntime.gml_display_mouse_set(10, 20)\n"
+            "GMRuntime.gml_display_set_ui_visibility(0)\n"
+            "GMRuntime.gml_window_center()\n"
+            "fullscreen = GMRuntime.gml_window_get_fullscreen()\n"
+            "ww = GMRuntime.gml_window_get_width()\n"
+            "wh = GMRuntime.gml_window_get_height()\n"
+            "wx = GMRuntime.gml_window_get_x()\n"
+            "wy = GMRuntime.gml_window_get_y()\n"
+            "rects = GMRuntime.gml_window_get_visible_rects()\n"
+            "GMRuntime.gml_window_set_fullscreen(false)\n"
+            "GMRuntime.gml_window_set_position(10, 20)\n"
+            "GMRuntime.gml_window_set_size(640, 480)\n"
+            "GMRuntime.gml_window_set_rectangle(0, 0, 320, 240)\n"
+            "GMRuntime.gml_window_set_min_width(200)\n"
+            "GMRuntime.gml_window_set_max_width(2000)\n"
+            "GMRuntime.gml_window_set_min_height(150)\n"
+            "GMRuntime.gml_window_set_max_height(1500)\n"
+            "GMRuntime.gml_window_minimise()\n"
+            "GMRuntime.gml_window_restore()\n"
+            "GMRuntime.gml_screen_save('shot.png')\n"
+            "GMRuntime.gml_screen_save_part('shot_part.png', 0, 0, 8, 8)\n"
             "GMRuntime.gml_camera_destroy(empty_cam)",
         )
+
+    def test_camera_display_unsupported_gif_apis_get_diagnostics(self):
+        with self.assertRaisesRegex(GMLTranspileError, "gif_open.*unsupported.*#493.*GIF"):
+            transpile_gml_code("gif_open(320, 180);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "gif_add_surface.*unsupported.*#493.*GIF"):
+            transpile_gml_code("gif_add_surface(gif_id, surf, 6);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "gif_save_buffer.*unsupported.*#493.*GIF"):
+            transpile_gml_code("gif_save_buffer(gif_id);", indent="")
 
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
@@ -4128,8 +4190,6 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_os_device_media_unsupported_apis_get_diagnostics(self):
         with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):
             transpile_gml_code("device_get_tilt_y();", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "display_get_orientation.*unsupported.*#569.*sensor"):
-            transpile_gml_code("display_get_orientation();", indent="")
 
     def test_extension_function_mappings_emit_configured_hook_calls(self):
         self.assertEqual(

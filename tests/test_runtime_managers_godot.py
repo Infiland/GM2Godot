@@ -118,6 +118,83 @@ class TestRuntimeManagersGodotSmoke(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("RUNTIME_MANAGERS_SMOKE_OK", result.stdout)
 
+    def test_dynamic_asset_registry_updates_and_releases_runtime_assets(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tvar asset_id = GMRuntime.gml_asset_register_dynamic("spr_runtime", "sprite", "res://runtime/spr_runtime.png", ["runtime", "generated"])
+            \tif not _check(asset_id >= GMRuntime.GML_DYNAMIC_ASSET_ID_START, "dynamic asset id range mismatch"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_get_index("spr_runtime") == asset_id, "dynamic asset name lookup failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_get_type(asset_id) == "sprite", "dynamic asset type lookup failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_get_type_name(asset_id) == "Sprite", "dynamic asset type name lookup failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_has_any_tag(asset_id, ["missing", "generated"]), "dynamic asset tags missing"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_get_ids("sprite").has("dynamic:" + str(asset_id)), "dynamic asset type ids missing"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_release(asset_id), "dynamic asset release failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_asset_get_index("spr_runtime") == -1, "released dynamic asset still resolved"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_asset_release(asset_id), "released dynamic asset released twice"):
+            \t\treturn
+            \tprint("DYNAMIC_ASSET_REGISTRY_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as godot_tmp:
+            project_dir = Path(godot_tmp)
+            _write_text(project_dir / "project.godot", "[application]\n")
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            try:
+                result = subprocess.run(
+                    [godot_binary, "--headless", "--path", str(project_dir), "smoke.tscn"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired as exc:
+                output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+                self.fail("Godot dynamic-asset smoke timed out\n" + output)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("DYNAMIC_ASSET_REGISTRY_SMOKE_OK", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

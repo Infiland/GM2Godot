@@ -1021,6 +1021,13 @@ static func _gml_audio_player_finished(instance_index):
 	if bool(entry["loop"]) and _gml_audio_player_is_valid(player):
 		player.play(0.0)
 		return
+	gml_async_enqueue_from_signal("audio_playback_ended", {
+		"id": gml_async_next_request_id(),
+		"status": 0,
+		"sound_id": entry["handle"],
+		"asset_id": entry["asset_id"],
+		"asset_name": entry["asset_name"]
+	}, "_on_audio_playback_ended_async")
 	_gml_audio_unregister_instance(instance_index, false)
 
 

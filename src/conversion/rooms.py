@@ -7,6 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypedDict, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.architecture_policy import (
+    ROOM_ROOT_POLICY_ID,
+    gui_canvas_layer_node_lines,
+    room_root_metadata_lines,
+)
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.project_godot import GodotProjectFile
@@ -30,6 +35,7 @@ def render_room_runtime_script() -> str:
     return (
         "extends Node2D\n\n"
         'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
+        f'const GM2GODOT_ROOM_ROOT_POLICY = "{ROOM_ROOT_POLICY_ID}"\n\n'
         "func _ready():\n"
         "\tGMRuntime.gml_room_enter_scene(self)\n"
     )
@@ -215,8 +221,10 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_instance_creation_order = {json.dumps(instance_creation_order_names(room))}',
             f'metadata/gamemaker_room_creation_code_execution_phase = {json.dumps(room_creation_code.execution_phase)}',
             f'metadata/gamemaker_room_creation_code_execution_phase_index = {json.dumps(room_creation_code.execution_phase_index)}',
-            "",
         ])
+        lines.extend(room_root_metadata_lines())
+        lines.append("")
+        lines.extend(gui_canvas_layer_node_lines())
         lines.extend(serialized_layers.node_lines)
         return "\n".join(lines)
 

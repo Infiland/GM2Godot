@@ -31,9 +31,9 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [x] Rooms become `.tscn` scenes.
 - [x] Objects become `.tscn` scenes and `.gd` scripts.
 - [x] Sprites become scenes/resources with `Sprite2D` or `AnimatedSprite2D` behavior in many cases.
-- [ ] Use a custom `GMRoom extends Node2D` or equivalent room root consistently.
-- [ ] Use deterministic room child hierarchy matching GameMaker layer/depth order.
-- [ ] Use `CanvasLayer` for GUI layers and draw GUI behavior.
+- [x] Use a custom `GMRoom extends Node2D` or equivalent room root consistently.
+- [x] Use deterministic room child hierarchy matching GameMaker layer/depth order.
+- [x] Use `CanvasLayer` for GUI layers and draw GUI behavior.
 - [ ] Use `TileMapLayer` or Godot 4 equivalent for tile layers where compatible.
 - [ ] Use `Parallax2D`/background controllers for scrolling/tiled backgrounds where compatible.
 - [ ] Use `Path2D`/`Curve2D` for converted paths where compatible.
@@ -79,7 +79,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [x] Use Godot `CanvasItem` draw APIs for many draw functions.
 - [x] Use sprite nodes for normal sprite display.
 - [x] Use basic surface emulation.
-- [ ] Decide renderer backend per project or per room: node-rendered, canvas draw manager, or high-fidelity surface/viewport renderer.
+- [x] Decide renderer backend per project or per room: node-rendered, canvas draw manager, or high-fidelity surface/viewport renderer.
 - [ ] Use `queue_redraw()` consistently when GameMaker draw state requires redraw.
 - [ ] Use `SubViewport` and `ViewportTexture` for surfaces where needed.
 - [ ] Use `BackBufferCopy` or viewport passes for backbuffer-style effects.
@@ -91,7 +91,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 
 - [x] Implement query-style collision compatibility subset.
 - [x] Implement physics compatibility subset using Godot 2D primitives.
-- [ ] Decide exact-mask custom collision backend versus Godot-native body/area backend per project.
+- [x] Decide exact-mask custom collision backend versus Godot-native body/area backend per project.
 - [ ] Use `Area2D` for overlap events where compatible.
 - [ ] Use `PhysicsDirectSpaceState2D` for point/rectangle/circle/line query APIs where compatible.
 - [ ] Avoid changing GameMaker semantics by overusing `move_and_slide()` or Godot body callbacks.
@@ -114,11 +114,11 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [x] Use Godot file APIs for runtime file helpers.
 - [x] Use PackedByteArray-like buffer runtime behavior.
 - [x] Use Godot TCP/UDP primitives for networking subset.
-- [ ] Use `FileAccess` and `DirAccess` with explicit sandbox path mapping.
-- [ ] Use `PackedByteArray` with explicit endian/alignment helpers for all buffer operations.
-- [ ] Use `HTTPRequest` or `HTTPClient` with a deterministic async event queue for HTTP.
-- [ ] Use `StreamPeerTCP`, `TCPServer`, `PacketPeerUDP`, and `WebSocketPeer` wrappers with GameMaker packet/event semantics.
-- [ ] Document that Godot multiplayer APIs are not a direct replacement for GameMaker socket APIs.
+- [x] Use `FileAccess` and `DirAccess` with explicit sandbox path mapping.
+- [x] Use `PackedByteArray` with explicit endian/alignment helpers for all buffer operations.
+- [x] Use `HTTPRequest` or `HTTPClient` with a deterministic async event queue for HTTP.
+- [x] Use `StreamPeerTCP`, `TCPServer`, `PacketPeerUDP`, and `WebSocketPeer` wrappers with GameMaker packet/event semantics.
+- [x] Document that Godot multiplayer APIs are not a direct replacement for GameMaker socket APIs.
 
 ## Platform Services
 

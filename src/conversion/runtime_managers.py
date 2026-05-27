@@ -21,6 +21,7 @@ class RuntimeManagerDefinition:
     input_capture: bool = False
     draw_pump: bool = False
     async_pump: bool = False
+    queued_godot_signals: tuple[str, ...] = ()
 
     @property
     def relative_path(self) -> str:
@@ -71,6 +72,12 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         dependencies=("GMRuntime", "GMRooms", "GMInstances"),
         state_keys=("event_queue", "alarms", "timeline_dispatch", "sequence_dispatch"),
         frame_pump=True,
+        queued_godot_signals=(
+            "Area2D.area_entered",
+            "Area2D.body_entered",
+            "AnimationPlayer.animation_finished",
+            "Timer.timeout",
+        ),
     ),
     RuntimeManagerDefinition(
         "GMDraw",
@@ -106,6 +113,11 @@ RUNTIME_MANAGER_DEFINITIONS: tuple[RuntimeManagerDefinition, ...] = (
         dependencies=("GMRuntime", "GMEvents"),
         state_keys=("async_load", "event_log", "http", "buffers", "networking"),
         async_pump=True,
+        queued_godot_signals=(
+            "HTTPRequest.request_completed",
+            "AudioStreamPlayer.finished",
+            "SceneTree.process_frame",
+        ),
     ),
     RuntimeManagerDefinition(
         "GMPlatform",
@@ -148,6 +160,7 @@ def register_runtime_manager_autoloads(godot_project_path: str) -> bool:
 def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
     dependencies = _gdscript_string_array(definition.dependencies)
     state_keys = _gdscript_string_array(definition.state_keys)
+    queued_godot_signals = _gdscript_string_array(definition.queued_godot_signals)
     lines = [
         "extends Node",
         "",
@@ -163,6 +176,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         f"const INITIALIZATION_ORDER = {definition.order}",
         f"const DEPENDENCIES = {dependencies}",
         f"const STATE_KEYS = {state_keys}",
+        f"const QUEUED_GODOT_SIGNALS = {queued_godot_signals}",
         "",
         "var initialized = false",
         "var initialization_index = -1",
@@ -235,6 +249,10 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "",
         "func manager_state_keys():",
         "\treturn STATE_KEYS.duplicate()",
+        "",
+        "",
+        "func manager_queued_godot_signals():",
+        "\treturn QUEUED_GODOT_SIGNALS.duplicate()",
         "",
         "",
         "func set_initialization_index(index):",

@@ -1506,6 +1506,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_async_next_request_id",
             "gml_async_dispatch",
             "gml_async_enqueue",
+            "gml_async_enqueue_from_signal",
             "gml_async_queue_flush",
             "gml_async_queue_size",
             "gml_async_queue_snapshot",
@@ -3036,6 +3037,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_async_queue = []", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_ASYNC_PAYLOAD_SCHEMAS", GML_RUNTIME_SCRIPT)
         self.assertIn('"lifetime": "async_load is set only while', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_async_enqueue_from_signal", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_async_queue_flush", GML_RUNTIME_SCRIPT)
         self.assertIn('"_on_async_http"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_async_dispatch_unsupported", GML_RUNTIME_SCRIPT)

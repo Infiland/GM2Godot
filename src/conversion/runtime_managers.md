@@ -21,6 +21,8 @@ The CLI static report pipeline writes `gm2godot/platform_capability_report.json`
 
 Converted projects also receive `gm2godot/conversion_manifest.json`, a deterministic generated-output manifest with resource source paths, generated Godot paths, source-map files, file hashes, and diagnostics for path collisions that required stable generated suffixes. `GM2Godot validate` can write `gm2godot/godot_validation_report.json` by loading generated `.gd`, `.tscn`, `.tres`, and `.gdshader` resources through headless Godot when `GODOT_BIN` or `--godot-bin` is available.
 
+Generated projects also receive `gm2godot/architecture_policy.json`. The report records the selected room root, layer/depth, renderer, collision, audio, file/buffer/network, runtime-manager, and signal-queue policies described in `src/conversion/godot_architecture_policy.md`.
+
 The `GMRuntime` autoload records each manager in `manager_registry_snapshot()` and exposes `manager_order()`. Each manager owns named state buckets so future runtime slices can move domain state out of the static compatibility facade without changing generated GML helper call sites.
 
 Collision events are dispatched by the central scheduler after motion/path updates and before End Step, matching the relevant GameMaker event-order window: https://manual.gamemaker.io/monthly/en/The_Asset_Editors/Object_Properties/Event_Order.htm. Dispatch uses generated Godot collision shape bounds, which aligns with Godot's 2D physics shape model: https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html. Pixel-perfect precise masks remain reported as a runtime fidelity limitation through the existing precise-collision warning path.

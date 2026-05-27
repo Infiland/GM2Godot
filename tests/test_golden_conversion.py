@@ -75,6 +75,7 @@ def _snapshot_output(godot_dir: Path, gm_project_dir: Path) -> dict[str, object]
         "scripts/game/scr_stats.gd",
     ]
     json_files = [
+        "gm2godot/architecture_policy.json",
         "gm2godot/conversion_diagnostics.json",
         "scripts/game/scr_add.gd.gmlmap.json",
         "scripts/game/scr_stats.gd.gmlmap.json",

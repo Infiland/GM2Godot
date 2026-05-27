@@ -336,10 +336,11 @@ static func _gml_gamepad_axis_key(device, axis):
 
 static func _gml_mouse_room_to_gui(position):
 	var gui_size = _gml_display_gui_dimensions()
-	var app_size = _gml_application_surface_size()
-	var scale_x = gui_size.x / app_size.x if app_size.x > 0.0 else 1.0
-	var scale_y = gui_size.y / app_size.y if app_size.y > 0.0 else 1.0
-	return Vector2(position.x * scale_x, position.y * scale_y)
+	var source_size = _gml_display_gui_source_dimensions()
+	var origin = _gml_display_gui_origin()
+	var scale_x = gui_size.x / source_size.x if source_size.x > 0.0 else 1.0
+	var scale_y = gui_size.y / source_size.y if source_size.y > 0.0 else 1.0
+	return Vector2((position.x - origin.x) * scale_x, (position.y - origin.y) * scale_y)
 
 
 static func _gml_input_instance_snapshot(instances):

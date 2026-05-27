@@ -147,6 +147,7 @@ static var _gml_builtin_globals = {
 	"argument": [],
 	"argument_count": 0,
 	"async_load": {},
+	"display_aa": 0,
 	"event_data": {},
 	"instance_count": 0,
 	"room": _gml_undefined,

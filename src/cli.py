@@ -18,6 +18,10 @@ from src.conversion.gml_transpiler import (
     generate_gml_api_compatibility_report,
     render_gml_manual_scope_markdown,
 )
+from src.conversion.platform_capabilities import (
+    generate_platform_capability_report,
+    render_platform_capability_markdown,
+)
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "analyze":
         diagnostics = _analyze_project(args.gm_project, args.platform)
-        _write_static_reports(args.report_dir)
+        _write_static_reports(args.report_dir, args.platform)
         diagnostics.write_reports(args.report_dir)
         return _threshold_exit_code(diagnostics, args)
 
@@ -179,7 +183,7 @@ def _run_convert(args: argparse.Namespace) -> int:
     for message in logs:
         print(message)
     if args.report_dir:
-        _write_static_reports(args.report_dir)
+        _write_static_reports(args.report_dir, args.platform)
         converter.diagnostics.write_reports(args.report_dir)
     return _threshold_exit_code(converter.diagnostics, args)
 
@@ -345,13 +349,23 @@ def _settings_for_args(args: argparse.Namespace) -> dict[str, CLISetting]:
     return settings
 
 
-def _write_static_reports(report_dir: str) -> None:
+def _write_static_reports(report_dir: str, target_platform: str | None = None) -> None:
     report_root = os.path.join(report_dir, "gm2godot")
     os.makedirs(report_root, exist_ok=True)
     with open(os.path.join(report_root, "gml_manual_scope.md"), "w", encoding="utf-8") as manual_file:
         manual_file.write(render_gml_manual_scope_markdown())
     with open(os.path.join(report_root, "gml_api_compatibility.md"), "w", encoding="utf-8") as api_file:
         api_file.write(_render_api_compatibility_markdown())
+    with open(os.path.join(report_root, "platform_capability_report.json"), "w", encoding="utf-8") as capability_file:
+        json.dump(
+            generate_platform_capability_report(target_platform),
+            capability_file,
+            indent=2,
+            sort_keys=True,
+        )
+        capability_file.write("\n")
+    with open(os.path.join(report_root, "platform_capability_report.md"), "w", encoding="utf-8") as capability_markdown:
+        capability_markdown.write(render_platform_capability_markdown(target_platform))
 
 
 def _render_api_compatibility_markdown() -> str:

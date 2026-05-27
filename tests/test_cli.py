@@ -33,11 +33,25 @@ class TestCLIReports(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(report_root, "conversion_diagnostics.md")))
         self.assertTrue(os.path.isfile(os.path.join(report_root, "gml_manual_scope.md")))
         self.assertTrue(os.path.isfile(os.path.join(report_root, "gml_api_compatibility.md")))
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "platform_capability_report.json")))
+        self.assertTrue(os.path.isfile(os.path.join(report_root, "platform_capability_report.md")))
 
         with open(os.path.join(report_root, "conversion_diagnostics.json"), "r", encoding="utf-8") as report_file:
             report = json.load(report_file)
 
         self.assertEqual(report["summary"]["total"], 0)
+
+        with open(os.path.join(report_root, "platform_capability_report.json"), "r", encoding="utf-8") as report_file:
+            capability_report = json.load(report_file)
+
+        self.assertEqual(capability_report["issue_number"], 606)
+        self.assertTrue(
+            any(
+                check["capability"] == "microphone"
+                and "audio_start_recording" in check["apis"]
+                for check in capability_report["checks"]
+            )
+        )
 
     def test_analyze_only_writes_platform_diagnostic_without_conversion_output(self) -> None:
         gm_dir = os.path.join(self.temp_dir, "gm")
@@ -66,6 +80,13 @@ class TestCLIReports(unittest.TestCase):
         self.assertIn("GM2GD-CLI-TARGET-PLATFORM", codes)
         self.assertIn("GM2GD-ANALYZE-MISSING-YYP", codes)
         self.assertTrue(any("linux" in diagnostic["message"] for diagnostic in report["diagnostics"]))
+        with open(
+            os.path.join(report_dir, "gm2godot", "platform_capability_report.json"),
+            "r",
+            encoding="utf-8",
+        ) as capability_file:
+            capability_report = json.load(capability_file)
+        self.assertEqual(capability_report["selected_target"], "linux")
 
     def test_validate_applies_thresholds_to_existing_diagnostics_report(self) -> None:
         godot_dir = os.path.join(self.temp_dir, "godot")

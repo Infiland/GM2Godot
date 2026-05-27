@@ -1,0 +1,66 @@
+name: Godot Headless Smoke
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  GODOT_VERSION: 4.4.1-stable
+  GODOT_ARCHIVE: Godot_v4.4.1-stable_linux.x86_64.zip
+  GODOT_BINARY: Godot_v4.4.1-stable_linux.x86_64
+
+jobs:
+  godot-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install Pillow
+
+      - name: Cache pinned Godot
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/gm2godot/godot-${{ env.GODOT_VERSION }}
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Install pinned Godot
+        run: |
+          set -euo pipefail
+          godot_dir="$HOME/.cache/gm2godot/godot-${GODOT_VERSION}"
+          godot_bin="${godot_dir}/${GODOT_BINARY}"
+          if [ ! -x "$godot_bin" ]; then
+            mkdir -p "$godot_dir"
+            curl --fail --location --retry 3 \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${GODOT_ARCHIVE}" \
+              --output "${RUNNER_TEMP}/${GODOT_ARCHIVE}"
+            unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}" -d "$godot_dir"
+            chmod +x "$godot_bin"
+          fi
+          echo "GODOT_BIN=$godot_bin" >> "$GITHUB_ENV"
+          "$godot_bin" --version
+
+      - name: Run headless Godot smoke tests
+        run: |
+          python -m unittest \
+            tests.test_runtime_managers_godot \
+            tests.test_room_game_flow_godot \
+            tests.test_cameras_display_godot \
+            tests.test_game_input_godot \
+            tests.test_draw_basic_godot \
+            tests.test_draw_sprite_text_godot \
+            tests.test_draw_surfaces_godot \
+            tests.test_motion_helpers_godot \
+            tests.test_collision_queries_godot \
+            tests.test_layers_runtime_godot \
+            tests.test_physics_runtime_godot \
+            tests.test_async_http_godot

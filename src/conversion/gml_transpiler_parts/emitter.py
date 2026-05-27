@@ -700,6 +700,13 @@ def _emit_descriptor_call(
         )
         return f"GMRuntime.{descriptor.lowering_target}({emitted_first}, [{emitted_rest}])"
 
+    if descriptor.lowering_kind == "runtime_variadic_all":
+        emitted_args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        )
+        return f"GMRuntime.{descriptor.lowering_target}([{emitted_args}])"
+
     if descriptor.lowering_kind == "runtime_platform_service_api":
         emitted_args = ", ".join(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]

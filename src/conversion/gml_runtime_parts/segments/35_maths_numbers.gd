@@ -104,7 +104,7 @@ static func gml_lerp(a, b, amount):
 	return _to_real(a) + ((_to_real(b) - _to_real(a)) * _to_real(amount))
 
 
-static func gml_min(...values):
+static func gml_min(values):
 	if values.size() == 0:
 		return gml_error("GML min requires at least one value")
 	var best = values[0]
@@ -118,7 +118,7 @@ static func gml_min(...values):
 	return best
 
 
-static func gml_max(...values):
+static func gml_max(values):
 	if values.size() == 0:
 		return gml_error("GML max requires at least one value")
 	var best = values[0]
@@ -289,7 +289,7 @@ static func gml_irandom_range(minimum, maximum):
 	return _gml_random_int_range(int(_to_real(minimum)), int(_to_real(maximum)))
 
 
-static func gml_choose(...values):
+static func gml_choose(values):
 	if values.size() == 0:
 		return gml_error("GML choose requires at least one value")
 	return values[gml_irandom(values.size() - 1)]

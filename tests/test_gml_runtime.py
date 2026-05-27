@@ -232,8 +232,8 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("frac(1.75)", "GMRuntime.gml_frac(1.75)"),
     RuntimeValueParityCase("clamp(7, 0, 5)", "GMRuntime.gml_clamp(7, 0, 5)"),
     RuntimeValueParityCase("lerp(10, 20, 0.25)", "GMRuntime.gml_lerp(10, 20, 0.25)"),
-    RuntimeValueParityCase("min(3, 1, 2)", "GMRuntime.gml_min(3, 1, 2)"),
-    RuntimeValueParityCase("max(3, 1, 2)", "GMRuntime.gml_max(3, 1, 2)"),
+    RuntimeValueParityCase("min(3, 1, 2)", "GMRuntime.gml_min([3, 1, 2])"),
+    RuntimeValueParityCase("max(3, 1, 2)", "GMRuntime.gml_max([3, 1, 2])"),
     RuntimeValueParityCase("dcos(180)", "GMRuntime.gml_dcos(180)"),
     RuntimeValueParityCase("darctan2(1, 0)", "GMRuntime.gml_darctan2(1, 0)"),
     RuntimeValueParityCase("point_direction(0, 0, 0, -10)", "GMRuntime.gml_point_direction(0, 0, 0, -10)"),
@@ -244,7 +244,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("dot_product(1, 2, 3, 4)", "GMRuntime.gml_dot_product(1, 2, 3, 4)"),
     RuntimeValueParityCase("random(10)", "GMRuntime.gml_random(10)"),
     RuntimeValueParityCase("irandom_range(2, 5)", "GMRuntime.gml_irandom_range(2, 5)"),
-    RuntimeValueParityCase("choose(1, 2, 3)", "GMRuntime.gml_choose(1, 2, 3)"),
+    RuntimeValueParityCase("choose(1, 2, 3)", "GMRuntime.gml_choose([1, 2, 3])"),
     RuntimeValueParityCase("random_set_seed(123)", "GMRuntime.gml_random_set_seed(123)"),
     RuntimeValueParityCase("random_get_seed()", "GMRuntime.gml_random_get_seed()"),
     RuntimeValueParityCase("working_directory", 'GMRuntime.gml_builtin_global("working_directory")'),
@@ -529,7 +529,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xview"), 0)',
     ),
     RuntimeValueParityCase("array_equals([NaN], [NaN])", "GMRuntime.gml_array_equals([NAN], [NAN])"),
-    RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, 2, 3)"),
+    RuntimeValueParityCase("array_push(items, 2, 3)", "GMRuntime.gml_array_push(items, [2, 3])"),
     RuntimeValueParityCase('asset_get_index("s_player")', 'GMRuntime.gml_asset_get_index("s_player")'),
     RuntimeValueParityCase("asset_get_type(sprite_index)", "GMRuntime.gml_asset_get_type(sprite_index)"),
     RuntimeValueParityCase("asset_get_ids()", "GMRuntime.gml_asset_get_ids()"),
@@ -2263,7 +2263,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
 
     def test_runtime_array_push_mutates_reference_without_copying(self):
-        self.assertIn("static func gml_array_push(array_value, ...values):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_array_push(array_value, values):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML array_push", array_value)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML array_push requires at least one value")', GML_RUNTIME_SCRIPT)
         self.assertIn("for value in values:", GML_RUNTIME_SCRIPT)

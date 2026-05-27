@@ -382,7 +382,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("array_push(items, 2, 3)"),
-            "GMRuntime.gml_array_push(items, 2, 3)",
+            "GMRuntime.gml_array_push(items, [2, 3])",
         )
 
     def test_undefined_equality_uses_runtime_type_table(self):
@@ -3008,7 +3008,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ),
             "var try_to_modify_array = GMRuntime.gml_method(self, func(argument0 = null): "
             "if argument0 == null: argument0 = GMRuntime.gml_undefined(); "
-            "GMRuntime.gml_array_push(argument0, 2))\n"
+            "GMRuntime.gml_array_push(argument0, [2]))\n"
             "items = [1]\n"
             "try_to_modify_array(items)\n"
             "value = GMRuntime.gml_array_get(items, 1)",
@@ -3712,7 +3712,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_random_set_seed(123)\n"
             "a = GMRuntime.gml_random(10)\n"
             "b = GMRuntime.gml_irandom_range(2, 5)\n"
-            "c = GMRuntime.gml_choose('a', 'b', 'c')\n"
+            "c = GMRuntime.gml_choose(['a', 'b', 'c'])\n"
             "d = GMRuntime.gml_random_get_seed()",
         )
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import importlib
+import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -52,6 +57,67 @@ class TestCLIReports(unittest.TestCase):
                 for check in capability_report["checks"]
             )
         )
+
+    def test_version_flag_prints_current_version(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = cli.main(["--version"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.6.1")
+
+    def test_list_converters_writes_text_inventory(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = cli.main(["list-converters"])
+
+        inventory = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Default groups: assets, project, wip", inventory)
+        self.assertIn("Conversion groups:", inventory)
+        self.assertIn("Converter keys:", inventory)
+        self.assertIn("  assets: sprites, fonts, sounds", inventory)
+        self.assertIn("  asset_registry", inventory)
+
+    def test_list_converters_writes_json_inventory(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = cli.main(["list-converters", "--format", "json"])
+
+        inventory = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(inventory["default_groups"], ["assets", "project", "wip"])
+        self.assertIn("sprites", inventory["groups"]["assets"])
+        self.assertIn("project_settings", inventory["groups"]["project"])
+        self.assertIn("sound_group_folders", inventory["converter_keys"])
+
+    def test_module_entrypoint_prints_version(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "src.cli", "--version"],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "GM2Godot 0.6.1")
+
+    def test_app_entrypoint_routes_global_cli_flags(self) -> None:
+        app_entrypoint = importlib.import_module("main")
+
+        with (
+            patch.object(sys, "argv", ["main.py", "--version"]),
+            patch("src.cli.main", return_value=0) as cli_main,
+            self.assertRaises(SystemExit) as context,
+        ):
+            app_entrypoint.main()
+
+        self.assertEqual(context.exception.code, 0)
+        cli_main.assert_called_once_with(["--version"])
 
     def test_analyze_only_writes_platform_diagnostic_without_conversion_output(self) -> None:
         gm_dir = os.path.join(self.temp_dir, "gm")

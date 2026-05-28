@@ -43,7 +43,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.6.0`.
+Current source version: `0.6.1`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 
@@ -116,17 +116,23 @@ python main.py
 The same entrypoint can run headless conversion, analysis, validation, and report generation:
 
 ```bash
+python main.py --version
+python main.py list-converters
+python main.py list-converters --format json
 python main.py report --report-dir reports
 python main.py analyze --gm-project path/to/GameMakerProject --report-dir reports --target-platform windows
 python main.py convert --gm-project path/to/GameMakerProject --godot-project path/to/GodotProject --groups assets,project --report-dir reports --target-platform windows
 python main.py validate --godot-project path/to/GodotProject --fail-on-unsupported
 ```
 
+You can also invoke the same headless interface directly with `python -m src.cli`.
+
 CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md` and `gml_api_compatibility.md`.
 
 Useful conversion and validation filters:
 - `--groups assets,project,wip` selects conversion groups.
 - `--only asset_registry,scripts,objects` runs specific converter keys instead of groups.
+- `list-converters --format json` prints the exact converter keys accepted by `--only`.
 - `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, and `--max-unsupported` turn diagnostics into non-zero exit codes for CI.
 - `--godot-bin` points validation at a specific Godot executable when `GODOT_BIN` is not set.
 
@@ -173,6 +179,8 @@ Run the application using:
 python main.py
 
 Headless verification examples:
+python main.py --version
+python main.py list-converters --format json
 python main.py report --report-dir reports
 python main.py analyze --gm-project path/to/GameMakerProject --report-dir reports --target-platform windows
 python main.py validate --godot-project path/to/GodotProject --fail-on-unsupported

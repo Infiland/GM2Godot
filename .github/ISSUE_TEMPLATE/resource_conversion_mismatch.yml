@@ -1,0 +1,58 @@
+name: Resource Conversion Mismatch
+description: Report a converted sprite, sound, room, object, tilemap, shader, or other resource that differs from GameMaker.
+title: "Resource conversion mismatch: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: resource-kind
+    attributes:
+      label: Resource kind
+      options:
+        - Sprite
+        - Sound or audio group
+        - Font
+        - Script
+        - Object or event
+        - Room or layer
+        - Tileset or tilemap
+        - Shader or material
+        - Path, sequence, or timeline
+        - Included file, extension, option, or platform setting
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: resource-name
+    attributes:
+      label: Resource name
+      placeholder: "obj_player"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected GameMaker behavior or metadata
+      description: Describe what the original project contains or does.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Godot output
+      description: Describe the generated file, scene, resource, or runtime behavior that is wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Minimal fixture or screenshots
+      description: Attach a minimal `.yyp/.yy` fixture, generated output, screenshots, or logs if possible.
+    validations:
+      required: false
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: GM2Godot commit or release, GameMaker version, Godot version, and target platform.
+    validations:
+      required: true

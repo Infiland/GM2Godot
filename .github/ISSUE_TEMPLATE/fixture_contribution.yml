@@ -1,0 +1,43 @@
+name: Fixture Contribution
+description: Propose or contribute a minimal GameMaker fixture for regression coverage.
+title: "Fixture contribution: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: coverage-target
+    attributes:
+      label: Coverage target
+      description: Name the API, resource type, event, runtime behavior, or malformed project case covered by this fixture.
+      placeholder: "Async HTTP event ordering"
+    validations:
+      required: true
+  - type: textarea
+    id: fixture-contents
+    attributes:
+      label: Fixture contents
+      description: List the `.yyp`, `.yy`, `.gml`, assets, and generated expectations included.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-result
+    attributes:
+      label: Expected conversion result
+      description: Describe expected diagnostics, generated files, snapshots, or Godot validation behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Fixture checklist
+      options:
+        - label: The fixture is minimal and does not include unrelated project assets.
+        - label: Any third-party assets are removed or clearly licensed for repository use.
+        - label: Expected warnings or unsupported features are documented.
+        - label: Tests or corpus metadata are included or described.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: GameMaker version, Godot version, and target platform used to create or verify the fixture.
+    validations:
+      required: true

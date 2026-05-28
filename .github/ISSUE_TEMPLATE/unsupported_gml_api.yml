@@ -1,0 +1,44 @@
+name: Unsupported GML API
+description: Report a GameMaker API that GM2Godot does not transpile or emulate yet.
+title: "Unsupported GML API: "
+labels: ["feature"]
+body:
+  - type: input
+    id: api-name
+    attributes:
+      label: GML API name
+      description: Name of the missing function, variable, constant, or language feature.
+      placeholder: "audio_play_sound"
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Minimal GameMaker source
+      description: Include the smallest GML snippet that reproduces the unsupported API.
+      render: gml
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostic
+    attributes:
+      label: GM2Godot diagnostic or output
+      description: Paste the relevant log line, diagnostic JSON entry, or generated GDScript.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the GameMaker behavior that should be represented in Godot.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: GM2Godot commit or release, GameMaker version, Godot version, and target platform.
+      placeholder: "GM2Godot 0.6.0, GameMaker 2024.14.2, Godot 4.6.2, Windows"
+    validations:
+      required: true

@@ -32,3 +32,37 @@ Collision events are dispatched by the central scheduler after motion/path updat
 The manager layer is enabled by default when `write_gml_runtime()` runs and `project.godot` exists. Existing generated scripts remain compatible because they still preload and call `res://gm2godot/gml_runtime.gd`.
 
 Projects can remove or override the generated `GM*` autoloads while keeping the static compatibility facade for tests or incremental migrations. New runtime code should prefer manager `state_bucket()` ownership for persistent domain state and keep `GMRuntime.gml_*` helpers as stable call-site facades.
+
+## Event Order And Deviations
+
+GameMaker event order is coordinated through `GMEvents` and generated object
+methods rather than relying on individual Godot node callback order. The runtime
+dispatches Create/room-enter behavior during room scene setup, then uses the
+frame pump for Begin Step, Step, End Step, alarm processing, collision dispatch,
+timelines/sequences, input edge clearing, draw phases, GUI phases, and queued
+async delivery. Tests that depend on these phases should assert the generated
+method names or manager queues rather than incidental node order.
+
+Known semantic differences must be documented where they are introduced. Current
+examples include precise pixel collision masks falling back to Godot collision
+shape bounds, shader-language differences between GLSL ES and Godot shaders,
+platform-service calls routed through `GMPlatform`, and target permissions that
+cannot be inferred from GameMaker options alone.
+
+## State, Globals, And Persistence
+
+Runtime state has three ownership levels:
+
+- Static compatibility state in `gml_runtime.gd` for helper functions that are
+  still called directly by generated scripts.
+- Autoload manager state buckets for generated projects, exposed through stable
+  manager names such as `GMAssets`, `GMRooms`, `GMInstances`, `GMEvents`,
+  `GMDraw`, `GMInput`, `GMAudio`, `GMAsync`, and `GMPlatform`.
+- Scene-local room/object state for generated room scenes and object instances.
+
+Global variables, asset ids, handles, room order, persistent instances, async
+queues, and audio handles must survive the same transitions that GameMaker keeps
+alive. Room-local layers, transient draw state, one-frame input edges, collision
+pairs, and non-persistent instances should be reset at the documented frame or
+room boundary. Add regression tests whenever a runtime change moves state between
+these levels.

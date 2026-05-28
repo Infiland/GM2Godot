@@ -1,0 +1,21 @@
+{
+  "$GMSprite": "v1",
+  "%Name": "spr_checker",
+  "name": "spr_checker",
+  "resourceType": "GMSprite",
+  "width": 16,
+  "height": 16,
+  "bboxMode": 0,
+  "collisionKind": 1,
+  "bbox_left": 0,
+  "bbox_right": 15,
+  "bbox_top": 0,
+  "bbox_bottom": 15,
+  "origin": 0,
+  "xorigin": 0,
+  "yorigin": 0,
+  "textureGroupId": {"name": "texturegroup_world", "path": "texturegroups/texturegroup_world.yy"},
+  "frames": [],
+  "layers": [],
+  "parent": {"name": "Sprites", "path": "folders/Sprites.yy"}
+}

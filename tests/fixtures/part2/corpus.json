@@ -1,0 +1,224 @@
+{
+  "issue": 610,
+  "resource_matrix_project": "projects/resource_matrix/ResourceMatrix.yyp",
+  "required_resource_areas": [
+    {
+      "area": "shaders",
+      "resource_type": "GMShader",
+      "game_maker_resource_path": "projects/resource_matrix/shaders/shd_matrix/shd_matrix.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_shaders.py::TestShaderConverterBasic.test_creates_gdshader_file"]
+    },
+    {
+      "area": "materials",
+      "resource_type": "GMMaterial",
+      "game_maker_resource_path": "projects/resource_matrix/materials/mat_canvas/mat_canvas.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_rooms.py::TestRoomConverter.test_effect_layer_preserves_effect_metadata"]
+    },
+    {
+      "area": "paths",
+      "resource_type": "GMPath",
+      "game_maker_resource_path": "projects/resource_matrix/paths/path_patrol/path_patrol.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_path_registry.py::TestPathRegistry.test_builds_path_registry_entries_from_gamemaker_paths"]
+    },
+    {
+      "area": "timelines",
+      "resource_type": "GMTimeline",
+      "game_maker_resource_path": "projects/resource_matrix/timelines/tl_intro/tl_intro.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_sequences_timelines_godot.py::TestSequencesTimelinesGodotSmoke.test_sequence_timeline_runtime_smoke_scene"]
+    },
+    {
+      "area": "sequences",
+      "resource_type": "GMSequence",
+      "game_maker_resource_path": "projects/resource_matrix/sequences/seq_intro/seq_intro.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_sequences_timelines_godot.py::TestSequencesTimelinesGodotSmoke.test_sequence_timeline_runtime_smoke_scene"]
+    },
+    {
+      "area": "particles",
+      "resource_type": "GMParticleSystem",
+      "game_maker_resource_path": "projects/resource_matrix/particles/ps_dust/ps_dust.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_particles_runtime_godot.py::TestParticlesRuntimeGodotSmoke.test_particle_lifecycle_handles_and_nodes_are_cleaned_up"]
+    },
+    {
+      "area": "physics",
+      "resource_type": "GMObject",
+      "game_maker_resource_path": "projects/resource_matrix/objects/o_physics_box/o_physics_box.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_physics_runtime_godot.py::TestPhysicsRuntimeGodotSmoke.test_fixture_binding_and_impulse_apply_to_rigidbody2d"]
+    },
+    {
+      "area": "tilemaps",
+      "resource_type": "GMTileSet",
+      "game_maker_resource_path": "projects/resource_matrix/tilesets/ts_ground/ts_ground.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_rooms.py::TestRoomConverter.test_tile_layer_emits_tilemaplayer_with_decoded_cells"]
+    },
+    {
+      "area": "views_layer_inheritance",
+      "resource_type": "GMRoom",
+      "game_maker_resource_path": "projects/resource_matrix/rooms/r_child/r_child.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": [
+        "tests/test_rooms.py::TestRoomConverter.test_room_inheritance_resolves_settings_and_layers",
+        "tests/test_rooms.py::TestRoomConverter.test_multiple_visible_views_disable_additional_cameras_and_warn"
+      ]
+    },
+    {
+      "area": "extensions",
+      "resource_type": "GMExtension",
+      "game_maker_resource_path": "projects/resource_matrix/extensions/ext_analytics/ext_analytics.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_extension_registry.py::TestExtensionRegistry.test_parses_extension_metadata_and_reports_mapping_diagnostics"]
+    },
+    {
+      "area": "macros_configs",
+      "resource_type": "GMScript",
+      "game_maker_resource_path": "projects/resource_matrix/scripts/scr_macros/scr_macros.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_gml_transpiler.py::TestGMLExpressionTranspiler.test_transpiles_macro_declarations_and_configuration_overrides"]
+    },
+    {
+      "area": "included_files",
+      "resource_type": "GMIncludedFile",
+      "game_maker_resource_path": "projects/resource_matrix/datafiles/config/defaults.json",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_included_files.py::TestIncludedFilesConverterNestedDirs.test_preserves_directory_structure"]
+    },
+    {
+      "area": "fonts",
+      "resource_type": "GMFont",
+      "game_maker_resource_path": "projects/resource_matrix/fonts/fnt_ui/fnt_ui.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_fonts.py::TestFontConverterSubfolders.test_font_in_subfolder"]
+    },
+    {
+      "area": "texture_groups",
+      "resource_type": "GMTextureGroup",
+      "game_maker_resource_path": "projects/resource_matrix/texturegroups/texturegroup_world.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_sprites.py::TestSpriteConverterBasic.test_converts_sprite_to_godot_dir"]
+    },
+    {
+      "area": "audio_groups",
+      "resource_type": "GMAudioGroup",
+      "game_maker_resource_path": "projects/resource_matrix/audiogroups/audiogroup_sfx.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_sounds.py::TestSoundConverterAudioGroupMap.test_generates_audio_group_map_file"]
+    },
+    {
+      "area": "options",
+      "resource_type": "GMWindowsOptions",
+      "game_maker_resource_path": "projects/resource_matrix/options/windows/options_windows.yy",
+      "source_path": "source/resource_matrix.gml",
+      "assertion_paths": ["tests/test_project_settings.py::TestUpdateProjectSettingsFromManifest.test_updates_project_godot_from_typed_options_and_reports_gaps"]
+    }
+  ],
+  "golden_trace_specs": [
+    {
+      "id": "event_order",
+      "expected_trace": ["begin_step", "time_sources", "alarms", "step", "motion", "collision", "end_step"],
+      "assertion_paths": ["tests/test_event_scheduler_godot.py::TestEventSchedulerGodotSmoke.test_scheduler_phase_order_alarms_and_mutation_queue"]
+    },
+    {
+      "id": "alarms",
+      "expected_trace": ["alarm[0]", "alarm[1]", "delta_time"],
+      "assertion_paths": ["tests/test_time_alarms_godot.py::TestTimeAlarmsGodotSmoke.test_alarm_countdown_and_time_source_scheduler"]
+    },
+    {
+      "id": "input",
+      "expected_trace": ["pressed", "held", "released", "mouse_gui"],
+      "assertion_paths": ["tests/test_game_input_godot.py::TestGameInputGodotSmoke.test_input_bridge_tracks_edges_and_coordinates"]
+    },
+    {
+      "id": "collision",
+      "expected_trace": ["place_meeting", "collision_rectangle", "collision_event"],
+      "assertion_paths": ["tests/test_collision_queries_godot.py::TestCollisionQueriesGodotSmoke.test_runtime_collision_queries_against_generated_shapes"]
+    },
+    {
+      "id": "draw_order",
+      "expected_trace": ["pre_draw", "draw_begin", "draw", "draw_end", "post_draw", "draw_gui"],
+      "assertion_paths": ["tests/test_draw_event_dispatch_godot.py::TestDrawEventDispatchGodotSmoke.test_draw_dispatch_order_default_draw_and_surface_stack"]
+    },
+    {
+      "id": "async",
+      "expected_trace": ["http_get", "http_post", "buffer_save_async", "async_load"],
+      "assertion_paths": ["tests/test_async_http_godot.py::TestAsyncHttpGodotSmoke.test_http_requests_dispatch_async_load_to_generated_handlers"]
+    },
+    {
+      "id": "rooms_persistence_lifecycle",
+      "expected_trace": ["room_start", "room_end", "persistent_survives", "room_restart"],
+      "assertion_paths": ["tests/test_room_game_flow_godot.py::TestRoomGameFlowGodotSmoke.test_room_runtime_transitions_lifecycle_and_persistent_nodes"]
+    },
+    {
+      "id": "physics",
+      "expected_trace": ["fixture_bind", "impulse", "rigidbody2d"],
+      "assertion_paths": ["tests/test_physics_runtime_godot.py::TestPhysicsRuntimeGodotSmoke.test_fixture_binding_and_impulse_apply_to_rigidbody2d"]
+    },
+    {
+      "id": "data_structures",
+      "expected_trace": ["ds_list", "ds_map", "ds_grid", "file_text", "ini", "json"],
+      "assertion_paths": ["tests/test_ds_collections_godot.py::TestDSCollectionsGodotSmoke.test_ds_collections_runtime"]
+    }
+  ],
+  "visual_regression_specs": [
+    {
+      "id": "surfaces",
+      "feature": "surface clear/copy pixels",
+      "pixel_check": true,
+      "assertion_paths": ["tests/test_draw_surfaces_godot.py::TestDrawSurfacesGodotSmoke.test_surface_runtime_handles_targets_and_application_surface"]
+    },
+    {
+      "id": "blend_alpha",
+      "feature": "sprite image_blend and image_alpha",
+      "pixel_check": true,
+      "assertion_paths": ["tests/test_draw_sprite_text_godot.py::TestDrawSpriteTextGodotSmoke.test_room_instance_transform_metadata_hydrates_sprite_runtime"]
+    },
+    {
+      "id": "gui_scaling_cameras",
+      "feature": "GUI size and view coordinate transforms",
+      "pixel_check": false,
+      "assertion_paths": ["tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_multiview_viewport_state_and_diagnostics"]
+    },
+    {
+      "id": "tile_layer_data",
+      "feature": "TileMapLayer decoded cells",
+      "pixel_check": false,
+      "assertion_paths": ["tests/test_rooms.py::TestRoomConverter.test_tile_layer_emits_tilemaplayer_with_decoded_cells"]
+    }
+  ],
+  "malformed_fixture_projects": [
+    {
+      "id": "malformed_yyp",
+      "project_path": "projects/malformed_yyp/MalformedProject.yyp",
+      "expected_diagnostic_code": "GM2GD-WARNING",
+      "expected_log_fragment": "Could not parse GameMaker project .yyp",
+      "continued_outputs": [
+        "gm2godot/conversion_diagnostics.json",
+        "gm2godot/conversion_manifest.json",
+        "gm2godot/architecture_policy.json"
+      ]
+    },
+    {
+      "id": "missing_yy",
+      "project_path": "projects/missing_yy/MissingResource.yyp",
+      "expected_diagnostic_code": "GM2GD-WARNING",
+      "expected_log_fragment": "Skipping missing GameMaker asset",
+      "continued_outputs": [
+        "gm2godot/conversion_diagnostics.json",
+        "gm2godot/conversion_manifest.json",
+        "gm2godot/architecture_policy.json"
+      ]
+    }
+  ],
+  "coverage_budget": {
+    "required_resource_area_count": 16,
+    "minimum_golden_trace_count": 9,
+    "minimum_visual_regression_count": 4,
+    "minimum_malformed_fixture_count": 2
+  }
+}

@@ -27,13 +27,13 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Add generated scene/resource load validation through Godot headless.
 - [ ] Add external-project conversion assertions for unsupported/transpile-warning counts.
 - [ ] Add failure thresholds for unsupported APIs, invalid generated code, missing assets, and skipped resources.
-- [ ] Add committed minimal `.yyp/.yy` fixture project corpus.
+- [x] Add committed minimal `.yyp/.yy` fixture project corpus.
 - [ ] Add end-to-end golden conversion tests over fixture projects.
 - [ ] Snapshot selected generated `project.godot`, `.tscn`, `.gd`, registry, and runtime outputs.
 - [ ] Normalize nondeterministic IDs and paths in snapshots.
 - [ ] Add deterministic output tests for ordering, ext_resource IDs, object/room ordering, and dictionary traversal.
 - [ ] Add manifest-to-runtime/emitter consistency tests.
-- [ ] Add manifest-to-fixture coverage budgets.
+- [x] Add manifest-to-fixture coverage budgets.
 - [ ] Add durable unsupported-feature report artifacts as JSON and Markdown.
 
 ## P0: Diagnostics And User Reports
@@ -94,22 +94,22 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 ## P1: Real GameMaker Fixtures
 
-- [ ] Add fixture projects for shaders and materials.
-- [ ] Add fixture projects for paths.
-- [ ] Add fixture projects for timelines and sequences.
-- [ ] Add fixture projects for particles.
-- [ ] Add fixture projects for physics.
-- [ ] Add fixture projects for tilemaps.
-- [ ] Add fixture projects for views and layer inheritance.
-- [ ] Add fixture projects for extension functions.
-- [ ] Add fixture projects for macros and configs.
-- [ ] Add fixture projects for included files.
-- [ ] Add fixture projects for fonts.
-- [ ] Add fixture projects for texture groups.
-- [ ] Add fixture projects for audio groups.
-- [ ] Add fixture projects for options and platform settings.
+- [x] Add fixture projects for shaders and materials.
+- [x] Add fixture projects for paths.
+- [x] Add fixture projects for timelines and sequences.
+- [x] Add fixture projects for particles.
+- [x] Add fixture projects for physics.
+- [x] Add fixture projects for tilemaps.
+- [x] Add fixture projects for views and layer inheritance.
+- [x] Add fixture projects for extension functions.
+- [x] Add fixture projects for macros and configs.
+- [x] Add fixture projects for included files.
+- [x] Add fixture projects for fonts.
+- [x] Add fixture projects for texture groups.
+- [x] Add fixture projects for audio groups.
+- [x] Add fixture projects for options and platform settings.
 - [ ] Add multiple GameMaker version fixtures if supporting more than the currently documented version.
-- [ ] Add malformed/missing `.yy` fixtures.
+- [x] Add malformed/missing `.yy` fixtures.
 - [ ] Add fixtures that prove conversion can continue after unsupported features while preserving diagnostics.
 
 ## P2: Pyright, Lint, And Code Health

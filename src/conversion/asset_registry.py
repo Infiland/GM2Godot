@@ -336,7 +336,7 @@ class AssetRegistryConverter(BaseConverter):
 
             yy_path = os.path.normpath(os.path.join(self.gm_project_path, raw_path))
             if not os.path.isfile(yy_path):
-                self._safe_log(f"Skipping missing GameMaker asset {name}: {yy_path}")
+                self._safe_log(f"Warning: Skipping missing GameMaker asset {name}: {yy_path}")
                 continue
 
             resources.append(

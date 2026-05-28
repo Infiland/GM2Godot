@@ -1,0 +1,9 @@
+{
+  "%Name": "MissingResource",
+  "name": "MissingResource",
+  "resourceType": "GMProject",
+  "resources": [
+    {"id": {"name": "spr_missing", "path": "sprites/spr_missing/spr_missing.yy"}}
+  ],
+  "RoomOrderNodes": []
+}

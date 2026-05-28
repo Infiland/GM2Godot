@@ -2,6 +2,8 @@
 
 This directory tracks the staged compatibility fixtures for issue #518. Each fixture has a minimal GameMaker source expectation in `source/`, manifest entries for the runtime/API surface it exercises, and one or more headless Godot assertion paths in `fixtures.json`.
 
+`corpus.json` tracks the Milestone 7 issue #610 coverage budget. It links the committed `projects/resource_matrix/` `.yyp/.yy` fixture project, malformed fixture projects, golden trace specs, and visual regression specs to the unit/Godot smoke tests that enforce each coverage area.
+
 The fixture catalog covers the required P0 buckets:
 
 - `movement_collisions`: top-down movement, instance registration, blocking collision, and collision query assertions.
@@ -12,5 +14,7 @@ The fixture catalog covers the required P0 buckets:
 - `async_http`: HTTP GET/POST/custom requests, async event dispatch, and async buffer save.
 - `camera_view`: camera helper state, legacy view array synchronization, Camera2D transforms, and GUI display sizing.
 - `multi_view_viewports`: multi-view viewport rectangles, view mouse coordinate conversion, view-surface state, and backend diagnostics.
+
+The resource matrix project covers shaders, materials, paths, timelines, sequences, particles, physics, tilemaps, views/layer inheritance, extensions, macros/configs, included files, fonts, texture groups, audio groups, and platform options.
 
 Unsupported APIs discovered by a fixture must be added to that fixture's `unsupported_api_issue_refs` list with the manifest API name and issue number. Empty lists mean the current fixture path did not encounter a new unsupported API.

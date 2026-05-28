@@ -1,0 +1,32 @@
+{
+  "%Name": "ResourceMatrix",
+  "name": "ResourceMatrix",
+  "resourceType": "GMProject",
+  "AudioGroups": [
+    {"%Name": "audiogroup_default", "name": "audiogroup_default", "resourceType": "GMAudioGroup"},
+    {"%Name": "audiogroup_sfx", "name": "audiogroup_sfx", "resourceType": "GMAudioGroup"}
+  ],
+  "TextureGroups": [
+    {"%Name": "Default", "name": "Default", "resourceType": "GMTextureGroup"},
+    {"%Name": "texturegroup_world", "name": "texturegroup_world", "resourceType": "GMTextureGroup"}
+  ],
+  "resources": [
+    {"id": {"name": "spr_checker", "path": "sprites/spr_checker/spr_checker.yy"}},
+    {"id": {"name": "snd_click", "path": "sounds/snd_click/snd_click.yy"}},
+    {"id": {"name": "fnt_ui", "path": "fonts/fnt_ui/fnt_ui.yy"}},
+    {"id": {"name": "shd_matrix", "path": "shaders/shd_matrix/shd_matrix.yy"}},
+    {"id": {"name": "path_patrol", "path": "paths/path_patrol/path_patrol.yy"}},
+    {"id": {"name": "tl_intro", "path": "timelines/tl_intro/tl_intro.yy"}},
+    {"id": {"name": "seq_intro", "path": "sequences/seq_intro/seq_intro.yy"}},
+    {"id": {"name": "ps_dust", "path": "particles/ps_dust/ps_dust.yy"}},
+    {"id": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"}},
+    {"id": {"name": "o_physics_box", "path": "objects/o_physics_box/o_physics_box.yy"}},
+    {"id": {"name": "scr_macros", "path": "scripts/scr_macros/scr_macros.yy"}},
+    {"id": {"name": "r_parent", "path": "rooms/r_parent/r_parent.yy"}},
+    {"id": {"name": "r_child", "path": "rooms/r_child/r_child.yy"}},
+    {"id": {"name": "ext_analytics", "path": "extensions/ext_analytics/ext_analytics.yy"}}
+  ],
+  "RoomOrderNodes": [
+    {"roomId": {"name": "r_child", "path": "rooms/r_child/r_child.yy"}}
+  ]
+}

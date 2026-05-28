@@ -274,7 +274,7 @@ class GameMakerResourceIndex(BaseConverter):
             yy_path = os.path.normpath(os.path.join(self.gm_project_path, yyp_path))
             if not os.path.isfile(yy_path):
                 self._safe_log(
-                    f"Skipping missing GameMaker resource {name}: {yy_path}"
+                    f"Warning: Skipping missing GameMaker resource {name}: {yy_path}"
                 )
                 continue
 

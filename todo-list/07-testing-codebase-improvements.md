@@ -52,12 +52,12 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 ## P1: Architecture Boundaries
 
-- [ ] Introduce typed `ConversionContext` shared by converters.
-- [ ] Replace hard-coded converter sequence with explicit dependency graph.
-- [ ] Split source discovery/parsing from Godot rendering/writing for resource converters.
-- [ ] Create typed intermediate models for projects, sprites, sounds, fonts, objects, rooms, layers, scripts, shaders, tilesets, paths, sequences, timelines, and diagnostics.
-- [ ] Separate parser AST, semantic analysis, and GDScript emission phases more sharply.
-- [ ] Move asset-specific lowering rules out of the general expression emitter where possible.
+- [x] Introduce typed `ConversionContext` shared by converters.
+- [x] Replace hard-coded converter sequence with explicit dependency graph.
+- [x] Split source discovery/parsing from Godot rendering/writing for resource converters.
+- [x] Create typed intermediate models for projects, sprites, sounds, fonts, objects, rooms, layers, scripts, shaders, tilesets, paths, sequences, timelines, and diagnostics.
+- [x] Separate parser AST, semantic analysis, and GDScript emission phases more sharply.
+- [x] Move asset-specific lowering rules out of the general expression emitter where possible.
 - [ ] Unify arity, lowering kind, manifest status, docs URL, runtime function name, and tests in one source of truth.
 - [ ] Add explicit runtime segment dependency declarations.
 - [ ] Add event mapping manifest with event type, event number, callback, runtime requirements, support status, test path, and issue reference.

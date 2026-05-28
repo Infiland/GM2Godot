@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Iterable
 
+from .asset_lowering import asset_argument_indices, first_argument_is_script_asset
 from .constants import (
     _ARITHMETIC_RUNTIME_FUNCTIONS,
     _BINARY_PRECEDENCE,
@@ -93,97 +94,6 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "collision_line_list": frozenset({4}),
     "collision_circle_list": frozenset({3}),
 }
-
-_PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "path_get_length": frozenset({0}),
-    "path_start": frozenset({0}),
-    "mp_grid_path": frozenset({1}),
-}
-
-_DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "draw_sprite": frozenset({0}),
-    "draw_sprite_ext": frozenset({0}),
-    "draw_sprite_part": frozenset({0}),
-    "draw_sprite_part_ext": frozenset({0}),
-    "draw_sprite_general": frozenset({0}),
-    "draw_sprite_pos": frozenset({0}),
-    "draw_sprite_tiled": frozenset({0}),
-    "draw_sprite_tiled_ext": frozenset({0}),
-    "draw_tile": frozenset({0}),
-    "draw_set_font": frozenset({0}),
-    "sprite_get_texture": frozenset({0}),
-    "sprite_get_uvs": frozenset({0}),
-    "sprite_prefetch": frozenset({0}),
-    "sprite_flush": frozenset({0}),
-    "texturegroup_set_mode": frozenset({2}),
-    "shader_set": frozenset({0}),
-    "shader_get_name": frozenset({0}),
-    "shader_is_compiled": frozenset({0}),
-    "shader_get_uniform": frozenset({0}),
-    "shader_get_sampler_index": frozenset({0}),
-    "part_system_create": frozenset({0}),
-    "part_system_create_layer": frozenset({2}),
-    "part_type_sprite": frozenset({1}),
-    "camera_create_view": frozenset({5}),
-}
-
-_AUDIO_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "audio_play_sound": frozenset({0}),
-    "audio_play_sound_at": frozenset({0}),
-    "audio_play_sound_on": frozenset({1}),
-    "audio_stop_sound": frozenset({0}),
-    "audio_pause_sound": frozenset({0}),
-    "audio_resume_sound": frozenset({0}),
-    "audio_is_playing": frozenset({0}),
-    "audio_is_paused": frozenset({0}),
-    "audio_sound_gain": frozenset({0}),
-    "audio_sound_get_gain": frozenset({0}),
-    "audio_sound_pitch": frozenset({0}),
-    "audio_sound_get_pitch": frozenset({0}),
-    "audio_sound_loop": frozenset({0}),
-    "audio_sound_get_loop": frozenset({0}),
-    "audio_sound_set_listener_mask": frozenset({0}),
-    "audio_sound_get_listener_mask": frozenset({0}),
-    "audio_sound_get_asset": frozenset({0}),
-    "audio_play_in_sync_group": frozenset({1}),
-    "sound_play": frozenset({0}),
-    "sound_loop": frozenset({0}),
-    "sound_stop": frozenset({0}),
-    "sound_pause": frozenset({0}),
-    "sound_resume": frozenset({0}),
-    "sound_isplaying": frozenset({0}),
-    "sound_volume": frozenset({0}),
-    "sound_pitch": frozenset({0}),
-}
-
-_SCRIPT_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "script_execute": frozenset({0}),
-    "script_exists": frozenset({0}),
-    "script_get_name": frozenset({0}),
-    "script_get_callable": frozenset({0}),
-}
-
-_ROOM_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "room_goto": frozenset({0}),
-    "room_exists": frozenset({0}),
-    "room_get_name": frozenset({0}),
-    "room_get_info": frozenset({0}),
-}
-
-_SEQUENCE_TIMELINE_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
-    "timeline_exists": frozenset({0}),
-    "timeline_get_name": frozenset({0}),
-    "timeline_moment_add_script": frozenset({0, 2}),
-    "timeline_moment_clear": frozenset({0}),
-    "timeline_clear": frozenset({0}),
-    "timeline_size": frozenset({0}),
-    "timeline_max_moment": frozenset({0}),
-    "sequence_exists": frozenset({0}),
-    "sequence_get": frozenset({0}),
-    "sequence_destroy": frozenset({0}),
-    "layer_sequence_create": frozenset({3}),
-}
-
 
 def _emit_name(
     value: str,
@@ -690,7 +600,7 @@ def _emit_descriptor_call(
         return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
 
     if descriptor.lowering_kind == "runtime_variadic_1":
-        if 0 in _SCRIPT_ASSET_ARG_INDICES.get(descriptor.name, frozenset()):
+        if first_argument_is_script_asset(descriptor.name):
             emitted_first = _emit_asset_argument(args[0], local_names, scope_context=scope_context)
         else:
             emitted_first = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
@@ -720,7 +630,7 @@ def _emit_descriptor_call(
             f")"
         )
 
-    script_asset_indices = _SCRIPT_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    script_asset_indices = asset_argument_indices(descriptor.name, "script")
     emitted_args = ", ".join(
         _emit_asset_argument(arg, local_names, scope_context=scope_context)
         if index in script_asset_indices
@@ -760,7 +670,7 @@ def _emit_instance_api_args(
     selector_indices = _INSTANCE_SELECTOR_ARG_INDICES.get(descriptor.name)
     if selector_indices is None:
         selector_indices = _COLLISION_SELECTOR_ARG_INDICES.get(descriptor.name, frozenset())
-    asset_indices = _PATH_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = asset_argument_indices(descriptor.name, "path")
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in selector_indices or index in asset_indices:
@@ -782,7 +692,7 @@ def _emit_draw_api_args(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> list[str]:
-    asset_indices = _DRAW_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = asset_argument_indices(descriptor.name, "draw")
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:
@@ -798,7 +708,7 @@ def _emit_audio_api_args(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> list[str]:
-    asset_indices = _AUDIO_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = asset_argument_indices(descriptor.name, "audio")
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:
@@ -814,7 +724,7 @@ def _emit_room_api_args(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> list[str]:
-    asset_indices = _ROOM_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = asset_argument_indices(descriptor.name, "room")
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:
@@ -830,7 +740,7 @@ def _emit_sequence_api_args(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> list[str]:
-    asset_indices = _SEQUENCE_TIMELINE_ASSET_ARG_INDICES.get(descriptor.name, frozenset())
+    asset_indices = asset_argument_indices(descriptor.name, "sequence_timeline")
     emitted_args: list[str] = []
     for index, arg in enumerate(args):
         if index in asset_indices:

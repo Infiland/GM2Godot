@@ -13,14 +13,16 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
      ```
 
 2. **Set Up Development Environment**
-   - Install Python 3.9.0 or later
+   - Install Python 3.12 or later
    - Install required packages:
      ```bash
-     pip install Pillow markdown2 tkhtmlview
+     python3 -m venv venv
+     source venv/bin/activate
+     pip install -r requirements.txt
      ```
-   - For Linux users, install additional dependencies:
+   - Install optional local tooling when changing Python code:
      ```bash
-     sudo apt-get install python3-tk python3-pil python3-pil.imagetk python3-markdown2
+     pip install pyright ruff
      ```
 
 ## Development Guidelines
@@ -32,6 +34,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
 - Keep functions focused and concise
 - Use type hints where appropriate
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
+- Run `ruff check .` before submitting Python code. The project currently enables fatal/static Ruff checks in CI; broader style rules should be introduced separately from feature work.
 
 ### UI Development
 - Maintain consistency with the existing dark theme
@@ -46,6 +49,47 @@ When adding new asset conversion features:
 3. Add appropriate error handling
 4. Include progress reporting
 5. Add the new feature to the settings UI
+
+### Conversion Architecture
+New conversion work should fit the current staged architecture:
+- Add orchestration metadata to `src/conversion/conversion_plan.py` when a converter needs a stable execution slot or dependency.
+- Use `src/conversion/conversion_context.py` for shared conversion-run state instead of adding parallel callback/path arguments in the orchestrator.
+- Keep parse-only GameMaker metadata in `src/conversion/resource_models.py` or a resource-specific model helper so parsing can be tested without writing Godot files.
+- Keep generated output deterministic; update golden or manifest tests only when output changes intentionally.
+
+### GML API Support
+When adding or improving a GML API:
+- Update the manifest entry in `src/conversion/gml_transpiler_parts/gml_api_manifest.py`.
+- Add or update dispatch metadata in `gml_function_dispatch.py` and keep asset-argument rules in `asset_lowering.py`.
+- Implement runtime behavior in the owning `src/conversion/gml_runtime_parts/segments/*.gd` segment and declare ownership in `gml_runtime_parts/manifest.py`.
+- Add focused Python and, when behavior depends on Godot, `*_godot.py` coverage.
+- Update compatibility docs or reports when support status changes.
+
+### Runtime Segments
+When adding a runtime segment or moving runtime helpers:
+- Declare the segment, dependencies, description, and tests in `src/conversion/gml_runtime_parts/manifest.py`.
+- Keep public `gml_*` helper names unique; `tests/test_gml_runtime_segments.py` validates duplicate symbols and API-to-segment ownership.
+- Prefer segment-local state buckets or generated managers for mutable runtime state.
+- Document user-visible semantic differences in `src/conversion/runtime_managers.md` or `src/conversion/godot_architecture_policy.md`.
+
+### Resource Converters
+When adding a converter for a GameMaker resource type:
+- Add parse fixtures under `tests/fixtures/part2/` when possible.
+- Add parse-only model coverage before renderer/writer coverage.
+- Route warnings through diagnostics where they can become reports.
+- Add converter tests that check deterministic paths and generated Godot resources.
+
+### Event Mappings
+When adding object event support:
+- Add event metadata in `src/conversion/events/mappings/` and registry coverage in `tests/conversion/events/`.
+- Document event-order differences when GameMaker and Godot callback order cannot match exactly.
+- Add runtime scheduler tests for events that depend on frame ordering, input, alarms, async queues, draw phases, or collisions.
+
+### Fixtures
+Fixture contributions should include:
+- A minimal `.yyp` plus committed `.yy` resources.
+- A short note in `tests/fixtures/part2/fixtures.json` or `corpus.json` explaining the coverage target.
+- Tests that prove conversion continues when the fixture is malformed, unsupported, or expected to warn.
 
 ## Making Changes
 

@@ -2,43 +2,44 @@
 
 <img width="802" height="632" alt="screen" src="https://github.com/user-attachments/assets/cedf47f5-6668-44ab-8cf6-959a21afd7fa" />
 
-GM2Godot is a modern, user-friendly tool designed to convert GameMaker (2024.14.2) projects to Godot (4.6.2) projects. It features a sleek dark-themed interface and intuitive controls for a seamless conversion experience.
+GM2Godot converts GameMaker (2024.14.2) projects into Godot (4.6.2) projects. It includes a GUI, a headless CLI, a growing GMS2+ GML-to-GDScript transpiler, generated Godot runtime helpers, deterministic asset registries, diagnostics, compatibility reports, and fixture-backed regression tests.
 
 ## Features
 
-- **Modern Dark Theme UI**: Clean, intuitive interface with modern design elements
-- **Asset Conversion**: Converts various GameMaker assets to Godot format:
-  - Sprites and Images
-  - Sound Effects and Music
-  - Fonts
-  - Project Settings
-  - Game Icons
-  - Audio Bus Layout
-  - Notes and Documentation
+- **Modern Dark Theme UI**: Clean project selection, settings, progress, and logs
+- **Headless CLI**: Convert, analyze, validate, and generate compatibility reports for CI workflows
+- **GML Transpilation**: Converts supported GMS2+ expressions, scripts, object events, room creation code, macros, extension stubs, and source-map metadata into GDScript
+- **Generated Runtime**: Emits `gm2godot/gml_runtime.gd`, runtime managers, asset registries, room/runtime metadata, and compatibility helpers for supported GameMaker APIs
+- **Asset Conversion**: Converts GameMaker project resources to Godot format:
+  - Sprites, collision masks, animation metadata, and generated scenes
+  - Sound effects, audio groups, bus layouts, and runtime playback metadata
+  - Fonts, notes, included files, scripts, objects, rooms, tilesets, shaders, paths, timelines, sequences, particles, extensions, texture groups, and options metadata where supported
+  - Project settings, game icons, platform options, and validation reports
 - **Platform Support**: Converts settings for multiple platforms:
   - Windows
   - macOS
   - Linux
-- **Real-time Progress**: Visual feedback with progress bar and time tracking
-- **Customizable Conversion**: Choose exactly which assets to convert
+- **Diagnostics and Reports**: Writes structured warnings/errors, compatibility Markdown/JSON, conversion manifests, architecture-policy reports, and optional headless Godot validation reports
+- **Customizable Conversion**: Choose conversion groups or specific converter keys
 - **Compatibility Roadmap**: Tracks current and missing GameMaker-to-Godot coverage in [`todo-list/`](todo-list/README.md)
 
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
-- A modern asset conversion tool from GameMaker to Godot
-- A growing GMS2+ GML-to-GDScript transpiler and Godot runtime compatibility layer
+- A modern project conversion tool from GameMaker to Godot
+- A growing GMS2+ GML-to-GDScript transpiler and Godot runtime compatibility layer with tests and reports
 - A time-saver for starting Godot projects from GameMaker
 - A tool for developers who want to migrate their projects
 
 **GM2Godot isn't:**
 - A perfect 1:1 conversion tool
 - A complete implementation of every current GameMaker GML Code and GML Reference page yet
+- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, precise collision masks, shaders, and target-specific runtime APIs
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Compatibility Todo List
 
-The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It tracks checked current coverage, missing features, GMS2+ GML Code coverage, GML Reference/runtime API coverage, events, project import work, Godot architecture, and testing/codebase improvements.
+The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It tracks checked current coverage, missing features, GMS2+ GML Code coverage, GML Reference/runtime API coverage, events, project import work, Godot architecture, and testing/codebase improvements. Generated report commands can also write current compatibility artifacts under `gm2godot/`.
 
 ## Releases
 
@@ -50,7 +51,7 @@ To build a local macOS distributable (`.app` + `.dmg`), run `bash build_macos.sh
 
 ### Prerequisites
 
-- Python 3.9 or later
+- Python 3.12 or later
 
 ### Setup
 
@@ -121,10 +122,11 @@ python main.py validate --godot-project path/to/GodotProject --fail-on-unsupport
 
 CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md` and `gml_api_compatibility.md`.
 
-Useful conversion filters:
+Useful conversion and validation filters:
 - `--groups assets,project,wip` selects conversion groups.
 - `--only asset_registry,scripts,objects` runs specific converter keys instead of groups.
 - `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, and `--max-unsupported` turn diagnostics into non-zero exit codes for CI.
+- `--godot-bin` points validation at a specific Godot executable when `GODOT_BIN` is not set.
 
 ## Contributing
 
@@ -150,7 +152,7 @@ To contribute:
 ```text
 You are setting up the GM2Godot project.
 
-Ensure Python 3.9 or later is installed.
+Ensure Python 3.12 or later is installed.
 
 Create and activate a virtual environment:
 python3 -m venv venv

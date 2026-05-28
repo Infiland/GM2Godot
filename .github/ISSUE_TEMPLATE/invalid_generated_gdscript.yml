@@ -1,0 +1,44 @@
+name: Invalid Generated GDScript
+description: Report GDScript emitted by GM2Godot that Godot cannot parse or load.
+title: "Invalid generated GDScript: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: source
+    attributes:
+      label: Original GameMaker source
+      description: Include the smallest source file, script, event, or room code that generates invalid GDScript.
+      render: gml
+    validations:
+      required: true
+  - type: textarea
+    id: generated
+    attributes:
+      label: Generated GDScript
+      description: Paste the generated GDScript around the failing line.
+      render: gdscript
+    validations:
+      required: true
+  - type: textarea
+    id: godot-error
+    attributes:
+      label: Godot error
+      description: Paste the Godot parse, load, or validation error.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: GM2Godot diagnostics
+      description: Paste relevant `conversion_diagnostics.json` or `godot_validation_report.json` entries.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: GM2Godot commit or release, GameMaker version, Godot version, and target platform.
+    validations:
+      required: true

@@ -115,13 +115,13 @@ This file tracks engineering work that will make full transpilation safer to bui
 ## P2: Pyright, Lint, And Code Health
 
 - [ ] Reduce broad file-level Pyright suppressions over time.
-- [ ] Add Ruff or equivalent linting.
+- [x] Add Ruff or equivalent linting.
 - [ ] Add complexity checks for parser/emitter/runtime generation modules.
 - [ ] Add import sorting.
 - [ ] Add unused code checks.
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.
-- [ ] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.
+- [x] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.
 - [ ] Add local pre-commit hooks or documented equivalent commands.
 - [ ] Make tests import source through package configuration rather than repeated `sys.path` mutation.
 - [ ] Add shared test utility for Godot binary discovery.
@@ -130,33 +130,33 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 ## P2: Runtime Maintainability
 
-- [ ] Add per-segment ownership docs.
-- [ ] Add public runtime function indexes.
+- [x] Add per-segment ownership docs.
+- [x] Add public runtime function indexes.
 - [ ] Split runtime segments when they accumulate unrelated concerns.
 - [ ] Add concatenation tests for segment ordering.
 - [ ] Add tests for duplicate runtime function names.
 - [ ] Add tests for duplicate runtime constants.
 - [ ] Add event mapping conflict tests across modules.
-- [ ] Add docs for event execution order and deviations from GameMaker semantics.
-- [ ] Add docs for runtime state, global state, and persistence behavior.
+- [x] Add docs for event execution order and deviations from GameMaker semantics.
+- [x] Add docs for runtime state, global state, and persistence behavior.
 
 ## P2: Documentation And UX
 
-- [ ] Update README to reflect that the project now includes substantial GML transpilation and runtime work.
-- [ ] Update setup docs to match current dependencies.
+- [x] Update README to reflect that the project now includes substantial GML transpilation and runtime work.
+- [x] Update setup docs to match current dependencies.
 - [ ] Add compatibility report document generated from the manifest.
 - [ ] Add `What failed and what to do next` conversion report UX.
-- [ ] Add issue template for unsupported GML API reports.
-- [ ] Add issue template for invalid generated GDScript.
-- [ ] Add issue template for resource conversion mismatches.
-- [ ] Add issue template for fixture contributions.
-- [ ] Add CLI docs.
-- [ ] Add docs for adding a new GML API.
-- [ ] Add docs for adding a new runtime segment.
-- [ ] Add docs for adding a new resource converter.
-- [ ] Add docs for adding a new event mapping.
-- [ ] Add docs for adding a new fixture.
-- [ ] Add docs for known GameMaker/Godot semantic differences.
+- [x] Add issue template for unsupported GML API reports.
+- [x] Add issue template for invalid generated GDScript.
+- [x] Add issue template for resource conversion mismatches.
+- [x] Add issue template for fixture contributions.
+- [x] Add CLI docs.
+- [x] Add docs for adding a new GML API.
+- [x] Add docs for adding a new runtime segment.
+- [x] Add docs for adding a new resource converter.
+- [x] Add docs for adding a new event mapping.
+- [x] Add docs for adding a new fixture.
+- [x] Add docs for known GameMaker/Godot semantic differences.
 
 ## Current Design Risks To Track
 
@@ -166,5 +166,5 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Public transpiler facade exports private internals, making refactors risky.
 - [ ] Runtime segment concatenation order is manual.
 - [ ] String-based generated-code tests can miss invalid GDScript.
-- [ ] README and CONTRIBUTING docs may lag implementation maturity.
+- [x] README and CONTRIBUTING docs may lag implementation maturity.
 - [ ] External project CI can become non-reproducible if third-party repos are not pinned.

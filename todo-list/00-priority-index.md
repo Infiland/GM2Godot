@@ -89,7 +89,7 @@ This file is the high-level roadmap for reaching full GameMaker-to-Godot transpi
 - [ ] Add CLI modes: analyze-only, convert, validate, report, fail-on-unsupported, and target-platform filter.
 - [ ] Generate compatibility reports grouped by manual category, asset type, event, function, source file, and severity.
 - [ ] Add source-linked warnings for unsupported GML APIs, unsupported resources, skipped event source, shader failures, invalid generated code, and platform gaps.
-- [ ] Update README product positioning because the project now contains a real transpiler and runtime.
+- [x] Update README product positioning because the project now contains a real transpiler and runtime.
 - [ ] Add documentation for adding a new GML API, runtime segment, resource converter, event mapping, fixture, and Godot smoke test.
 
 ## P1: Expand Correctness And Coverage

@@ -1,10 +1,11 @@
 import sys
 
-CLI_COMMANDS = {"analyze", "convert", "report", "validate"}
+CLI_COMMANDS = {"analyze", "convert", "list-converters", "report", "validate"}
+CLI_GLOBAL_FLAGS = {"--help", "-h", "--version"}
 
 
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in CLI_COMMANDS:
+    if len(sys.argv) > 1 and (sys.argv[1] in CLI_COMMANDS or sys.argv[1] in CLI_GLOBAL_FLAGS):
         from src.cli import main as cli_main
 
         sys.exit(cli_main(sys.argv[1:]))

@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Sequence, cast
+from typing import Sequence, TypedDict, cast
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.diagnostics import (
@@ -26,6 +26,16 @@ from src.conversion.platform_capabilities import (
     generate_platform_capability_report,
     render_platform_capability_markdown,
 )
+from src.version import get_version
+
+
+DEFAULT_CONVERSION_GROUPS = ("assets", "project", "wip")
+
+
+class ConverterInventory(TypedDict):
+    default_groups: list[str]
+    groups: dict[str, list[str]]
+    converter_keys: list[str]
 
 
 @dataclass(frozen=True)
@@ -39,6 +49,14 @@ class CLISetting:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+
+    if args.version:
+        print(f"GM2Godot {get_version()}")
+        return 0
+
+    if args.command == "list-converters":
+        _print_converter_inventory(args.output_format)
+        return 0
 
     if args.command == "report":
         diagnostics = DiagnosticCollector()
@@ -75,7 +93,24 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="GM2Godot",
         description="Headless GM2Godot conversion, analysis, validation, and reporting.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the GM2Godot version and exit.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    list_parser = subparsers.add_parser(
+        "list-converters",
+        help="List available conversion groups and converter keys.",
+    )
+    list_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        dest="output_format",
+        help="Output format for converter inventory.",
+    )
 
     report_parser = subparsers.add_parser("report", help="Write static compatibility reports.")
     _add_report_args(report_parser)
@@ -410,6 +445,33 @@ def _settings_for_args(args: argparse.Namespace) -> dict[str, CLISetting]:
     return settings
 
 
+def _converter_inventory() -> ConverterInventory:
+    groups = {group: list(keys) for group, keys in CONVERSION_CATEGORIES.items()}
+    converter_keys = sorted({key for keys in groups.values() for key in keys})
+    return {
+        "default_groups": list(DEFAULT_CONVERSION_GROUPS),
+        "groups": groups,
+        "converter_keys": converter_keys,
+    }
+
+
+def _print_converter_inventory(output_format: str) -> None:
+    inventory = _converter_inventory()
+    if output_format == "json":
+        print(json.dumps(inventory, indent=2, sort_keys=True))
+        return
+
+    print("Default groups: " + ", ".join(inventory["default_groups"]))
+    print("")
+    print("Conversion groups:")
+    for group, keys in inventory["groups"].items():
+        print(f"  {group}: {', '.join(keys)}")
+    print("")
+    print("Converter keys:")
+    for key in inventory["converter_keys"]:
+        print(f"  {key}")
+
+
 def _write_static_reports(report_dir: str, target_platform: str | None = None) -> None:
     report_root = os.path.join(report_dir, "gm2godot")
     os.makedirs(report_root, exist_ok=True)
@@ -501,3 +563,7 @@ def _default_platform() -> str:
     if sys.platform.startswith("linux"):
         return "linux"
     return "windows"
+
+
+if __name__ == "__main__":
+    sys.exit(main())

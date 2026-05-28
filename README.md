@@ -43,6 +43,8 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
+Current source version: `0.6.0`.
+
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 
 To build a local macOS distributable (`.app` + `.dmg`), run `bash build_macos.sh` from the project root.

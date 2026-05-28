@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Iterable
 
+from src.conversion.architecture_policy import build_architecture_policy_report
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
@@ -64,13 +65,14 @@ def build_conversion_manifest(
     target_platform: str,
     enabled_converters: Iterable[str],
 ) -> JsonDict:
+    enabled_converter_keys = tuple(sorted(set(enabled_converters)))
     project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
     asset_entries = _asset_registry_entries(gm_project_path, godot_project_path)
     generated_files = _generated_files(godot_project_path)
     return {
         "format_version": 1,
         "target_platform": target_platform,
-        "enabled_converters": sorted(set(enabled_converters)),
+        "enabled_converters": list(enabled_converter_keys),
         "source_project": {
             "name": project_manifest.project_name,
             "yyp_path": _relative_source_path(project_manifest.yyp_path, gm_project_path),
@@ -84,6 +86,11 @@ def build_conversion_manifest(
             for entry in generated_files
             if entry.path.endswith(".gmlmap.json")
         ],
+        "architecture_policies": build_architecture_policy_report(
+            gm_project_path,
+            target_platform=target_platform,
+            enabled_converters=enabled_converter_keys,
+        ),
         "path_diagnostics": _path_diagnostics(asset_entries),
     }
 

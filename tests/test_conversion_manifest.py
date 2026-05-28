@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from src import cli
+from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
 from src.conversion.conversion_manifest import (
     CONVERSION_MANIFEST_RELATIVE_PATH,
     build_conversion_manifest,
@@ -57,6 +58,11 @@ class TestConversionManifest(unittest.TestCase):
 
         self.assertEqual(manifest["target_platform"], "windows")
         self.assertEqual(manifest["enabled_converters"], ["scripts"])
+        self.assertEqual(
+            cast(dict[str, object], manifest["architecture_policies"])["target_platform"],
+            "windows",
+        )
+        self.assertTrue((godot_dir / ARCHITECTURE_POLICY_RELATIVE_PATH).is_file())
         self.assertTrue(
             any(
                 resource["name"] == "scr_add"
@@ -69,6 +75,13 @@ class TestConversionManifest(unittest.TestCase):
             any(
                 generated["path"] == "scripts/game/scr_add.gd.gmlmap.json"
                 and generated["kind"] == "source_map"
+                for generated in generated_files
+            )
+        )
+        self.assertTrue(
+            any(
+                generated["path"] == ARCHITECTURE_POLICY_RELATIVE_PATH.replace("\\", "/")
+                and generated["kind"] == "report"
                 for generated in generated_files
             )
         )

@@ -5,6 +5,7 @@ import os
 import re
 from typing import NamedTuple, Protocol, cast
 
+from src.conversion.architecture_policy import layer_policy_metadata_lines
 from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
 
@@ -309,6 +310,7 @@ def _layer_node_lines(
         f"metadata/gamemaker_layer_properties = {godot_value(layer.get('properties', []))}",
         "metadata/gamemaker_placeholder = true",
     ]
+    lines.extend(layer_policy_metadata_lines())
 
     _append_optional_metadata(lines, layer, "name", "gamemaker_layer_internal_name")
     _append_optional_metadata(lines, layer, "userdefinedDepth", "gamemaker_layer_userdefined_depth")

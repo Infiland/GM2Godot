@@ -139,6 +139,10 @@ static func gml_async_enqueue(kind, payload, handler_name = ""):
 	return _gml_async_enqueue(kind, payload, handler_name, true)
 
 
+static func gml_async_enqueue_from_signal(kind, payload, handler_name = ""):
+	return _gml_async_enqueue(kind, payload, handler_name, true)
+
+
 static func gml_async_queue_flush(max_events = -1):
 	var limit = _to_int64_value(max_events)
 	var dispatched = 0
@@ -250,7 +254,7 @@ static func _gml_http_request(url, method, headers, body):
 
 static func _gml_http_complete(request_id, url, result, response_code, response_headers, body_bytes):
 	var body_text = body_bytes.get_string_from_utf8() if body_bytes is PackedByteArray else ""
-	gml_async_dispatch("http", {
+	gml_async_enqueue_from_signal("http", {
 		"id": request_id,
 		"status": int(response_code),
 		"http_status": int(response_code),

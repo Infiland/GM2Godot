@@ -74,9 +74,11 @@ class TestRuntimeManagers(unittest.TestCase):
 
         self.assertIn("extends Node", script)
         self.assertIn('const MANAGER_NAME = "GMRuntime"', script)
+        self.assertIn("const QUEUED_GODOT_SIGNALS = []", script)
         self.assertIn("func register_manager(manager):", script)
         self.assertIn("func manager_order():", script)
         self.assertIn("func state_bucket(key = \"default\"):", script)
+        self.assertIn("func manager_queued_godot_signals():", script)
 
     def test_events_manager_pumps_central_scheduler(self) -> None:
         definition = next(
@@ -88,6 +90,8 @@ class TestRuntimeManagers(unittest.TestCase):
         script = render_runtime_manager_script(definition)
 
         self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn('"Area2D.area_entered"', script)
+        self.assertIn('"Timer.timeout"', script)
         self.assertIn("func _process(delta):", script)
         self.assertIn("GMRuntimeFacade.gml_input_dispatch_frame()", script)
         self.assertIn("GMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)", script)
@@ -129,6 +133,8 @@ class TestRuntimeManagers(unittest.TestCase):
         script = render_runtime_manager_script(definition)
 
         self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
+        self.assertIn('"HTTPRequest.request_completed"', script)
+        self.assertIn('"AudioStreamPlayer.finished"', script)
         self.assertIn("func _process(_delta):", script)
         self.assertIn("GMRuntimeFacade.gml_async_queue_flush()", script)
 

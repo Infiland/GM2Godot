@@ -14,6 +14,7 @@ from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.architecture_policy import write_architecture_policy_report
 from src.conversion.conversion_manifest import write_conversion_manifest
 from src.conversion.diagnostics import DiagnosticCollector, write_conversion_diagnostic_reports
 from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
@@ -179,6 +180,12 @@ class Converter:
                     self.progress_callback(0)
         finally:
             write_conversion_diagnostic_reports(godot_path, self.diagnostics)
+            write_architecture_policy_report(
+                gm_path,
+                godot_path,
+                target_platform=gm_platform,
+                enabled_converters=enabled_converters,
+            )
             write_conversion_manifest(
                 gm_path,
                 godot_path,

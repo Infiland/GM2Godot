@@ -6,6 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypedDict, cast
 
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.architecture_policy import (
     ROOM_ROOT_POLICY_ID,
@@ -131,6 +132,7 @@ class RoomConverter(BaseConverter):
                          max_workers=max_workers, diagnostics=diagnostics)
         self.godot_rooms_path = os.path.join(self.godot_project_path, "rooms")
         self.resource_index = resource_index
+        self._asset_names_cache: set[str] | None = None
 
     def _build_resource_index(self) -> GameMakerResourceIndex:
         if self.resource_index is not None:
@@ -425,12 +427,31 @@ class RoomConverter(BaseConverter):
         return f"{base}_{count + 1}"
 
     def _asset_names(self, resource_index: GameMakerResourceIndex | None) -> set[str]:
+        if self._asset_names_cache is not None:
+            return set(self._asset_names_cache)
+
+        try:
+            registry_converter = AssetRegistryConverter(
+                self.gm_project_path,
+                self.godot_project_path,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=self.conversion_running,
+            )
+            asset_names = {entry.name for entry in registry_converter.build_entries()}
+            self._asset_names_cache = asset_names
+            return set(asset_names)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            pass
+
         if resource_index is None:
+            self._asset_names_cache = set()
             return set()
         names = set(resource_index.rooms.keys())
         for resources in resource_index.resources.values():
             names.update(resources.keys())
-        return names
+        self._asset_names_cache = names
+        return set(names)
 
     def _process_room(
         self, room: IndexedRoom, resource_index: GameMakerResourceIndex | None = None

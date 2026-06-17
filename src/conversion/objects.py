@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import TypedDict, cast
 
 from src.localization import get_localized
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
@@ -72,6 +73,7 @@ class ObjectConverter(BaseConverter):
                          diagnostics=diagnostics)
         self.godot_objects_path = os.path.join(self.godot_project_path, 'objects')
         self.macro_configuration = macro_configuration
+        self._project_asset_names_cache: set[str] | None = None
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of object name -> subfolder.
@@ -107,6 +109,23 @@ class ObjectConverter(BaseConverter):
 
     def _get_project_asset_names(self) -> set[str]:
         """Return GameMaker resource names that can collide with unscoped GML identifiers."""
+        if self._project_asset_names_cache is not None:
+            return set(self._project_asset_names_cache)
+
+        try:
+            registry_converter = AssetRegistryConverter(
+                self.gm_project_path,
+                self.godot_project_path,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=self.conversion_running,
+            )
+            asset_names = {entry.name for entry in registry_converter.build_entries()}
+            self._project_asset_names_cache = asset_names
+            return set(asset_names)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            pass
+
         try:
             yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
             if yyp_files:
@@ -123,7 +142,8 @@ class ObjectConverter(BaseConverter):
                     name = res_id.get('name')
                     if isinstance(name, str) and name:
                         asset_names.add(name)
-                return asset_names
+                self._project_asset_names_cache = asset_names
+                return set(asset_names)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             pass
 
@@ -140,7 +160,8 @@ class ObjectConverter(BaseConverter):
                 )
             except OSError:
                 continue
-        return asset_names
+        self._project_asset_names_cache = asset_names
+        return set(asset_names)
 
     def _parse_object_yy(self, object_name: str) -> ParsedObject | None:
         """Parse an object .yy file and extract the sprite reference and event list.

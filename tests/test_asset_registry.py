@@ -307,6 +307,38 @@ class TestAssetRegistryConverter(unittest.TestCase):
 
         self.assertEqual(first_ids, second_ids)
 
+    def test_build_entries_includes_modern_script_function_assets(self) -> None:
+        _write_yyp(self.gm_dir, [("scripts", "ending")])
+        self._write_resource("scripts", "ending", "GMScript", "folders/Scripts/Game.yy")
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "ending", "ending.gml"),
+            "function loadending() { return 1; }\n"
+            "function saveending() { loadending(); }\n",
+        )
+
+        entries = self._converter().build_entries()
+        by_name = {entry.name: entry for entry in entries}
+
+        self.assertIn("ending", by_name)
+        self.assertIn("loadending", by_name)
+        self.assertIn("saveending", by_name)
+        self.assertEqual(by_name["ending"].godot_path, "res://scripts/game/ending.gd")
+        self.assertEqual(by_name["loadending"].asset_type, "script")
+        self.assertEqual(by_name["loadending"].godot_path, by_name["ending"].godot_path)
+        self.assertNotEqual(by_name["loadending"].id, by_name["ending"].id)
+        self.assertEqual(
+            by_name["loadending"].legacy_id,
+            "scripts/ending/ending.yy#function:loadending",
+        )
+        self.assertEqual(
+            by_name["loadending"].metadata,
+            {
+                "script_function": True,
+                "script_asset": "ending",
+                "script_source_path": "scripts/ending/ending.yy",
+            },
+        )
+
     def test_convert_all_writes_runtime_registry_script(self) -> None:
         _write_yyp(
             self.gm_dir,

@@ -219,25 +219,30 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn("return 11", modern_script)
         self.assertNotIn("return 22", modern_script)
 
-    def test_records_migration_diagnostic_for_unsupported_multi_function_script_assets(self) -> None:
+    def test_converts_multi_function_script_assets_and_declared_registry_names(self) -> None:
         self._write_project()
         project_path = self.gm_dir / "ScriptTest.yyp"
         project = json.loads(project_path.read_text(encoding="utf-8"))
         resources = cast(list[object], project["resources"])
-        resources.append(_resource_entry("scripts", "scr_multi"))
+        resources.append(_resource_entry("scripts", "ending"))
         _write_json(project_path, project)
         _write_json(
-            self.gm_dir / "scripts" / "scr_multi" / "scr_multi.yy",
+            self.gm_dir / "scripts" / "ending" / "ending.yy",
             {
-                "%Name": "scr_multi",
-                "name": "scr_multi",
+                "%Name": "ending",
+                "name": "ending",
                 "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
                 "resourceType": "GMScript",
             },
         )
         _write_text(
-            self.gm_dir / "scripts" / "scr_multi" / "scr_multi.gml",
-            "function helper(a) { return a; } function scr_multi(a) { return helper(a); }",
+            self.gm_dir / "scripts" / "ending" / "ending.gml",
+            "function loadending() {\n"
+            "    for (var i = 1; i <= 7; i++) { global.endingnum[i] = i; }\n"
+            "}\n"
+            "function saveending() {\n"
+            "    for (var i = 1; i <= 7; i++) { loadending(); }\n"
+            "}\n",
         )
         diagnostics = DiagnosticCollector()
 
@@ -251,18 +256,33 @@ class TestScriptConverter(unittest.TestCase):
         ).convert_all()
 
         self.assertEqual(registry_path, str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH))
-        recorded = diagnostics.diagnostics()
-        self.assertEqual(len(recorded), 1)
-        diagnostic = recorded[0]
-        self.assertEqual(diagnostic.code, "GM2GD-GML-TRANSPILE")
-        self.assertEqual(diagnostic.resource, "scr_multi")
-        self.assertEqual(diagnostic.resource_type, "script")
-        self.assertIn("Unexpected token: function", diagnostic.message)
-        self.assertIn("Split or rewrite unsupported GML", diagnostic.workaround or "")
+        self.assertEqual(diagnostics.diagnostics(), ())
+        ending_script = (self.godot_dir / "scripts" / "game" / "ending.gd").read_text(encoding="utf-8")
+        self.assertIn("func _gm_script_call_loadending():", ending_script)
+        self.assertIn(
+            "func _gm_script_call_scoped_loadending(_gml_script_self = null, _gml_script_other = null):",
+            ending_script,
+        )
+        self.assertIn("func _gm_script_call_saveending():", ending_script)
+        self.assertIn(
+            "GMRuntime.gml_script_call(GMRuntime.gml_asset_get_index(\"loadending\"), [], "
+            "_gml_script_self, _gml_script_other)",
+            ending_script,
+        )
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
         self.assertIn('"name": "scr_add"', registry)
         self.assertIn('"name": "scr_modern"', registry)
-        self.assertNotIn('"name": "scr_multi"', registry)
+        self.assertIn('"name": "loadending"', registry)
+        self.assertIn('"name": "saveending"', registry)
+        self.assertNotIn('"name": "ending"', registry)
+        self.assertIn(
+            'preload("res://scripts/game/ending.gd").new().gm2godot_callable_loadending()',
+            registry,
+        )
+        self.assertIn(
+            'preload("res://scripts/game/ending.gd").new().gm2godot_scoped_callable_saveending()',
+            registry,
+        )
 
 
 if __name__ == "__main__":

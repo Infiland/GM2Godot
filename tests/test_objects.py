@@ -556,6 +556,34 @@ class TestScriptGeneration(unittest.TestCase):
             content,
         )
 
+    def test_child_object_reuses_inherited_sprite_runtime_members(self):
+        self._setup_object(
+            "o_parent",
+            sprite_name="s_parent",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        self._setup_object(
+            "o_child",
+            sprite_name="s_child",
+            event_list=[],
+            parent_object_name="o_parent",
+        )
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertNotIn('const s_child = "s_child"', content)
+        self.assertNotIn("const _GM_SPRITE_SCENES", content)
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertNotIn("\nvar image_index =", content)
+        self.assertNotIn("func _gm_apply_sprite_index():", content)
+        self.assertIn("\tsprite_index = \"s_child\"\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertIn("\tsuper._ready()", content)
+
     def test_script_event_sources_use_selected_macro_configuration(self):
         self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
         with open(

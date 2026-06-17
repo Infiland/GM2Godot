@@ -85,6 +85,41 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         )
         self.assertIn("func _exit_tree():\n\tsuper._exit_tree()\n\t_gm_unregister_instance()", content)
 
+    def test_inherited_sprite_runtime_reuses_parent_members(self):
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="s_child",
+                sprite_scene_paths={
+                    "s_child": "res://sprites/s_child/s_child.tscn",
+                    "s_parent": "res://sprites/s_parent/s_parent.tscn",
+                },
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+                inherit_ready=True,
+                inherit_exit_tree=True,
+            ),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertNotIn('const s_child = "s_child"', content)
+        self.assertNotIn("const _GM_SPRITE_SCENES", content)
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertNotIn("\nvar image_index =", content)
+        self.assertNotIn("func _gm_apply_sprite_index():", content)
+        self.assertIn(
+            "func _ready():\n"
+            "\t_gm_register_instance()\n"
+            "\t_gm_initialize_motion_runtime()\n"
+            "\tsprite_index = \"s_child\"\n"
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tsuper._ready()",
+            content,
+        )
+
     def test_object_runtime_records_solid_metadata_for_motion_contact(self):
         content = generate_script_content(
             [],
@@ -466,6 +501,17 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn("\n\nvar score\n", content)
         self.assertNotIn("\n\nvar image_index\n", content)
         self.assertNotIn("\n\nvar sprite_index\n", content)
+
+    def test_native_node2d_members_are_not_redeclared(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": "\trotation = 0\n\tscore = 1"},
+            instance_variables={"rotation", "score"},
+        )
+
+        self.assertIn("\trotation = 0", content)
+        self.assertIn("\n\nvar score\n", content)
+        self.assertNotIn("\n\nvar rotation\n", content)
 
 
 if __name__ == "__main__":

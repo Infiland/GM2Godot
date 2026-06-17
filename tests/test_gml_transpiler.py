@@ -1700,6 +1700,28 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "var view_xview = [1]\nvalue = GMRuntime.gml_array_get(view_xview, 0)",
         )
 
+    def test_transpiles_alarm_array_through_instance_runtime(self):
+        self.assertEqual(
+            transpile_gml_expression("alarm[0]"),
+            "GMRuntime.gml_alarm_get(self, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_code("alarm[0] = 30;", indent=""),
+            "GMRuntime.gml_alarm_set(self, 0, 30)",
+        )
+        self.assertEqual(
+            transpile_gml_code("alarm[next_alarm()] += 1;", indent=""),
+            "var _gml_alarm_index_0 = next_alarm()\n"
+            "GMRuntime.gml_alarm_set(self, _gml_alarm_index_0, "
+            "GMRuntime.gml_add(GMRuntime.gml_alarm_get(self, _gml_alarm_index_0), 1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("var alarm = [1]; value = alarm[0]; alarm[0] = 2;", indent=""),
+            "var alarm = [1]\n"
+            "value = GMRuntime.gml_array_get(alarm, 0)\n"
+            "GMRuntime.gml_array_set(alarm, 0, 2)",
+        )
+
     def test_transpiles_builtin_room_and_global_variables_through_runtime(self):
         cases = (
             ("room", 'GMRuntime.gml_builtin_global("room")'),
@@ -3196,6 +3218,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("foo(items[i]++);", indent=""),
             "var _gm2gd_mutation_value_0 = GMRuntime.gml_array_get(items, i)\n"
             "GMRuntime.gml_array_set(items, i, GMRuntime.gml_add(_gm2gd_mutation_value_0, 1))\n"
+            "foo(_gm2gd_mutation_value_0)",
+        )
+        self.assertEqual(
+            transpile_gml_code("foo(alarm[i]++);", indent=""),
+            "var _gm2gd_mutation_value_0 = GMRuntime.gml_alarm_get(self, i)\n"
+            "GMRuntime.gml_alarm_set(self, i, GMRuntime.gml_add(_gm2gd_mutation_value_0, 1))\n"
             "foo(_gm2gd_mutation_value_0)",
         )
         self.assertEqual(

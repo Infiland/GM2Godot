@@ -13,6 +13,7 @@ from .constants import (
     _GML_LITERAL_IDENTIFIERS,
 )
 from .emitter import (
+    _is_alarm_array_access,
     _emit_expression,
     _emit_instance_keyword_argument,
     _name_resolves_to_global,
@@ -61,6 +62,26 @@ from .utils import (
 )
 
 _MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
+
+
+def _alarm_array_index(
+    target_expr: _Index,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    return _emit_expression(
+        target_expr.index,
+        local_names,
+        scope_context=scope_context,
+    )[0]
+
+
+def _alarm_array_get(scope_context: _ScopeContext, index: str) -> str:
+    return f"GMRuntime.gml_alarm_get({scope_context.self_expression}, {index})"
+
+
+def _alarm_array_set(scope_context: _ScopeContext, index: str, value: str) -> str:
+    return f"GMRuntime.gml_alarm_set({scope_context.self_expression}, {index}, {value})"
 
 
 @dataclass(frozen=True)
@@ -312,6 +333,25 @@ def _transpile_statement(
                 "GMRuntime.gml_variable_instance_set("
                 f"{instance_target}, {member_name}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
+            ]
+        if _is_alarm_array_access(target_expr, local_names):
+            index = _alarm_array_index(target_expr, local_names, scope_context)
+            prelude_lines: list[str] = []
+            index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.index,
+                index,
+                generated_counter,
+                "_gml_alarm_index",
+            )
+            current_value = _alarm_array_get(scope_context, index)
+            return [
+                *prelude_lines,
+                _alarm_array_set(
+                    scope_context,
+                    index,
+                    f"GMRuntime.{helper}({current_value}, 1)",
+                ),
             ]
         selector_target = _selector_assignment_parts(
             target_expr,
@@ -737,6 +777,36 @@ def _transpile_statement(
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
             raise GMLTranspileError("Unsupported scoped instance assignment operator")
+        if _is_alarm_array_access(target_expr, local_names):
+            index = _alarm_array_index(target_expr, local_names, scope_context)
+            if operator in ("=", ":="):
+                return [*prelude_lines, _alarm_array_set(scope_context, index, value)]
+            index = _cache_assignment_part(
+                prelude_lines,
+                target_expr.index,
+                index,
+                generated_counter,
+                "_gml_alarm_index",
+            )
+            current_value = _alarm_array_get(scope_context, index)
+            if operator == "??=":
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [_alarm_array_set(scope_context, index, value)],
+                )
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                return [
+                    *prelude_lines,
+                    _alarm_array_set(
+                        scope_context,
+                        index,
+                        f"GMRuntime.{helper}({current_value}, {value})",
+                    ),
+                ]
+            raise GMLTranspileError("Unsupported alarm assignment operator")
         _record_instance_assignment(target, local_names, instance_variables)
         target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         if isinstance(target_expr, _Index):
@@ -1908,6 +1978,20 @@ def _assignment_target_reader_writer(
             ],
         )
 
+    if _is_alarm_array_access(target_expr, local_names):
+        index = _alarm_array_index(target_expr, local_names, scope_context)
+        index = _cache_assignment_part(
+            prelude_lines,
+            target_expr.index,
+            index,
+            generated_counter,
+            "_gml_alarm_index",
+        )
+        return (
+            _alarm_array_get(scope_context, index),
+            lambda value: [_alarm_array_set(scope_context, index, value)],
+        )
+
     _record_instance_assignment(target_source, local_names, instance_variables)
     if isinstance(target_expr, _Index | _ArrayRefAccess):
         container = _emit_expression(
@@ -2288,6 +2372,9 @@ def _transpile_assignment_to_emitted_value(
             "GMRuntime.gml_variable_instance_set("
             f"{instance_target}, {member_name}, {value})"
         ]
+    if _is_alarm_array_access(target_expr, local_names):
+        index = _alarm_array_index(target_expr, local_names, scope_context)
+        return [_alarm_array_set(scope_context, index, value)]
     _record_instance_assignment(target, local_names, instance_variables)
     if isinstance(target_expr, _Index):
         container = _emit_expression(

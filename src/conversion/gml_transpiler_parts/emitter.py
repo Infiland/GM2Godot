@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from typing import Iterable, TypeGuard
 
 from .asset_lowering import asset_argument_indices, first_argument_is_script_asset
 from .constants import (
@@ -183,6 +183,19 @@ def _legacy_argument_replacement(name: str) -> str | None:
     return f"GMRuntime.gml_argument({index})"
 
 
+def _is_alarm_array_access(
+    expr: _Expression,
+    local_names: Iterable[str] | None,
+) -> TypeGuard[_Index]:
+    local_name_set = _normalize_local_names(local_names)
+    return (
+        isinstance(expr, _Index)
+        and isinstance(expr.target, _Name)
+        and expr.target.value == "alarm"
+        and expr.target.value not in local_name_set
+    )
+
+
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
@@ -329,6 +342,12 @@ def _emit_expression(
         )
         return f"GMRuntime.gml_struct({{{fields}}})", _POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
+        if _is_alarm_array_access(expr, local_names):
+            index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
+            return (
+                f"GMRuntime.gml_alarm_get({scope_context.self_expression}, {index})",
+                _POSTFIX_PRECEDENCE,
+            )
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
         return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE

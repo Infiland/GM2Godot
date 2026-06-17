@@ -948,6 +948,25 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         self.assertIn("func _on_alarm_3():", content)
 
+    def test_event_source_uses_runtime_alarm_array_access(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("alarm[0] = 3;\nnext_alarm = alarm[0];")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("GMRuntime.gml_alarm_set(self, 0, 3)", content)
+        self.assertIn("next_alarm = GMRuntime.gml_alarm_get(self, 0)", content)
+        self.assertNotIn("alarm[", content)
+
     def test_script_with_collision_event(self):
         """eventType 4 with collisionObjectId should produce func _on_collision_NAME()."""
         self._setup_object("o_test", event_list=[

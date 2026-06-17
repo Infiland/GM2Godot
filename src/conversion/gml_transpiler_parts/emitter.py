@@ -81,6 +81,7 @@ _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
 }
 
 _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
+    "distance_to_object": frozenset({0}),
     "place_meeting": frozenset({2}),
     "position_meeting": frozenset({2}),
     "instance_place": frozenset({2}),

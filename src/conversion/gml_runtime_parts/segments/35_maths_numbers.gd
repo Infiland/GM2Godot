@@ -225,6 +225,50 @@ static func gml_lengthdir_y(length, direction):
 	return -_to_real(length) * sin(deg_to_rad(_to_real(direction)))
 
 
+static func gml_make_color_rgb(red, green, blue):
+	var r = clamp(int(round(_to_real(red))), 0, 255)
+	var g = clamp(int(round(_to_real(green))), 0, 255)
+	var b = clamp(int(round(_to_real(blue))), 0, 255)
+	return r | (g << 8) | (b << 16)
+
+
+static func gml_matrix_build_lookat(xfrom, yfrom, zfrom, xto, yto, zto, xup, yup, zup):
+	var origin = Vector3(_to_real(xfrom), _to_real(yfrom), _to_real(zfrom))
+	var target = Vector3(_to_real(xto), _to_real(yto), _to_real(zto))
+	var forward = (target - origin).normalized()
+	if forward.length_squared() <= 0.000001:
+		forward = Vector3(0.0, 0.0, -1.0)
+	var up = Vector3(_to_real(xup), _to_real(yup), _to_real(zup)).normalized()
+	if up.length_squared() <= 0.000001:
+		up = Vector3(0.0, 1.0, 0.0)
+	var right = forward.cross(up).normalized()
+	if right.length_squared() <= 0.000001:
+		right = Vector3(1.0, 0.0, 0.0)
+	up = right.cross(forward).normalized()
+	return [
+		right.x, up.x, -forward.x, 0.0,
+		right.y, up.y, -forward.y, 0.0,
+		right.z, up.z, -forward.z, 0.0,
+		-right.dot(origin), -up.dot(origin), forward.dot(origin), 1.0
+	]
+
+
+static func gml_matrix_build_projection_ortho(width, height, znear, zfar):
+	var resolved_width = max(abs(_to_real(width)), 0.000001)
+	var resolved_height = max(abs(_to_real(height)), 0.000001)
+	var near_z = _to_real(znear)
+	var far_z = _to_real(zfar)
+	var depth = far_z - near_z
+	if abs(depth) <= 0.000001:
+		depth = 1.0
+	return [
+		2.0 / resolved_width, 0.0, 0.0, 0.0,
+		0.0, 2.0 / resolved_height, 0.0, 0.0,
+		0.0, 0.0, 1.0 / depth, 0.0,
+		0.0, 0.0, -near_z / depth, 1.0
+	]
+
+
 static func gml_angle_difference(angle1, angle2):
 	if not _is_real_convertible(angle1) or not _is_real_convertible(angle2):
 		return gml_error("GML angle_difference requires real-convertible arguments")

@@ -1,6 +1,20 @@
 static var _gml_collision_event_trace = []
 
 
+static func gml_distance_to_object(current_self, target):
+	if current_self == null:
+		return -1
+	var origin = _gml_instance_position(current_self)
+	var best_distance = -1.0
+	for instance in gml_with_targets(target, current_self, null):
+		if instance == null or not is_instance_valid(instance):
+			continue
+		var distance = origin.distance_to(_gml_instance_position(instance))
+		if best_distance < 0.0 or distance < best_distance:
+			best_distance = distance
+	return best_distance
+
+
 static func gml_place_meeting(current_self, x, y, target):
 	return gml_handle_is_valid(gml_instance_place(current_self, x, y, target))
 

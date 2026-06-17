@@ -2704,6 +2704,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code(
                 "draw_set_color(c_red); draw_set_alpha(0.5); draw_set_line_width(2); "
                 "draw_line(0, 0, 10, 10); draw_rectangle(0, 0, 8, 8, false); "
+                "draw_line_width(0, 0, 10, 10, 3); "
+                "draw_rectangle_color(0, 0, 8, 8, c_red, c_white, c_blue, c_black, false); "
                 "draw_circle(4, 4, 2, true); draw_triangle(0, 0, 4, 0, 0, 4, false); "
                 "draw_point(1, 1); draw_clear(c_black); seen = draw_get_alpha();",
                 indent="",
@@ -2713,11 +2715,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_draw_set_line_width(2)\n"
             "GMRuntime.gml_draw_line(0, 0, 10, 10)\n"
             "GMRuntime.gml_draw_rectangle(0, 0, 8, 8, false)\n"
+            "GMRuntime.gml_draw_line_width(0, 0, 10, 10, 3)\n"
+            "GMRuntime.gml_draw_rectangle_color(0, 0, 8, 8, 0x0000ff, 0xffffff, 0xff0000, 0x000000, false)\n"
             "GMRuntime.gml_draw_circle(4, 4, 2, true)\n"
             "GMRuntime.gml_draw_triangle(0, 0, 4, 0, 0, 4, false)\n"
             "GMRuntime.gml_draw_point(1, 1)\n"
             "GMRuntime.gml_draw_clear(0x000000)\n"
             "seen = GMRuntime.gml_draw_get_alpha()",
+        )
+
+    def test_monophobia_helper_apis_lower_to_runtime(self):
+        asset_names = {"o_enemy"}
+        self.assertEqual(
+            transpile_gml_expression("distance_to_object(o_enemy)", asset_names=asset_names),
+            'GMRuntime.gml_distance_to_object(self, GMRuntime.gml_asset_get_index("o_enemy"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("matrix_build_lookat(0, 0, -10, 0, 0, 0, 0, 1, 0)"),
+            "GMRuntime.gml_matrix_build_lookat(0, 0, -10, 0, 0, 0, 0, 1, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("matrix_build_projection_ortho(320, 180, 1, 1000)"),
+            "GMRuntime.gml_matrix_build_projection_ortho(320, 180, 1, 1000)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("make_color_rgb(255, 128, 0)"),
+            "GMRuntime.gml_make_color_rgb(255, 128, 0)",
         )
 
     def test_sprite_and_text_draw_helpers_lower_assets_and_state(self):

@@ -813,6 +813,9 @@ _MATH_RUNTIME_FUNCTIONS = {
     "point_direction": "gml_point_direction",
     "lengthdir_x": "gml_lengthdir_x",
     "lengthdir_y": "gml_lengthdir_y",
+    "matrix_build_lookat": "gml_matrix_build_lookat",
+    "matrix_build_projection_ortho": "gml_matrix_build_projection_ortho",
+    "make_color_rgb": "gml_make_color_rgb",
     "angle_difference": "gml_angle_difference",
     "dot_product": "gml_dot_product",
     "dot_product_3d": "gml_dot_product_3d",
@@ -1129,6 +1132,7 @@ _INSTANCE_RUNTIME_FUNCTIONS = {
 }
 
 _COLLISION_RUNTIME_FUNCTIONS = {
+    "distance_to_object": "gml_distance_to_object",
     "place_meeting": "gml_place_meeting",
     "position_meeting": "gml_position_meeting",
     "instance_place": "gml_instance_place",
@@ -1506,6 +1510,8 @@ _DRAW_RUNTIME_FUNCTIONS = {
     "draw_get_alpha": "gml_draw_get_alpha",
     "draw_set_line_width": "gml_draw_set_line_width",
     "draw_get_line_width": "gml_draw_get_line_width",
+    "draw_line_width": "gml_draw_line_width",
+    "draw_rectangle_color": "gml_draw_rectangle_color",
     "gpu_set_blendmode": "gml_gpu_set_blendmode",
     "gpu_get_blendmode": "gml_gpu_get_blendmode",
     "draw_set_blend_mode": "gml_draw_set_blend_mode",

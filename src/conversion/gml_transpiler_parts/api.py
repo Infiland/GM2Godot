@@ -17,6 +17,7 @@ from .source_map import (
 )
 from .statement_parser import _StatementParser
 from .tokens import _tokenize
+from .utils import _prefix_multiline
 
 
 def transpile_gml_code(
@@ -129,7 +130,7 @@ def transpile_gml_code_with_source_map(
     if not lines:
         code = f"{indent}pass"
     else:
-        code = "\n".join(f"{indent}{line}" if line else "" for line in lines)
+        code = "\n".join(_prefix_multiline(line, indent) if line else "" for line in lines)
 
     if preserve_source_comments:
         header = render_gml_source_header(source_path=None, event=None, source=source)

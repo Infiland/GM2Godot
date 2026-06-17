@@ -1226,10 +1226,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_function_literals_inside_structs(self):
         self.assertEqual(
             transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
-            'GMRuntime.gml_struct({"apply": func(a = null, b = null): '
-            "if a == null: a = GMRuntime.gml_undefined(); "
-            "if b == null: b = GMRuntime.gml_undefined(); "
-            "return GMRuntime.gml_add(a, b)})",
+            'GMRuntime.gml_struct({"apply": func(a = null, b = null):\n'
+            "\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\tif b == null: b = GMRuntime.gml_undefined()\n"
+            "\treturn GMRuntime.gml_add(a, b)\n"
+            "})",
         )
         self.assertEqual(
             transpile_gml_expression('string({toString: function() { return "ok"; }})'),
@@ -1239,17 +1240,19 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_function_literals_preserve_optional_defaults(self):
         self.assertEqual(
             transpile_gml_expression("function(a, b = 90) { return b; }"),
-            "GMRuntime.gml_method(self, func(a = null, b = null): "
-            "if a == null: a = GMRuntime.gml_undefined(); "
-            "if b == null or GMRuntime.is_undefined(b): b = 90; "
-            "return b)",
+            "GMRuntime.gml_method(self, func(a = null, b = null):\n"
+            "\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\tif b == null or GMRuntime.is_undefined(b): b = 90\n"
+            "\treturn b\n"
+            ")",
         )
         self.assertEqual(
             transpile_gml_expression("function(a, b = a + 1) { return b; }"),
-            "GMRuntime.gml_method(self, func(a = null, b = null): "
-            "if a == null: a = GMRuntime.gml_undefined(); "
-            "if b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1); "
-            "return b)",
+            "GMRuntime.gml_method(self, func(a = null, b = null):\n"
+            "\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\tif b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1)\n"
+            "\treturn b\n"
+            ")",
         )
         self.assertEqual(
             transpile_gml_expression("[function() { return 1; }]"),
@@ -1601,11 +1604,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 "function Point(_x, _y) constructor { x = _x; y = _y; }",
             ),
             "GMRuntime.gml_constructor(self, "
-            "func Point(_gml_constructor_self = null, _x = null, _y = null): "
-            "if _x == null: _x = GMRuntime.gml_undefined(); "
-            "if _y == null: _y = GMRuntime.gml_undefined(); "
-            'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "x", _x); '
-            'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "y", _y))',
+            "func Point(_gml_constructor_self = null, _x = null, _y = null):\n"
+            "\tif _x == null: _x = GMRuntime.gml_undefined()\n"
+            "\tif _y == null: _y = GMRuntime.gml_undefined()\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_constructor_self, "x", _x)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_constructor_self, "y", _y)\n'
+            ")",
         )
 
     def test_transpiles_function_static_variables(self):
@@ -1857,8 +1861,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_function_exit_as_early_return(self):
         self.assertEqual(
             transpile_gml_expression("function() { if done begin exit; end return score; }"),
-            "GMRuntime.gml_method(self, func(): "
-            "if GMRuntime.gml_bool(done):; \treturn; return score)",
+            "GMRuntime.gml_method(self, func():\n"
+            "\tif GMRuntime.gml_bool(done):\n"
+            "\t\treturn\n"
+            "\treturn score\n"
+            ")",
         )
 
     def test_exit_aborts_later_generated_event_code(self):
@@ -2461,7 +2468,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_nested_function_local_vars_do_not_hoist_to_enclosing_scope(self):
         self.assertEqual(
             transpile_gml_code("var fn = function() { var inner = 1; return inner; };", indent=""),
-            "var fn = GMRuntime.gml_method(self, func(): var inner = 1; return inner)",
+            "var fn = GMRuntime.gml_method(self, func():\n"
+            "\tvar inner = 1\n"
+            "\treturn inner\n"
+            ")",
         )
 
     def test_unknown_reads_remain_runtime_or_compile_errors(self):
@@ -3108,8 +3118,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "value = 1; try_to_modify_value(value); result = value;",
                 indent="",
             ),
-            "var try_to_modify_value = GMRuntime.gml_method(self, func(argument0 = null): "
-            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); argument0 = 2)\n"
+            "var try_to_modify_value = GMRuntime.gml_method(self, func(argument0 = null):\n"
+            "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
+            "\targument0 = 2\n"
+            ")\n"
             "value = 1\n"
             'GMRuntime.gml_call_value(try_to_modify_value, [value], self, other, "try_to_modify_value")\n'
             "result = value",
@@ -3122,9 +3134,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "items = [1]; try_to_modify_array(items); value = items[1];",
                 indent="",
             ),
-            "var try_to_modify_array = GMRuntime.gml_method(self, func(argument0 = null): "
-            "if argument0 == null: argument0 = GMRuntime.gml_undefined(); "
-            "GMRuntime.gml_array_push(argument0, [2]))\n"
+            "var try_to_modify_array = GMRuntime.gml_method(self, func(argument0 = null):\n"
+            "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
+            "\tGMRuntime.gml_array_push(argument0, [2])\n"
+            ")\n"
             "items = [1]\n"
             'GMRuntime.gml_call_value(try_to_modify_array, [items], self, other, "try_to_modify_array")\n'
             "value = GMRuntime.gml_array_get(items, 1)",

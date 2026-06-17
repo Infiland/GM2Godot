@@ -67,7 +67,12 @@ from .model import (
     _Ternary,
     _Unary,
 )
-from .utils import _normalize_local_names, _normalize_scope_context, _unwrap_grouped_expression
+from .utils import (
+    _normalize_local_names,
+    _normalize_scope_context,
+    _prefix_multiline,
+    _unwrap_grouped_expression,
+)
 
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_create_layer": frozenset({3}),
@@ -457,8 +462,21 @@ def _emit_function_literal(
         parameter_names,
         scope_context=scope_context,
     )
-    body = "; ".join([*default_lines, *expr.body_lines])
-    return f"func{name}({parameters}): {body}"
+    body_lines = [*default_lines, *expr.body_lines]
+    if _can_emit_single_line_function_literal(body_lines):
+        return f"func{name}({parameters}): {body_lines[0]}"
+    body = "\n".join(_prefix_multiline(line, "\t") for line in body_lines)
+    return f"func{name}({parameters}):\n{body}\n"
+
+
+def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
+    if len(body_lines) != 1:
+        return False
+    line = body_lines[0]
+    if "\n" in line:
+        return False
+    stripped = line.lstrip("\t")
+    return stripped == "pass" or stripped == "return" or stripped.startswith("return ")
 
 
 def _emit_struct_field(

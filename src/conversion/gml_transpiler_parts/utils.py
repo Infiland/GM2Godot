@@ -58,7 +58,11 @@ def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[li
 
 
 def _indent_lines(lines: Iterable[str]) -> list[str]:
-    return [f"\t{line}" if line else "" for line in lines]
+    return [_prefix_multiline(line, "\t") if line else "" for line in lines]
+
+
+def _prefix_multiline(text: str, prefix: str) -> str:
+    return "\n".join(f"{prefix}{line}" if line else "" for line in text.split("\n"))
 
 
 def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable[str]) -> list[str]:

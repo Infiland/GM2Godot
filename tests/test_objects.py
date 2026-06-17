@@ -647,6 +647,39 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertEqual(source_map["entries"][0]["event"], "_ready")
         self.assertEqual(source_map["entries"][0]["source_line"], 1)
 
+    def test_script_transpiles_calls_to_modern_script_function_assets(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        script_dir = os.path.join(self.gm_dir, "scripts", "ending")
+        os.makedirs(script_dir)
+        with open(os.path.join(script_dir, "ending.yy"), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "%Name": "ending",
+                    "name": "ending",
+                    "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
+                    "resourceType": "GMScript",
+                },
+                f,
+            )
+        with open(os.path.join(script_dir, "ending.gml"), "w", encoding="utf-8") as f:
+            f.write("function loadending() { return 1; }\nfunction saveending() { loadending(); }\n")
+        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("loadending();")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn(
+            'GMRuntime.gml_script_call(GMRuntime.gml_asset_get_index("loadending"), [], self, other)',
+            content,
+        )
+        self.assertNotIn("\tloadending()", content)
+
     def test_script_transpiles_infinity_runtime_support(self):
         """Infinity-sensitive GML should use the shared runtime support layer."""
         self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])

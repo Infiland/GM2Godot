@@ -18,6 +18,7 @@ from src.conversion.generated_paths import (
     generated_path_segment,
     generated_resource_stem,
 )
+from src.conversion.script_functions import modern_script_function_names
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -239,6 +240,28 @@ class AssetRegistryConverter(BaseConverter):
                 metadata=self._metadata(resource, room_order_indices),
             )
             entries.append(entry)
+            if resource.kind == "scripts":
+                for function_name in self._script_function_names(resource):
+                    if function_name == resource.name:
+                        continue
+                    entries.append(
+                        AssetRegistryEntry(
+                            id=self._stable_asset_id(asset_type, function_name, used_ids),
+                            name=function_name,
+                            kind=resource.kind,
+                            asset_type=asset_type,
+                            type_name=self.TYPE_NAME_BY_KIND[resource.kind],
+                            source_path=resource.source_path,
+                            godot_path=entry.godot_path,
+                            legacy_id=f"{self._legacy_id(resource)}#function:{function_name}",
+                            tags=self._extract_tags(resource.raw_data),
+                            metadata={
+                                "script_function": True,
+                                "script_asset": resource.name,
+                                "script_source_path": resource.source_path,
+                            },
+                        )
+                    )
 
         return tuple(entries)
 
@@ -381,6 +404,31 @@ class AssetRegistryConverter(BaseConverter):
                     )
                 )
         return tuple(resources)
+
+    def _script_source_gml_path(self, resource: _ProjectResource) -> str | None:
+        script_dir = os.path.dirname(resource.yy_path)
+        preferred_path = os.path.join(script_dir, resource.name + ".gml")
+        if os.path.isfile(preferred_path):
+            return preferred_path
+        if not os.path.isdir(script_dir):
+            return None
+        try:
+            for filename in sorted(os.listdir(script_dir)):
+                if filename.endswith(".gml"):
+                    return os.path.join(script_dir, filename)
+        except OSError:
+            return None
+        return None
+
+    def _script_function_names(self, resource: _ProjectResource) -> tuple[str, ...]:
+        source_path = self._script_source_gml_path(resource)
+        if source_path is None:
+            return ()
+        try:
+            with open(source_path, "r", encoding="utf-8") as source_file:
+                return modern_script_function_names(source_file.read())
+        except OSError:
+            return ()
 
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
         datafiles_dir = os.path.join(self.gm_project_path, "datafiles")

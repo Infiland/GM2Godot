@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -27,16 +26,14 @@ from src.conversion.gml_transpiler import (
     write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.script_functions import (
+    ScriptFunctionDeclaration,
+    modern_script_function_declarations,
+)
 from src.conversion.gml_transpiler_parts.identifiers import (
     _sanitize_gdscript_identifier,
-    _validate_gml_identifier,
 )
 from src.conversion.gml_transpiler_parts.model import _ScopeContext
-from src.conversion.gml_transpiler_parts.utils import (
-    _split_assignment,
-    _split_top_level,
-    _strip_comments,
-)
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
@@ -48,23 +45,20 @@ _SCRIPT_OTHER_PARAMETER = "_gml_script_other"
 
 @dataclass(frozen=True)
 class ScriptRegistryEntry:
-    id: int
+    id: int | str
     name: str
     resource_path: str
     legacy_arguments: bool
+    callable_method: str = "gm2godot_callable"
+    scoped_callable_method: str = "gm2godot_scoped_callable"
 
 
 @dataclass(frozen=True)
-class _ScriptFunctionParameter:
-    name: str
-    default: str | None
-
-
-@dataclass(frozen=True)
-class _ScriptFunctionDeclaration:
-    name: str
-    parameters: tuple[_ScriptFunctionParameter, ...]
-    body: str
+class _ScriptCallableNames:
+    call_method: str
+    scoped_call_method: str
+    callable_accessor: str
+    scoped_callable_accessor: str
 
 
 def _script_scope_context() -> _ScopeContext:
@@ -90,13 +84,35 @@ def _script_scope_lines() -> list[str]:
     ]
 
 
-def _script_forward_call(*, declaration: _ScriptFunctionDeclaration) -> str:
+def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_method: str) -> str:
     args = [
         "self",
         "self",
         *(_sanitize_gdscript_identifier(parameter.name) for parameter in declaration.parameters),
     ]
-    return f"\treturn _gm_script_call_scoped({', '.join(args)})\n"
+    return f"\treturn {scoped_call_method}({', '.join(args)})\n"
+
+
+def _script_callable_names(declaration_name: str, *, use_default_names: bool) -> _ScriptCallableNames:
+    if use_default_names:
+        return _ScriptCallableNames(
+            call_method="_gm_script_call",
+            scoped_call_method="_gm_script_call_scoped",
+            callable_accessor="gm2godot_callable",
+            scoped_callable_accessor="gm2godot_scoped_callable",
+        )
+    suffix = _sanitize_gdscript_identifier(declaration_name)
+    return _ScriptCallableNames(
+        call_method=f"_gm_script_call_{suffix}",
+        scoped_call_method=f"_gm_script_call_scoped_{suffix}",
+        callable_accessor=f"gm2godot_callable_{suffix}",
+        scoped_callable_accessor=f"gm2godot_scoped_callable_{suffix}",
+    )
+
+
+def _is_script_function_entry(entry: AssetRegistryEntry) -> bool:
+    metadata = entry.metadata or {}
+    return bool(metadata.get("script_function"))
 
 
 def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str:
@@ -109,10 +125,10 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
         lines.extend(
             [
                 "\t\t{\n",
-                f"\t\t\t\"id\": {entry.id},\n",
+                f"\t\t\t\"id\": {json.dumps(entry.id)},\n",
                 f"\t\t\t\"name\": {json.dumps(entry.name)},\n",
-                f"\t\t\t\"callable\": preload({json.dumps(entry.resource_path)}).new().gm2godot_callable(),\n",
-                f"\t\t\t\"scoped_callable\": preload({json.dumps(entry.resource_path)}).new().gm2godot_scoped_callable(),\n",
+                f"\t\t\t\"callable\": preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}(),\n",
+                f"\t\t\t\"scoped_callable\": preload({json.dumps(entry.resource_path)}).new().{entry.scoped_callable_method}(),\n",
                 f"\t\t\t\"legacy_arguments\": {str(entry.legacy_arguments).lower()},\n",
                 "\t\t},\n",
             ]
@@ -183,89 +199,9 @@ class ScriptConverter(BaseConverter):
         relative_path = entry.godot_path[len("res://"):].replace("/", os.sep)
         return os.path.join(self.godot_project_path, relative_path)
 
-    def _modern_function_declaration(self, source: str) -> _ScriptFunctionDeclaration | None:
-        candidate = _strip_comments(source).strip()
-        while candidate.endswith(";"):
-            candidate = candidate[:-1].rstrip()
-        match = re.match(r"^function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", candidate)
-        if match is None:
-            return None
-        params_start = candidate.find("(", match.start())
-        params_end = self._find_matching(candidate, params_start, "(", ")")
-        if params_end is None:
-            return None
-        body_start = candidate.find("{", params_end + 1)
-        if body_start == -1 or candidate[params_end + 1:body_start].strip():
-            return None
-        body_end = self._find_matching(candidate, body_start, "{", "}")
-        if body_end is None or candidate[body_end + 1:].strip():
-            return None
-        try:
-            parameters = self._parse_function_parameters(candidate[params_start + 1:params_end])
-        except GMLTranspileError:
-            return None
-        return _ScriptFunctionDeclaration(
-            name=match.group(1),
-            parameters=parameters,
-            body=candidate[body_start + 1:body_end],
-        )
-
-    def _find_matching(self, source: str, start: int, opener: str, closer: str) -> int | None:
-        if start < 0 or start >= len(source) or source[start] != opener:
-            return None
-        depth = 0
-        index = start
-        quote: str | None = None
-        while index < len(source):
-            char = source[index]
-            if quote is not None:
-                if char == "\\":
-                    index += 2
-                    continue
-                if char == quote:
-                    quote = None
-                index += 1
-                continue
-            if char in ("'", '"'):
-                quote = char
-            elif char == opener:
-                depth += 1
-            elif char == closer:
-                depth -= 1
-                if depth == 0:
-                    return index
-            index += 1
-        return None
-
-    def _parse_function_parameters(self, params_text: str) -> tuple[_ScriptFunctionParameter, ...]:
-        if not params_text.strip():
-            return ()
-        parameters: list[_ScriptFunctionParameter] = []
-        for raw_param in _split_top_level(params_text, ","):
-            raw_param = raw_param.strip()
-            if not raw_param:
-                continue
-            assignment = _split_assignment(raw_param)
-            if assignment is None:
-                name = raw_param
-                default = None
-            else:
-                name, operator, default = assignment
-                if operator != "=":
-                    raise GMLTranspileError("Script function parameters only support simple defaults")
-            name = name.strip()
-            _validate_gml_identifier(name)
-            parameters.append(
-                _ScriptFunctionParameter(
-                    name=name,
-                    default=default.strip() if default is not None else None,
-                )
-            )
-        return tuple(parameters)
-
     def _modern_function_body(
         self,
-        declaration: _ScriptFunctionDeclaration,
+        declaration: ScriptFunctionDeclaration,
         *,
         source_path: str,
         asset_names: set[str],
@@ -321,55 +257,79 @@ class ScriptConverter(BaseConverter):
         *,
         source_path: str,
         asset_names: set[str],
+        script_entries_by_name: dict[str, AssetRegistryEntry],
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
-    ) -> tuple[str, bool, GMLSourceMap]:
+    ) -> tuple[str, tuple[ScriptRegistryEntry, ...], tuple[GMLSourceMap, ...]]:
         header = render_gml_source_header(
             source_path=source_path,
             event=f"script:{entry.name}",
             source=source,
         )
-        modern_declaration = self._modern_function_declaration(source)
-        if modern_declaration is not None:
-            params = ", ".join(
-                f"{_sanitize_gdscript_identifier(parameter.name)} = null"
-                for parameter in modern_declaration.parameters
-            )
-            scoped_params = ", ".join(
-                [
-                    f"{_SCRIPT_SELF_PARAMETER} = null",
-                    f"{_SCRIPT_OTHER_PARAMETER} = null",
-                    *(f"{_sanitize_gdscript_identifier(parameter.name)} = null" for parameter in modern_declaration.parameters),
-                ]
-            )
-            prefix = (
-                "extends RefCounted\n\n"
-                f"{header}"
-                'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
-                f"func _gm_script_call({params}):\n"
-                f"{_script_forward_call(declaration=modern_declaration)}\n"
-                f"func _gm_script_call_scoped({scoped_params}):\n"
-            )
-            body, source_map = self._modern_function_body(
-                modern_declaration,
-                source_path=source_path,
-                asset_names=asset_names,
-                static_scope_prefix=f"{entry.name}.{modern_declaration.name}",
-                extension_functions=extension_functions,
-                extension_function_mappings=extension_function_mappings,
-                generated_line_offset=prefix.count("\n"),
-            )
-            return (
-                prefix
-                + f"{body}\n"
-                + "\treturn GMRuntime.gml_undefined()\n\n"
-                + "func gm2godot_callable():\n"
-                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
-                + "func gm2godot_scoped_callable():\n"
-                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call_scoped"))\n',
-                False,
-                source_map,
-            )
+        modern_declarations = modern_script_function_declarations(source)
+        if modern_declarations is not None:
+            chunks = [
+                "extends RefCounted\n\n",
+                f"{header}",
+                'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n',
+            ]
+            registry_entries: list[ScriptRegistryEntry] = []
+            source_maps: list[GMLSourceMap] = []
+            for declaration in modern_declarations:
+                callable_names = _script_callable_names(
+                    declaration.name,
+                    use_default_names=declaration.name == entry.name,
+                )
+                params = ", ".join(
+                    f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+                    for parameter in declaration.parameters
+                )
+                scoped_params = ", ".join(
+                    [
+                        f"{_SCRIPT_SELF_PARAMETER} = null",
+                        f"{_SCRIPT_OTHER_PARAMETER} = null",
+                        *(
+                            f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+                            for parameter in declaration.parameters
+                        ),
+                    ]
+                )
+                function_prefix = (
+                    f"func {callable_names.call_method}({params}):\n"
+                    f"{_script_forward_call(declaration=declaration, scoped_call_method=callable_names.scoped_call_method)}\n"
+                    f"func {callable_names.scoped_call_method}({scoped_params}):\n"
+                )
+                body, source_map = self._modern_function_body(
+                    declaration,
+                    source_path=source_path,
+                    asset_names=asset_names,
+                    static_scope_prefix=f"{entry.name}.{declaration.name}",
+                    extension_functions=extension_functions,
+                    extension_function_mappings=extension_function_mappings,
+                    generated_line_offset=("".join(chunks) + function_prefix).count("\n"),
+                )
+                chunks.append(
+                    function_prefix
+                    + f"{body}\n"
+                    + "\treturn GMRuntime.gml_undefined()\n\n"
+                    + f"func {callable_names.callable_accessor}():\n"
+                    + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
+                    + f"func {callable_names.scoped_callable_accessor}():\n"
+                    + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.scoped_call_method}"))\n\n'
+                )
+                script_entry = script_entries_by_name.get(declaration.name)
+                registry_entries.append(
+                    ScriptRegistryEntry(
+                        id=script_entry.id if script_entry is not None else f"{entry.name}:{declaration.name}",
+                        name=declaration.name,
+                        resource_path=entry.godot_path,
+                        legacy_arguments=False,
+                        callable_method=callable_names.callable_accessor,
+                        scoped_callable_method=callable_names.scoped_callable_accessor,
+                    )
+                )
+                source_maps.append(source_map)
+            return "".join(chunks).rstrip("\n") + "\n", tuple(registry_entries), tuple(source_maps)
 
         prefix = (
             "extends RefCounted\n\n"
@@ -406,8 +366,15 @@ class ScriptConverter(BaseConverter):
             + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
             + "func gm2godot_scoped_callable():\n"
             + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call_scoped"))\n',
-            True,
-            result.source_map,
+            (
+                ScriptRegistryEntry(
+                    id=entry.id,
+                    name=entry.name,
+                    resource_path=entry.godot_path,
+                    legacy_arguments=True,
+                ),
+            ),
+            (result.source_map,),
         )
 
     def _record_source_diagnostics(
@@ -441,22 +408,24 @@ class ScriptConverter(BaseConverter):
         entry: AssetRegistryEntry,
         *,
         asset_names: set[str],
+        script_entries_by_name: dict[str, AssetRegistryEntry],
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
-    ) -> ScriptRegistryEntry | None:
+    ) -> tuple[ScriptRegistryEntry, ...]:
         source_path = self._source_gml_path(entry)
         output_path = self._output_path(entry)
         if source_path is None or output_path is None:
-            return None
+            return ()
         try:
             with open(source_path, "r", encoding="utf-8") as source_file:
                 source = source_file.read()
             self._record_source_diagnostics(source, source_path, entry)
-            script_content, legacy_arguments, source_map = self._render_script(
+            script_content, registry_entries, source_maps = self._render_script(
                 entry,
                 source,
                 source_path=source_path,
                 asset_names=asset_names,
+                script_entries_by_name=script_entries_by_name,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
@@ -486,21 +455,16 @@ class ScriptConverter(BaseConverter):
                         resource_type="script",
                     )
             self._safe_log(message)
-            return None
+            return ()
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(script_content)
         write_gml_source_map(
             output_path,
-            merge_gml_source_maps([source_map], source_path=source_path, event=f"script:{entry.name}"),
+            merge_gml_source_maps(source_maps, source_path=source_path, event=f"script:{entry.name}"),
         )
-        return ScriptRegistryEntry(
-            id=entry.id,
-            name=entry.name,
-            resource_path=entry.godot_path,
-            legacy_arguments=legacy_arguments,
-        )
+        return registry_entries
 
     def _extension_functions(self) -> dict[str, GMLExtensionFunction]:
         index = GameMakerResourceIndex(
@@ -537,7 +501,11 @@ class ScriptConverter(BaseConverter):
             return None
 
         all_entries = self._registry_entries()
-        entries = tuple(entry for entry in all_entries if entry.asset_type == "script")
+        entries = tuple(
+            entry
+            for entry in all_entries
+            if entry.asset_type == "script" and not _is_script_function_entry(entry)
+        )
         if not entries:
             self.log_callback(get_localized("Console_Convertor_Scripts_Complete"))
             return None
@@ -545,6 +513,11 @@ class ScriptConverter(BaseConverter):
         write_gml_runtime(self.godot_project_path)
         os.makedirs(self.godot_scripts_path, exist_ok=True)
         asset_names = {entry.name for entry in all_entries}
+        script_entries_by_name = {
+            entry.name: entry
+            for entry in all_entries
+            if entry.asset_type == "script"
+        }
         extension_functions = self._extension_functions()
         extension_function_mappings = self._extension_function_mappings()
         registry_entries: list[ScriptRegistryEntry] = []
@@ -554,14 +527,15 @@ class ScriptConverter(BaseConverter):
             if not self.conversion_running():
                 self.log_callback(get_localized("Console_Convertor_Scripts_Stopped"))
                 return None
-            registry_entry = self._write_script(
+            converted_registry_entries = self._write_script(
                 entry,
                 asset_names=asset_names,
+                script_entries_by_name=script_entries_by_name,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
-            if registry_entry is not None:
-                registry_entries.append(registry_entry)
+            if converted_registry_entries:
+                registry_entries.extend(converted_registry_entries)
                 self._safe_log(
                     get_localized("Console_Convertor_Scripts_Converted").format(script_name=entry.name)
                 )

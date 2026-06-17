@@ -2396,6 +2396,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var _str = GMRuntime.gml_undefined()",
         )
 
+    def test_redeclared_local_vars_lower_to_assignments(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var x = 1; var x = 2; if ready { var x = 3; var x; } if retry { var x = 4; }",
+                indent="",
+            ),
+            "var x = 1\n"
+            "x = 2\n"
+            "if GMRuntime.gml_bool(ready):\n"
+            "\tvar x = 3\n"
+            "\tx = GMRuntime.gml_undefined()\n"
+            "if GMRuntime.gml_bool(retry):\n"
+            "\tvar x = 4",
+        )
+
     def test_unknown_reads_remain_runtime_or_compile_errors(self):
         self.assertEqual(
             transpile_gml_expression("missing_value"),
@@ -3541,6 +3556,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "kind = layer_get_element_type(elements[0]);"
                 "layer_set_visible(fx, false);"
                 "visible = layer_get_visible(fx);"
+                "bg = layer_background_get_id(layer_id);"
+                "layer_background_alpha(bg, 0.25);"
+                "layer_background_blend(bg, 255);"
                 "layer_destroy(fx);",
                 indent="",
             ),
@@ -3566,6 +3584,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "kind = GMRuntime.gml_layer_get_element_type(GMRuntime.gml_array_get(elements, 0))\n"
             "GMRuntime.gml_layer_set_visible(fx, false)\n"
             "visible = GMRuntime.gml_layer_get_visible(fx)\n"
+            "bg = GMRuntime.gml_layer_background_get_id(layer_id)\n"
+            "GMRuntime.gml_layer_background_alpha(bg, 0.25)\n"
+            "GMRuntime.gml_layer_background_blend(bg, 255)\n"
             "GMRuntime.gml_layer_destroy(fx)",
         )
 

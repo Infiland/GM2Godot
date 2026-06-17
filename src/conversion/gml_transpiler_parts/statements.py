@@ -99,6 +99,7 @@ class _ControlFlowCapture:
 def _transpile_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
+    declared_local_names: MutableSet[str] | None = None,
     instance_variables: MutableSet[str] | None = None,
     loop_depth: int = 0,
     continue_depth: int = 0,
@@ -117,6 +118,8 @@ def _transpile_statement(
 
     if local_names is None:
         local_names = set()
+    if declared_local_names is None:
+        declared_local_names = set()
     scope_context = _normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
@@ -267,6 +270,7 @@ def _transpile_statement(
         return _transpile_var_statement(
             statement[4:].strip(),
             local_names,
+            declared_local_names,
             instance_variables,
             enum_values,
             enum_names,
@@ -624,6 +628,7 @@ def _transpile_statement(
             increment_lines = _transpile_statement(
                 f"{increment_target}{suffix}",
                 local_names,
+                declared_local_names,
                 instance_variables,
                 loop_depth=loop_depth,
                 continue_depth=continue_depth,
@@ -1552,6 +1557,7 @@ def _record_instance_assignment(
 def _transpile_var_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
+    declared_local_names: MutableSet[str] | None = None,
     instance_variables: MutableSet[str] | None = None,
     enum_values: MutableMapping[str, dict[str, int]] | None = None,
     enum_names: Iterable[str] | None = None,
@@ -1562,6 +1568,8 @@ def _transpile_var_statement(
     lines: list[str] = []
     if local_names is None:
         local_names = set()
+    if declared_local_names is None:
+        declared_local_names = set()
     scope_context = _normalize_scope_context(scope_context)
     enum_name_set = frozenset(enum_names or [])
     macro_values = macro_values or {}
@@ -1578,8 +1586,10 @@ def _transpile_var_statement(
             _reject_constant_declaration_name(name, macro_values.keys())
             if name in enum_name_set:
                 raise GMLTranspileError("Cannot redeclare enum")
-            lines.append(f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
+            declaration_prefix = "" if name in declared_local_names else "var "
+            lines.append(f"{declaration_prefix}{_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
             local_names.add(name)
+            declared_local_names.add(name)
             continue
         name, operator, value = assignment
         if operator not in ("=", ":="):
@@ -1623,8 +1633,10 @@ def _transpile_var_statement(
                 macro_values=macro_values,
             )
             lines.extend(prelude_lines)
-        lines.append(f"var {_sanitize_gdscript_identifier(name)} = {initial_value}")
+        declaration_prefix = "" if name in declared_local_names else "var "
+        lines.append(f"{declaration_prefix}{_sanitize_gdscript_identifier(name)} = {initial_value}")
         local_names.add(name)
+        declared_local_names.add(name)
     return lines
 
 def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | None:

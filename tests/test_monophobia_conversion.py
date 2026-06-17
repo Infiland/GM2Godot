@@ -137,6 +137,20 @@ class TestMonophobiaConversion(unittest.TestCase):
 
         self.assertEqual(ending_failures, [])
 
+    def test_player_background_layer_calls_have_no_transpile_failure_diagnostic(self) -> None:
+        diagnostics = json.loads(
+            self._read_generated_file("gm2godot", "conversion_diagnostics.json")
+        )
+        player_background_failures = [
+            diagnostic
+            for diagnostic in diagnostics.get("diagnostics", [])
+            if diagnostic.get("resource") == "o_player"
+            and diagnostic.get("code") == "GM2GD-GML-TRANSPILE"
+            and diagnostic.get("api") == "layer_background_get_id"
+        ]
+
+        self.assertEqual(player_background_failures, [])
+
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
         self.assertIsNotNone(
             find_godot_binary(),

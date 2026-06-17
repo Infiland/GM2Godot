@@ -277,6 +277,48 @@ static func gml_layer_get_element_type(element):
 	return "undefined"
 
 
+static func gml_layer_background_get_id(layer):
+	var layer_node = _gml_layer_resolve_node(layer)
+	if layer_node == null:
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	if _gml_layer_node_is_background(layer_node):
+		return _gml_layer_element_register(layer_node)
+	if not (layer_node is Node):
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	for child in layer_node.get_children():
+		if _gml_layer_node_is_background(child):
+			return _gml_layer_element_register(child)
+	return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+
+
+static func gml_layer_background_alpha(background, alpha):
+	var node = _gml_layer_background_resolve_node(background)
+	if node == null:
+		return false
+	var resolved_alpha = clamp(_to_real(alpha), 0.0, 1.0)
+	if node is CanvasItem:
+		var color = node.modulate
+		color.a = resolved_alpha
+		node.modulate = color
+	node.set_meta("gamemaker_background_alpha", resolved_alpha)
+	return true
+
+
+static func gml_layer_background_blend(background, color):
+	var node = _gml_layer_background_resolve_node(background)
+	if node == null:
+		return false
+	var resolved_color = _gml_layer_background_color(color)
+	if node is CanvasItem:
+		var modulate = node.modulate
+		modulate.r = resolved_color.r
+		modulate.g = resolved_color.g
+		modulate.b = resolved_color.b
+		node.modulate = modulate
+	node.set_meta("gamemaker_background_blend", int(_to_real(color)))
+	return true
+
+
 static func _gml_layer_register_current_scene():
 	var scene = _gml_layer_current_scene()
 	if scene != null:
@@ -566,6 +608,8 @@ static func _gml_layer_element_register(node):
 
 
 static func _gml_layer_element_name(node):
+	if node is Object and node.has_meta("gamemaker_background_visual"):
+		return str(node.get_meta("gamemaker_layer_name", str(node.name)))
 	if node is Object and node.has_meta("gamemaker_instance_name"):
 		return str(node.get_meta("gamemaker_instance_name"))
 	if node is Object and node.has_meta("gamemaker_asset_name"):
@@ -610,3 +654,26 @@ static func _gml_layer_element_unregister_handle(handle, invalidate = true):
 		_gml_layer_element_handles_by_node_id.erase(node.get_instance_id())
 	if invalidate:
 		gml_handle_invalidate(handle)
+
+
+static func _gml_layer_node_is_background(node):
+	return node is Object and node.has_meta("gamemaker_background_visual")
+
+
+static func _gml_layer_background_resolve_node(background):
+	var node = _gml_layer_element_resolve_node(background)
+	if _gml_layer_node_is_background(node):
+		return node
+	return null
+
+
+static func _gml_layer_background_color(color):
+	if color is Color:
+		return color
+	var value = int(_to_real(color))
+	return Color(
+		float(value & 0xff) / 255.0,
+		float((value >> 8) & 0xff) / 255.0,
+		float((value >> 16) & 0xff) / 255.0,
+		1.0
+	)

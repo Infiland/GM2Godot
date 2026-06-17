@@ -290,6 +290,23 @@ static func gml_variable_instance_names_count(instance_value):
 	return gml_selector_names_count(instance_value)
 
 
+static func gml_call_named(function_name, args = [], caller_self = null, caller_other = null):
+	var name = str(function_name)
+	if name == "":
+		return gml_error("GML dynamic function call requires a function name")
+	if caller_self != null and not is_undefined(caller_self):
+		var instance_value = gml_selector_get(caller_self, name, caller_self, caller_other)
+		if not is_undefined(instance_value):
+			return gml_call_value(instance_value, args, caller_self, caller_other, name)
+	if gml_variable_global_exists(name):
+		var global_value = gml_variable_global_get(name)
+		if not is_undefined(global_value):
+			return gml_call_value(global_value, args, caller_self, caller_other, name)
+	if gml_script_exists(name):
+		return gml_script_execute(name, args, caller_self, caller_other)
+	return gml_error("GML function '" + name + "' is not available")
+
+
 static func gml_selector_get(target, member_name, current_self = null, current_other = null):
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():

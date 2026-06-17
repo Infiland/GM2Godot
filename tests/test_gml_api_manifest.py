@@ -913,10 +913,10 @@ class TestGMLAPIManifest(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "array_push.*at least 2.*got 1"):
             transpile_gml_expression("array_push(items)")
 
-    def test_unknown_project_local_function_calls_still_pass_through(self):
+    def test_unknown_project_local_function_calls_use_runtime_dispatch(self):
         self.assertEqual(
             transpile_gml_expression("project_local_function(score + 1)"),
-            "project_local_function(GMRuntime.gml_add(score, 1))",
+            'GMRuntime.gml_call_named("project_local_function", [GMRuntime.gml_add(score, 1)], self, other)',
         )
 
 

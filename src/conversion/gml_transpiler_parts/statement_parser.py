@@ -66,10 +66,23 @@ class _StatementParser:
     ) -> None:
         self.tokens = tokens
         self.position = 0
-        self.local_names = set(local_names or [])
+        initial_local_names = set(local_names or [])
+        self.local_names = set(initial_local_names)
         self.declared_local_names: MutableSet[str] = (
             declared_local_names if declared_local_names is not None else set[str]()
         )
+        self.hoisted_local_names = _collect_hoisted_local_names(tokens)
+        self._hoisted_local_declaration_lines = [
+            f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()"
+            for name in self.hoisted_local_names
+            if name not in initial_local_names
+        ]
+        self.local_names.update(self.hoisted_local_names)
+        for name in initial_local_names:
+            self.declared_local_names.add(name)
+        for name in self.hoisted_local_names:
+            self.declared_local_names.add(name)
+        self._emitted_hoisted_local_declarations = False
         self.instance_variables = instance_variables
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
@@ -102,6 +115,9 @@ class _StatementParser:
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
+        if terminator is None and not self._emitted_hoisted_local_declarations:
+            lines.extend(self._hoisted_local_declaration_lines)
+            self._emitted_hoisted_local_declarations = True
         while not self._at_end() and not self._check(terminator):
             if self._match(";") or self._match("\n"):
                 continue
@@ -804,22 +820,12 @@ class _StatementParser:
         return self._parse_nested_single_statement_body()
 
     def _parse_nested_braced_body(self) -> list[str]:
-        outer_declared_local_names = self.declared_local_names
-        self.declared_local_names = set[str]()
-        try:
-            lines = self.parse(terminator="}")
-            self._consume("}")
-            return lines
-        finally:
-            self.declared_local_names = outer_declared_local_names
+        lines = self.parse(terminator="}")
+        self._consume("}")
+        return lines
 
     def _parse_nested_single_statement_body(self) -> list[str]:
-        outer_declared_local_names = self.declared_local_names
-        self.declared_local_names = set[str]()
-        try:
-            return self._parse_statement()
-        finally:
-            self.declared_local_names = outer_declared_local_names
+        return self._parse_statement()
 
     def _read_condition_tokens(self) -> list[_Token]:
         if self._match("("):
@@ -994,3 +1000,116 @@ class _StatementParser:
     def _error(self, message: str) -> GMLTranspileError:
         token = self._peek()
         return GMLTranspileError(message, line=token.line, column=token.column)
+
+
+def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    root_declared_names: set[str] = set()
+    brace_depth = 0
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "IDENT" and token.value == "function":
+            index = _skip_function_literal(tokens, index)
+            continue
+        if token.kind == "IDENT" and token.value == "var":
+            should_hoist = brace_depth > 0 or not _is_root_var_statement(tokens, index)
+            declared_names = _collect_var_statement_names(tokens, index + 1)
+            if should_hoist:
+                for name in declared_names:
+                    if name in root_declared_names:
+                        continue
+                    if name not in seen:
+                        names.append(name)
+                        seen.add(name)
+            else:
+                root_declared_names.update(declared_names)
+        elif token.value == "{":
+            brace_depth += 1
+        elif token.value == "}":
+            brace_depth = max(0, brace_depth - 1)
+        index += 1
+    return tuple(names)
+
+
+def _collect_var_statement_names(tokens: list[_Token], start: int) -> tuple[str, ...]:
+    names: list[str] = []
+    index = start
+    depth = 0
+    expect_name = True
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if depth == 0 and token.value in {";", "\n"}:
+            break
+        if expect_name:
+            if token.kind == "IDENT":
+                names.append(token.value)
+                expect_name = False
+            index += 1
+            continue
+        if token.kind == "IDENT" and token.value == "function":
+            index = _skip_function_literal(tokens, index)
+            continue
+        if token.value in {"(", "[", "{"}:
+            depth += 1
+        elif token.value in {")", "]", "}"}:
+            if depth <= 0:
+                break
+            depth -= 1
+        elif depth == 0 and token.value == ",":
+            expect_name = True
+        index += 1
+    return tuple(names)
+
+
+def _is_root_var_statement(tokens: list[_Token], index: int) -> bool:
+    previous_index = _previous_token_index(tokens, index)
+    if previous_index is None:
+        return True
+    previous = tokens[previous_index]
+    if previous.value in {";", "\n", "}"}:
+        return True
+    if previous.value == "(":
+        before_previous_index = _previous_token_index(tokens, previous_index)
+        if before_previous_index is None:
+            return False
+        before_previous = tokens[before_previous_index]
+        return before_previous.kind == "IDENT" and before_previous.value == "for"
+    return False
+
+
+def _previous_token_index(tokens: list[_Token], index: int) -> int | None:
+    cursor = index - 1
+    return cursor if cursor >= 0 else None
+
+
+def _skip_function_literal(tokens: list[_Token], index: int) -> int:
+    cursor = index + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token.kind == "EOF":
+            return cursor
+        if token.value == "{":
+            return _matching_closing_brace_index(tokens, cursor) + 1
+        cursor += 1
+    return cursor
+
+
+def _matching_closing_brace_index(tokens: list[_Token], open_index: int) -> int:
+    depth = 0
+    cursor = open_index
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token.value == "{":
+            depth += 1
+        elif token.value == "}":
+            depth -= 1
+            if depth == 0:
+                return cursor
+        cursor += 1
+    return max(open_index, len(tokens) - 1)

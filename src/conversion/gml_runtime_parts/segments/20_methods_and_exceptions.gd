@@ -15,6 +15,22 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	return method.gml_callv(call_args) if method is GMLMethod else method.callv(call_args)
 
 
+static func gml_call_value(function_value, args = [], caller_self = null, caller_other = null, function_name = ""):
+	var call_args = args if typeof(args) == TYPE_ARRAY else [args]
+	if is_method(function_value):
+		return function_value.gml_callv(call_args) if function_value is GMLMethod else function_value.callv(call_args)
+	if typeof(function_value) == TYPE_DICTIONARY and function_value.has("callable"):
+		return gml_script_call(function_value, call_args, caller_self, caller_other)
+	var descriptor: Variant = _gml_script_resolve(function_value)
+	if descriptor != null:
+		return gml_script_call(descriptor, call_args, caller_self, caller_other)
+	if str(function_name) != "":
+		descriptor = _gml_script_resolve(str(function_name))
+		if descriptor != null:
+			return gml_script_call(descriptor, call_args, caller_self, caller_other)
+	return gml_unsupported_type_error("GML dynamic function call", function_value)
+
+
 static func gml_script_execute(script, args = [], caller_self = null, caller_other = null):
 	var descriptor: Variant = _gml_script_resolve(script)
 	if descriptor == null:

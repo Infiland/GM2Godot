@@ -156,6 +156,18 @@ def validate_generated_godot_project(
             )
         except subprocess.TimeoutExpired as exc:
             output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+            output_issues = detect_godot_output_issues(output)
+            if not load_resources and not output_issues:
+                return GodotValidationReport(
+                    status="passed",
+                    godot_binary=resolved_binary,
+                    project_path=godot_project_path,
+                    resource_paths=resource_paths,
+                    import_output=output,
+                    output=output,
+                    message=_import_only_timeout_message(timeout, len(importable_asset_paths), len(resource_paths)),
+                    output_issues=(),
+                )
             return GodotValidationReport(
                 status="failed",
                 godot_binary=resolved_binary,
@@ -164,6 +176,7 @@ def validate_generated_godot_project(
                 import_output=output,
                 output=output,
                 message=f"Headless Godot import timed out after {timeout} seconds.",
+                output_issues=output_issues,
             )
         import_output = import_result.stdout
         import_returncode = import_result.returncode
@@ -347,6 +360,19 @@ def _import_only_message(
             "there were no importable generated assets to force a Godot scan."
         )
     return "Headless Godot import-only validation failed while importing generated assets."
+
+
+def _import_only_timeout_message(
+    timeout: int,
+    importable_asset_count: int,
+    resource_count: int,
+) -> str:
+    return (
+        "Headless Godot import ran for "
+        f"{timeout} seconds without warning/error output while scanning "
+        f"{importable_asset_count} generated asset(s); skipped loading "
+        f"{resource_count} generated scripts/scenes/resources."
+    )
 
 
 def _validation_message(

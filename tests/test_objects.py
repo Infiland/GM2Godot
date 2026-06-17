@@ -903,6 +903,75 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 
+    def test_script_assigned_instance_variables_are_declared_on_objects(self):
+        self._setup_object("o_player", event_list=[{"eventType": 3, "eventNum": 0}])
+        scripts_dir = os.path.join(self.gm_dir, "scripts", "scr_controls")
+        os.makedirs(scripts_dir, exist_ok=True)
+        with open(os.path.join(scripts_dir, "scr_controls.gml"), "w", encoding="utf-8") as f:
+            f.write(
+                "function scr_controls(local_param) {\n"
+                "    var local_only = 0;\n"
+                "    local_param = 1;\n"
+                "    leftcontrols = 0;\n"
+                "    rightcontrols = 1;\n"
+                "}\n"
+            )
+
+        object_dir = os.path.join(self.gm_dir, "objects", "o_player")
+        with open(os.path.join(object_dir, "Step_0.gml"), "w", encoding="utf-8") as f:
+            f.write(
+                "scr_controls(0);\n"
+                "if leftcontrols = 0 { key_left = true; }\n"
+                "if rightcontrols = 1 { key_right = true; }\n"
+            )
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("var leftcontrols", content)
+        self.assertIn("var rightcontrols", content)
+        self.assertNotIn("var local_only", content)
+        self.assertNotIn("var local_param", content)
+        self.assertIn("if GMRuntime.gml_eq(leftcontrols, 0):", content)
+        self.assertIn("if GMRuntime.gml_eq(rightcontrols, 1):", content)
+
+    def test_script_assigned_instance_variables_are_inherited_by_child_objects(self):
+        self._setup_object("o_parent", event_list=[])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 3, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        scripts_dir = os.path.join(self.gm_dir, "scripts", "scr_controls")
+        os.makedirs(scripts_dir, exist_ok=True)
+        with open(os.path.join(scripts_dir, "scr_controls.gml"), "w", encoding="utf-8") as f:
+            f.write("function scr_controls() { leftcontrols = 0; }\n")
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Step_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("scr_controls(); if leftcontrols = 0 { key_left = true; }")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        parent_gd_path = os.path.join(self.godot_dir, "objects", "o_parent", "o_parent.gd")
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(parent_gd_path, "r", encoding="utf-8") as f:
+            parent_content = f.read()
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("var leftcontrols", parent_content)
+        self.assertNotIn("var leftcontrols", child_content)
+        self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertIn("if GMRuntime.gml_eq(leftcontrols, 0):", child_content)
+
     def test_script_supports_sprite_and_image_index(self):
         """sprite_index and image_index should map to generated sprite runtime state."""
         self._setup_object(

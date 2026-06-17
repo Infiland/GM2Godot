@@ -262,15 +262,15 @@ def _emit_expression(
         builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
             return builtin_call, _POSTFIX_PRECEDENCE
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         if (
             isinstance(expr.callee, _Name)
             and expr.callee.value not in local_names
             and expr.callee.value in scope_context.asset_names
         ):
-            args = ", ".join(
-                _emit_expression(arg, local_names, scope_context=scope_context)[0]
-                for arg in expr.args
-            )
             return (
                 "GMRuntime.gml_script_call("
                 f"GMRuntime.gml_asset_get_index({json.dumps(expr.callee.value)}), "
@@ -278,24 +278,31 @@ def _emit_expression(
                 _POSTFIX_PRECEDENCE,
             )
         if isinstance(expr.callee, _Name):
-            callee = _emit_name(
-                expr.callee.value,
-                local_names,
-                scope_context,
-                resolve_asset_names=False,
-            )[0]
-        else:
-            callee = _emit_child(
-                expr.callee,
+            if expr.callee.value not in local_names:
+                return (
+                    "GMRuntime.gml_call_named("
+                    f"{json.dumps(expr.callee.value)}, [{args}], "
+                    f"{scope_context.self_expression}, {scope_context.other_expression})",
+                    _POSTFIX_PRECEDENCE,
+                )
+            callee = _emit_name(expr.callee.value, local_names, scope_context)[0]
+            return (
+                "GMRuntime.gml_call_value("
+                f"{callee}, [{args}], {scope_context.self_expression}, "
+                f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
                 _POSTFIX_PRECEDENCE,
-                local_names=local_names,
-                scope_context=scope_context,
             )
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
+        callee = _emit_child(
+            expr.callee,
+            _POSTFIX_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
         )
-        return f"{callee}({args})", _POSTFIX_PRECEDENCE
+        return (
+            "GMRuntime.gml_call_value("
+            f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})",
+            _POSTFIX_PRECEDENCE,
+        )
     if isinstance(expr, _ArrayLiteral):
         elements = ", ".join(
             _emit_expression(element, local_names, scope_context=scope_context)[0]

@@ -468,6 +468,9 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("room", 'GMRuntime.gml_builtin_global("room")'),
     RuntimeValueParityCase("room_width", 'GMRuntime.gml_builtin_global("room_width")'),
     RuntimeValueParityCase("room_height", 'GMRuntime.gml_builtin_global("room_height")'),
+    RuntimeValueParityCase("current_year", 'GMRuntime.gml_builtin_global("current_year")'),
+    RuntimeValueParityCase("current_month", 'GMRuntime.gml_builtin_global("current_month")'),
+    RuntimeValueParityCase("current_day", 'GMRuntime.gml_builtin_global("current_day")'),
     RuntimeValueParityCase("current_minute", 'GMRuntime.gml_builtin_global("current_minute")'),
     RuntimeValueParityCase("current_second", 'GMRuntime.gml_builtin_global("current_second")'),
     RuntimeValueParityCase("room_goto(r_next)", 'GMRuntime.gml_room_goto(GMRuntime.gml_asset_get_index("r_next"))'),
@@ -1412,6 +1415,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_exception_value",
             "gml_exception_struct",
             "gml_method_call",
+            "gml_call_value",
+            "gml_call_named",
             "gml_method_get_self",
             "gml_method_get_index",
             "gml_repeat_count",
@@ -2067,6 +2072,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var count = source_size - start if num_args == null else int(_to_real(num_args))", GML_RUNTIME_SCRIPT)
         self.assertIn("var step = -1 if count < 0 else 1", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_error(\"GML method_call argument range out of bounds\")", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_dynamic_call_dispatch_uses_callv_and_registered_scripts(self):
+        self.assertIn("static func gml_call_value(function_value, args = [], caller_self = null, caller_other = null, function_name = \"\"):", GML_RUNTIME_SCRIPT)
+        self.assertIn("return function_value.gml_callv(call_args) if function_value is GMLMethod else function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_script_call(descriptor, call_args, caller_self, caller_other)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_call_named(function_name, args = [], caller_self = null, caller_other = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var instance_value = gml_selector_get(caller_self, name, caller_self, caller_other)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_script_execute(name, args, caller_self, caller_other)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_method_accessors_expose_bound_self_and_index(self):
         self.assertIn("class GMLMethod:", GML_RUNTIME_SCRIPT)
@@ -3037,6 +3050,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_weak_ref_create", GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "current_year":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "current_month":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "current_day":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "current_minute":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "current_second":', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string_hash_to_newline", GML_RUNTIME_SCRIPT)

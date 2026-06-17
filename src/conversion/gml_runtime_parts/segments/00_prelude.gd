@@ -211,6 +211,12 @@ static func gml_builtin_global(name):
 		return gml_working_directory()
 	if key == "current_time":
 		return Time.get_ticks_msec()
+	if key == "current_year":
+		return int(Time.get_datetime_dict_from_system().get("year", 0))
+	if key == "current_month":
+		return int(Time.get_datetime_dict_from_system().get("month", 0))
+	if key == "current_day":
+		return int(Time.get_datetime_dict_from_system().get("day", 0))
 	if key == "current_minute":
 		return int(Time.get_datetime_dict_from_system().get("minute", 0))
 	if key == "current_second":

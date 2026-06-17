@@ -123,6 +123,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 ("sequences", "seq_intro"),
                 ("timelines", "tl_intro"),
                 ("particlesystems", "ps_spark"),
+                ("particles", "ps_legacy"),
                 ("extensions", "AdSDK"),
             ],
         )
@@ -187,6 +188,16 @@ class TestAssetRegistryConverter(unittest.TestCase):
             {
                 "particleTypes": [{"name": "pt_spark", "lifeMin": 10, "lifeMax": 20}],
                 "emitters": [{"name": "pe_spark", "streamNumber": 4}],
+            },
+        )
+        self._write_resource(
+            "particles",
+            "ps_legacy",
+            "GMParticleSystem",
+            "folders/Particles.yy",
+            {
+                "particleTypes": [{"name": "pt_legacy"}],
+                "emitters": [{"name": "pe_legacy"}],
             },
         )
         self._write_resource(
@@ -276,6 +287,11 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert particle_metadata is not None
         self.assertEqual(particle_metadata["types"][0]["name"], "pt_spark")
         self.assertEqual(particle_metadata["emitters"][0]["name"], "pe_spark")
+        self.assertEqual(by_name["ps_legacy"].asset_type, "particle_system")
+        legacy_particle_metadata = by_name["ps_legacy"].metadata
+        self.assertIsNotNone(legacy_particle_metadata)
+        assert legacy_particle_metadata is not None
+        self.assertEqual(legacy_particle_metadata["types"][0]["name"], "pt_legacy")
         self.assertEqual(by_name["AdSDK"].asset_type, "extension")
         self.assertEqual(
             by_name["AdSDK"].godot_path,

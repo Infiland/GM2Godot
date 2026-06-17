@@ -194,6 +194,51 @@ class TestGodotValidation(unittest.TestCase):
         self.assertIn("GM2GODOT_IMPORT_OK", report.output)
         self.assertIn("skipped loading 3 generated scripts/scenes/resources", report.message)
 
+    def test_import_only_timeout_passes_when_no_warning_or_error_output(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' 'Godot Engine v4.6.3.stable.official'\n"
+            "sleep 5\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            timeout=1,
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertIsNone(report.import_returncode)
+        self.assertEqual(report.output_issues, ())
+        self.assertIn("without warning/error output", report.message)
+
+    def test_import_only_timeout_fails_when_warning_or_error_output_exists(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' 'SCRIPT ERROR: Parse Error: Identifier not declared.'\n"
+            "sleep 5\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            timeout=1,
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(len(report.output_issues), 1)
+        self.assertEqual(report.output_issues[0].severity, "error")
+
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_headless_godot_validation_loads_generated_resources(self) -> None:
         project_dir = self._write_project()

@@ -144,6 +144,7 @@ class AssetRegistryConverter(BaseConverter):
         "animcurves": "animation_curve",
         "shaders": "shader",
         "tilesets": "tileset",
+        "particles": "particle_system",
         "particlesystems": "particle_system",
         "timelines": "timeline",
         "sequences": "sequence",
@@ -161,6 +162,7 @@ class AssetRegistryConverter(BaseConverter):
         "animcurves": "Animation Curve",
         "shaders": "Shader",
         "tilesets": "Tile Set",
+        "particles": "Particle System",
         "particlesystems": "Particle System",
         "timelines": "Timeline",
         "sequences": "Sequence",
@@ -556,7 +558,7 @@ class AssetRegistryConverter(BaseConverter):
         if resource.kind == "timelines":
             return self._timeline_metadata(resource)
 
-        if resource.kind == "particlesystems":
+        if resource.kind in {"particles", "particlesystems"}:
             return self._particle_system_metadata(resource.raw_data)
 
         if resource.kind == "extensions":

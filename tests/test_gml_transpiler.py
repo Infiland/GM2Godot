@@ -2497,7 +2497,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("scr_add(1)", asset_names={"scr_add"}),
-            "scr_add(1)",
+            'GMRuntime.gml_script_call(GMRuntime.gml_asset_get_index("scr_add"), [1], self, other)',
         )
         with self.assertRaisesRegex(GMLTranspileError, "collides with a global and asset name"):
             transpile_gml_expression("shared_name", global_names={"shared_name"}, asset_names={"shared_name"})
@@ -4088,7 +4088,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 indent="",
                 asset_names={"scr_add"},
             ),
-            "result = GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index(\"scr_add\"), [1, 2])\n"
+            "result = GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index(\"scr_add\"), [1, 2], self, other)\n"
             "ok = GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
             "name = GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index(\"scr_add\"))\n"
             "fn = GMRuntime.gml_global_function('scr_add')\n"

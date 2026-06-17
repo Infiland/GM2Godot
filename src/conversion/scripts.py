@@ -31,6 +31,7 @@ from src.conversion.gml_transpiler_parts.identifiers import (
     _sanitize_gdscript_identifier,
     _validate_gml_identifier,
 )
+from src.conversion.gml_transpiler_parts.model import _ScopeContext
 from src.conversion.gml_transpiler_parts.utils import (
     _split_assignment,
     _split_top_level,
@@ -41,6 +42,8 @@ from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCal
 
 SCRIPT_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_script_registry.gd")
 SCRIPT_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_script_registry.gd"
+_SCRIPT_SELF_PARAMETER = "_gml_script_self"
+_SCRIPT_OTHER_PARAMETER = "_gml_script_other"
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,38 @@ class _ScriptFunctionDeclaration:
     body: str
 
 
+def _script_scope_context() -> _ScopeContext:
+    return _ScopeContext(
+        self_expression=_SCRIPT_SELF_PARAMETER,
+        other_expression=_SCRIPT_OTHER_PARAMETER,
+        instance_target=_SCRIPT_SELF_PARAMETER,
+    )
+
+
+def _script_scope_lines() -> list[str]:
+    return [
+        (
+            f"\tif {_SCRIPT_SELF_PARAMETER} == null "
+            f"or GMRuntime.is_undefined({_SCRIPT_SELF_PARAMETER}): "
+            f"{_SCRIPT_SELF_PARAMETER} = self"
+        ),
+        (
+            f"\tif {_SCRIPT_OTHER_PARAMETER} == null "
+            f"or GMRuntime.is_undefined({_SCRIPT_OTHER_PARAMETER}): "
+            f"{_SCRIPT_OTHER_PARAMETER} = {_SCRIPT_SELF_PARAMETER}"
+        ),
+    ]
+
+
+def _script_forward_call(*, declaration: _ScriptFunctionDeclaration) -> str:
+    args = [
+        "self",
+        "self",
+        *(_sanitize_gdscript_identifier(parameter.name) for parameter in declaration.parameters),
+    ]
+    return f"\treturn _gm_script_call_scoped({', '.join(args)})\n"
+
+
 def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str:
     lines = [
         "extends RefCounted\n\n",
@@ -77,6 +112,7 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
                 f"\t\t\t\"id\": {entry.id},\n",
                 f"\t\t\t\"name\": {json.dumps(entry.name)},\n",
                 f"\t\t\t\"callable\": preload({json.dumps(entry.resource_path)}).new().gm2godot_callable(),\n",
+                f"\t\t\t\"scoped_callable\": preload({json.dumps(entry.resource_path)}).new().gm2godot_scoped_callable(),\n",
                 f"\t\t\t\"legacy_arguments\": {str(entry.legacy_arguments).lower()},\n",
                 "\t\t},\n",
             ]
@@ -115,7 +151,7 @@ class ScriptConverter(BaseConverter):
         self.godot_scripts_path = os.path.join(self.godot_project_path, "scripts")
         self.macro_configuration = macro_configuration
 
-    def _asset_entries(self) -> tuple[AssetRegistryEntry, ...]:
+    def _registry_entries(self) -> tuple[AssetRegistryEntry, ...]:
         registry_converter = AssetRegistryConverter(
             self.gm_project_path,
             self.godot_project_path,
@@ -123,11 +159,10 @@ class ScriptConverter(BaseConverter):
             progress_callback=lambda _value: None,
             conversion_running=self.conversion_running,
         )
-        return tuple(
-            entry
-            for entry in registry_converter.build_entries()
-            if entry.asset_type == "script"
-        )
+        return tuple(registry_converter.build_entries())
+
+    def _asset_entries(self) -> tuple[AssetRegistryEntry, ...]:
+        return tuple(entry for entry in self._registry_entries() if entry.asset_type == "script")
 
     def _source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
         yy_path = os.path.join(self.gm_project_path, entry.source_path)
@@ -240,7 +275,8 @@ class ScriptConverter(BaseConverter):
         generated_line_offset: int = 0,
     ) -> tuple[str, GMLSourceMap]:
         local_names = {parameter.name for parameter in declaration.parameters}
-        lines: list[str] = []
+        script_scope = _script_scope_context()
+        lines: list[str] = _script_scope_lines()
         for parameter in declaration.parameters:
             parameter_name = _sanitize_gdscript_identifier(parameter.name)
             if parameter.default is None:
@@ -250,6 +286,7 @@ class ScriptConverter(BaseConverter):
                 parameter.default,
                 local_names=local_names,
                 asset_names=asset_names,
+                scope_context=script_scope,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
@@ -262,6 +299,9 @@ class ScriptConverter(BaseConverter):
             return_depth=1,
             asset_names=asset_names,
             static_scope_prefix=static_scope_prefix,
+            self_expression=script_scope.self_expression,
+            other_expression=script_scope.other_expression,
+            instance_target=script_scope.instance_target,
             local_names=local_names,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
@@ -295,11 +335,20 @@ class ScriptConverter(BaseConverter):
                 f"{_sanitize_gdscript_identifier(parameter.name)} = null"
                 for parameter in modern_declaration.parameters
             )
+            scoped_params = ", ".join(
+                [
+                    f"{_SCRIPT_SELF_PARAMETER} = null",
+                    f"{_SCRIPT_OTHER_PARAMETER} = null",
+                    *(f"{_sanitize_gdscript_identifier(parameter.name)} = null" for parameter in modern_declaration.parameters),
+                ]
+            )
             prefix = (
                 "extends RefCounted\n\n"
                 f"{header}"
                 'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
                 f"func _gm_script_call({params}):\n"
+                f"{_script_forward_call(declaration=modern_declaration)}\n"
+                f"func _gm_script_call_scoped({scoped_params}):\n"
             )
             body, source_map = self._modern_function_body(
                 modern_declaration,
@@ -315,7 +364,9 @@ class ScriptConverter(BaseConverter):
                 + f"{body}\n"
                 + "\treturn GMRuntime.gml_undefined()\n\n"
                 + "func gm2godot_callable():\n"
-                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
+                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
+                + "func gm2godot_scoped_callable():\n"
+                + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call_scoped"))\n',
                 False,
                 source_map,
             )
@@ -325,26 +376,36 @@ class ScriptConverter(BaseConverter):
             f"{header}"
             'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
             "func _gm_script_call():\n"
+            "\treturn _gm_script_call_scoped(self, self)\n\n"
+            f"func _gm_script_call_scoped({_SCRIPT_SELF_PARAMETER} = null, {_SCRIPT_OTHER_PARAMETER} = null):\n"
         )
+        script_scope = _script_scope_context()
         result = transpile_gml_code_with_source_map(
             source,
             return_depth=1,
             asset_names=asset_names,
             static_scope_prefix=f"{entry.name}.script",
+            self_expression=script_scope.self_expression,
+            other_expression=script_scope.other_expression,
+            instance_target=script_scope.instance_target,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
             macro_configuration=self.macro_configuration,
             source_path=source_path,
             event=f"script:{entry.name}",
             preserve_source_comments=True,
-            generated_line_offset=prefix.count("\n"),
+            generated_line_offset=prefix.count("\n") + len(_script_scope_lines()),
         )
         return (
             prefix
+            + "\n".join(_script_scope_lines())
+            + "\n"
             + f"{result.code}\n"
             + "\treturn GMRuntime.gml_undefined()\n\n"
             + "func gm2godot_callable():\n"
-            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n',
+            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
+            + "func gm2godot_scoped_callable():\n"
+            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call_scoped"))\n',
             True,
             result.source_map,
         )
@@ -475,14 +536,15 @@ class ScriptConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        entries = self._asset_entries()
+        all_entries = self._registry_entries()
+        entries = tuple(entry for entry in all_entries if entry.asset_type == "script")
         if not entries:
             self.log_callback(get_localized("Console_Convertor_Scripts_Complete"))
             return None
 
         write_gml_runtime(self.godot_project_path)
         os.makedirs(self.godot_scripts_path, exist_ok=True)
-        asset_names = {entry.name for entry in entries}
+        asset_names = {entry.name for entry in all_entries}
         extension_functions = self._extension_functions()
         extension_function_mappings = self._extension_function_mappings()
         registry_entries: list[ScriptRegistryEntry] = []

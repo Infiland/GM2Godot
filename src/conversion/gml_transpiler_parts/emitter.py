@@ -248,6 +248,21 @@ def _emit_expression(
         builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
             return builtin_call, _POSTFIX_PRECEDENCE
+        if (
+            isinstance(expr.callee, _Name)
+            and expr.callee.value not in local_names
+            and expr.callee.value in scope_context.asset_names
+        ):
+            args = ", ".join(
+                _emit_expression(arg, local_names, scope_context=scope_context)[0]
+                for arg in expr.args
+            )
+            return (
+                "GMRuntime.gml_script_call("
+                f"GMRuntime.gml_asset_get_index({json.dumps(expr.callee.value)}), "
+                f"[{args}], {scope_context.self_expression}, {scope_context.other_expression})",
+                _POSTFIX_PRECEDENCE,
+            )
         if isinstance(expr.callee, _Name):
             callee = _emit_name(
                 expr.callee.value,
@@ -608,6 +623,12 @@ def _emit_descriptor_call(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
             for arg in args[1:]
         )
+        if descriptor.name == "script_execute":
+            return (
+                f"GMRuntime.{descriptor.lowering_target}("
+                f"{emitted_first}, [{emitted_rest}], "
+                f"{scope_context.self_expression}, {scope_context.other_expression})"
+            )
         return f"GMRuntime.{descriptor.lowering_target}({emitted_first}, [{emitted_rest}])"
 
     if descriptor.lowering_kind == "runtime_variadic_all":

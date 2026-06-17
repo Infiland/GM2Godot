@@ -15,33 +15,40 @@ static func gml_method_call(method, array_args = null, offset = 0, num_args = nu
 	return method.gml_callv(call_args) if method is GMLMethod else method.callv(call_args)
 
 
-static func gml_script_execute(script, args = []):
+static func gml_script_execute(script, args = [], caller_self = null, caller_other = null):
 	var descriptor: Variant = _gml_script_resolve(script)
 	if descriptor == null:
 		return gml_unsupported_type_error("GML script_execute", script)
-	return gml_script_call(descriptor, args)
+	return gml_script_call(descriptor, args, caller_self, caller_other)
 
 
-static func gml_script_call(script_or_callable, args = []):
+static func gml_script_call(script_or_callable, args = [], caller_self = null, caller_other = null):
 	var call_args = args if typeof(args) == TYPE_ARRAY else [args]
 	var callable = script_or_callable
 	var use_legacy_arguments = false
+	var has_caller_scope = caller_self != null and not is_undefined(caller_self)
 	if typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable"):
-		callable = script_or_callable["callable"]
+		if has_caller_scope and script_or_callable.has("scoped_callable"):
+			callable = script_or_callable["scoped_callable"]
+		else:
+			callable = script_or_callable["callable"]
 		use_legacy_arguments = bool(script_or_callable.get("legacy_arguments", false))
 	if not is_method(callable):
 		return gml_unsupported_type_error("GML script callable", callable)
 	_gml_script_push_arguments(call_args)
+	var runtime_args = []
+	if has_caller_scope and typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("scoped_callable"):
+		runtime_args.append(caller_self)
+		runtime_args.append(caller_other if caller_other != null and not is_undefined(caller_other) else caller_self)
+	if not use_legacy_arguments:
+		runtime_args.append_array(call_args)
 	var result = null
-	if use_legacy_arguments:
-		result = callable.gml_callv([]) if callable is GMLMethod else callable.callv([])
-	else:
-		result = callable.gml_callv(call_args) if callable is GMLMethod else callable.callv(call_args)
+	result = callable.gml_callv(runtime_args) if callable is GMLMethod else callable.callv(runtime_args)
 	_gml_script_pop_arguments()
 	return result
 
 
-static func gml_script_register(script, callable, legacy_arguments = false):
+static func gml_script_register(script, callable, legacy_arguments = false, scoped_callable = null):
 	if not is_method(callable):
 		return false
 	var key = _gml_script_key(script)
@@ -50,6 +57,7 @@ static func gml_script_register(script, callable, legacy_arguments = false):
 	var name = _gml_script_name(script)
 	_gml_script_registry[key] = {
 		"callable": callable,
+		"scoped_callable": scoped_callable if is_method(scoped_callable) else callable,
 		"name": name,
 		"legacy_arguments": gml_bool(legacy_arguments)
 	}
@@ -67,7 +75,12 @@ static func gml_script_registry_set(entries):
 		if typeof(entry) != TYPE_DICTIONARY or not entry.has("callable"):
 			continue
 		var script = entry["id"] if entry.has("id") else entry.get("name", "")
-		gml_script_register(script, entry["callable"], bool(entry.get("legacy_arguments", false)))
+		gml_script_register(
+			script,
+			entry["callable"],
+			bool(entry.get("legacy_arguments", false)),
+			entry.get("scoped_callable", null)
+		)
 	return null
 
 
@@ -80,6 +93,7 @@ static func gml_script_registry_entries():
 			"id": int(key) if is_numeric(key) else key,
 			"name": str(entry.get("name", key)),
 			"callable": entry["callable"],
+			"scoped_callable": entry.get("scoped_callable", entry["callable"]),
 			"legacy_arguments": bool(entry.get("legacy_arguments", false))
 		})
 	return entries

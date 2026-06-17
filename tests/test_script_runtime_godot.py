@@ -55,12 +55,13 @@ def _write_gm_project(gm_dir: Path) -> None:
             "resources": [
                 _resource_entry("scripts", "scr_add"),
                 _resource_entry("scripts", "scr_modern"),
+                _resource_entry("scripts", "scr_context"),
             ],
             "RoomOrderNodes": [],
             "resourceType": "GMProject",
         },
     )
-    for script_name in ("scr_add", "scr_modern"):
+    for script_name in ("scr_add", "scr_modern", "scr_context"):
         _write_json(
             gm_dir / "scripts" / script_name / f"{script_name}.yy",
             {
@@ -74,6 +75,10 @@ def _write_gm_project(gm_dir: Path) -> None:
     _write_text(
         gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
         "function scr_modern(a, b = 4) { return a + b; }",
+    )
+    _write_text(
+        gm_dir / "scripts" / "scr_context" / "scr_context.gml",
+        "function scr_context(delta) { score += delta; return score; }",
     )
 
 
@@ -114,6 +119,7 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             func _run():
             \tvar legacy_id = GMRuntime.gml_asset_get_index("scr_add")
             \tvar modern_id = GMRuntime.gml_asset_get_index("scr_modern")
+            \tvar context_id = GMRuntime.gml_asset_get_index("scr_context")
 
             \tif not _check(GMRuntime.gml_script_exists(legacy_id), "script_exists failed"):
             \t\treturn
@@ -132,6 +138,11 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \tif not _check(method_result == 10, "callable lookup did not remain method-callable: " + str(method_result)):
             \t\treturn
             \tif not _check(GMRuntime.gml_script_execute(modern_id, [5]) == 9, "optional default argument failed"):
+            \t\treturn
+            \tGMRuntime.gml_variable_instance_set(self, "score", 10)
+            \tif not _check(GMRuntime.gml_script_execute(context_id, [5], self, self) == 15, "caller-scoped script result failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_variable_instance_get(self, "score") == 15, "caller-scoped script mutation failed"):
             \t\treturn
 
             \tvar method_a = GMRuntime.gml_method(self, Callable(self, "_identity"))

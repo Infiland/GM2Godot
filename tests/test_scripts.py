@@ -118,6 +118,7 @@ class TestScriptConverter(unittest.TestCase):
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
 
         self.assertIn("func _gm_script_call():", legacy_script)
+        self.assertIn("func _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null):", legacy_script)
         self.assertIn("# GM2Godot source:", legacy_script)
         self.assertIn("GMRuntime.gml_argument(0)", legacy_script)
         self.assertIn("GMRuntime.gml_argument(1)", legacy_script)
@@ -129,12 +130,47 @@ class TestScriptConverter(unittest.TestCase):
         )
         self.assertEqual(legacy_source_map["entries"][0]["source_line"], 1)
         self.assertIn("func gm2godot_callable():", modern_script)
+        self.assertIn("func gm2godot_scoped_callable():", modern_script)
         self.assertIn("func _gm_script_call(a = null, b = null):", modern_script)
+        self.assertIn(
+            "func _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null, a = null, b = null):",
+            modern_script,
+        )
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)
         self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_callable()', registry)
+        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_scoped_callable()', registry)
         self.assertIn('"legacy_arguments": true', registry)
         self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
+        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_scoped_callable()', registry)
         self.assertIn('"legacy_arguments": false', registry)
+
+    def test_script_body_uses_caller_instance_scope(self) -> None:
+        self._write_project()
+        project_path = self.gm_dir / "ScriptTest.yyp"
+        project = json.loads(project_path.read_text(encoding="utf-8"))
+        resources = cast(list[object], project["resources"])
+        resources.append(_resource_entry("scripts", "scr_move"))
+        _write_json(project_path, project)
+        _write_json(
+            self.gm_dir / "scripts" / "scr_move" / "scr_move.yy",
+            {
+                "%Name": "scr_move",
+                "name": "scr_move",
+                "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
+                "resourceType": "GMScript",
+            },
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_move" / "scr_move.gml",
+            "function scr_move(amount) { x += amount; return x; }",
+        )
+
+        self._converter().convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_move.gd").read_text(encoding="utf-8")
+        self.assertIn('GMRuntime.gml_variable_instance_get(_gml_script_self, "x")', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gml_script_self, "x"', script)
+        self.assertNotIn("position.x", script)
 
     def test_converts_scripts_with_mapped_extension_calls(self) -> None:
         self._write_project()

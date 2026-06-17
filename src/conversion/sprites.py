@@ -301,9 +301,10 @@ class SpriteConverter(BaseConverter):
         has_collision = collision_sub is not None
         load_steps = 2 if has_collision else 1
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
+        sprite_stem = generated_resource_stem(sprite_name)
 
         parts: list[str] = [f'[gd_scene format=3 load_steps={load_steps}]\n']
-        parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_name}.png" id="1"]\n')
+        parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_stem}.png" id="1"]\n')
 
         if has_collision:
             parts.append(f'\n{collision_sub}')
@@ -318,7 +319,6 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        sprite_stem = generated_resource_stem(sprite_name)
         tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
@@ -336,12 +336,13 @@ class SpriteConverter(BaseConverter):
         # ext_resources (one per frame) + SpriteFrames sub_resource + optional collision sub_resource
         load_steps = frame_count + 1 + (1 if has_collision else 0)
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
+        sprite_stem = generated_resource_stem(sprite_name)
 
         parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
 
         # One ext_resource per frame
         for i in range(1, frame_count + 1):
-            parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_name}_{i}.png" id="{i}"]\n')
+            parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_stem}_{i}.png" id="{i}"]\n')
 
         # Build frame entries for the SpriteFrames animation array
         durations = animation_data.get("frame_durations", [])
@@ -375,7 +376,6 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        sprite_stem = generated_resource_stem(sprite_name)
         tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")

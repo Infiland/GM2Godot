@@ -16,6 +16,27 @@ GODOT_VALIDATION_REPORT_RELATIVE_PATH = os.path.join(
 GodotValidationStatus: TypeAlias = Literal["passed", "failed", "skipped"]
 GodotOutputIssueSeverity: TypeAlias = Literal["warning", "error"]
 _LOADABLE_EXTENSIONS = (".gd", ".gdshader", ".tscn", ".tres")
+_IMPORTABLE_EXTENSIONS = (
+    ".bmp",
+    ".dds",
+    ".exr",
+    ".hdr",
+    ".jpg",
+    ".jpeg",
+    ".ktx",
+    ".ktx2",
+    ".mp3",
+    ".ogg",
+    ".otf",
+    ".png",
+    ".svg",
+    ".tga",
+    ".ttf",
+    ".wav",
+    ".webp",
+    ".woff",
+    ".woff2",
+)
 _GODOT_ERROR_PREFIXES = ("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")
 _GODOT_WARNING_PREFIXES = ("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")
 
@@ -39,6 +60,8 @@ class GodotValidationReport:
     project_path: str
     resource_paths: tuple[str, ...]
     returncode: int | None = None
+    import_returncode: int | None = None
+    import_output: str = ""
     output: str = ""
     message: str = ""
     output_issues: tuple[GodotOutputIssue, ...] = ()
@@ -52,6 +75,8 @@ class GodotValidationReport:
             "resource_count": len(self.resource_paths),
             "resource_paths": list(self.resource_paths),
             "returncode": self.returncode,
+            "import_returncode": self.import_returncode,
+            "import_output": self.import_output,
             "output": self.output,
             "output_issue_count": len(self.output_issues),
             "output_error_count": sum(1 for issue in self.output_issues if issue.severity == "error"),
@@ -109,6 +134,53 @@ def validate_generated_godot_project(
         )
 
     script = _validation_script(resource_paths)
+    import_output = ""
+    import_returncode: int | None = None
+    importable_asset_paths = generated_godot_importable_asset_paths(godot_project_path)
+    if importable_asset_paths:
+        try:
+            import_result = subprocess.run(
+                [
+                    resolved_binary,
+                    "--headless",
+                    "--path",
+                    godot_project_path,
+                    "--import",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+            return GodotValidationReport(
+                status="failed",
+                godot_binary=resolved_binary,
+                project_path=godot_project_path,
+                resource_paths=resource_paths,
+                import_output=output,
+                output=output,
+                message=f"Headless Godot import timed out after {timeout} seconds.",
+            )
+        import_output = import_result.stdout
+        import_returncode = import_result.returncode
+        import_output_issues = detect_godot_output_issues(import_output)
+        if import_result.returncode != 0 or import_output_issues:
+            return GodotValidationReport(
+                status="failed",
+                godot_binary=resolved_binary,
+                project_path=godot_project_path,
+                resource_paths=resource_paths,
+                returncode=import_result.returncode,
+                import_returncode=import_result.returncode,
+                import_output=import_output,
+                output=import_output,
+                message=_import_message(import_result.returncode, len(importable_asset_paths), import_output_issues),
+                output_issues=import_output_issues,
+            )
+
     with tempfile.TemporaryDirectory() as temp_dir:
         script_path = os.path.join(temp_dir, "gm2godot_validate.gd")
         with open(script_path, "w", encoding="utf-8") as script_file:
@@ -136,11 +208,14 @@ def validate_generated_godot_project(
                 godot_binary=resolved_binary,
                 project_path=godot_project_path,
                 resource_paths=resource_paths,
+                import_returncode=import_returncode,
+                import_output=import_output,
                 output=output,
                 message=f"Headless Godot validation timed out after {timeout} seconds.",
             )
 
-    output_issues = detect_godot_output_issues(result.stdout)
+    combined_output = _combine_output(import_output, result.stdout)
+    output_issues = detect_godot_output_issues(combined_output)
     status: GodotValidationStatus = (
         "passed" if result.returncode == 0 and not output_issues else "failed"
     )
@@ -151,7 +226,9 @@ def validate_generated_godot_project(
         project_path=godot_project_path,
         resource_paths=resource_paths,
         returncode=result.returncode,
-        output=result.stdout,
+        import_returncode=import_returncode,
+        import_output=import_output,
+        output=combined_output,
         message=_validation_message(result.returncode, len(resource_paths), output_issues),
         output_issues=output_issues,
     )
@@ -184,6 +261,21 @@ def generated_godot_resource_paths(godot_project_path: str) -> tuple[str, ...]:
     return tuple(sorted(resource_paths))
 
 
+def generated_godot_importable_asset_paths(godot_project_path: str) -> tuple[str, ...]:
+    asset_paths: list[str] = []
+    if not os.path.isdir(godot_project_path):
+        return ()
+    for root, dirs, files in os.walk(godot_project_path):
+        dirs[:] = sorted(directory for directory in dirs if directory != ".godot")
+        for filename in sorted(files):
+            if not filename.lower().endswith(_IMPORTABLE_EXTENSIONS):
+                continue
+            full_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(full_path, godot_project_path).replace(os.sep, "/")
+            asset_paths.append("res://" + relative_path)
+    return tuple(sorted(asset_paths))
+
+
 def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
     issues: list[GodotOutputIssue] = []
     for line in output.splitlines():
@@ -195,6 +287,32 @@ def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
         elif stripped.startswith(_GODOT_WARNING_PREFIXES):
             issues.append(GodotOutputIssue(severity="warning", line=stripped))
     return tuple(issues)
+
+
+def _combine_output(import_output: str, validation_output: str) -> str:
+    if not import_output:
+        return validation_output
+    if not validation_output:
+        return import_output
+    return import_output.rstrip() + "\n" + validation_output
+
+
+def _import_message(
+    returncode: int,
+    importable_asset_count: int,
+    output_issues: tuple[GodotOutputIssue, ...],
+) -> str:
+    if output_issues:
+        error_count = sum(1 for issue in output_issues if issue.severity == "error")
+        warning_count = sum(1 for issue in output_issues if issue.severity == "warning")
+        return (
+            "Headless Godot import reported "
+            f"{error_count} error(s) and {warning_count} warning(s) "
+            f"while importing {importable_asset_count} generated asset(s)."
+        )
+    if returncode == 0:
+        return f"Headless Godot import completed for {importable_asset_count} generated asset(s)."
+    return "Headless Godot import failed while importing generated assets."
 
 
 def _validation_message(

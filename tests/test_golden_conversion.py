@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import cli
+from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 
 
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "golden" / "basic_scripts"
@@ -31,6 +32,21 @@ class TestGoldenConversion(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_basic_scripts_conversion_matches_golden_snapshot(self) -> None:
+        godot_dir = self._convert_basic_scripts_fixture()
+        actual = _snapshot_output(godot_dir, FIXTURE_ROOT)
+        expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
+    def test_basic_scripts_godot_validation_has_no_warnings_or_errors(self) -> None:
+        godot_dir = self._convert_basic_scripts_fixture()
+
+        report = validate_generated_godot_project(str(godot_dir))
+
+        self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.output_issues, (), report.output)
+
+    def _convert_basic_scripts_fixture(self) -> Path:
         godot_dir = self.temp_dir / "godot"
         report_dir = self.temp_dir / "reports"
         godot_dir.mkdir()
@@ -62,9 +78,7 @@ class TestGoldenConversion(unittest.TestCase):
         )
 
         self.assertEqual(exit_code, 0)
-        actual = _snapshot_output(godot_dir, FIXTURE_ROOT)
-        expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(actual, expected)
+        return godot_dir
 
 
 def _snapshot_output(godot_dir: Path, gm_project_dir: Path) -> dict[str, object]:

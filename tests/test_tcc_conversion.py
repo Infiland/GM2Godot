@@ -15,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.generated_paths import generated_resource_stem
+from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
 
 
@@ -205,6 +206,13 @@ class TestTCCConversion(unittest.TestCase):
     def test_no_tracebacks_in_logs(self):
         joined = "\n".join(str(msg) for msg in self.logs)
         self.assertNotIn("Traceback", joined, "Conversion produced a Python traceback")
+
+    @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
+    def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
+        report = validate_generated_godot_project(self.godot_dir)
+
+        self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.output_issues, (), report.output)
 
 
 if __name__ == "__main__":

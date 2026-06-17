@@ -1,13 +1,13 @@
 {
   "files": {
-    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
+    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"scoped_callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_scoped_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"scoped_callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_scoped_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
     "project.godot": "[application]\nconfig/name=\"Golden Fixture\"\n\n[autoload]\nGMRuntime=\"*res://gm2godot/managers/gm_runtime_manager.gd\"\nGMAssets=\"*res://gm2godot/managers/gm_assets.gd\"\nGMRooms=\"*res://gm2godot/managers/gm_rooms.gd\"\nGMInstances=\"*res://gm2godot/managers/gm_instances.gd\"\nGMEvents=\"*res://gm2godot/managers/gm_events.gd\"\nGMDraw=\"*res://gm2godot/managers/gm_draw.gd\"\nGMInput=\"*res://gm2godot/managers/gm_input.gd\"\nGMAudio=\"*res://gm2godot/managers/gm_audio.gd\"\nGMAsync=\"*res://gm2godot/managers/gm_async.gd\"\nGMPlatform=\"*res://gm2godot/managers/gm_platform.gd\"\n",
-    "scripts/game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n",
-    "scripts/game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n"
+    "scripts/game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn _gm_script_call_scoped(self, self)\n\nfunc _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null):\n\tif _gml_script_self == null or GMRuntime.is_undefined(_gml_script_self): _gml_script_self = self\n\tif _gml_script_other == null or GMRuntime.is_undefined(_gml_script_other): _gml_script_other = _gml_script_self\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n\nfunc gm2godot_scoped_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call_scoped\"))\n",
+    "scripts/game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\treturn _gm_script_call_scoped(self, self, a, b)\n\nfunc _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null, a = null, b = null):\n\tif _gml_script_self == null or GMRuntime.is_undefined(_gml_script_self): _gml_script_self = self\n\tif _gml_script_other == null or GMRuntime.is_undefined(_gml_script_other): _gml_script_other = _gml_script_self\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n\nfunc gm2godot_scoped_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call_scoped\"))\n"
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:b617b26cbefdb24656d08ec577a2dd835a8692d0edf1f640f428b897b099a154",
+    "gm2godot/gml_runtime.gd": "sha256:f7926b4ec9389c06d73299a9571d693f90b8885884267fa8dab37248ef43dcf1",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
     "gm2godot/managers/gm_async.gd": "sha256:d0a73997476f0e889892f85a6c343fc5b44fecdf9fa547e943902632aedf9df3",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",
@@ -367,7 +367,7 @@
       "entries": [
         {
           "event": "script:scr_add",
-          "generated_line": 9,
+          "generated_line": 14,
           "generated_text": "return GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))",
           "source_column": 1,
           "source_line": 1,
@@ -383,7 +383,7 @@
       "entries": [
         {
           "event": "script:scr_stats",
-          "generated_line": 11,
+          "generated_line": 16,
           "generated_text": "var values = [a]",
           "source_column": 5,
           "source_line": 2,
@@ -392,7 +392,7 @@
         },
         {
           "event": "script:scr_stats",
-          "generated_line": 12,
+          "generated_line": 17,
           "generated_text": "GMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])",
           "source_column": 5,
           "source_line": 3,
@@ -401,7 +401,7 @@
         },
         {
           "event": "script:scr_stats",
-          "generated_line": 13,
+          "generated_line": 18,
           "generated_text": "return GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)",
           "source_column": 5,
           "source_line": 4,

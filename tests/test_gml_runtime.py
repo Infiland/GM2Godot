@@ -433,7 +433,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("physics_joint_delete(joint)", "GMRuntime.gml_physics_joint_delete(joint)"),
     RuntimeValueParityCase(
         "script_execute(scr_add, 1, 2)",
-        'GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index("scr_add"), [1, 2])',
+        'GMRuntime.gml_script_execute(GMRuntime.gml_asset_get_index("scr_add"), [1, 2], self, other)',
     ),
     RuntimeValueParityCase("script_exists(scr_add)", 'GMRuntime.gml_script_exists(GMRuntime.gml_asset_get_index("scr_add"))'),
     RuntimeValueParityCase("script_get_name(scr_add)", 'GMRuntime.gml_script_get_name(GMRuntime.gml_asset_get_index("scr_add"))'),

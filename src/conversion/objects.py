@@ -1,8 +1,9 @@
+# pyright: reportPrivateUsage=false
 import os
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TypedDict, cast
 
 from src.localization import get_localized
@@ -25,11 +26,65 @@ from src.conversion.gml_transpiler import (
     transpile_gml_code_with_source_map,
     write_gml_source_map,
 )
-from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
+from src.conversion.gml_transpiler_parts.constants import (
+    _ASSIGNMENT_OPERATORS,
+    _BUILTIN_GLOBAL_VARIABLES,
+    _BUILTIN_INSTANCE_VARIABLES,
+    _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+    _GML_LITERAL_IDENTIFIERS,
+)
+from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.model import _Token
+from src.conversion.gml_transpiler_parts.tokens import _tokenize
+from src.conversion.script_generator import (
+    ObjectRuntimeConfig,
+    SpriteRuntimeConfig,
+    _valid_instance_variables,
+    generate_script_content,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
+)
+_SCRIPT_ASSIGNMENT_OPERATORS = frozenset(_ASSIGNMENT_OPERATORS) | frozenset({"++", "--"})
+_SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS = (
+    _BUILTIN_GLOBAL_VARIABLES
+    | _BUILTIN_INSTANCE_VARIABLES
+    | _GML_LITERAL_IDENTIFIERS
+    | frozenset(
+        {
+            "break",
+            "case",
+            "catch",
+            "continue",
+            "default",
+            "delete",
+            "do",
+            "else",
+            "enum",
+            "exit",
+            "finally",
+            "for",
+            "function",
+            "global",
+            "globalvar",
+            "if",
+            "new",
+            "repeat",
+            "return",
+            "self",
+            "static",
+            "switch",
+            "then",
+            "throw",
+            "try",
+            "until",
+            "var",
+            "while",
+            "with",
+        }
+    )
 )
 
 
@@ -49,6 +104,13 @@ class ObjectProcessResult(TypedDict):
     event_count: int
 
 
+class ObjectEventSource(TypedDict):
+    mapping: EventMapping
+    source_path: str
+    source: str
+    inherited_event_call: str | None
+
+
 def _line_offset_for_block(script_content: str, block: str) -> int:
     script_lines = script_content.splitlines()
     block_lines = block.splitlines()
@@ -62,6 +124,124 @@ def _line_offset_for_block(script_content: str, block: str) -> int:
         if line == first_line:
             return index
     return 0
+
+
+def _script_assigned_instance_variable_names(
+    source: str,
+    *,
+    asset_names: set[str],
+) -> set[str]:
+    try:
+        tokens = _tokenize(preprocess_gml_source(source).source)
+    except GMLTranspileError:
+        return set()
+
+    assigned_names: set[str] = set()
+    local_names = _script_function_parameter_names(tokens)
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "IDENT" and token.value == "var":
+            local_names.update(_script_var_declaration_names(tokens, index + 1))
+        if token.kind == "IDENT":
+            name = token.value
+            previous_token = tokens[index - 1] if index > 0 else None
+            next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+            if (
+                name not in local_names
+                and name not in asset_names
+                and name not in _SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS
+                and (previous_token is None or previous_token.value != ".")
+                and _script_identifier_is_assigned(previous_token, next_token)
+            ):
+                assigned_names.add(name)
+        index += 1
+    return assigned_names
+
+
+def _script_identifier_is_assigned(previous_token: _Token | None, next_token: _Token | None) -> bool:
+    previous_value = previous_token.value if previous_token is not None else None
+    next_value = next_token.value if next_token is not None else None
+    return (
+        next_value in _SCRIPT_ASSIGNMENT_OPERATORS
+        or previous_value in {"++", "--"}
+    )
+
+
+def _script_var_declaration_names(tokens: Sequence[_Token], start: int) -> set[str]:
+    names: set[str] = set()
+    index = start
+    depth = 0
+    expect_name = True
+    while index < len(tokens):
+        token = tokens[index]
+        value = token.value
+        kind = token.kind
+        if kind == "EOF":
+            break
+        if depth == 0 and value in {";", "\n"}:
+            break
+        if expect_name:
+            if kind == "IDENT":
+                names.add(str(value))
+                expect_name = False
+            index += 1
+            continue
+        if value in {"(", "[", "{"}:
+            depth += 1
+        elif value in {")", "]", "}"}:
+            if depth <= 0:
+                break
+            depth -= 1
+        elif depth == 0 and value == ",":
+            expect_name = True
+        index += 1
+    return names
+
+
+def _script_function_parameter_names(tokens: Sequence[_Token]) -> set[str]:
+    names: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "IDENT" and token.value == "function":
+            open_index = _next_token_value_index(tokens, index + 1, "(")
+            if open_index is not None:
+                close_index = _matching_token_index(tokens, open_index, "(", ")")
+                for parameter_index in range(open_index + 1, close_index):
+                    parameter = tokens[parameter_index]
+                    if parameter.kind == "IDENT":
+                        names.add(parameter.value)
+                index = close_index
+        index += 1
+    return names
+
+
+def _next_token_value_index(tokens: Sequence[_Token], start: int, value: str) -> int | None:
+    for index in range(start, len(tokens)):
+        token = tokens[index]
+        if token.kind == "EOF":
+            return None
+        if token.value == value:
+            return index
+    return None
+
+
+def _matching_token_index(tokens: Sequence[_Token], open_index: int, open_value: str, close_value: str) -> int:
+    depth = 0
+    for index in range(open_index, len(tokens)):
+        value = tokens[index].value
+        if value == open_value:
+            depth += 1
+        elif value == close_value:
+            depth -= 1
+            if depth == 0:
+                return index
+    return max(open_index, len(tokens) - 1)
 
 
 class ObjectConverter(BaseConverter):
@@ -78,6 +258,7 @@ class ObjectConverter(BaseConverter):
         self.godot_objects_path = os.path.join(self.godot_project_path, 'objects')
         self.macro_configuration = macro_configuration
         self._project_asset_names_cache: set[str] | None = None
+        self._project_script_instance_variables_cache: set[str] | None = None
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of object name -> subfolder.
@@ -166,6 +347,36 @@ class ObjectConverter(BaseConverter):
                 continue
         self._project_asset_names_cache = asset_names
         return set(asset_names)
+
+    def _get_project_script_instance_variables(self, asset_names: set[str]) -> set[str]:
+        """Return bare script-assigned names that execute in caller instance scope."""
+        if self._project_script_instance_variables_cache is not None:
+            return set(self._project_script_instance_variables_cache)
+
+        script_instance_variables: set[str] = set()
+        scripts_root = os.path.join(self.gm_project_path, "scripts")
+        if not os.path.isdir(scripts_root):
+            self._project_script_instance_variables_cache = script_instance_variables
+            return set(script_instance_variables)
+
+        for dirpath, _, filenames in os.walk(scripts_root):
+            for filename in filenames:
+                if not filename.endswith(".gml"):
+                    continue
+                source_path = os.path.join(dirpath, filename)
+                try:
+                    with open(source_path, "r", encoding="utf-8") as source_file:
+                        source = source_file.read()
+                except OSError:
+                    continue
+                script_instance_variables.update(
+                    _script_assigned_instance_variable_names(
+                        source,
+                        asset_names=asset_names,
+                    )
+                )
+        self._project_script_instance_variables_cache = script_instance_variables
+        return set(script_instance_variables)
 
     def _parse_object_yy(self, object_name: str) -> ParsedObject | None:
         """Parse an object .yy file and extract the sprite reference and event list.
@@ -301,12 +512,17 @@ class ObjectConverter(BaseConverter):
         event_list: list[JsonDict],
         inherited_event_functions: set[str] | None = None,
         asset_names: set[str] | None = None,
+        project_script_instance_variables: set[str] | None = None,
+        direct_instance_variables: set[str] | None = None,
+        direct_reference_names: set[str] | None = None,
     ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap]]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
-        instance_variables: set[str] = set()
+        instance_variables: set[str] = set(project_script_instance_variables or set())
         inherited_functions = inherited_event_functions or set()
+        source_entries: list[ObjectEventSource] = []
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
+        asset_name_set = set(asset_names or set())
 
         for event in event_list or []:
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
@@ -334,6 +550,36 @@ class ObjectConverter(BaseConverter):
                 if mapping.godot_func in inherited_functions
                 else None
             )
+            source_entries.append(
+                {
+                    "mapping": mapping,
+                    "source_path": source_path,
+                    "source": source,
+                    "inherited_event_call": inherited_event_call,
+                }
+            )
+            instance_variables.update(
+                _script_assigned_instance_variable_names(
+                    source,
+                    asset_names=asset_name_set,
+                )
+            )
+
+        direct_names = (
+            set(_valid_instance_variables(instance_variables))
+            if direct_instance_variables is None
+            else set(direct_instance_variables)
+        )
+        direct_names.update(direct_reference_names or set())
+        dynamic_names = (
+            set(instance_variables)
+            | _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+        ) - direct_names
+
+        for entry in source_entries:
+            mapping = entry["mapping"]
+            source_path = entry["source_path"]
+            source = entry["source"]
             try:
                 self._record_event_source_diagnostics(
                     source,
@@ -344,13 +590,16 @@ class ObjectConverter(BaseConverter):
                 result = transpile_gml_code_with_source_map(
                     source,
                     instance_variables=instance_variables,
-                    inherited_event_call=inherited_event_call,
+                    inherited_event_call=entry["inherited_event_call"],
                     macro_configuration=self.macro_configuration,
                     asset_names=asset_names,
                     static_scope_prefix=f"{object_name}.{mapping.godot_func}",
                     source_path=source_path,
                     event=mapping.godot_func,
                     preserve_source_comments=True,
+                    instance_target="self",
+                    direct_instance_names=direct_names,
+                    dynamic_instance_names=dynamic_names,
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
@@ -484,6 +733,7 @@ class ObjectConverter(BaseConverter):
         subfolder: str = "",
         sprite_scene_paths: Mapping[str, str] | None = None,
         asset_names: set[str] | None = None,
+        project_script_instance_variables: set[str] | None = None,
     ) -> ObjectProcessResult | None:
         """Process a single object: parse .yy, generate scene and script, write files.
 
@@ -527,11 +777,18 @@ class ObjectConverter(BaseConverter):
             event_list,
             inherited_event_functions=inherited_event_functions,
             asset_names=asset_names,
+            project_script_instance_variables=(
+                project_script_instance_variables
+                if parent_object_name is None
+                else None
+            ),
+            direct_instance_variables=set() if parent_object_name is not None else None,
+            direct_reference_names=set(sprite_scene_paths or {}),
         )
         script_content = generate_script_content(
             event_list,
             code_bodies=code_bodies,
-            instance_variables=instance_variables,
+            instance_variables=instance_variables if parent_object_name is None else set(),
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,
@@ -615,6 +872,7 @@ class ObjectConverter(BaseConverter):
         processed = 0
         sprite_scene_paths = self._get_available_sprite_scene_paths()
         asset_names = self._get_project_asset_names()
+        project_script_instance_variables = self._get_project_script_instance_variables(asset_names)
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
@@ -624,6 +882,7 @@ class ObjectConverter(BaseConverter):
                     object_subfolders.get(name, ""),
                     sprite_scene_paths,
                     asset_names,
+                    project_script_instance_variables,
                 ): name
                 for name in object_names
             }

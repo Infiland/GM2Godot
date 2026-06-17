@@ -67,7 +67,12 @@ from .model import (
     _Ternary,
     _Unary,
 )
-from .utils import _normalize_local_names, _normalize_scope_context, _unwrap_grouped_expression
+from .utils import (
+    _normalize_local_names,
+    _normalize_scope_context,
+    _prefix_multiline,
+    _unwrap_grouped_expression,
+)
 
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_create_layer": frozenset({3}),
@@ -142,14 +147,42 @@ def _emit_name(
                 "GMRuntime.gml_struct_get("
                 f"GMRuntime.gml_global_scope(), {json.dumps(value)})"
             ), _POSTFIX_PRECEDENCE
+        if value in _INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
+            return _INSTANCE_NAME_REPLACEMENTS[value], _POSTFIX_PRECEDENCE
+        if value in _BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
+            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+        if _is_gdscript_constant_identifier(value):
+            return value, _PRIMARY_PRECEDENCE
+        if value in scope_context.direct_instance_names:
+            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+        if value in scope_context.dynamic_instance_names and _is_plain_identifier(value):
+            return (
+                "GMRuntime.gml_variable_instance_get("
+                f"{scope_context.self_expression}, {json.dumps(value)})"
+            ), _POSTFIX_PRECEDENCE
         if scope_context.instance_target is not None and _is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.instance_target}, {json.dumps(value)})"
             ), _POSTFIX_PRECEDENCE
-        value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
     value = _sanitize_gdscript_identifier(value)
     return value, _PRIMARY_PRECEDENCE
+
+
+def _is_gdscript_constant_identifier(value: str) -> bool:
+    return (
+        value in {"INF", "NAN", "PI"}
+        or value.startswith("KEY_")
+        or value.startswith("MOUSE_BUTTON_")
+        or value.startswith("JOY_")
+    )
+
+
+def _uses_direct_builtin_instance_members(scope_context: _ScopeContext) -> bool:
+    return (
+        scope_context.self_expression == "self"
+        and scope_context.instance_target in {None, "self"}
+    )
 
 
 def _name_resolves_to_global(
@@ -262,15 +295,15 @@ def _emit_expression(
         builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
             return builtin_call, _POSTFIX_PRECEDENCE
+        args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
         if (
             isinstance(expr.callee, _Name)
             and expr.callee.value not in local_names
             and expr.callee.value in scope_context.asset_names
         ):
-            args = ", ".join(
-                _emit_expression(arg, local_names, scope_context=scope_context)[0]
-                for arg in expr.args
-            )
             return (
                 "GMRuntime.gml_script_call("
                 f"GMRuntime.gml_asset_get_index({json.dumps(expr.callee.value)}), "
@@ -278,24 +311,31 @@ def _emit_expression(
                 _POSTFIX_PRECEDENCE,
             )
         if isinstance(expr.callee, _Name):
-            callee = _emit_name(
-                expr.callee.value,
-                local_names,
-                scope_context,
-                resolve_asset_names=False,
-            )[0]
-        else:
-            callee = _emit_child(
-                expr.callee,
+            if expr.callee.value not in local_names:
+                return (
+                    "GMRuntime.gml_call_named("
+                    f"{json.dumps(expr.callee.value)}, [{args}], "
+                    f"{scope_context.self_expression}, {scope_context.other_expression})",
+                    _POSTFIX_PRECEDENCE,
+                )
+            callee = _emit_name(expr.callee.value, local_names, scope_context)[0]
+            return (
+                "GMRuntime.gml_call_value("
+                f"{callee}, [{args}], {scope_context.self_expression}, "
+                f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
                 _POSTFIX_PRECEDENCE,
-                local_names=local_names,
-                scope_context=scope_context,
             )
-        args = ", ".join(
-            _emit_expression(arg, local_names, scope_context=scope_context)[0]
-            for arg in expr.args
+        callee = _emit_child(
+            expr.callee,
+            _POSTFIX_PRECEDENCE,
+            local_names=local_names,
+            scope_context=scope_context,
         )
-        return f"{callee}({args})", _POSTFIX_PRECEDENCE
+        return (
+            "GMRuntime.gml_call_value("
+            f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})",
+            _POSTFIX_PRECEDENCE,
+        )
     if isinstance(expr, _ArrayLiteral):
         elements = ", ".join(
             _emit_expression(element, local_names, scope_context=scope_context)[0]
@@ -422,8 +462,21 @@ def _emit_function_literal(
         parameter_names,
         scope_context=scope_context,
     )
-    body = "; ".join([*default_lines, *expr.body_lines])
-    return f"func{name}({parameters}): {body}"
+    body_lines = [*default_lines, *expr.body_lines]
+    if _can_emit_single_line_function_literal(body_lines):
+        return f"func{name}({parameters}): {body_lines[0]}"
+    body = "\n".join(_prefix_multiline(line, "\t") for line in body_lines)
+    return f"func{name}({parameters}):\n{body}\n"
+
+
+def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
+    if len(body_lines) != 1:
+        return False
+    line = body_lines[0]
+    if "\n" in line:
+        return False
+    stripped = line.lstrip("\t")
+    return stripped == "pass" or stripped == "return" or stripped.startswith("return ")
 
 
 def _emit_struct_field(

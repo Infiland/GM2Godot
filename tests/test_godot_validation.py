@@ -115,6 +115,21 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(issues[0].line, "SCRIPT ERROR: Parse Error: Identifier not declared.")
         self.assertEqual(issues[1].severity, "warning")
 
+    def test_detects_colored_godot_warning_and_error_output(self) -> None:
+        issues = detect_godot_output_issues(
+            "\n".join(
+                [
+                    "\x1b[1;31mERROR:\x1b[0;91m Failed loading resource.",
+                    "\x1b[1;33mWARNING:\x1b[0;93m Scan thread aborted...",
+                ]
+            )
+        )
+
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(issues[0].severity, "error")
+        self.assertEqual(issues[0].line, "ERROR: Failed loading resource.")
+        self.assertEqual(issues[1].severity, "warning")
+
     def test_validation_fails_when_godot_outputs_error_with_zero_exit(self) -> None:
         project_dir = self._write_project()
         fake_godot = self.temp_dir / "fake-godot"
@@ -165,6 +180,33 @@ class TestGodotValidation(unittest.TestCase):
         self.assertIn("GM2GODOT_IMPORT_OK", report.import_output)
         self.assertIn("GM2GODOT_VALIDATION_OK 3", report.output)
 
+    def test_import_pass_uses_recovery_mode(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        args_file = self.temp_dir / "import-args.txt"
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            f"    printf '%s\\n' \"$@\" > '{args_file}'\n"
+            "    printf '%s\\n' 'GM2GODOT_IMPORT_OK'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'GM2GODOT_VALIDATION_OK 3'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertIn("--recovery-mode", args_file.read_text(encoding="utf-8").splitlines())
+
     def test_import_only_validation_skips_resource_load_script(self) -> None:
         project_dir = self._write_png_sprite_project()
         fake_godot = self.temp_dir / "fake-godot"
@@ -193,6 +235,87 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(report.import_returncode, 0)
         self.assertIn("GM2GODOT_IMPORT_OK", report.output)
         self.assertIn("skipped loading 3 generated scripts/scenes/resources", report.message)
+
+    def test_import_only_validation_falls_back_without_audio_after_clean_nonzero_import(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        (project_dir / "sounds").mkdir()
+        (project_dir / "sounds" / "theme.mp3").write_bytes(b"fake mp3")
+        fake_godot = self.temp_dir / "fake-godot"
+        marker = self.temp_dir / "first-import-done"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            f"    if [ ! -f '{marker}' ]; then\n"
+            f"      touch '{marker}'\n"
+            "      printf '%s\\n' 'Godot exited without diagnostics during audio import.'\n"
+            "      exit 11\n"
+            "    fi\n"
+            "    printf '%s\\n' 'GM2GODOT_NO_AUDIO_IMPORT_OK'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'resource loading should have been skipped'\n"
+            "exit 2\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertEqual(report.import_returncode, 0)
+        self.assertIn("GM2GODOT_NO_AUDIO_IMPORT_OK", report.output)
+        self.assertIn("no-audio import fallback completed", report.message)
+
+    def test_import_only_timeout_passes_when_no_warning_or_error_output(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' 'Godot Engine v4.6.3.stable.official'\n"
+            "sleep 5\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            timeout=1,
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertIsNone(report.import_returncode)
+        self.assertEqual(report.output_issues, ())
+        self.assertIn("without warning/error output", report.message)
+
+    def test_import_only_timeout_fails_when_warning_or_error_output_exists(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' 'SCRIPT ERROR: Parse Error: Identifier not declared.'\n"
+            "sleep 5\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            timeout=1,
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(len(report.output_issues), 1)
+        self.assertEqual(report.output_issues[0].severity, "error")
 
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_headless_godot_validation_loads_generated_resources(self) -> None:

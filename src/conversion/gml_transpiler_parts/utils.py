@@ -58,7 +58,11 @@ def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[li
 
 
 def _indent_lines(lines: Iterable[str]) -> list[str]:
-    return [f"\t{line}" if line else "" for line in lines]
+    return [_prefix_multiline(line, "\t") if line else "" for line in lines]
+
+
+def _prefix_multiline(text: str, prefix: str) -> str:
+    return "\n".join(f"{prefix}{line}" if line else "" for line in text.split("\n"))
 
 
 def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable[str]) -> list[str]:
@@ -189,6 +193,8 @@ def _scope_context_with_global_names(
         global_scope=scope_context.global_scope if top_level_global_scope is None else top_level_global_scope,
         global_names=frozenset(names),
         asset_names=frozenset(assets),
+        direct_instance_names=scope_context.direct_instance_names,
+        dynamic_instance_names=scope_context.dynamic_instance_names,
         static_scope=scope_context.static_scope,
         static_names=scope_context.static_names,
         static_prefix=scope_context.static_prefix if static_prefix is None else static_prefix,

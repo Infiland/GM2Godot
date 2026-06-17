@@ -17,6 +17,7 @@ from .source_map import (
 )
 from .statement_parser import _StatementParser
 from .tokens import _tokenize
+from .utils import _prefix_multiline
 
 
 def transpile_gml_code(
@@ -41,6 +42,8 @@ def transpile_gml_code(
     self_expression: str = "self",
     other_expression: str = "other",
     instance_target: str | None = None,
+    direct_instance_names: Iterable[str] | None = None,
+    dynamic_instance_names: Iterable[str] | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     return transpile_gml_code_with_source_map(
@@ -65,6 +68,8 @@ def transpile_gml_code(
         self_expression=self_expression,
         other_expression=other_expression,
         instance_target=instance_target,
+        direct_instance_names=direct_instance_names,
+        dynamic_instance_names=dynamic_instance_names,
     ).code
 
 
@@ -90,6 +95,8 @@ def transpile_gml_code_with_source_map(
     self_expression: str = "self",
     other_expression: str = "other",
     instance_target: str | None = None,
+    direct_instance_names: Iterable[str] | None = None,
+    dynamic_instance_names: Iterable[str] | None = None,
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(
@@ -112,6 +119,8 @@ def transpile_gml_code_with_source_map(
             self_expression=self_expression,
             other_expression=other_expression,
             instance_target=instance_target,
+            direct_instance_names=frozenset(direct_instance_names or ()),
+            dynamic_instance_names=frozenset(dynamic_instance_names or ()),
         ),
         extension_functions=normalize_extension_functions(extension_functions),
         extension_function_mappings=normalize_extension_function_mappings(extension_function_mappings),
@@ -121,7 +130,7 @@ def transpile_gml_code_with_source_map(
     if not lines:
         code = f"{indent}pass"
     else:
-        code = "\n".join(f"{indent}{line}" if line else "" for line in lines)
+        code = "\n".join(_prefix_multiline(line, indent) if line else "" for line in lines)
 
     if preserve_source_comments:
         header = render_gml_source_header(source_path=None, event=None, source=source)

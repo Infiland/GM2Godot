@@ -524,12 +524,14 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
     def test_native_node2d_members_are_not_redeclared(self):
         content = generate_script_content(
             [{"eventType": 0, "eventNum": 0}],
-            code_bodies={"_ready": "\trotation = 0\n\tscore = 1"},
-            instance_variables={"rotation", "score"},
+            code_bodies={"_ready": "\trotation = 0\n\tdraw = true\n\tscore = 1"},
+            instance_variables={"draw", "rotation", "score"},
         )
 
         self.assertIn("\trotation = 0", content)
+        self.assertIn("\tdraw = true", content)
         self.assertIn("\n\nvar score\n", content)
+        self.assertNotIn("\n\nvar draw\n", content)
         self.assertNotIn("\n\nvar rotation\n", content)
 
 

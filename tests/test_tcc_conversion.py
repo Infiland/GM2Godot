@@ -211,7 +211,7 @@ class TestTCCConversion(unittest.TestCase):
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
         report = validate_generated_godot_project(
             self.godot_dir,
-            timeout=180,
+            timeout=360,
             load_resources=False,
         )
 

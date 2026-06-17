@@ -15,6 +15,10 @@ static func gml_array_set(array_value, index, value):
 	var resolved_index = _to_array_index(index)
 	if resolved_index < 0:
 		return gml_undefined()
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array set", array_value)
+	if resolved_index >= array_value.size():
+		array_value.resize(resolved_index + 1)
 	array_value[resolved_index] = value
 	return value
 

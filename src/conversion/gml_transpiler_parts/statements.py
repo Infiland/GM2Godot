@@ -675,6 +675,7 @@ def _transpile_statement(
                 enum_names=enum_names,
                 scope_context=scope_context,
                 macro_values=macro_values,
+                generated_counter=generated_counter,
             )
             return [*prelude_lines, *increment_lines, *assignment_lines]
         _reject_constant_assignment_target_name(target, macro_values.keys())
@@ -871,6 +872,19 @@ def _transpile_statement(
                 ]
             raise GMLTranspileError("Unsupported alarm assignment operator")
         _record_instance_assignment(target, local_names, instance_variables)
+        array_writeback_lines = _member_backed_array_assignment_lines(
+            target_expr,
+            local_names,
+            instance_variables,
+            scope_context,
+            generated_counter,
+            value,
+            operator,
+            prelude_lines,
+            value_prelude_lines,
+        )
+        if array_writeback_lines is not None:
+            return array_writeback_lines
         target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
         if isinstance(target_expr, _Index):
             container = _emit_expression(
@@ -2307,6 +2321,74 @@ def _assignment_target_reader_writer(
     raise GMLTranspileError("Assignment target must be assignable")
 
 
+def _member_backed_array_assignment_lines(
+    target_expr: _Expression,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    scope_context: _ScopeContext,
+    generated_counter: list[int],
+    value: str,
+    operator: str,
+    prelude_lines: list[str],
+    value_prelude_lines: Iterable[str],
+) -> list[str] | None:
+    if not isinstance(target_expr, _Index | _ArrayRefAccess):
+        return None
+    if not isinstance(target_expr.target, (_Member, _StructAccess)):
+        return None
+
+    container_reader, container_writer = _assignment_target_reader_writer(
+        "",
+        target_expr.target,
+        local_names,
+        instance_variables,
+        scope_context,
+        generated_counter,
+        prelude_lines,
+    )
+    index = _emit_expression(
+        target_expr.index,
+        local_names,
+        scope_context=scope_context,
+    )[0]
+    index = _cache_assignment_part(
+        prelude_lines,
+        target_expr.index,
+        index,
+        generated_counter,
+        "_gml_array_index",
+    )
+    container_name = _next_generated_name_from_counter(generated_counter, "_gml_array_target")
+    setup_lines = [
+        *prelude_lines,
+        f"var {container_name} = {container_reader}",
+        f"if GMRuntime.is_undefined({container_name}):",
+        f"\t{container_name} = []",
+    ]
+    writeback_lines = [
+        f"GMRuntime.gml_array_set({container_name}, {index}, {value})",
+        *container_writer(container_name),
+    ]
+    if operator in ("=", ":="):
+        return [*setup_lines, *writeback_lines]
+    if operator == "??=":
+        return _nullish_assignment_lines(
+            setup_lines,
+            f"GMRuntime.gml_array_get({container_name}, {index})",
+            value_prelude_lines,
+            writeback_lines,
+        )
+    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+        return [
+            *setup_lines,
+            f"GMRuntime.gml_array_set({container_name}, {index}, "
+            f"GMRuntime.{helper}(GMRuntime.gml_array_get({container_name}, {index}), {value}))",
+            *container_writer(container_name),
+        ]
+    raise GMLTranspileError("Unsupported member-backed array assignment operator")
+
+
 def _transpile_assignment_expression_to_temp(
     source: str,
     local_names: MutableSet[str],
@@ -2455,9 +2537,11 @@ def _transpile_assignment_to_emitted_value(
     enum_names: Iterable[str] | None = None,
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
 ) -> list[str]:
     scope_context = _normalize_scope_context(scope_context)
     macro_values = macro_values or {}
+    generated_counter = generated_counter if generated_counter is not None else [0]
     _reject_constant_assignment_target_name(target, macro_values.keys())
     target_expr = _parse_gml_expression(
         target,
@@ -2512,6 +2596,19 @@ def _transpile_assignment_to_emitted_value(
         index = _alarm_array_index(target_expr, local_names, scope_context)
         return [_alarm_array_set(scope_context, index, value)]
     _record_instance_assignment(target, local_names, instance_variables)
+    array_writeback_lines = _member_backed_array_assignment_lines(
+        target_expr,
+        local_names,
+        instance_variables,
+        scope_context,
+        generated_counter,
+        value,
+        "=",
+        [],
+        (),
+    )
+    if array_writeback_lines is not None:
+        return array_writeback_lines
     if isinstance(target_expr, _Index):
         container = _emit_expression(
             target_expr.target,

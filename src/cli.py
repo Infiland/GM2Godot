@@ -77,6 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnostics = _validate_project(
             args.godot_project,
             godot_binary=args.godot_bin,
+            godot_boot_frames=args.godot_boot_frames,
             run_godot_validation=not args.skip_godot_validation,
         )
         if args.report_dir:
@@ -173,6 +174,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-godot-validation",
         action="store_true",
         help="Skip headless Godot generated resource validation.",
+    )
+    validate_parser.add_argument(
+        "--godot-boot-frames",
+        type=_non_negative_int,
+        default=0,
+        help=(
+            "After generated resource validation passes, boot the Godot project's "
+            "configured main scene headlessly for this many frames and fail on "
+            "warning/error output. Default: 0 (disabled)."
+        ),
     )
     _add_report_args(validate_parser, required=False)
     _add_threshold_args(validate_parser)
@@ -277,6 +288,7 @@ def _validate_project(
     godot_project_path: str,
     *,
     godot_binary: str | None = None,
+    godot_boot_frames: int = 0,
     run_godot_validation: bool = True,
 ) -> DiagnosticCollector:
     diagnostics = DiagnosticCollector()
@@ -320,7 +332,12 @@ def _validate_project(
             source_path=report_path,
         )
     if run_godot_validation:
-        _add_godot_validation_diagnostic(diagnostics, godot_project_path, godot_binary)
+        _add_godot_validation_diagnostic(
+            diagnostics,
+            godot_project_path,
+            godot_binary,
+            boot_frames=godot_boot_frames,
+        )
     return diagnostics
 
 
@@ -340,10 +357,13 @@ def _add_godot_validation_diagnostic(
     diagnostics: DiagnosticCollector,
     godot_project_path: str,
     godot_binary: str | None,
+    *,
+    boot_frames: int = 0,
 ) -> None:
     report = validate_generated_godot_project(
         godot_project_path,
         godot_binary=godot_binary,
+        boot_frames=boot_frames,
     )
     write_godot_validation_report(godot_project_path, report)
     if report.status == "passed":
@@ -370,6 +390,16 @@ def _add_godot_validation_diagnostic(
         source_path=godot_project_path,
         workaround="Open the generated project with the pinned Godot version and fix the first parser/resource error reported in gm2godot/godot_validation_report.json.",
     )
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Expected a non-negative integer: {value}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"Expected a non-negative integer: {value}")
+    return parsed
 
 
 def _import_diagnostics_report(

@@ -317,6 +317,109 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(len(report.output_issues), 1)
         self.assertEqual(report.output_issues[0].severity, "error")
 
+    def test_boot_validation_runs_main_scene_for_requested_frames(self) -> None:
+        project_dir = self._write_project()
+        args_file = self.temp_dir / "boot-args.txt"
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "is_boot=0\n"
+            "is_script=0\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--quit-after\" ]; then is_boot=1; fi\n"
+            "  if [ \"$arg\" = \"--script\" ]; then is_script=1; fi\n"
+            "done\n"
+            "if [ \"$is_boot\" = \"1\" ]; then\n"
+            f"  printf '%s\\n' \"$@\" > '{args_file}'\n"
+            "  printf '%s\\n' 'GM2GODOT_BOOT_OK'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"$is_script\" = \"1\" ]; then\n"
+            "  printf '%s\\n' 'GM2GODOT_VALIDATION_OK 2'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\\n' 'unexpected Godot invocation'\n"
+            "exit 8\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            boot_frames=4,
+        )
+
+        self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.boot_frames, 4)
+        self.assertEqual(report.boot_returncode, 0)
+        self.assertIn("GM2GODOT_VALIDATION_OK 2", report.output)
+        self.assertIn("GM2GODOT_BOOT_OK", report.boot_output)
+        boot_args = args_file.read_text(encoding="utf-8").splitlines()
+        self.assertIn("--headless", boot_args)
+        self.assertIn("--fixed-fps", boot_args)
+        self.assertIn("--path", boot_args)
+        self.assertIn("--quit-after", boot_args)
+        self.assertIn("4", boot_args)
+        self.assertNotIn("--script", boot_args)
+
+    def test_boot_validation_fails_on_runtime_warning_with_zero_exit(self) -> None:
+        project_dir = self._write_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--quit-after\" ]; then\n"
+            "    printf '%s\\n' 'WARNING: Runtime warning from main scene.'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'GM2GODOT_VALIDATION_OK 2'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            boot_frames=2,
+        )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(report.boot_returncode, 0)
+        self.assertEqual(len(report.output_issues), 1)
+        self.assertEqual(report.output_issues[0].severity, "warning")
+        self.assertIn("boot reported 0 error(s) and 1 warning(s)", report.message)
+
+    def test_boot_validation_fails_on_runtime_nonzero_exit(self) -> None:
+        project_dir = self._write_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--quit-after\" ]; then\n"
+            "    printf '%s\\n' 'Runtime exited without warning lines.'\n"
+            "    exit 13\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'GM2GODOT_VALIDATION_OK 2'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            boot_frames=2,
+        )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(report.boot_returncode, 13)
+        self.assertEqual(report.output_issues, ())
+        self.assertIn("boot exited with code 13", report.message)
+
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_headless_godot_validation_loads_generated_resources(self) -> None:
         project_dir = self._write_project()
@@ -340,6 +443,18 @@ class TestGodotValidation(unittest.TestCase):
         self.assertIn("GM2GODOT_VALIDATION_OK", report.output)
 
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
+    def test_headless_godot_boots_main_scene_without_warnings(self) -> None:
+        project_dir = self._write_project()
+
+        report = validate_generated_godot_project(str(project_dir), boot_frames=2)
+
+        self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.boot_frames, 2)
+        self.assertEqual(report.boot_returncode, 0, report.boot_output)
+        self.assertEqual(report.output_issues, (), report.output)
+        self.assertIn("main scene", report.message)
+
+    @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_cli_validate_writes_godot_validation_report(self) -> None:
         project_dir = self._write_project()
         (project_dir / "gm2godot").mkdir()
@@ -356,6 +471,7 @@ class TestGodotValidation(unittest.TestCase):
         report = json.loads(report_path.read_text(encoding="utf-8"))
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["resource_count"], 2)
+        self.assertEqual(report["boot_frames"], 0)
         self.assertEqual(report["output_issue_count"], 0)
 
 

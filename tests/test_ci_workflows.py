@@ -35,9 +35,9 @@ class TestCIWorkflows(unittest.TestCase):
 
         install_index = content.index("- name: Install pinned Godot")
         self.assertIn("GODOT_BIN=$godot_bin", content)
-        self.assertLess(install_index, content.index("- name: Run SimpleTopDown conversion test"))
+        self.assertLess(install_index, content.index("- name: Run SimpleTopDown conversion and boot-log test"))
         self.assertLess(install_index, content.index("- name: Run TCC conversion test"))
-        self.assertLess(install_index, content.index("- name: Run Monophobia conversion test"))
+        self.assertLess(install_index, content.index("- name: Run Monophobia conversion and boot-log test"))
 
 
 if __name__ == "__main__":

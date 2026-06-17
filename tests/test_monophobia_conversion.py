@@ -156,9 +156,10 @@ class TestMonophobiaConversion(unittest.TestCase):
             find_godot_binary(),
             "Godot binary is required for Monophobia strict validation.",
         )
-        report = validate_generated_godot_project(self.godot_dir, timeout=180)
+        report = validate_generated_godot_project(self.godot_dir, timeout=180, boot_frames=2)
 
         self.assertEqual(report.status, "passed", report.message + "\n" + report.output)
+        self.assertEqual(report.boot_returncode, 0, report.boot_output)
         self.assertEqual(report.output_issues, (), report.message + "\n" + report.output)
 
 

@@ -163,9 +163,10 @@ class TestSimpleTopDownConversion(unittest.TestCase):
 
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
-        report = validate_generated_godot_project(self.godot_dir)
+        report = validate_generated_godot_project(self.godot_dir, boot_frames=2)
 
         self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.boot_returncode, 0, report.boot_output)
         self.assertEqual(report.output_issues, (), report.output)
 
 

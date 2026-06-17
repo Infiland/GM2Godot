@@ -64,9 +64,12 @@ class GodotValidationReport:
     resource_paths: tuple[str, ...]
     returncode: int | None = None
     import_returncode: int | None = None
+    boot_returncode: int | None = None
     import_output: str = ""
+    boot_output: str = ""
     output: str = ""
     message: str = ""
+    boot_frames: int = 0
     output_issues: tuple[GodotOutputIssue, ...] = ()
 
     def to_dict(self) -> JsonDict:
@@ -79,8 +82,11 @@ class GodotValidationReport:
             "resource_paths": list(self.resource_paths),
             "returncode": self.returncode,
             "import_returncode": self.import_returncode,
+            "boot_returncode": self.boot_returncode,
             "import_output": self.import_output,
+            "boot_output": self.boot_output,
             "output": self.output,
+            "boot_frames": self.boot_frames,
             "output_issue_count": len(self.output_issues),
             "output_error_count": sum(1 for issue in self.output_issues if issue.severity == "error"),
             "output_warning_count": sum(1 for issue in self.output_issues if issue.severity == "warning"),
@@ -116,7 +122,11 @@ def validate_generated_godot_project(
     godot_binary: str | None = None,
     timeout: int = 60,
     load_resources: bool = True,
+    boot_frames: int = 0,
 ) -> GodotValidationReport:
+    if boot_frames < 0:
+        raise ValueError("boot_frames must be zero or greater.")
+
     resolved_binary = find_godot_binary(godot_binary)
     resource_paths = generated_godot_resource_paths(godot_project_path)
     if resolved_binary is None:
@@ -125,7 +135,8 @@ def validate_generated_godot_project(
             godot_binary="",
             project_path=godot_project_path,
             resource_paths=resource_paths,
-            message="Godot binary not found; set GODOT_BIN or pass --godot-bin to run generated resource validation.",
+            boot_frames=boot_frames,
+            message="Godot binary not found; set GODOT_BIN or pass --godot-bin to run generated resource/runtime validation.",
         )
 
     if not os.path.isfile(os.path.join(godot_project_path, "project.godot")):
@@ -134,6 +145,7 @@ def validate_generated_godot_project(
             godot_binary=resolved_binary,
             project_path=godot_project_path,
             resource_paths=resource_paths,
+            boot_frames=boot_frames,
             message="project.godot is missing; generated resources cannot be loaded through Godot.",
         )
 
@@ -152,16 +164,19 @@ def validate_generated_godot_project(
             output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
             output_issues = detect_godot_output_issues(output)
             if not load_resources and not output_issues:
-                return GodotValidationReport(
-                    status="passed",
-                    godot_binary=resolved_binary,
-                    project_path=godot_project_path,
-                    resource_paths=resource_paths,
-                    import_output=output,
-                    output=output,
-                    message=_import_only_timeout_message(timeout, len(importable_asset_paths), len(resource_paths)),
-                    output_issues=(),
-                )
+                if boot_frames == 0:
+                    return GodotValidationReport(
+                        status="passed",
+                        godot_binary=resolved_binary,
+                        project_path=godot_project_path,
+                        resource_paths=resource_paths,
+                        import_output=output,
+                        output=output,
+                        message=_import_only_timeout_message(timeout, len(importable_asset_paths), len(resource_paths)),
+                        boot_frames=boot_frames,
+                        output_issues=(),
+                    )
+                output_issues = detect_godot_output_issues(output)
             return GodotValidationReport(
                 status="failed",
                 godot_binary=resolved_binary,
@@ -170,6 +185,7 @@ def validate_generated_godot_project(
                 import_output=output,
                 output=output,
                 message=f"Headless Godot import timed out after {timeout} seconds.",
+                boot_frames=boot_frames,
                 output_issues=output_issues,
             )
         import_output = import_result.stdout
@@ -186,7 +202,7 @@ def validate_generated_godot_project(
                 fallback_output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
                 combined_output = _combine_output(import_output, fallback_output)
                 output_issues = detect_godot_output_issues(combined_output)
-                if not output_issues:
+                if not output_issues and boot_frames == 0:
                     return GodotValidationReport(
                         status="passed",
                         godot_binary=resolved_binary,
@@ -195,6 +211,7 @@ def validate_generated_godot_project(
                         import_output=combined_output,
                         output=combined_output,
                         message=_audio_fallback_timeout_message(timeout, len(importable_asset_paths), len(resource_paths)),
+                        boot_frames=boot_frames,
                         output_issues=(),
                     )
                 return GodotValidationReport(
@@ -205,6 +222,7 @@ def validate_generated_godot_project(
                     import_output=combined_output,
                     output=combined_output,
                     message=f"Headless Godot no-audio import fallback timed out after {timeout} seconds.",
+                    boot_frames=boot_frames,
                     output_issues=output_issues,
                 )
 
@@ -212,6 +230,17 @@ def validate_generated_godot_project(
             combined_output = _combine_output(import_output, fallback_output)
             fallback_output_issues = detect_godot_output_issues(combined_output)
             if fallback_result.returncode == 0 and not fallback_output_issues:
+                if boot_frames > 0:
+                    return _run_godot_boot_validation(
+                        resolved_binary,
+                        godot_project_path,
+                        resource_paths=resource_paths,
+                        import_returncode=fallback_result.returncode,
+                        import_output=combined_output,
+                        previous_output=combined_output,
+                        boot_frames=boot_frames,
+                        timeout=timeout,
+                    )
                 return GodotValidationReport(
                     status="passed",
                     godot_binary=resolved_binary,
@@ -227,6 +256,7 @@ def validate_generated_godot_project(
                         len(importable_asset_paths),
                         (),
                     ),
+                    boot_frames=boot_frames,
                     output_issues=(),
                 )
             else:
@@ -245,6 +275,7 @@ def validate_generated_godot_project(
                         len(importable_asset_paths),
                         fallback_output_issues,
                     ),
+                    boot_frames=boot_frames,
                     output_issues=fallback_output_issues,
                 )
         if import_result.returncode != 0 or import_output_issues:
@@ -258,10 +289,22 @@ def validate_generated_godot_project(
                 import_output=import_output,
                 output=import_output,
                 message=_import_message(import_result.returncode, len(importable_asset_paths), import_output_issues),
+                boot_frames=boot_frames,
                 output_issues=import_output_issues,
             )
 
     if not load_resources:
+        if boot_frames > 0:
+            return _run_godot_boot_validation(
+                resolved_binary,
+                godot_project_path,
+                resource_paths=resource_paths,
+                import_returncode=import_returncode,
+                import_output=import_output,
+                previous_output=import_output,
+                boot_frames=boot_frames,
+                timeout=timeout,
+            )
         return GodotValidationReport(
             status="passed",
             godot_binary=resolved_binary,
@@ -272,6 +315,7 @@ def validate_generated_godot_project(
             import_output=import_output,
             output=import_output,
             message=_import_only_message(import_returncode, len(importable_asset_paths), len(resource_paths)),
+            boot_frames=boot_frames,
             output_issues=(),
         )
 
@@ -297,6 +341,7 @@ def validate_generated_godot_project(
             )
         except subprocess.TimeoutExpired as exc:
             output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+            combined_output = _combine_output(import_output, output)
             return GodotValidationReport(
                 status="failed",
                 godot_binary=resolved_binary,
@@ -304,8 +349,10 @@ def validate_generated_godot_project(
                 resource_paths=resource_paths,
                 import_returncode=import_returncode,
                 import_output=import_output,
-                output=output,
+                output=combined_output,
                 message=f"Headless Godot validation timed out after {timeout} seconds.",
+                boot_frames=boot_frames,
+                output_issues=detect_godot_output_issues(combined_output),
             )
 
     combined_output = _combine_output(import_output, result.stdout)
@@ -314,7 +361,7 @@ def validate_generated_godot_project(
         "passed" if result.returncode == 0 and not output_issues else "failed"
     )
 
-    return GodotValidationReport(
+    resource_report = GodotValidationReport(
         status=status,
         godot_binary=resolved_binary,
         project_path=godot_project_path,
@@ -324,7 +371,21 @@ def validate_generated_godot_project(
         import_output=import_output,
         output=combined_output,
         message=_validation_message(result.returncode, len(resource_paths), output_issues),
+        boot_frames=boot_frames,
         output_issues=output_issues,
+    )
+    if status == "failed" or boot_frames == 0:
+        return resource_report
+
+    return _run_godot_boot_validation(
+        resolved_binary,
+        godot_project_path,
+        resource_paths=resource_paths,
+        import_returncode=import_returncode,
+        import_output=import_output,
+        previous_output=combined_output,
+        boot_frames=boot_frames,
+        timeout=timeout,
     )
 
 
@@ -428,6 +489,92 @@ def _run_godot_import_without_audio(
             validation_project_path,
             timeout=timeout,
         )
+
+
+def _run_godot_boot_validation(
+    resolved_binary: str,
+    godot_project_path: str,
+    *,
+    resource_paths: tuple[str, ...],
+    import_returncode: int | None,
+    import_output: str,
+    previous_output: str,
+    boot_frames: int,
+    timeout: int,
+) -> GodotValidationReport:
+    try:
+        boot_result = _run_godot_boot(
+            resolved_binary,
+            godot_project_path,
+            boot_frames=boot_frames,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        boot_output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+        combined_output = _combine_output(previous_output, boot_output)
+        output_issues = detect_godot_output_issues(combined_output)
+        return GodotValidationReport(
+            status="failed",
+            godot_binary=resolved_binary,
+            project_path=godot_project_path,
+            resource_paths=resource_paths,
+            import_returncode=import_returncode,
+            import_output=import_output,
+            boot_output=boot_output,
+            output=combined_output,
+            message=f"Headless Godot boot timed out after {timeout} seconds.",
+            boot_frames=boot_frames,
+            output_issues=output_issues,
+        )
+
+    boot_output = boot_result.stdout
+    combined_output = _combine_output(previous_output, boot_output)
+    output_issues = detect_godot_output_issues(combined_output)
+    status: GodotValidationStatus = (
+        "passed" if boot_result.returncode == 0 and not output_issues else "failed"
+    )
+    return GodotValidationReport(
+        status=status,
+        godot_binary=resolved_binary,
+        project_path=godot_project_path,
+        resource_paths=resource_paths,
+        returncode=boot_result.returncode,
+        import_returncode=import_returncode,
+        boot_returncode=boot_result.returncode,
+        import_output=import_output,
+        boot_output=boot_output,
+        output=combined_output,
+        message=_boot_message(boot_result.returncode, boot_frames, output_issues),
+        boot_frames=boot_frames,
+        output_issues=output_issues,
+    )
+
+
+def _run_godot_boot(
+    resolved_binary: str,
+    godot_project_path: str,
+    *,
+    boot_frames: int,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            resolved_binary,
+            "--headless",
+            "--disable-vsync",
+            "--fixed-fps",
+            "60",
+            "--path",
+            godot_project_path,
+            "--quit-after",
+            str(boot_frames),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=timeout,
+    )
 
 
 def _ignore_audio_import_validation_files(_directory: str, names: list[str]) -> set[str]:
@@ -573,4 +720,28 @@ def _validation_script(resource_paths: tuple[str, ...]) -> str:
         "\tfor failure in failures:\n"
         "\t\tpush_error(\"GM2Godot generated resource failed to load: \" + str(failure))\n"
         "\tquit(1)\n"
+    )
+
+
+def _boot_message(
+    returncode: int,
+    boot_frames: int,
+    output_issues: tuple[GodotOutputIssue, ...],
+) -> str:
+    if output_issues:
+        error_count = sum(1 for issue in output_issues if issue.severity == "error")
+        warning_count = sum(1 for issue in output_issues if issue.severity == "warning")
+        return (
+            "Headless Godot boot reported "
+            f"{error_count} error(s) and {warning_count} warning(s) while running "
+            f"the project main scene for {boot_frames} frame(s)."
+        )
+    if returncode == 0:
+        return (
+            "Headless Godot boot ran the project main scene for "
+            f"{boot_frames} frame(s) without warning/error output."
+        )
+    return (
+        "Headless Godot boot exited with code "
+        f"{returncode} while running the project main scene for {boot_frames} frame(s)."
     )

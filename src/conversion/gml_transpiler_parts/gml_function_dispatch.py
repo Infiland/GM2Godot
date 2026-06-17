@@ -276,6 +276,9 @@ _MATH_ARITY: dict[str, tuple[int, int | None]] = {
     "point_direction": (4, 4),
     "lengthdir_x": (2, 2),
     "lengthdir_y": (2, 2),
+    "matrix_build_lookat": (9, 9),
+    "matrix_build_projection_ortho": (4, 4),
+    "make_color_rgb": (3, 3),
     "angle_difference": (2, 2),
     "dot_product": (4, 4),
     "dot_product_3d": (6, 6),
@@ -447,6 +450,7 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
+    "distance_to_object": (1, 1),
     "place_meeting": (3, 3),
     "position_meeting": (3, 3),
     "instance_place": (3, 3),
@@ -1000,6 +1004,8 @@ _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "draw_get_alpha": (0, 0),
     "draw_set_line_width": (1, 1),
     "draw_get_line_width": (0, 0),
+    "draw_line_width": (5, 5),
+    "draw_rectangle_color": (9, 9),
     "gpu_set_blendmode": (1, 1),
     "gpu_get_blendmode": (0, 0),
     "draw_set_blend_mode": (1, 1),

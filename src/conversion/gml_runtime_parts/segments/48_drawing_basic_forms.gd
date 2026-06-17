@@ -883,6 +883,19 @@ static func gml_draw_line(x1, y1, x2, y2):
 	return null
 
 
+static func gml_draw_line_width(x1, y1, x2, y2, width):
+	var target = _gml_draw_target()
+	if target == null:
+		return null
+	target.draw_line(
+		Vector2(_to_real(x1), _to_real(y1)),
+		Vector2(_to_real(x2), _to_real(y2)),
+		_gml_draw_current_color(),
+		max(_to_real(width), 1.0)
+	)
+	return null
+
+
 static func gml_draw_rectangle(x1, y1, x2, y2, outline):
 	var target = _gml_draw_target()
 	if target == null:
@@ -893,6 +906,20 @@ static func gml_draw_rectangle(x1, y1, x2, y2, outline):
 	var bottom = max(_to_real(y1), _to_real(y2))
 	var rect = Rect2(Vector2(left, top), Vector2(right - left, bottom - top))
 	target.draw_rect(rect, _gml_draw_current_color(), not gml_bool(outline), _gml_draw_line_width())
+	return null
+
+
+static func gml_draw_rectangle_color(x1, y1, x2, y2, col1, col2, col3, col4, outline):
+	var target = _gml_draw_target()
+	if target == null:
+		return null
+	var left = min(_to_real(x1), _to_real(x2))
+	var top = min(_to_real(y1), _to_real(y2))
+	var right = max(_to_real(x1), _to_real(x2))
+	var bottom = max(_to_real(y1), _to_real(y2))
+	var rect = Rect2(Vector2(left, top), Vector2(right - left, bottom - top))
+	var color = _gml_draw_average_colour([col1, col2, col3, col4], 1.0)
+	target.draw_rect(rect, color, not gml_bool(outline), _gml_draw_line_width())
 	return null
 
 

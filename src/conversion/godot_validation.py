@@ -14,7 +14,22 @@ GODOT_VALIDATION_REPORT_RELATIVE_PATH = os.path.join(
     "gm2godot", "godot_validation_report.json"
 )
 GodotValidationStatus: TypeAlias = Literal["passed", "failed", "skipped"]
+GodotOutputIssueSeverity: TypeAlias = Literal["warning", "error"]
 _LOADABLE_EXTENSIONS = (".gd", ".gdshader", ".tscn", ".tres")
+_GODOT_ERROR_PREFIXES = ("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")
+_GODOT_WARNING_PREFIXES = ("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")
+
+
+@dataclass(frozen=True)
+class GodotOutputIssue:
+    severity: GodotOutputIssueSeverity
+    line: str
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "severity": self.severity,
+            "line": self.line,
+        }
 
 
 @dataclass(frozen=True)
@@ -26,6 +41,7 @@ class GodotValidationReport:
     returncode: int | None = None
     output: str = ""
     message: str = ""
+    output_issues: tuple[GodotOutputIssue, ...] = ()
 
     def to_dict(self) -> JsonDict:
         return {
@@ -37,6 +53,10 @@ class GodotValidationReport:
             "resource_paths": list(self.resource_paths),
             "returncode": self.returncode,
             "output": self.output,
+            "output_issue_count": len(self.output_issues),
+            "output_error_count": sum(1 for issue in self.output_issues if issue.severity == "error"),
+            "output_warning_count": sum(1 for issue in self.output_issues if issue.severity == "warning"),
+            "output_issues": [issue.to_dict() for issue in self.output_issues],
             "message": self.message,
         }
 
@@ -120,18 +140,20 @@ def validate_generated_godot_project(
                 message=f"Headless Godot validation timed out after {timeout} seconds.",
             )
 
+    output_issues = detect_godot_output_issues(result.stdout)
+    status: GodotValidationStatus = (
+        "passed" if result.returncode == 0 and not output_issues else "failed"
+    )
+
     return GodotValidationReport(
-        status="passed" if result.returncode == 0 else "failed",
+        status=status,
         godot_binary=resolved_binary,
         project_path=godot_project_path,
         resource_paths=resource_paths,
         returncode=result.returncode,
         output=result.stdout,
-        message=(
-            f"Headless Godot validation loaded {len(resource_paths)} generated resources."
-            if result.returncode == 0
-            else "Headless Godot validation failed while loading generated scripts/scenes/resources."
-        ),
+        message=_validation_message(result.returncode, len(resource_paths), output_issues),
+        output_issues=output_issues,
     )
 
 
@@ -160,6 +182,37 @@ def generated_godot_resource_paths(godot_project_path: str) -> tuple[str, ...]:
             relative_path = os.path.relpath(full_path, godot_project_path).replace(os.sep, "/")
             resource_paths.append("res://" + relative_path)
     return tuple(sorted(resource_paths))
+
+
+def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
+    issues: list[GodotOutputIssue] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(_GODOT_ERROR_PREFIXES):
+            issues.append(GodotOutputIssue(severity="error", line=stripped))
+        elif stripped.startswith(_GODOT_WARNING_PREFIXES):
+            issues.append(GodotOutputIssue(severity="warning", line=stripped))
+    return tuple(issues)
+
+
+def _validation_message(
+    returncode: int,
+    resource_count: int,
+    output_issues: tuple[GodotOutputIssue, ...],
+) -> str:
+    if output_issues:
+        error_count = sum(1 for issue in output_issues if issue.severity == "error")
+        warning_count = sum(1 for issue in output_issues if issue.severity == "warning")
+        return (
+            "Headless Godot validation reported "
+            f"{error_count} error(s) and {warning_count} warning(s) "
+            "while loading generated scripts/scenes/resources."
+        )
+    if returncode == 0:
+        return f"Headless Godot validation loaded {resource_count} generated resources."
+    return "Headless Godot validation failed while loading generated scripts/scenes/resources."
 
 
 def _validation_script(resource_paths: tuple[str, ...]) -> str:

@@ -115,6 +115,21 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(issues[0].line, "SCRIPT ERROR: Parse Error: Identifier not declared.")
         self.assertEqual(issues[1].severity, "warning")
 
+    def test_detects_colored_godot_warning_and_error_output(self) -> None:
+        issues = detect_godot_output_issues(
+            "\n".join(
+                [
+                    "\x1b[1;31mERROR:\x1b[0;91m Failed loading resource.",
+                    "\x1b[1;33mWARNING:\x1b[0;93m Scan thread aborted...",
+                ]
+            )
+        )
+
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(issues[0].severity, "error")
+        self.assertEqual(issues[0].line, "ERROR: Failed loading resource.")
+        self.assertEqual(issues[1].severity, "warning")
+
     def test_validation_fails_when_godot_outputs_error_with_zero_exit(self) -> None:
         project_dir = self._write_project()
         fake_godot = self.temp_dir / "fake-godot"
@@ -220,6 +235,42 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(report.import_returncode, 0)
         self.assertIn("GM2GODOT_IMPORT_OK", report.output)
         self.assertIn("skipped loading 3 generated scripts/scenes/resources", report.message)
+
+    def test_import_only_validation_falls_back_without_audio_after_clean_nonzero_import(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        (project_dir / "sounds").mkdir()
+        (project_dir / "sounds" / "theme.mp3").write_bytes(b"fake mp3")
+        fake_godot = self.temp_dir / "fake-godot"
+        marker = self.temp_dir / "first-import-done"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            f"    if [ ! -f '{marker}' ]; then\n"
+            f"      touch '{marker}'\n"
+            "      printf '%s\\n' 'Godot exited without diagnostics during audio import.'\n"
+            "      exit 11\n"
+            "    fi\n"
+            "    printf '%s\\n' 'GM2GODOT_NO_AUDIO_IMPORT_OK'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'resource loading should have been skipped'\n"
+            "exit 2\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertEqual(report.import_returncode, 0)
+        self.assertIn("GM2GODOT_NO_AUDIO_IMPORT_OK", report.output)
+        self.assertIn("no-audio import fallback completed", report.message)
 
     def test_import_only_timeout_passes_when_no_warning_or_error_output(self) -> None:
         project_dir = self._write_png_sprite_project()

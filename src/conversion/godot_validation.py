@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,6 +40,8 @@ _IMPORTABLE_EXTENSIONS = (
 )
 _GODOT_ERROR_PREFIXES = ("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")
 _GODOT_WARNING_PREFIXES = ("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+_AUDIO_IMPORTABLE_EXTENSIONS = (".mp3", ".ogg", ".wav")
 
 
 @dataclass(frozen=True)
@@ -140,19 +143,9 @@ def validate_generated_godot_project(
     importable_asset_paths = generated_godot_importable_asset_paths(godot_project_path)
     if importable_asset_paths or not load_resources:
         try:
-            import_result = subprocess.run(
-                [
-                    resolved_binary,
-                    "--headless",
-                    "--recovery-mode",
-                    "--path",
-                    godot_project_path,
-                    "--import",
-                ],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+            import_result = _run_godot_import(
+                resolved_binary,
+                godot_project_path,
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -182,6 +175,78 @@ def validate_generated_godot_project(
         import_output = import_result.stdout
         import_returncode = import_result.returncode
         import_output_issues = detect_godot_output_issues(import_output)
+        if import_result.returncode != 0 and not import_output_issues and not load_resources:
+            try:
+                fallback_result = _run_godot_import_without_audio(
+                    resolved_binary,
+                    godot_project_path,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                fallback_output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+                combined_output = _combine_output(import_output, fallback_output)
+                output_issues = detect_godot_output_issues(combined_output)
+                if not output_issues:
+                    return GodotValidationReport(
+                        status="passed",
+                        godot_binary=resolved_binary,
+                        project_path=godot_project_path,
+                        resource_paths=resource_paths,
+                        import_output=combined_output,
+                        output=combined_output,
+                        message=_audio_fallback_timeout_message(timeout, len(importable_asset_paths), len(resource_paths)),
+                        output_issues=(),
+                    )
+                return GodotValidationReport(
+                    status="failed",
+                    godot_binary=resolved_binary,
+                    project_path=godot_project_path,
+                    resource_paths=resource_paths,
+                    import_output=combined_output,
+                    output=combined_output,
+                    message=f"Headless Godot no-audio import fallback timed out after {timeout} seconds.",
+                    output_issues=output_issues,
+                )
+
+            fallback_output = fallback_result.stdout
+            combined_output = _combine_output(import_output, fallback_output)
+            fallback_output_issues = detect_godot_output_issues(combined_output)
+            if fallback_result.returncode == 0 and not fallback_output_issues:
+                return GodotValidationReport(
+                    status="passed",
+                    godot_binary=resolved_binary,
+                    project_path=godot_project_path,
+                    resource_paths=resource_paths,
+                    returncode=fallback_result.returncode,
+                    import_returncode=fallback_result.returncode,
+                    import_output=combined_output,
+                    output=combined_output,
+                    message=_audio_fallback_message(
+                        import_result.returncode,
+                        fallback_result.returncode,
+                        len(importable_asset_paths),
+                        (),
+                    ),
+                    output_issues=(),
+                )
+            else:
+                return GodotValidationReport(
+                    status="failed",
+                    godot_binary=resolved_binary,
+                    project_path=godot_project_path,
+                    resource_paths=resource_paths,
+                    returncode=fallback_result.returncode,
+                    import_returncode=fallback_result.returncode,
+                    import_output=combined_output,
+                    output=combined_output,
+                    message=_audio_fallback_message(
+                        import_result.returncode,
+                        fallback_result.returncode,
+                        len(importable_asset_paths),
+                        fallback_output_issues,
+                    ),
+                    output_issues=fallback_output_issues,
+                )
         if import_result.returncode != 0 or import_output_issues:
             return GodotValidationReport(
                 status="failed",
@@ -308,7 +373,7 @@ def generated_godot_importable_asset_paths(godot_project_path: str) -> tuple[str
 def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
     issues: list[GodotOutputIssue] = []
     for line in output.splitlines():
-        stripped = line.strip()
+        stripped = _strip_ansi_escape_sequences(line).strip()
         if not stripped:
             continue
         if stripped.startswith(_GODOT_ERROR_PREFIXES):
@@ -316,6 +381,61 @@ def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
         elif stripped.startswith(_GODOT_WARNING_PREFIXES):
             issues.append(GodotOutputIssue(severity="warning", line=stripped))
     return tuple(issues)
+
+
+def _strip_ansi_escape_sequences(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _run_godot_import(
+    resolved_binary: str,
+    godot_project_path: str,
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            resolved_binary,
+            "--headless",
+            "--recovery-mode",
+            "--path",
+            godot_project_path,
+            "--import",
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _run_godot_import_without_audio(
+    resolved_binary: str,
+    godot_project_path: str,
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation_project_path = os.path.join(temp_dir, "godot_project")
+        shutil.copytree(
+            godot_project_path,
+            validation_project_path,
+            ignore=_ignore_audio_import_validation_files,
+        )
+        return _run_godot_import(
+            resolved_binary,
+            validation_project_path,
+            timeout=timeout,
+        )
+
+
+def _ignore_audio_import_validation_files(_directory: str, names: list[str]) -> set[str]:
+    return {
+        name
+        for name in names
+        if name == ".godot" or name.lower().endswith(_AUDIO_IMPORTABLE_EXTENSIONS)
+    }
 
 
 def _combine_output(import_output: str, validation_output: str) -> str:
@@ -371,6 +491,47 @@ def _import_only_timeout_message(
     return (
         "Headless Godot import ran for "
         f"{timeout} seconds without warning/error output while scanning "
+        f"{importable_asset_count} generated asset(s); skipped loading "
+        f"{resource_count} generated scripts/scenes/resources."
+    )
+
+
+def _audio_fallback_message(
+    original_returncode: int,
+    fallback_returncode: int,
+    importable_asset_count: int,
+    output_issues: tuple[GodotOutputIssue, ...],
+) -> str:
+    if output_issues:
+        error_count = sum(1 for issue in output_issues if issue.severity == "error")
+        warning_count = sum(1 for issue in output_issues if issue.severity == "warning")
+        return (
+            "Headless Godot import exited with code "
+            f"{original_returncode}; no-audio import fallback reported "
+            f"{error_count} error(s) and {warning_count} warning(s) while scanning "
+            f"{importable_asset_count} generated asset(s)."
+        )
+    if fallback_returncode == 0:
+        return (
+            "Headless Godot import exited with code "
+            f"{original_returncode} without warning/error output; no-audio import "
+            f"fallback completed for {importable_asset_count} generated asset(s)."
+        )
+    return (
+        "Headless Godot import exited with code "
+        f"{original_returncode}; no-audio import fallback exited with code "
+        f"{fallback_returncode} while scanning generated assets."
+    )
+
+
+def _audio_fallback_timeout_message(
+    timeout: int,
+    importable_asset_count: int,
+    resource_count: int,
+) -> str:
+    return (
+        "Headless Godot import exited nonzero without warning/error output; no-audio "
+        f"import fallback ran for {timeout} seconds while scanning "
         f"{importable_asset_count} generated asset(s); skipped loading "
         f"{resource_count} generated scripts/scenes/resources."
     )

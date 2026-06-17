@@ -120,6 +120,25 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             content,
         )
 
+    def test_child_without_parent_sprite_runtime_declares_own_members(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": "\tsprite_index = \"s_child\""},
+            sprite_runtime=SpriteRuntimeConfig(
+                sprite_scene_paths={"s_child": "res://sprites/s_child/s_child.tscn"},
+                inherit_runtime=False,
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+            ),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertIn("\nvar sprite_index = null:", content)
+        self.assertIn("func _gm_initialize_sprite_runtime():", content)
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsprite_index = \"s_child\"", content)
+
     def test_object_runtime_records_solid_metadata_for_motion_contact(self):
         content = generate_script_content(
             [],

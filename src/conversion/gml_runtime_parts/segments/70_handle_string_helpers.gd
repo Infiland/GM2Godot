@@ -454,6 +454,10 @@ static func gml_string_replace_all(value, old_char, new_str):
 	return s.replace(old, new_s)
 
 
+static func gml_string_hash_to_newline(value):
+	return gml_string(value).replace("#", "\n")
+
+
 static func gml_string_delete(value, index, count):
 	var s = gml_string(value)
 	var pos = _gml_one_based_index(index)

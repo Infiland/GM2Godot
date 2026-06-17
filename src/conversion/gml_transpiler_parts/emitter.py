@@ -498,6 +498,16 @@ def _emit_builtin_call(
     if extension_function is not None:
         raise GMLTranspileError(diagnostic_for_unmapped_extension_function(extension_function))
 
+    if expr.callee.value.startswith("AdMob_"):
+        emitted_args = ", ".join(
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in expr.args
+        )
+        return (
+            "GMRuntime.gml_admob_extension_call("
+            f"{json.dumps(expr.callee.value)}, [{emitted_args}])"
+        )
+
     if descriptor is not None:
         return _emit_descriptor_call(
             descriptor,

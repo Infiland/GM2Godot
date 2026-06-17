@@ -165,6 +165,35 @@ class TestGodotValidation(unittest.TestCase):
         self.assertIn("GM2GODOT_IMPORT_OK", report.import_output)
         self.assertIn("GM2GODOT_VALIDATION_OK 3", report.output)
 
+    def test_import_only_validation_skips_resource_load_script(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            "    printf '%s\\n' 'GM2GODOT_IMPORT_OK'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'resource loading should have been skipped'\n"
+            "exit 2\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            load_resources=False,
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertEqual(report.returncode, 0)
+        self.assertEqual(report.import_returncode, 0)
+        self.assertIn("GM2GODOT_IMPORT_OK", report.output)
+        self.assertIn("skipped loading 3 generated scripts/scenes/resources", report.message)
+
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_headless_godot_validation_loads_generated_resources(self) -> None:
         project_dir = self._write_project()

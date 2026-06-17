@@ -152,6 +152,7 @@ static var _gml_builtin_globals = {
 	"instance_count": 0,
 	"room": _gml_undefined,
 	"room_height": 0,
+	"room_speed": 0,
 	"room_width": 0
 }
 
@@ -210,6 +211,10 @@ static func gml_builtin_global(name):
 		return gml_working_directory()
 	if key == "current_time":
 		return Time.get_ticks_msec()
+	if key == "current_minute":
+		return int(Time.get_datetime_dict_from_system().get("minute", 0))
+	if key == "current_second":
+		return int(Time.get_datetime_dict_from_system().get("second", 0))
 	if key == "debug_mode":
 		return OS.is_debug_build()
 	if key == "fps":

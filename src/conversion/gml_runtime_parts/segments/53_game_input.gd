@@ -9,6 +9,7 @@ static var _gml_input_gamepad_pressed = {}
 static var _gml_input_gamepad_released = {}
 static var _gml_input_gamepad_axis_values = {}
 static var _gml_input_gamepad_axis_deadzones = {}
+static var _gml_input_gamepad_colors = {}
 static var _gml_input_mouse_position = Vector2.ZERO
 static var _gml_input_mouse_wheel_up = false
 static var _gml_input_mouse_wheel_down = false
@@ -315,6 +316,11 @@ static func gml_gamepad_get_axis_deadzone(device):
 
 static func gml_gamepad_set_vibration(device, left_motor, right_motor):
 	push_warning("GM gamepad_set_vibration is a compatibility stub in this runtime")
+	return null
+
+
+static func gml_gamepad_set_color(device, color):
+	_gml_input_gamepad_colors[int(_to_real(device))] = int(_to_real(color)) & 0xffffff
 	return null
 
 

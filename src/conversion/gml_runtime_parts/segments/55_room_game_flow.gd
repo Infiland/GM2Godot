@@ -61,6 +61,14 @@ static func gml_room_restart():
 	return _gml_room_change_to_entry(entry, true)
 
 
+static func gml_game_set_speed(speed, type):
+	var resolved_speed = max(int(_to_real(speed)), 0)
+	_gml_builtin_globals["room_speed"] = resolved_speed
+	if int(_to_real(type)) == 0:
+		Engine.max_fps = resolved_speed
+	return null
+
+
 static func gml_game_restart():
 	var entries = _gml_room_ordered_entries()
 	if entries.is_empty():

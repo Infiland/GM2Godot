@@ -9,7 +9,7 @@ from typing import Callable, Iterable, Literal, Mapping, cast
 from src.conversion.type_defs import JsonDict, JsonList
 
 
-ProjectManifestSeverity = Literal["warning", "error"]
+ProjectManifestSeverity = Literal["info", "warning", "error"]
 
 _RESOURCE_TYPE_KIND = {
     "GMAnimationCurve": "animcurves",
@@ -270,7 +270,7 @@ def unsupported_project_option_diagnostics(
             continue
         diagnostics.append(
             ProjectManifestDiagnostic(
-                severity="warning",
+                severity="info",
                 code="GM2GD-PROJECT-OPTION-UNSUPPORTED",
                 message=(
                     "Unsupported GameMaker project option "

@@ -36,6 +36,17 @@ class TestDiagnosticCollector(unittest.TestCase):
         self.assertEqual(recorded[0].severity, "warning")
         self.assertEqual(recorded[0].code, "GM2GD-WARNING")
 
+    def test_info_log_wrapper_records_informational_diagnostic(self):
+        diagnostics = DiagnosticCollector()
+        wrapped_log = diagnostics.wrap_log_callback(lambda message: None)
+
+        wrapped_log("Info: Missing optional GameMaker metadata file; fallback metadata preserved.")
+
+        recorded = diagnostics.diagnostics()
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0].severity, "info")
+        self.assertEqual(recorded[0].code, "GM2GD-WARNING")
+
     def test_transpile_failure_extracts_api_and_issue_metadata(self):
         diagnostics = DiagnosticCollector()
 

@@ -211,7 +211,11 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn("window/size/borderless=false", content)
         self.assertIn("textures/canvas_textures/default_texture_filter=1", content)
         self.assertIn("window/size/mode=3", content)
-        self.assertTrue(any("option_windows_custom_future" in log for log in self.logs))
+        unsupported_logs = [
+            log for log in self.logs if "option_windows_custom_future" in log
+        ]
+        self.assertTrue(unsupported_logs)
+        self.assertTrue(all(log.startswith("Info:") for log in unsupported_logs))
 
 
 class TestConvertIconFallback(unittest.TestCase):

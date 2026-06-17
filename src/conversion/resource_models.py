@@ -11,7 +11,7 @@ from src.conversion.project_manifest import GameMakerProjectManifest, ProjectRes
 from src.conversion.type_defs import JsonDict, JsonList
 
 
-ResourceModelSeverity = Literal["warning", "error"]
+ResourceModelSeverity = Literal["info", "warning", "error"]
 
 
 def _empty_json_dict() -> JsonDict:

@@ -156,7 +156,7 @@ class ProjectSettingsConverter(BaseConverter):
                 target_platform=self.gm_platform,
                 supported_keys=self._supported_project_option_keys(),
             ):
-                self._safe_log(f"Warning: {diagnostic.message}")
+                self._safe_log(f"{diagnostic.severity.title()}: {diagnostic.message}")
 
             with open(project_godot_path, 'w', encoding='utf-8') as file:
                 file.write(content)

@@ -95,17 +95,6 @@ class TestMonophobiaConversion(unittest.TestCase):
             json.loads(self._read_generated_file("gm2godot", "conversion_diagnostics.json")),
         )
 
-    @staticmethod
-    def _is_expected_room_behavior_warning(message: str) -> bool:
-        normalized = message.lower()
-        return (
-            "gamemaker background layer" in normalized
-            and "scrolling/tiling" in normalized
-        ) or (
-            "gamemaker view in room" in normalized
-            and "follows object" in normalized
-        )
-
     def test_ending_script_functions_are_registered(self) -> None:
         registry = self._read_generated_file("gm2godot", "gml_script_registry.gd")
         ending_script = self._read_generated_file("scripts", "ending.gd")
@@ -164,18 +153,13 @@ class TestMonophobiaConversion(unittest.TestCase):
 
         self.assertEqual(player_background_failures, [])
 
-    def test_conversion_warnings_are_actionable_room_behavior_gaps(self) -> None:
+    def test_conversion_diagnostics_have_no_warnings(self) -> None:
         diagnostics = self._conversion_diagnostics()
         diagnostic_entries = cast(list[dict[str, Any]], diagnostics.get("diagnostics", []))
-        warning_messages = [
-            str(diagnostic.get("message", ""))
+        warnings = [
+            diagnostic
             for diagnostic in diagnostic_entries
             if diagnostic.get("severity") == "warning"
-        ]
-        unexpected_warnings = [
-            message
-            for message in warning_messages
-            if not self._is_expected_room_behavior_warning(message)
         ]
         info_messages = [
             str(diagnostic.get("message", ""))
@@ -183,7 +167,7 @@ class TestMonophobiaConversion(unittest.TestCase):
             if diagnostic.get("severity") == "info"
         ]
 
-        self.assertEqual(unexpected_warnings, [])
+        self.assertEqual(warnings, [])
         self.assertTrue(any("Unsupported GameMaker project option" in message for message in info_messages))
         self.assertTrue(any("Missing GameMaker" in message for message in info_messages))
 

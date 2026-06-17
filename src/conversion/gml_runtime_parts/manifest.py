@@ -176,7 +176,13 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     _segment(
         "55_room_game_flow.gd",
         "Room order, game flow, transitions, and restart/end behavior.",
-        depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "11_layers.gd", "15_asset_registry.gd"),
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "15_asset_registry.gd",
+            "52_cameras_display.gd",
+        ),
         tests=("tests/test_room_game_flow_godot.py",),
     ),
     _segment(

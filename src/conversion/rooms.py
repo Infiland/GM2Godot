@@ -39,6 +39,9 @@ def render_room_runtime_script() -> str:
         f'const GM2GODOT_ROOM_ROOT_POLICY = "{ROOM_ROOT_POLICY_ID}"\n\n'
         "func _ready():\n"
         "\tGMRuntime.gml_room_enter_scene(self)\n"
+        "\n\n"
+        "func _process(delta):\n"
+        "\tGMRuntime._gml_room_process_scene(self, delta)\n"
     )
 
 

@@ -509,7 +509,36 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
 
-    def test_background_layer_preserves_scrolling_tiling_metadata_and_warns(self):
+    def test_sprite_background_layer_with_scrolling_uses_parallax_runtime(self):
+        self._write_yyp(["r_background"], extra_resources=[("sprites", "s_background")])
+        self._write_sprite("s_background")
+        self._write_sprite_scene("s_background")
+        self._write_room("r_background", layers=[
+            {
+                "%Name": "Backgrounds",
+                "resourceType": "GMRBackgroundLayer",
+                "spriteId": {"name": "s_background", "path": "sprites/s_background/s_background.yy"},
+                "htiled": True,
+                "vtiled": True,
+                "hspeed": 1,
+                "vspeed": -2,
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_background")
+
+        self.assertIn('[node name="s_background" type="Parallax2D" parent="Backgrounds"]', content)
+        self.assertIn('repeat_size = Vector2(1024, 768)', content)
+        self.assertIn('scroll_offset = Vector2(0, 0)', content)
+        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
+        self.assertIn(
+            '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]',
+            content,
+        )
+        self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
+
+    def test_background_layer_preserves_scrolling_tiling_runtime_metadata(self):
         self._write_yyp(["r_background"])
         self._write_room("r_background", layers=[
             {
@@ -536,10 +565,12 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_background_stretch = true', content)
         self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
-        self.assertTrue(any(
-            "scrolling/tiling" in log and "MovingBackground" in log
-            for log in self.logs
-        ))
+        self.assertIn('[node name="BackgroundVisual" type="Parallax2D" parent="MovingBackground"]', content)
+        self.assertIn('repeat_size = Vector2(1024, 0)', content)
+        self.assertIn('repeat_times = 3', content)
+        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
+        self.assertIn('[node name="BackgroundColor" type="ColorRect" parent="MovingBackground/BackgroundVisual"]', content)
+        self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_layer_depth_maps_to_inverse_z_index(self):
         self._write_yyp(["r_depths"])
@@ -1410,7 +1441,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('limit_bottom = 560', content)
         self.assertIn('zoom = Vector2(2, 2)', content)
         self.assertIn('metadata/gamemaker_view_object_name = "o_player"', content)
-        self.assertTrue(any("follows object o_player" in log for log in self.logs))
+        self.assertFalse(any("follows object o_player" in log for log in self.logs))
 
     def test_multiple_visible_views_disable_additional_cameras_and_warn(self):
         self._write_yyp(["r_cameras"])

@@ -100,7 +100,15 @@ def _write_smoke_scene(project_dir: Path) -> None:
 
         func _ready():
         \tvar instances = _layer("Instances", 100)
-        \t_layer("Background", 200)
+        \tvar background_layer = _layer("Background", 200)
+        \tvar background_visual = ColorRect.new()
+        \tbackground_visual.name = "BackgroundVisual"
+        \tbackground_visual.color = Color(1, 1, 1, 1)
+        \tbackground_visual.modulate = Color(1, 1, 1, 1)
+        \tbackground_visual.set_meta("gamemaker_layer_element_type", "background")
+        \tbackground_visual.set_meta("gamemaker_background_visual", true)
+        \tbackground_visual.set_meta("gamemaker_background_visual_type", "color")
+        \tbackground_layer.add_child(background_visual)
         \tGMRuntime.gml_layer_register_scene(self)
 
         \tvar layer_id = GMRuntime.gml_layer_get_id("Instances")
@@ -130,6 +138,19 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tGMRuntime.gml_layer_set_visible(layer_id, true)
         \tif not _check(GMRuntime.gml_layer_get_id_at_depth(50).index == layer_id.index, "layer_get_id_at_depth mismatch"):
+        \t\treturn
+        \tvar background_id = GMRuntime.gml_layer_background_get_id("Background")
+        \tif not _check(GMRuntime.gml_handle_is_valid(background_id), "background get id invalid"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_get_element_type(background_id) == "background", "background element type mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_background_alpha(background_id, 0.25), "background alpha returned false"):
+        \t\treturn
+        \tif not _check(is_equal_approx(background_visual.modulate.a, 0.25), "background alpha mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_background_blend(background_id, 255), "background blend returned false"):
+        \t\treturn
+        \tif not _check(is_equal_approx(background_visual.modulate.r, 1.0) and is_equal_approx(background_visual.modulate.g, 0.0) and is_equal_approx(background_visual.modulate.b, 0.0), "background blend mismatch"):
         \t\treturn
 
         \tvar fx = GMRuntime.gml_layer_create(25, "Effects")

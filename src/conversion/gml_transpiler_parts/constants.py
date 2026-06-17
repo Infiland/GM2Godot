@@ -1343,6 +1343,9 @@ _LAYER_RUNTIME_FUNCTIONS = {
     "layer_get_element_type": "gml_layer_get_element_type",
     "layer_set_visible": "gml_layer_set_visible",
     "layer_get_visible": "gml_layer_get_visible",
+    "layer_background_get_id": "gml_layer_background_get_id",
+    "layer_background_alpha": "gml_layer_background_alpha",
+    "layer_background_blend": "gml_layer_background_blend",
 }
 
 _SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS = {

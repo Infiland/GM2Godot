@@ -302,6 +302,11 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert layer_get_id is not None
         self.assertEqual(layer_get_id.status, "implemented")
         self.assertEqual(layer_get_id.issue_number, 566)
+        layer_background_get_id = get_gml_api_entry("layer_background_get_id")
+        self.assertIsNotNone(layer_background_get_id)
+        assert layer_background_get_id is not None
+        self.assertEqual(layer_background_get_id.status, "implemented")
+        self.assertEqual(layer_background_get_id.issue_number, 566)
         layer_sequence_create = get_gml_api_entry("layer_sequence_create")
         self.assertIsNotNone(layer_sequence_create)
         assert layer_sequence_create is not None
@@ -610,6 +615,9 @@ class TestGMLAPIManifest(unittest.TestCase):
             "layer_add_instance",
             "layer_get_all_elements",
             "layer_get_element_type",
+            "layer_background_get_id",
+            "layer_background_alpha",
+            "layer_background_blend",
             "timeline_exists",
             "timeline_moment_add_script",
             "sequence_get",

@@ -42,6 +42,7 @@ class _StatementParser:
         self,
         tokens: list[_Token],
         local_names: Iterable[str] | None = None,
+        declared_local_names: MutableSet[str] | None = None,
         instance_variables: MutableSet[str] | None = None,
         loop_depth: int = 0,
         continue_depth: int = 0,
@@ -66,6 +67,9 @@ class _StatementParser:
         self.tokens = tokens
         self.position = 0
         self.local_names = set(local_names or [])
+        self.declared_local_names: MutableSet[str] = (
+            declared_local_names if declared_local_names is not None else set[str]()
+        )
         self.instance_variables = instance_variables
         self.loop_depth = loop_depth
         self.continue_depth = continue_depth
@@ -141,6 +145,7 @@ class _StatementParser:
         return _transpile_statement(
             _tokens_to_source(statement_tokens),
             self.local_names,
+            self.declared_local_names,
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
@@ -392,6 +397,7 @@ class _StatementParser:
                 _transpile_statement(
                     initializer,
                     self.local_names,
+                    self.declared_local_names,
                     self.instance_variables,
                     loop_depth=self.loop_depth,
                     continue_depth=self.continue_depth,
@@ -422,6 +428,7 @@ class _StatementParser:
             _transpile_statement(
                 operation,
                 self.local_names,
+                self.declared_local_names,
                 self.instance_variables,
                 loop_depth=self.loop_depth,
                 continue_depth=self.continue_depth,
@@ -623,6 +630,7 @@ class _StatementParser:
         parser = _StatementParser(
             body_tokens,
             local_names=self.local_names,
+            declared_local_names=set[str](),
             instance_variables=self.instance_variables,
             loop_depth=self.loop_depth + 1,
             continue_depth=self.continue_depth,
@@ -766,9 +774,7 @@ class _StatementParser:
 
     def _parse_do_until_body(self) -> list[str]:
         if self._match("{"):
-            lines = self.parse(terminator="}")
-            self._consume("}")
-            return lines
+            return self._parse_nested_braced_body()
 
         statement_tokens = self._read_do_until_statement_tokens()
         if not statement_tokens:
@@ -776,6 +782,7 @@ class _StatementParser:
         return _transpile_statement(
             _tokens_to_source(statement_tokens),
             self.local_names,
+            self.declared_local_names,
             self.instance_variables,
             loop_depth=self.loop_depth,
             continue_depth=self.continue_depth,
@@ -791,12 +798,28 @@ class _StatementParser:
 
     def _parse_body(self) -> list[str]:
         if self._match("{"):
+            return self._parse_nested_braced_body()
+        if self._at_end() or self._check("}"):
+            return []
+        return self._parse_nested_single_statement_body()
+
+    def _parse_nested_braced_body(self) -> list[str]:
+        outer_declared_local_names = self.declared_local_names
+        self.declared_local_names = set[str]()
+        try:
             lines = self.parse(terminator="}")
             self._consume("}")
             return lines
-        if self._at_end() or self._check("}"):
-            return []
-        return self._parse_statement()
+        finally:
+            self.declared_local_names = outer_declared_local_names
+
+    def _parse_nested_single_statement_body(self) -> list[str]:
+        outer_declared_local_names = self.declared_local_names
+        self.declared_local_names = set[str]()
+        try:
+            return self._parse_statement()
+        finally:
+            self.declared_local_names = outer_declared_local_names
 
     def _read_condition_tokens(self) -> list[_Token]:
         if self._match("("):

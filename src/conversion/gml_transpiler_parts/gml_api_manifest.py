@@ -157,6 +157,9 @@ _LAYER_IMPLEMENTED_APIS = frozenset(
         "layer_get_element_type",
         "layer_set_visible",
         "layer_get_visible",
+        "layer_background_get_id",
+        "layer_background_alpha",
+        "layer_background_blend",
     }
 )
 _LAYER_UNSUPPORTED_ELEMENT_APIS = (
@@ -167,10 +170,6 @@ _LAYER_UNSUPPORTED_ELEMENT_APIS = (
     (
         "layer_tilemap_create",
         "Runtime tilemap element creation needs the texture/tilemap compatibility surface tracked by #568.",
-    ),
-    (
-        "layer_background_get_id",
-        "Background layer element mutation needs dedicated background asset compatibility; converted backgrounds remain static metadata.",
     ),
     (
         "layer_background_create",
@@ -214,6 +213,9 @@ def _layer_entries() -> tuple[GMLAPIEntry, ...]:
                 "layer_add_instance",
                 "layer_get_all_elements",
                 "layer_get_element_type",
+                "layer_background_get_id",
+                "layer_background_alpha",
+                "layer_background_blend",
             }
             else "no",
             _LAYER_DOCS_PATH,

@@ -728,6 +728,9 @@ _LAYER_ARITY: dict[str, tuple[int, int | None]] = {
     "layer_get_element_type": (1, 1),
     "layer_set_visible": (2, 2),
     "layer_get_visible": (1, 1),
+    "layer_background_get_id": (1, 1),
+    "layer_background_alpha": (2, 2),
+    "layer_background_blend": (2, 2),
 }
 
 _SEQUENCE_TIMELINE_ARITY: dict[str, tuple[int, int | None]] = {

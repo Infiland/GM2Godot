@@ -479,6 +479,9 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("layer_add_instance(layer_id, id)", "GMRuntime.gml_layer_add_instance(layer_id, id)"),
     RuntimeValueParityCase("layer_get_all_elements(layer_id)", "GMRuntime.gml_layer_get_all_elements(layer_id)"),
     RuntimeValueParityCase("layer_get_element_type(element)", "GMRuntime.gml_layer_get_element_type(element)"),
+    RuntimeValueParityCase("layer_background_get_id(layer_id)", "GMRuntime.gml_layer_background_get_id(layer_id)"),
+    RuntimeValueParityCase("layer_background_alpha(bg, 0.25)", "GMRuntime.gml_layer_background_alpha(bg, 0.25)"),
+    RuntimeValueParityCase("layer_background_blend(bg, 255)", "GMRuntime.gml_layer_background_blend(bg, 255)"),
     RuntimeValueParityCase("layer_destroy(layer_id)", "GMRuntime.gml_layer_destroy(layer_id)"),
     RuntimeValueParityCase("timeline_exists(tl_intro)", 'GMRuntime.gml_timeline_exists(GMRuntime.gml_asset_get_index("tl_intro"))'),
     RuntimeValueParityCase("timeline_get_name(tl_intro)", 'GMRuntime.gml_timeline_get_name(GMRuntime.gml_asset_get_index("tl_intro"))'),
@@ -1344,6 +1347,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_layer_add_instance",
             "gml_layer_get_all_elements",
             "gml_layer_get_element_type",
+            "gml_layer_background_get_id",
+            "gml_layer_background_alpha",
+            "gml_layer_background_blend",
             "gml_timeline_exists",
             "gml_timeline_get_name",
             "gml_timeline_moment_add_script",
@@ -2574,6 +2580,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_layer_add_instance(layer, instance):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_get_all_elements(layer):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_get_element_type(element):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_background_get_id(layer):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_background_alpha(background, alpha):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_background_blend(background, color):", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_layer_register_scene(scene)", GML_RUNTIME_SCRIPT)
         self.assertIn("var resolved_layer = _gml_layer_resolve_node(layer)", GML_RUNTIME_SCRIPT)
 

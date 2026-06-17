@@ -88,6 +88,43 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_sprite_visual_node",
     "Vector2",
 })
+_NATIVE_NODE2D_MEMBER_VARIABLES = frozenset({
+    "editor_description",
+    "global_position",
+    "global_rotation",
+    "global_rotation_degrees",
+    "global_scale",
+    "global_transform",
+    "light_mask",
+    "material",
+    "modulate",
+    "multiplayer",
+    "name",
+    "owner",
+    "position",
+    "process_mode",
+    "process_physics_priority",
+    "process_priority",
+    "process_thread_group",
+    "rotation",
+    "rotation_degrees",
+    "scale",
+    "scene_file_path",
+    "self_modulate",
+    "show_behind_parent",
+    "skew",
+    "texture_filter",
+    "texture_repeat",
+    "top_level",
+    "transform",
+    "unique_name_in_owner",
+    "use_parent_material",
+    "visible",
+    "visibility_layer",
+    "y_sort_enabled",
+    "z_as_relative",
+    "z_index",
+})
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
     "as",
@@ -193,6 +230,7 @@ def _valid_instance_variables(instance_variables: Iterable[str] | None) -> list[
     return sorted(
         name for name in instance_variables
         if _IDENTIFIER_RE.match(name) and name not in _SCRIPT_BUILTIN_VARIABLES
+        and name not in _NATIVE_NODE2D_MEMBER_VARIABLES
     )
 
 
@@ -218,7 +256,15 @@ def _extends_line(base_script_path: str | None = None) -> str:
     return f"extends {_gd_string(base_script_path)}\n"
 
 
-def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntimeConfig) -> None:
+def _emit_sprite_runtime_prelude(
+    lines: list[str],
+    sprite_runtime: SpriteRuntimeConfig,
+    *,
+    declare_members: bool,
+) -> None:
+    if not declare_members:
+        return
+
     sprite_scene_paths = dict(sprite_runtime.sprite_scene_paths or {})
     sprite_constants = [
         sprite_name for sprite_name in sorted(sprite_scene_paths)
@@ -395,8 +441,17 @@ def _emit_sprite_runtime_prelude(lines: list[str], sprite_runtime: SpriteRuntime
     )
 
 
-def _prepend_sprite_runtime_ready_body(body: str) -> str:
-    init_body = "\t_gm_initialize_sprite_runtime()"
+def _prepend_sprite_runtime_ready_body(
+    body: str,
+    sprite_runtime: SpriteRuntimeConfig,
+    *,
+    inherited_runtime: bool,
+) -> str:
+    init_lines: list[str] = []
+    if inherited_runtime and sprite_runtime.initial_sprite_name is not None:
+        init_lines.append(f"\tsprite_index = {_gd_string(sprite_runtime.initial_sprite_name)}")
+    init_lines.append("\t_gm_initialize_sprite_runtime()")
+    init_body = "\n".join(init_lines)
     if body.strip() == "pass":
         return init_body
     return f"{init_body}\n{body}"
@@ -477,12 +532,16 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
 
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
     init_lines = ["\t_gm_register_instance()", "\t_gm_initialize_motion_runtime()"]
-    if object_runtime.inherit_ready and body.strip() == "pass":
+    should_call_parent_ready = object_runtime.inherit_ready
+    if should_call_parent_ready and body.strip() == "pass":
         init_lines.append("\tsuper._ready()")
         return "\n".join(init_lines)
     if body.strip() == "pass":
         return "\n".join(init_lines)
-    return "\n".join(init_lines) + "\n" + body
+    wrapped_body = "\n".join(init_lines) + "\n" + body
+    if should_call_parent_ready:
+        wrapped_body += "\n\tsuper._ready()"
+    return wrapped_body
 
 
 def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
@@ -661,8 +720,13 @@ def generate_script_content(
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
         if emit_prelude is not None:
             emit_prelude(lines, function_names)
+    inherited_sprite_runtime = base_script_path is not None
     if uses_sprite_runtime and sprite_runtime is not None:
-        _emit_sprite_runtime_prelude(lines, sprite_runtime)
+        _emit_sprite_runtime_prelude(
+            lines,
+            sprite_runtime,
+            declare_members=not inherited_sprite_runtime,
+        )
     if uses_object_runtime and object_runtime is not None:
         _emit_object_runtime_prelude(
             lines,
@@ -683,8 +747,12 @@ def generate_script_content(
             wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
             if wrap_body is not None:
                 body = wrap_body(func, body, function_names)
-        if uses_sprite_runtime and func.godot_func == "_ready":
-            body = _prepend_sprite_runtime_ready_body(body)
+        if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready":
+            body = _prepend_sprite_runtime_ready_body(
+                body,
+                sprite_runtime,
+                inherited_runtime=inherited_sprite_runtime,
+            )
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":

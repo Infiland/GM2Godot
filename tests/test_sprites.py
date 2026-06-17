@@ -883,6 +883,16 @@ class TestGenerateSpriteScene(unittest.TestCase):
         self.assertIn('type="CollisionShape2D"', content)
         self.assertIn('res://sprites/spr_rect/spr_rect.png', content)
 
+    def test_static_scene_uses_sanitized_texture_filename(self):
+        self.converter._generate_sprite_scene("sLogo", None, 1, subfolder="logo")
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "logo", "s_logo", "s_logo.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('res://sprites/logo/s_logo/s_logo.png', content)
+        self.assertNotIn("sLogo.png", content)
+
     def test_rectangle_with_origin_offset(self):
         # Middle center origin on 32x32 sprite, full bbox
         data = self._make_collision_data(collision_kind=1, origin=4, width=32, height=32,
@@ -910,6 +920,24 @@ class TestGenerateSpriteScene(unittest.TestCase):
             content = f.read()
 
         self.assertIn("spr_anim_1.png", content)
+
+    def test_animated_scene_uses_sanitized_texture_filenames(self):
+        anim_data: AnimationData = {
+            "playbackSpeed": 30.0,
+            "playbackSpeedType": 0,
+            "loop": True,
+            "frame_durations": [1.0, 1.0],
+        }
+        self.converter._generate_sprite_scene("sLogo", None, 2, anim_data, subfolder="logo")
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "logo", "s_logo", "s_logo.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn('res://sprites/logo/s_logo/s_logo_1.png', content)
+        self.assertIn('res://sprites/logo/s_logo/s_logo_2.png', content)
+        self.assertNotIn("sLogo_1.png", content)
+        self.assertNotIn("sLogo_2.png", content)
 
     def test_ellipse_circle_shape(self):
         # Square bbox -> CircleShape2D

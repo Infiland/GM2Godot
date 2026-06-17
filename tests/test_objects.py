@@ -1149,6 +1149,74 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('{"target_object": "o_bullet", "method": "_on_collision_o_bullet"}', content)
         self.assertIn("func _on_collision_o_bullet():", content)
 
+    def test_named_collision_event_source_file_transpiles_body(self):
+        self._setup_object("o_test", event_list=[
+            {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
+        ])
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Collision_o_bullet.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("collision_seen = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("func _on_collision_o_bullet():", content)
+        self.assertIn("\tcollision_seen = true", content)
+
+    def test_collision_event_source_falls_back_to_numeric_filename(self):
+        self._setup_object("o_test", event_list=[
+            {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
+        ])
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Collision_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("legacy_collision_seen = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("func _on_collision_o_bullet():", content)
+        self.assertIn("\tlegacy_collision_seen = true", content)
+
+    def test_missing_collision_event_source_records_diagnostic(self):
+        self._setup_object("o_test", event_list=[
+            {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda v: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+        converter.convert_all()
+
+        missing_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE"
+        ]
+        self.assertEqual(len(missing_diagnostics), 1)
+        self.assertEqual(missing_diagnostics[0].resource, "o_test")
+        self.assertEqual(missing_diagnostics[0].event, "_on_collision_o_bullet")
+        self.assertIn("Collision_o_bullet.gml", missing_diagnostics[0].message)
+        self.assertIn("Collision_0.gml", missing_diagnostics[0].message)
+
     def test_script_with_multiple_events(self):
         """Multiple events should produce multiple function stubs."""
         self._setup_object("o_test", event_list=[

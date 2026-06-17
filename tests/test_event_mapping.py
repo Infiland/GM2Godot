@@ -164,7 +164,8 @@ class TestMapEventDynamic(unittest.TestCase):
         })
         self.assertEqual(m.godot_func, "_on_collision_o_bullet")
         self.assertEqual(m.sort_key, 13)
-        self.assertEqual(m.gml_filename, "Collision_0.gml")
+        self.assertEqual(m.gml_filename, "Collision_o_bullet.gml")
+        self.assertEqual(m.fallback_gml_filenames, ("Collision_0.gml",))
 
     def test_collision_without_object(self):
         m = map_event({"eventType": 4, "eventNum": 0})

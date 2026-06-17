@@ -19,8 +19,11 @@ class EventMapping:
         params: Function parameter string (e.g. "", "delta", "event").
         sort_key: Canonical ordering in the generated .gd file.
         gml_filename: Expected GML source filename (e.g. "Create_0.gml").
+        fallback_gml_filenames: Additional source filenames to try when the
+            preferred GameMaker event source file is not present.
     """
     godot_func: str
     params: str
     sort_key: int
     gml_filename: str
+    fallback_gml_filenames: tuple[str, ...] = ()

@@ -151,6 +151,18 @@ class TestMonophobiaConversion(unittest.TestCase):
 
         self.assertEqual(player_background_failures, [])
 
+    def test_named_collision_event_files_are_transpiled(self) -> None:
+        player = self._read_generated_file("objects", "o_player", "o_player.gd")
+        bullet = self._read_generated_file("objects", "o_bullet", "o_bullet.gd")
+
+        self.assertIn('{"target_object": "o_enemyroad", "method": "_on_collision_o_enemyroad"}', player)
+        self.assertIn("func _on_collision_o_enemyroad():", player)
+        self.assertIn('GMRuntime.gml_audio_play_sound(GMRuntime.gml_asset_get_index("snd_carstop"), 0, 0)', player)
+        self.assertIn("func _on_collision_o_murderer():", player)
+        self.assertIn('GMRuntime.gml_selector_set(GMRuntime.gml_global_scope(), "gas", 0)', player)
+        self.assertIn('{"target_object": "o_girl", "method": "_on_collision_o_girl"}', bullet)
+        self.assertIn("func _on_collision_o_girl():\n\tGMRuntime.gml_instance_destroy(self)", bullet)
+
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
         self.assertIsNotNone(
             find_godot_binary(),

@@ -111,6 +111,14 @@ class ObjectEventSource(TypedDict):
     inherited_event_call: str | None
 
 
+def _event_source_filenames(mapping: EventMapping) -> tuple[str, ...]:
+    filenames: list[str] = []
+    for filename in (mapping.gml_filename, *mapping.fallback_gml_filenames):
+        if filename and filename not in filenames:
+            filenames.append(filename)
+    return tuple(filenames)
+
+
 def _line_offset_for_block(script_content: str, block: str) -> int:
     script_lines = script_content.splitlines()
     block_lines = block.splitlines()
@@ -529,8 +537,9 @@ class ObjectConverter(BaseConverter):
             if mapping is None or not mapping.gml_filename:
                 continue
 
-            source_path = os.path.join(object_dir, mapping.gml_filename)
-            if not os.path.isfile(source_path):
+            source_path = self._event_source_path(object_dir, mapping)
+            if source_path is None:
+                self._record_missing_event_source(object_name, object_dir, mapping)
                 continue
 
             try:
@@ -622,6 +631,40 @@ class ObjectConverter(BaseConverter):
                 self._safe_log(message)
 
         return code_bodies, instance_variables, source_maps
+
+    def _event_source_path(self, object_dir: str, mapping: EventMapping) -> str | None:
+        for filename in _event_source_filenames(mapping):
+            source_path = os.path.join(object_dir, filename)
+            if os.path.isfile(source_path):
+                return source_path
+        return None
+
+    def _record_missing_event_source(
+        self,
+        object_name: str,
+        object_dir: str,
+        mapping: EventMapping,
+    ) -> None:
+        if not mapping.gml_filename.startswith("Collision_"):
+            return
+        filenames = _event_source_filenames(mapping)
+        message = (
+            "Warning: Missing GameMaker collision event code file for "
+            f"{object_name}/{mapping.godot_func}; looked for {', '.join(filenames)}"
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE",
+                message,
+                source_path=os.path.join(object_dir, filenames[0]) if filenames else object_dir,
+                resource=object_name,
+                resource_type="object",
+                event=mapping.godot_func,
+                workaround="Add the missing GameMaker collision event GML file or remove the stale event metadata.",
+            )
+        with self._lock:
+            self.log_callback(message)
 
     def _record_event_source_diagnostics(
         self,

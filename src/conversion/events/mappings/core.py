@@ -44,7 +44,15 @@ def map_collision_event(event: JsonDict, gml_filename: str) -> EventMapping:
     if collision_obj and isinstance(collision_obj, dict):
         collision_data = cast(JsonDict, collision_obj)
         obj_name = cast(str, collision_data.get('name', 'unknown'))
-        return EventMapping(f"_on_collision_{obj_name}", "", 13, gml_filename)
+        named_filename = f"Collision_{obj_name}.gml"
+        fallback_filenames = () if named_filename == gml_filename else (gml_filename,)
+        return EventMapping(
+            f"_on_collision_{obj_name}",
+            "",
+            13,
+            named_filename,
+            fallback_filenames,
+        )
     return EventMapping("_on_collision", "", 13, gml_filename)
 
 

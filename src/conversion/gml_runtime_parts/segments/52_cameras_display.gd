@@ -418,6 +418,18 @@ static func gml_view_backend_diagnostics():
 	return _gml_clone_value(_gml_view_backend_diagnostics, 8)
 
 
+static func _gml_view_register_scene(scene):
+	if not (scene is Node):
+		return false
+	var camera_nodes = []
+	_gml_find_camera_nodes_recursive(scene, camera_nodes)
+	for camera_node in camera_nodes:
+		var view_index = int(camera_node.get_meta("gamemaker_view_index"))
+		_gml_view_camera_handle_for_node(view_index, camera_node)
+	_gml_view_sync_backend()
+	return true
+
+
 static func gml_display_get_gui_width():
 	return _gml_display_gui_dimensions().x
 
@@ -818,9 +830,22 @@ static func _gml_view_default_value(name, index):
 
 static func _gml_view_camera_handle(index):
 	var view_index = int(index)
-	if _gml_camera_entries_by_index.has(view_index):
-		return _gml_camera_entries_by_index[view_index]["handle"]
 	var camera_node = _gml_view_find_camera_node(view_index)
+	return _gml_view_camera_handle_for_node(view_index, camera_node)
+
+
+static func _gml_view_camera_handle_for_node(view_index, camera_node):
+	if _gml_camera_entries_by_index.has(view_index):
+		var existing = _gml_camera_entries_by_index[view_index]
+		if existing.has("handle") and gml_handle_is_valid(existing["handle"]):
+			var existing_handle = existing["handle"]
+			var existing_camera = existing_handle.reference
+			if typeof(existing_camera) == TYPE_DICTIONARY and camera_node is Camera2D and is_instance_valid(camera_node):
+				existing_camera["node"] = camera_node
+				_gml_view_sync_port_arrays_from_node(view_index, camera_node)
+				_gml_camera_sync_from_node(existing_camera, camera_node)
+				_gml_camera_apply_state(existing_camera)
+			return existing_handle
 	var camera = _gml_camera_make(
 		_to_real(_gml_array_get_default("view_xview", view_index, 0)),
 		_to_real(_gml_array_get_default("view_yview", view_index, 0)),
@@ -974,11 +999,21 @@ static func _gml_camera_apply_state(camera):
 
 
 static func _gml_camera_update_visible_views():
-	if not _gml_builtin_arrays.has("view_camera"):
-		return null
-	var values = _gml_builtin_arrays["view_camera"]
-	for view_index in range(min(values.size(), GML_BUILTIN_ARRAY_SIZE)):
-		var handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, values[view_index])
+	var view_indices = []
+	if _gml_builtin_arrays.has("view_camera"):
+		var values = _gml_builtin_arrays["view_camera"]
+		for view_index in range(min(values.size(), GML_BUILTIN_ARRAY_SIZE)):
+			view_indices.append(view_index)
+	else:
+		for view_index in _gml_camera_entries_by_index.keys():
+			view_indices.append(int(view_index))
+	view_indices.sort()
+	for view_index in view_indices:
+		var handle = null
+		if _gml_builtin_arrays.has("view_camera"):
+			handle = gml_handle_from_value(GML_CAMERA_HANDLE_KIND, _gml_builtin_arrays["view_camera"][view_index])
+		elif _gml_camera_entries_by_index.has(view_index):
+			handle = _gml_camera_entries_by_index[view_index]["handle"]
 		if not gml_handle_is_valid(handle) or typeof(handle.reference) != TYPE_DICTIONARY:
 			continue
 		var camera = handle.reference
@@ -1097,6 +1132,15 @@ static func _gml_find_camera_node_recursive(node, view_index):
 		if result != null:
 			return result
 	return null
+
+
+static func _gml_find_camera_nodes_recursive(node, results):
+	if node is Camera2D and node.has_meta("gamemaker_view_index"):
+		results.append(node)
+	if not (node is Node):
+		return
+	for child in node.get_children():
+		_gml_find_camera_nodes_recursive(child, results)
 
 
 static func _gml_view_get_port_value(view_port, name, fallback):

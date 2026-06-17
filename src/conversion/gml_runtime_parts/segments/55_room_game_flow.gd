@@ -20,6 +20,7 @@ static func gml_room_enter_scene(scene, force = false):
 		return false
 	_gml_room_pending_entry = null
 	gml_layer_register_scene(scene)
+	_gml_view_register_scene(scene)
 	_gml_room_update_current(entry, scene)
 	_gml_room_warn_persistent_room(scene)
 	_gml_room_run_instance_creation_code(scene)
@@ -130,6 +131,14 @@ static func gml_room_transition_log():
 	return _gml_room_transition_log
 
 
+static func _gml_room_process_scene(scene, delta):
+	if not (scene is Node):
+		return false
+	_gml_camera_update_visible_views()
+	_gml_room_update_background_layers(scene, delta)
+	return true
+
+
 static func _gml_room_change_to_entry(entry, restarting):
 	var tree = _gml_room_tree()
 	if tree == null:
@@ -178,6 +187,48 @@ static func _gml_room_update_current(entry, scene):
 		height = int(scene.get_meta("gamemaker_room_height"))
 	_gml_builtin_globals["room_width"] = width
 	_gml_builtin_globals["room_height"] = height
+
+
+static func _gml_room_update_background_layers(scene, delta):
+	if not (scene is Node):
+		return
+	var step_scale = _gml_room_step_scale(delta)
+	for node in _gml_layer_tree_nodes(scene):
+		if node == scene:
+			continue
+		if node is Object and node.has_meta("gamemaker_background_visual"):
+			_gml_room_update_background_node(node, step_scale)
+
+
+static func _gml_room_update_background_node(node, step_scale):
+	var hspeed = _gml_room_background_speed(node, "h")
+	var vspeed = _gml_room_background_speed(node, "v")
+	if abs(hspeed) < 0.0001 and abs(vspeed) < 0.0001:
+		return
+	var motion = Vector2(hspeed * step_scale, vspeed * step_scale)
+	if node is Parallax2D:
+		node.scroll_offset += motion
+	elif node is Node2D:
+		node.position += motion
+
+
+static func _gml_room_background_speed(node, axis):
+	var background_key = "gamemaker_background_hspeed" if axis == "h" else "gamemaker_background_vspeed"
+	var layer_key = "gamemaker_layer_hspeed" if axis == "h" else "gamemaker_layer_vspeed"
+	if node is Object and node.has_meta(background_key):
+		return _to_real(node.get_meta(background_key))
+	if node is Object and node.has_meta(layer_key):
+		return _to_real(node.get_meta(layer_key))
+	return 0.0
+
+
+static func _gml_room_step_scale(delta):
+	var room_speed = _to_real(_gml_builtin_globals.get("room_speed", 0))
+	if room_speed <= 0.0:
+		room_speed = float(Engine.max_fps)
+	if room_speed <= 0.0:
+		room_speed = 60.0
+	return max(_to_real(delta), 0.0) * room_speed
 
 
 static func _gml_room_dispatch_lifecycle(root_node, method_name):

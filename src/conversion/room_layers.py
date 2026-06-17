@@ -816,15 +816,6 @@ def _camera_node_lines(context: RoomLayerSerializationContext) -> list[str]:
         object_id = _dict_value(view.get("objectId"))
         object_name = object_id.get("name") if isinstance(object_id.get("name"), str) else None
 
-        if object_name:
-            context.warn(
-                "Warning: GameMaker view in room {room_name} follows object {object_name}; "
-                "follow behavior is preserved as Camera2D metadata for runtime support.".format(
-                    room_name=context.room.name,
-                    object_name=object_name,
-                )
-            )
-
         lines.extend([
             f'[node name={godot_string(node_name)} type="Camera2D" parent="."]',
             "position = Vector2({x}, {y})".format(
@@ -896,6 +887,23 @@ def _background_color_lines(
     layer: JsonDict, parent_path: str, context: RoomLayerSerializationContext
 ) -> list[str]:
     width, height = _room_size(context)
+    if _background_needs_runtime(layer):
+        node_name = "BackgroundVisual"
+        child_path = f"{parent_path}/{node_name}"
+        lines = _background_parallax_lines(layer, parent_path, node_name, "color", context)
+        lines.extend([
+            f'[node name="BackgroundColor" type="ColorRect" parent={godot_string(child_path)}]',
+            "visible = true",
+            "position = Vector2(0, 0)",
+            "size = Vector2({width}, {height})".format(
+                width=_format_number(width),
+                height=_format_number(height),
+            ),
+            "color = {color}".format(color=_godot_color(layer.get("colour", 4278190080))),
+            "",
+        ])
+        return lines
+
     lines = [
         f'[node name="BackgroundVisual" type="ColorRect" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(bool(layer.get('visible', True)))}",
@@ -907,7 +915,6 @@ def _background_color_lines(
         "color = {color}".format(color=_godot_color(layer.get("colour", 4278190080))),
     ]
     lines.extend(_background_metadata_lines(layer, "color"))
-    _warn_background_runtime_requirements(layer, context)
     lines.append("")
     return lines
 
@@ -920,6 +927,23 @@ def _background_sprite_lines(
     context: RoomLayerSerializationContext,
 ) -> list[str]:
     node_name = _sanitize_node_name(sprite_name) or "BackgroundSprite"
+    if _background_needs_runtime(layer):
+        child_path = f"{parent_path}/{node_name}"
+        visual_name = _sanitize_node_name(sprite_name + "Visual") or "BackgroundSpriteVisual"
+        lines = _background_parallax_lines(layer, parent_path, node_name, "sprite", context)
+        lines.extend([
+            '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
+                name=godot_string(visual_name),
+                parent=godot_string(child_path),
+                resource_id=ext_resource_id,
+            ),
+            "visible = true",
+            "position = Vector2(0, 0)",
+            "modulate = {color}".format(color=_godot_color(layer.get("colour", 4294967295))),
+            "",
+        ])
+        return lines
+
     lines = [
         '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
             name=godot_string(node_name),
@@ -931,7 +955,6 @@ def _background_sprite_lines(
         "modulate = {color}".format(color=_godot_color(layer.get("colour", 4294967295))),
     ]
     lines.extend(_background_metadata_lines(layer, "sprite"))
-    _warn_background_runtime_requirements(layer, context)
     lines.append("")
     return lines
 
@@ -962,18 +985,50 @@ def _background_metadata_lines(layer: JsonDict, visual_type: str) -> list[str]:
     return lines
 
 
-def _warn_background_runtime_requirements(
+def _background_parallax_lines(
+    layer: JsonDict,
+    parent_path: str,
+    node_name: str,
+    visual_type: str,
+    context: RoomLayerSerializationContext,
+) -> list[str]:
+    repeat_x, repeat_y = _background_repeat_size(layer, context)
+    lines = [
+        f'[node name={godot_string(node_name)} type="Parallax2D" parent={godot_string(parent_path)}]',
+        f"visible = {godot_value(bool(layer.get('visible', True)))}",
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(layer.get("x", 0)),
+            y=_format_number(layer.get("y", 0)),
+        ),
+        "repeat_size = Vector2({x}, {y})".format(
+            x=_format_number(repeat_x),
+            y=_format_number(repeat_y),
+        ),
+        "repeat_times = 3",
+        "scroll_offset = Vector2(0, 0)",
+    ]
+    lines.extend(_background_metadata_lines(layer, visual_type))
+    lines.append("metadata/gamemaker_background_runtime_support = true")
+    lines.append("")
+    return lines
+
+
+def _background_needs_runtime(layer: JsonDict) -> bool:
+    return (
+        _truthy(layer.get("htiled"))
+        or _truthy(layer.get("vtiled"))
+        or _nonzero(layer.get("hspeed"))
+        or _nonzero(layer.get("vspeed"))
+    )
+
+
+def _background_repeat_size(
     layer: JsonDict, context: RoomLayerSerializationContext
-) -> None:
-    if not (_truthy(layer.get("htiled")) or _truthy(layer.get("vtiled"))
-            or _nonzero(layer.get("hspeed")) or _nonzero(layer.get("vspeed"))):
-        return
-    context.warn(
-        "Warning: GameMaker background layer {layer_name} in room {room_name} uses "
-        "scrolling/tiling; runtime support is required for hspeed/vspeed/htiled/vtiled.".format(
-            layer_name=_layer_name(layer),
-            room_name=context.room.name,
-        )
+) -> tuple[JsonValue, JsonValue]:
+    width, height = _room_size(context)
+    return (
+        width if _truthy(layer.get("htiled")) else 0,
+        height if _truthy(layer.get("vtiled")) else 0,
     )
 
 

@@ -64,7 +64,7 @@ def resolve_room_creation_code(
 
     if metadata.has_code and not metadata.exists and warn_callback is not None:
         warn_callback(
-            "Warning: Missing GameMaker room creation code file for room {room}: {path}".format(
+            "Info: Missing GameMaker room creation code file for room {room}: {path}".format(
                 room=room.name,
                 path=metadata.source_path,
             )
@@ -100,7 +100,7 @@ def resolve_instance_creation_code(
 
     if metadata.has_code and not metadata.exists and warn_callback is not None:
         warn_callback(
-            "Warning: Missing GameMaker instance creation code file for room {room}, "
+            "Info: Missing GameMaker instance creation code file for room {room}, "
             "instance {instance}: {path}".format(
                 room=room.name,
                 instance=instance_name,

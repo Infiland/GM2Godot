@@ -1135,7 +1135,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('extends "res://gm2godot/gml_room_node.gd"', script)
         self.assertIn("func _gm2godot_room_creation_code():", script)
 
-    def test_room_creation_code_missing_warns_and_marks_missing(self):
+    def test_room_creation_code_missing_logs_info_and_marks_missing(self):
         self._write_yyp(["r_missing_code"])
         missing_path = os.path.join(
             self.gm_dir, "rooms", "r_missing_code", "MissingCreationCode.gml"
@@ -1153,12 +1153,17 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
-        self.assertTrue(any(
+        missing_logs = [
+            log
+            for log in self.logs
+            if (
             "Missing GameMaker room creation code file" in log
             and "r_missing_code" in log
             and missing_path in log
-            for log in self.logs
-        ))
+            )
+        ]
+        self.assertTrue(missing_logs)
+        self.assertTrue(all(log.startswith("Info:") for log in missing_logs))
 
     def test_instance_emits_creation_code_metadata(self):
         self._write_yyp(["r_instance_code"], extra_resources=[("objects", "o_player")])
@@ -1269,7 +1274,7 @@ class TestRoomConverter(unittest.TestCase):
             script,
         )
 
-    def test_instance_creation_code_missing_warns_and_marks_missing(self):
+    def test_instance_creation_code_missing_logs_info_and_marks_missing(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player")
         self._write_object_scene("o_player")
@@ -1301,13 +1306,18 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
-        self.assertTrue(any(
+        missing_logs = [
+            log
+            for log in self.logs
+            if (
             "Missing GameMaker instance creation code file" in log
             and "inst_player" in log
             and "r_missing_instance_code" in log
             and missing_path in log
-            for log in self.logs
-        ))
+            )
+        ]
+        self.assertTrue(missing_logs)
+        self.assertTrue(all(log.startswith("Info:") for log in missing_logs))
 
     def test_execution_metadata_preserves_lifecycle_order(self):
         self._write_yyp(["r_lifecycle"], extra_resources=[("objects", "o_enemy")])

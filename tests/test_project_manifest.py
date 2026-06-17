@@ -8,7 +8,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    load_gamemaker_project_manifest,
+    unsupported_project_option_diagnostics,
+)
 
 
 def _write_file(path: str, content: str) -> None:
@@ -98,6 +101,14 @@ class TestGameMakerProjectManifest(unittest.TestCase):
         self.assertTrue(
             any(diagnostic.code == "GM2GD-PROJECT-UNKNOWN-FIELD" for diagnostic in manifest.diagnostics)
         )
+
+        unsupported = unsupported_project_option_diagnostics(
+            manifest,
+            target_platform="windows",
+            supported_keys={"option_game_speed", "option_windows_resize_window"},
+        )
+        self.assertTrue(unsupported)
+        self.assertTrue(all(diagnostic.severity == "info" for diagnostic in unsupported))
 
     def test_reports_duplicate_resource_conflicts_without_rejecting_manifest(self) -> None:
         _write_file(

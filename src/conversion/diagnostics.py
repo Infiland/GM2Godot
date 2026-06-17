@@ -241,6 +241,8 @@ def _escape_markdown_table(value: str) -> str:
 
 def _severity_from_log_message(message: str) -> DiagnosticSeverity | None:
     normalized = message.lower()
+    if normalized.startswith("info:"):
+        return "info"
     if normalized.startswith("warning:"):
         return "warning"
     if normalized.startswith("error:"):

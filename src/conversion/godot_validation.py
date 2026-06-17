@@ -144,6 +144,7 @@ def validate_generated_godot_project(
                 [
                     resolved_binary,
                     "--headless",
+                    "--recovery-mode",
                     "--path",
                     godot_project_path,
                     "--import",

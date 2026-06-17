@@ -165,6 +165,33 @@ class TestGodotValidation(unittest.TestCase):
         self.assertIn("GM2GODOT_IMPORT_OK", report.import_output)
         self.assertIn("GM2GODOT_VALIDATION_OK 3", report.output)
 
+    def test_import_pass_uses_recovery_mode(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        args_file = self.temp_dir / "import-args.txt"
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            f"    printf '%s\\n' \"$@\" > '{args_file}'\n"
+            "    printf '%s\\n' 'GM2GODOT_IMPORT_OK'\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'GM2GODOT_VALIDATION_OK 3'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake_godot.chmod(0o755)
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+        )
+
+        self.assertEqual(report.status, "passed")
+        self.assertIn("--recovery-mode", args_file.read_text(encoding="utf-8").splitlines())
+
     def test_import_only_validation_skips_resource_load_script(self) -> None:
         project_dir = self._write_png_sprite_project()
         fake_godot = self.temp_dir / "fake-godot"

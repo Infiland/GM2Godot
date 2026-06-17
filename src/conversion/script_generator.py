@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -8,6 +9,8 @@ from src.conversion.event_mapping import is_input_event, map_event, map_input_ev
 from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
+from src.conversion.gml_transpiler_parts.constants import _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+from src.conversion.gml_transpiler_parts.identifiers import _sanitize_gdscript_identifier
 from src.conversion.type_defs import JsonDict
 
 
@@ -88,43 +91,7 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_sprite_visual_node",
     "Vector2",
 })
-_NATIVE_NODE2D_MEMBER_VARIABLES = frozenset({
-    "editor_description",
-    "global_position",
-    "global_rotation",
-    "global_rotation_degrees",
-    "global_scale",
-    "global_transform",
-    "light_mask",
-    "material",
-    "modulate",
-    "multiplayer",
-    "name",
-    "owner",
-    "position",
-    "process_mode",
-    "process_physics_priority",
-    "process_priority",
-    "process_thread_group",
-    "rotation",
-    "rotation_degrees",
-    "scale",
-    "scene_file_path",
-    "self_modulate",
-    "show_behind_parent",
-    "skew",
-    "texture_filter",
-    "texture_repeat",
-    "top_level",
-    "transform",
-    "unique_name_in_owner",
-    "use_parent_material",
-    "visible",
-    "visibility_layer",
-    "y_sort_enabled",
-    "z_as_relative",
-    "z_index",
-})
+_NATIVE_NODE2D_MEMBER_VARIABLES = _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
     "as",
@@ -744,7 +711,7 @@ def generate_script_content(
             declare_members=base_script_path is None,
         )
     for variable_name in _valid_instance_variables(instance_variables):
-        lines.append(f"\n\nvar {variable_name}\n")
+        lines.append(f"\n\nvar {_sanitize_gdscript_identifier(variable_name)}\n")
 
     for func in unique_functions:
         body = _get_function_body(func, effective_code_bodies)

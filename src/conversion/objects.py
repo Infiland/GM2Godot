@@ -30,12 +30,18 @@ from src.conversion.gml_transpiler_parts.constants import (
     _ASSIGNMENT_OPERATORS,
     _BUILTIN_GLOBAL_VARIABLES,
     _BUILTIN_INSTANCE_VARIABLES,
+    _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
     _GML_LITERAL_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
 from src.conversion.gml_transpiler_parts.model import _Token
 from src.conversion.gml_transpiler_parts.tokens import _tokenize
-from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
+from src.conversion.script_generator import (
+    ObjectRuntimeConfig,
+    SpriteRuntimeConfig,
+    _valid_instance_variables,
+    generate_script_content,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
@@ -96,6 +102,13 @@ class ObjectProcessResult(TypedDict):
     has_sprite: bool
     sprite_name: str | None
     event_count: int
+
+
+class ObjectEventSource(TypedDict):
+    mapping: EventMapping
+    source_path: str
+    source: str
+    inherited_event_call: str | None
 
 
 def _line_offset_for_block(script_content: str, block: str) -> int:
@@ -500,12 +513,16 @@ class ObjectConverter(BaseConverter):
         inherited_event_functions: set[str] | None = None,
         asset_names: set[str] | None = None,
         project_script_instance_variables: set[str] | None = None,
+        direct_instance_variables: set[str] | None = None,
+        direct_reference_names: set[str] | None = None,
     ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap]]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
         instance_variables: set[str] = set(project_script_instance_variables or set())
         inherited_functions = inherited_event_functions or set()
+        source_entries: list[ObjectEventSource] = []
         object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
+        asset_name_set = set(asset_names or set())
 
         for event in event_list or []:
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
@@ -533,6 +550,36 @@ class ObjectConverter(BaseConverter):
                 if mapping.godot_func in inherited_functions
                 else None
             )
+            source_entries.append(
+                {
+                    "mapping": mapping,
+                    "source_path": source_path,
+                    "source": source,
+                    "inherited_event_call": inherited_event_call,
+                }
+            )
+            instance_variables.update(
+                _script_assigned_instance_variable_names(
+                    source,
+                    asset_names=asset_name_set,
+                )
+            )
+
+        direct_names = (
+            set(_valid_instance_variables(instance_variables))
+            if direct_instance_variables is None
+            else set(direct_instance_variables)
+        )
+        direct_names.update(direct_reference_names or set())
+        dynamic_names = (
+            set(instance_variables)
+            | _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+        ) - direct_names
+
+        for entry in source_entries:
+            mapping = entry["mapping"]
+            source_path = entry["source_path"]
+            source = entry["source"]
             try:
                 self._record_event_source_diagnostics(
                     source,
@@ -543,13 +590,16 @@ class ObjectConverter(BaseConverter):
                 result = transpile_gml_code_with_source_map(
                     source,
                     instance_variables=instance_variables,
-                    inherited_event_call=inherited_event_call,
+                    inherited_event_call=entry["inherited_event_call"],
                     macro_configuration=self.macro_configuration,
                     asset_names=asset_names,
                     static_scope_prefix=f"{object_name}.{mapping.godot_func}",
                     source_path=source_path,
                     event=mapping.godot_func,
                     preserve_source_comments=True,
+                    instance_target="self",
+                    direct_instance_names=direct_names,
+                    dynamic_instance_names=dynamic_names,
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
@@ -732,11 +782,13 @@ class ObjectConverter(BaseConverter):
                 if parent_object_name is None
                 else None
             ),
+            direct_instance_variables=set() if parent_object_name is not None else None,
+            direct_reference_names=set(sprite_scene_paths or {}),
         )
         script_content = generate_script_content(
             event_list,
             code_bodies=code_bodies,
-            instance_variables=instance_variables,
+            instance_variables=instance_variables if parent_object_name is None else set(),
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,

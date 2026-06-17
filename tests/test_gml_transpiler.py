@@ -1776,6 +1776,22 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(transpile_gml_code("var bbox_left = 1; bbox_left += 1", indent=""), "var bbox_left = 1\nbbox_left = GMRuntime.gml_add(bbox_left, 1)")
 
+    def test_instance_target_preserves_direct_names_and_dynamic_fallback(self):
+        output = transpile_gml_code(
+            "score = missing + 1; draw = score; score = draw;",
+            indent="",
+            instance_target="self",
+            direct_instance_names={"score"},
+            dynamic_instance_names={"draw"},
+        )
+
+        self.assertEqual(
+            output,
+            "score = GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(self, \"missing\"), 1)\n"
+            "GMRuntime.gml_variable_instance_set(self, \"draw\", score)\n"
+            "score = GMRuntime.gml_variable_instance_get(self, \"draw\")",
+        )
+
     def test_transpiles_multidimensional_array_access(self):
         self.assertEqual(
             transpile_gml_expression("grid[x][y]"),

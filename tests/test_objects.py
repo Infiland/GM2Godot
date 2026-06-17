@@ -638,7 +638,10 @@ class TestScriptGeneration(unittest.TestCase):
             source_map = json.load(f)
 
         self.assertIn("func _ready():", content)
-        self.assertIn("\tvar speed = GMRuntime.gml_mul(base_speed, 2)", content)
+        self.assertIn(
+            '\tvar speed = GMRuntime.gml_mul(GMRuntime.gml_variable_instance_get(self, "base_speed"), 2)',
+            content,
+        )
         self.assertIn("\tif GMRuntime.gml_is_nullish(score):\n\t\tscore = 0", content)
         self.assertIn("\tscore = GMRuntime.gml_add(score, GMRuntime.gml_int_div(speed, 2))", content)
         self.assertNotIn("\tpass", content)
@@ -721,7 +724,8 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn(
-            '\tvar label = GMRuntime.gml_add("Score: ", GMRuntime.gml_string(score))',
+            '\tvar label = GMRuntime.gml_add("Score: ", '
+            'GMRuntime.gml_string(GMRuntime.gml_variable_instance_get(self, "score")))',
             content,
         )
         self.assertIn("\tprint(label)", content)
@@ -787,7 +791,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn(
-            "\tchild_before = true\n\tsuper._ready()\n\tchild_after = true",
+            '\tGMRuntime.gml_variable_instance_set(self, "child_before", true)\n'
+            "\tsuper._ready()\n"
+            '\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
             child_content,
         )
 
@@ -812,7 +818,10 @@ class TestScriptGeneration(unittest.TestCase):
         with open(child_gd_path, "r", encoding="utf-8") as f:
             child_content = f.read()
 
-        self.assertIn("\tpass\n\tchild_after = true", child_content)
+        self.assertIn(
+            '\tpass\n\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
+            child_content,
+        )
         self.assertNotIn("super._ready()", child_content)
 
     def test_script_with_step_event(self):
@@ -970,7 +979,63 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var leftcontrols", parent_content)
         self.assertNotIn("var leftcontrols", child_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
-        self.assertIn("if GMRuntime.gml_eq(leftcontrols, 0):", child_content)
+        self.assertIn(
+            'if GMRuntime.gml_eq(GMRuntime.gml_variable_instance_get(self, "leftcontrols"), 0):',
+            child_content,
+        )
+
+    def test_native_member_instance_variables_use_dynamic_storage(self):
+        self._setup_object(
+            "o_box",
+            event_list=[
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 8, "eventNum": 0},
+            ],
+        )
+        object_dir = os.path.join(self.gm_dir, "objects", "o_box")
+        with open(os.path.join(object_dir, "Create_0.gml"), "w", encoding="utf-8") as f:
+            f.write("draw = true;")
+        with open(os.path.join(object_dir, "Draw_0.gml"), "w", encoding="utf-8") as f:
+            f.write("if draw { draw_text(0, 0, \"on\"); }")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_box", "o_box.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertNotIn("\n\nvar draw\n", content)
+        self.assertIn('GMRuntime.gml_variable_instance_set(self, "draw", true)', content)
+        self.assertIn(
+            'if GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(self, "draw")):',
+            content,
+        )
+
+    def test_failed_event_assignments_still_seed_instance_variable_declarations(self):
+        self._setup_object(
+            "o_stats",
+            event_list=[
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 8, "eventNum": 0},
+            ],
+        )
+        object_dir = os.path.join(self.gm_dir, "objects", "o_stats")
+        with open(os.path.join(object_dir, "Create_0.gml"), "w", encoding="utf-8") as f:
+            f.write('stats_rank_label = "A"; return 1;')
+        with open(os.path.join(object_dir, "Draw_0.gml"), "w", encoding="utf-8") as f:
+            f.write("draw_text(0, 0, stats_rank_label);")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_stats", "o_stats.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("\n\nvar stats_rank_label\n", content)
+        self.assertIn("GMRuntime.gml_draw_text(0, 0, stats_rank_label)", content)
+        self.assertIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 
     def test_script_supports_sprite_and_image_index(self):
         """sprite_index and image_index should map to generated sprite runtime state."""

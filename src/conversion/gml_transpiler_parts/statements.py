@@ -17,6 +17,7 @@ from .emitter import (
     _emit_expression,
     _emit_instance_keyword_argument,
     _name_resolves_to_global,
+    _uses_direct_builtin_instance_members,
     _uses_direct_member_access,
 )
 from .enum_helpers import (
@@ -247,6 +248,17 @@ def _transpile_statement(
         if global_target is not None:
             global_scope, member_name = global_target
             return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, GMRuntime.gml_undefined())"]
+        dynamic_target = _dynamic_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if dynamic_target is not None:
+            instance_target, member_name = dynamic_target
+            return [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, GMRuntime.gml_undefined())"
+            ]
         delete_lines = _delete_target_lines(target_expr, local_names, scope_context)
         if delete_lines is not None:
             return delete_lines
@@ -324,6 +336,19 @@ def _transpile_statement(
             return [
                 f"GMRuntime.gml_motion_set_{member_name}("
                 f"{instance_target}, GMRuntime.{helper}({current_value}, 1))"
+            ]
+        dynamic_target = _dynamic_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
+        if dynamic_target is not None:
+            instance_target, member_name = dynamic_target
+            current_value = f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})"
+            return [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, "
+                f"GMRuntime.{helper}({current_value}, 1))"
             ]
         scoped_target = _scoped_instance_assignment_parts(
             target_expr,
@@ -675,6 +700,11 @@ def _transpile_statement(
             local_names,
             scope_context,
         )
+        dynamic_target = _dynamic_instance_assignment_parts(
+            target_expr,
+            local_names,
+            scope_context,
+        )
         value_prelude_lines, value_source = _lower_mutation_expressions(
             value,
             local_names,
@@ -754,6 +784,34 @@ def _transpile_statement(
                     scope_context,
                 ),
             ]
+        if dynamic_target is not None:
+            instance_target, member_name = dynamic_target
+            if operator in ("=", ":="):
+                return [
+                    *prelude_lines,
+                    "GMRuntime.gml_variable_instance_set("
+                    f"{instance_target}, {member_name}, {value})"
+                ]
+            current_value = f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})"
+            if operator == "??=":
+                return _nullish_assignment_lines(
+                    prelude_lines,
+                    current_value,
+                    value_prelude_lines,
+                    [
+                        "GMRuntime.gml_variable_instance_set("
+                        f"{instance_target}, {member_name}, {value})"
+                    ],
+                )
+            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+                return [
+                    *prelude_lines,
+                    "GMRuntime.gml_variable_instance_set("
+                    f"{instance_target}, {member_name}, "
+                    f"GMRuntime.{helper}({current_value}, {value}))"
+                ]
+            raise GMLTranspileError("Unsupported dynamic instance assignment operator")
         if scoped_target is not None:
             instance_target, member_name = scoped_target
             if operator in ("=", ":="):
@@ -1450,13 +1508,45 @@ def _scoped_instance_assignment_parts(
     name = target_expr.value
     if (
         name in local_names
+        or name in scope_context.direct_instance_names
         or name in _GML_LITERAL_IDENTIFIERS
         or name in _BUILTIN_ARRAY_VARIABLES
         or name in _BUILTIN_GLOBAL_VARIABLES
+        or (
+            name in _BUILTIN_INSTANCE_VARIABLES
+            and _uses_direct_builtin_instance_members(scope_context)
+        )
         or not _is_plain_identifier(name)
     ):
         return None
     return scope_context.instance_target, json.dumps(name)
+
+
+def _dynamic_instance_assignment_parts(
+    target_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext | None = None,
+) -> tuple[str, str] | None:
+    scope_context = _normalize_scope_context(scope_context)
+    if not isinstance(target_expr, _Name):
+        return None
+
+    name = target_expr.value
+    if (
+        name in local_names
+        or name in scope_context.direct_instance_names
+        or name not in scope_context.dynamic_instance_names
+        or name in _GML_LITERAL_IDENTIFIERS
+        or name in _BUILTIN_ARRAY_VARIABLES
+        or name in _BUILTIN_GLOBAL_VARIABLES
+        or (
+            name in _BUILTIN_INSTANCE_VARIABLES
+            and _uses_direct_builtin_instance_members(scope_context)
+        )
+        or not _is_plain_identifier(name)
+    ):
+        return None
+    return scope_context.self_expression, json.dumps(name)
 
 
 def _motion_assignment_parts(
@@ -1983,6 +2073,21 @@ def _assignment_target_reader_writer(
             lambda value: [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"],
         )
 
+    dynamic_target = _dynamic_instance_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context,
+    )
+    if dynamic_target is not None:
+        instance_target, member_name = dynamic_target
+        return (
+            f"GMRuntime.gml_variable_instance_get({instance_target}, {member_name})",
+            lambda value: [
+                "GMRuntime.gml_variable_instance_set("
+                f"{instance_target}, {member_name}, {value})"
+            ],
+        )
+
     scoped_target = _scoped_instance_assignment_parts(
         target_expr,
         local_names,
@@ -2381,6 +2486,17 @@ def _transpile_assignment_to_emitted_value(
     if motion_target is not None:
         instance_target, member_name = motion_target
         return [f"GMRuntime.gml_motion_set_{member_name}({instance_target}, {value})"]
+    dynamic_target = _dynamic_instance_assignment_parts(
+        target_expr,
+        local_names,
+        scope_context,
+    )
+    if dynamic_target is not None:
+        instance_target, member_name = dynamic_target
+        return [
+            "GMRuntime.gml_variable_instance_set("
+            f"{instance_target}, {member_name}, {value})"
+        ]
     scoped_target = _scoped_instance_assignment_parts(
         target_expr,
         local_names,

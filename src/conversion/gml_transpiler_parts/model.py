@@ -101,6 +101,8 @@ class _ScopeContext:
     global_scope: bool = False
     global_names: frozenset[str] = frozenset()
     asset_names: frozenset[str] = frozenset()
+    direct_instance_names: frozenset[str] = frozenset()
+    dynamic_instance_names: frozenset[str] = frozenset()
     static_scope: str | None = None
     static_names: frozenset[str] = frozenset()
     static_prefix: str = "gml_static"

@@ -142,14 +142,42 @@ def _emit_name(
                 "GMRuntime.gml_struct_get("
                 f"GMRuntime.gml_global_scope(), {json.dumps(value)})"
             ), _POSTFIX_PRECEDENCE
+        if value in _INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
+            return _INSTANCE_NAME_REPLACEMENTS[value], _POSTFIX_PRECEDENCE
+        if value in _BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
+            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+        if _is_gdscript_constant_identifier(value):
+            return value, _PRIMARY_PRECEDENCE
+        if value in scope_context.direct_instance_names:
+            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+        if value in scope_context.dynamic_instance_names and _is_plain_identifier(value):
+            return (
+                "GMRuntime.gml_variable_instance_get("
+                f"{scope_context.self_expression}, {json.dumps(value)})"
+            ), _POSTFIX_PRECEDENCE
         if scope_context.instance_target is not None and _is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.instance_target}, {json.dumps(value)})"
             ), _POSTFIX_PRECEDENCE
-        value = _INSTANCE_NAME_REPLACEMENTS.get(value, value)
     value = _sanitize_gdscript_identifier(value)
     return value, _PRIMARY_PRECEDENCE
+
+
+def _is_gdscript_constant_identifier(value: str) -> bool:
+    return (
+        value in {"INF", "NAN", "PI"}
+        or value.startswith("KEY_")
+        or value.startswith("MOUSE_BUTTON_")
+        or value.startswith("JOY_")
+    )
+
+
+def _uses_direct_builtin_instance_members(scope_context: _ScopeContext) -> bool:
+    return (
+        scope_context.self_expression == "self"
+        and scope_context.instance_target in {None, "self"}
+    )
 
 
 def _name_resolves_to_global(

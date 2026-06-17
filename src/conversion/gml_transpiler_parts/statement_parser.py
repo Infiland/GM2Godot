@@ -320,6 +320,8 @@ class _StatementParser:
             instance_target=with_target,
             global_names=outer_scope_context.global_names,
             asset_names=outer_scope_context.asset_names,
+            direct_instance_names=outer_scope_context.direct_instance_names,
+            dynamic_instance_names=outer_scope_context.dynamic_instance_names,
             static_scope=outer_scope_context.static_scope,
             static_names=outer_scope_context.static_names,
             static_prefix=outer_scope_context.static_prefix,

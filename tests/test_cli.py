@@ -18,6 +18,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src import cli
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+from src.conversion.godot_validation import GodotValidationReport
 
 
 class TestCLIReports(unittest.TestCase):
@@ -179,6 +180,48 @@ class TestCLIReports(unittest.TestCase):
         exit_code = cli.main(["validate", "--godot-project", godot_dir, "--fail-on-unsupported"])
 
         self.assertEqual(exit_code, 2)
+
+    def test_validate_passes_boot_frame_count_to_godot_validation(self) -> None:
+        godot_dir = os.path.join(self.temp_dir, "godot")
+        report_root = os.path.join(godot_dir, "gm2godot")
+        os.makedirs(report_root)
+        with open(os.path.join(godot_dir, "project.godot"), "w", encoding="utf-8") as project_file:
+            project_file.write('[application]\nconfig/name="Demo"\n')
+        with open(os.path.join(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH), "w", encoding="utf-8") as report_file:
+            json.dump(
+                {"summary": {"info": 0, "warning": 0, "error": 0, "total": 0}, "diagnostics": []},
+                report_file,
+            )
+
+        validation_report = GodotValidationReport(
+            status="passed",
+            godot_binary="/tmp/fake-godot",
+            project_path=godot_dir,
+            resource_paths=(),
+            message="Headless Godot boot ran the project main scene for 5 frame(s).",
+            boot_frames=5,
+        )
+        with (
+            patch("src.cli.validate_generated_godot_project", return_value=validation_report) as validate_project,
+            patch("src.cli.write_godot_validation_report") as write_report,
+        ):
+            exit_code = cli.main([
+                "validate",
+                "--godot-project",
+                godot_dir,
+                "--godot-bin",
+                "/tmp/fake-godot",
+                "--godot-boot-frames",
+                "5",
+            ])
+
+        self.assertEqual(exit_code, 0)
+        validate_project.assert_called_once_with(
+            godot_dir,
+            godot_binary="/tmp/fake-godot",
+            boot_frames=5,
+        )
+        write_report.assert_called_once_with(godot_dir, validation_report)
 
     def test_convert_can_write_selected_reports_and_fail_warning_threshold(self) -> None:
         gm_dir = os.path.join(self.temp_dir, "gm")

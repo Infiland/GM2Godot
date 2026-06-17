@@ -52,7 +52,7 @@ jobs:
       - name: Clone SimpleTopDown test game (shallow)
         run: git clone --depth 1 --no-recurse-submodules https://github.com/Infiland/GM2GodotGameTest_SimpleTopDown.git "${{ runner.temp }}/GM2GodotGameTest_SimpleTopDown"
 
-      - name: Run SimpleTopDown conversion test
+      - name: Run SimpleTopDown conversion and boot-log test
         env:
           SIMPLE_TOPDOWN_PROJECT_PATH: ${{ runner.temp }}/GM2GodotGameTest_SimpleTopDown
         run: python -m unittest tests.test_simple_topdown_conversion -v
@@ -68,7 +68,7 @@ jobs:
       - name: Clone Monophobia (shallow)
         run: git clone --depth 1 --no-recurse-submodules https://github.com/Infiland/Monophobia.git "${{ runner.temp }}/Monophobia"
 
-      - name: Run Monophobia conversion test
+      - name: Run Monophobia conversion and boot-log test
         env:
           MONOPHOBIA_PROJECT_PATH: ${{ runner.temp }}/Monophobia
         run: python -m unittest tests.test_monophobia_conversion -v

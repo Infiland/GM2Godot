@@ -3049,6 +3049,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(items, _gml_array_index_0, "
             "GMRuntime.gml_add(GMRuntime.gml_array_get(items, _gml_array_index_0), value))",
         )
+        self.assertEqual(
+            transpile_gml_code('global.telephonenumber[3] = "";', indent=""),
+            'var _gml_array_target_0 = GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "telephonenumber")\n'
+            "if GMRuntime.is_undefined(_gml_array_target_0):\n"
+            "\t_gml_array_target_0 = []\n"
+            'GMRuntime.gml_array_set(_gml_array_target_0, 3, "")\n'
+            'GMRuntime.gml_selector_set(GMRuntime.gml_global_scope(), "telephonenumber", _gml_array_target_0)',
+        )
+        self.assertEqual(
+            transpile_gml_code("player.inventory[slot] = item;", indent=""),
+            'var _gml_array_target_0 = GMRuntime.gml_selector_get(player, "inventory")\n'
+            "if GMRuntime.is_undefined(_gml_array_target_0):\n"
+            "\t_gml_array_target_0 = []\n"
+            "GMRuntime.gml_array_set(_gml_array_target_0, slot, item)\n"
+            'GMRuntime.gml_selector_set(player, "inventory", _gml_array_target_0)',
+        )
 
     def test_transpiles_multidimensional_array_assignments(self):
         self.assertEqual(

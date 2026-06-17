@@ -22,7 +22,8 @@ class TestCollisionEvents(unittest.TestCase):
         self.assertEqual(mapping.godot_func, "_on_collision_o_enemy")
         self.assertEqual(mapping.params, "")
         self.assertEqual(mapping.sort_key, 13)
-        self.assertEqual(mapping.gml_filename, "Collision_0.gml")
+        self.assertEqual(mapping.gml_filename, "Collision_o_enemy.gml")
+        self.assertEqual(mapping.fallback_gml_filenames, ("Collision_0.gml",))
 
     def test_maps_collision_without_target_object(self):
         mapping = map_event({"eventType": 4, "eventNum": 0})
@@ -32,6 +33,7 @@ class TestCollisionEvents(unittest.TestCase):
         self.assertEqual(mapping.params, "")
         self.assertEqual(mapping.sort_key, 13)
         self.assertEqual(mapping.gml_filename, "Collision_0.gml")
+        self.assertEqual(mapping.fallback_gml_filenames, ())
 
     def test_generates_collision_stubs(self):
         content = generate_script_content([

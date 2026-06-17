@@ -77,6 +77,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase('typeof("abc")', 'GMRuntime.gml_typeof("abc")'),
     RuntimeValueParityCase('is_string("abc")', 'GMRuntime.is_string("abc")'),
     RuntimeValueParityCase('string_ord_at("é", 1)', 'GMRuntime.gml_string_ord_at("é", 1)'),
+    RuntimeValueParityCase('string_hash_to_newline("a#b")', 'GMRuntime.gml_string_hash_to_newline("a#b")'),
     RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
     RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
     RuntimeValueParityCase('int64("42")', 'GMRuntime.gml_int64("42")'),
@@ -308,6 +309,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gpu_set_blendmode(bm_add)", "GMRuntime.gml_gpu_set_blendmode(1)"),
     RuntimeValueParityCase("gpu_get_blendmode()", "GMRuntime.gml_gpu_get_blendmode()"),
     RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(2)"),
+    RuntimeValueParityCase(
+        "draw_circle_color(4, 5, 8, c_white, c_black, false)",
+        "GMRuntime.gml_draw_circle_color(4, 5, 8, 0xffffff, 0x000000, false)",
+    ),
     RuntimeValueParityCase("gpu_set_texfilter(true)", "GMRuntime.gml_gpu_set_texfilter(true)"),
     RuntimeValueParityCase("texture_set_repeat(false)", "GMRuntime.gml_texture_set_repeat(false)"),
     RuntimeValueParityCase(
@@ -318,6 +323,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gpu_set_alphatestref(128)", "GMRuntime.gml_gpu_set_alphatestref(128)"),
     RuntimeValueParityCase("surface_get_texture(surf)", "GMRuntime.gml_surface_get_texture(surf)"),
     RuntimeValueParityCase("texture_get_width(tex)", "GMRuntime.gml_texture_get_width(tex)"),
+    RuntimeValueParityCase("sprite_get_width(spr_player)", 'GMRuntime.gml_sprite_get_width(GMRuntime.gml_asset_get_index("spr_player"))'),
+    RuntimeValueParityCase("sprite_get_height(spr_player)", 'GMRuntime.gml_sprite_get_height(GMRuntime.gml_asset_get_index("spr_player"))'),
+    RuntimeValueParityCase("sprite_set_offset(spr_player, 4, 5)", 'GMRuntime.gml_sprite_set_offset(GMRuntime.gml_asset_get_index("spr_player"), 4, 5)'),
+    RuntimeValueParityCase("sprite_delete(spr_player)", 'GMRuntime.gml_sprite_delete(GMRuntime.gml_asset_get_index("spr_player"))'),
     RuntimeValueParityCase("sprite_get_uvs(spr_player, 0)", 'GMRuntime.gml_sprite_get_uvs(GMRuntime.gml_asset_get_index("spr_player"), 0)'),
     RuntimeValueParityCase("texture_get_texel_width(tex)", "GMRuntime.gml_texture_get_texel_width(tex)"),
     RuntimeValueParityCase("texture_get_texel_height(tex)", "GMRuntime.gml_texture_get_texel_height(tex)"),
@@ -459,10 +468,14 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("room", 'GMRuntime.gml_builtin_global("room")'),
     RuntimeValueParityCase("room_width", 'GMRuntime.gml_builtin_global("room_width")'),
     RuntimeValueParityCase("room_height", 'GMRuntime.gml_builtin_global("room_height")'),
+    RuntimeValueParityCase("current_minute", 'GMRuntime.gml_builtin_global("current_minute")'),
+    RuntimeValueParityCase("current_second", 'GMRuntime.gml_builtin_global("current_second")'),
     RuntimeValueParityCase("room_goto(r_next)", 'GMRuntime.gml_room_goto(GMRuntime.gml_asset_get_index("r_next"))'),
     RuntimeValueParityCase("room_goto_next()", "GMRuntime.gml_room_goto_next()"),
     RuntimeValueParityCase("room_goto_previous()", "GMRuntime.gml_room_goto_previous()"),
     RuntimeValueParityCase("room_restart()", "GMRuntime.gml_room_restart()"),
+    RuntimeValueParityCase("game_set_speed(60, gamespeed_fps)", "GMRuntime.gml_game_set_speed(60, 0)"),
+    RuntimeValueParityCase("room_speed", 'GMRuntime.gml_builtin_global("room_speed")'),
     RuntimeValueParityCase("game_restart()", "GMRuntime.gml_game_restart()"),
     RuntimeValueParityCase("game_end()", "GMRuntime.gml_game_end()"),
     RuntimeValueParityCase("room_exists(r_next)", 'GMRuntime.gml_room_exists(GMRuntime.gml_asset_get_index("r_next"))'),
@@ -788,6 +801,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("window_set_position(10, 20)", "GMRuntime.gml_window_set_position(10, 20)"),
     RuntimeValueParityCase("window_set_size(640, 480)", "GMRuntime.gml_window_set_size(640, 480)"),
     RuntimeValueParityCase("window_set_rectangle(0, 0, 320, 240)", "GMRuntime.gml_window_set_rectangle(0, 0, 320, 240)"),
+    RuntimeValueParityCase("window_set_cursor(cr_default)", "GMRuntime.gml_window_set_cursor(0)"),
     RuntimeValueParityCase("window_set_min_width(200)", "GMRuntime.gml_window_set_min_width(200)"),
     RuntimeValueParityCase("window_set_max_width(2000)", "GMRuntime.gml_window_set_max_width(2000)"),
     RuntimeValueParityCase("window_set_min_height(150)", "GMRuntime.gml_window_set_min_height(150)"),
@@ -815,6 +829,7 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("gamepad_set_axis_deadzone(0, 0.2)", "GMRuntime.gml_gamepad_set_axis_deadzone(0, 0.2)"),
     RuntimeValueParityCase("gamepad_get_axis_deadzone(0)", "GMRuntime.gml_gamepad_get_axis_deadzone(0)"),
     RuntimeValueParityCase("gamepad_set_vibration(0, 1, 0.5)", "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)"),
+    RuntimeValueParityCase("gamepad_set_color(0, c_blue)", "GMRuntime.gml_gamepad_set_color(0, 0xff0000)"),
     RuntimeValueParityCase(
         "audio_play_sound(snd_hit, 10, false)",
         'GMRuntime.gml_audio_play_sound(GMRuntime.gml_asset_get_index("snd_hit"), 10, false)',
@@ -3022,6 +3037,20 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_weak_ref_create", GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "current_minute":', GML_RUNTIME_SCRIPT)
+        self.assertIn('if key == "current_second":', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_string_hash_to_newline", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_contains_tcc_strict_validation_helpers(self):
+        self.assertIn("static func gml_gamepad_set_color", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_game_set_speed", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_window_set_cursor", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_draw_circle_color", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sprite_get_width", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sprite_get_height", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sprite_set_offset", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sprite_delete", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_admob_extension_call", GML_RUNTIME_SCRIPT)
 
     def test_runtime_contains_particle_compatibility_helpers(self):
         self.assertIn("const GML_PARTICLE_SYSTEM_HANDLE_KIND", GML_RUNTIME_SCRIPT)

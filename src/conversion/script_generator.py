@@ -166,6 +166,7 @@ _GDSCRIPT_RESERVED_WORDS = frozenset({
 class SpriteRuntimeConfig:
     initial_sprite_name: str | None = None
     sprite_scene_paths: Mapping[str, str] | None = None
+    inherit_runtime: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -720,7 +721,11 @@ def generate_script_content(
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
         if emit_prelude is not None:
             emit_prelude(lines, function_names)
-    inherited_sprite_runtime = base_script_path is not None
+    inherited_sprite_runtime = (
+        sprite_runtime.inherit_runtime
+        if sprite_runtime is not None and sprite_runtime.inherit_runtime is not None
+        else base_script_path is not None
+    )
     if uses_sprite_runtime and sprite_runtime is not None:
         _emit_sprite_runtime_prelude(
             lines,

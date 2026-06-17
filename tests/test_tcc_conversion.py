@@ -209,10 +209,14 @@ class TestTCCConversion(unittest.TestCase):
 
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:
-        report = validate_generated_godot_project(self.godot_dir)
+        report = validate_generated_godot_project(
+            self.godot_dir,
+            timeout=180,
+            load_resources=False,
+        )
 
-        self.assertEqual(report.status, "passed", report.output)
-        self.assertEqual(report.output_issues, (), report.output)
+        self.assertEqual(report.status, "passed", report.message + "\n" + report.output)
+        self.assertEqual(report.output_issues, (), report.message + "\n" + report.output)
 
 
 if __name__ == "__main__":

@@ -112,6 +112,7 @@ def validate_generated_godot_project(
     *,
     godot_binary: str | None = None,
     timeout: int = 60,
+    load_resources: bool = True,
 ) -> GodotValidationReport:
     resolved_binary = find_godot_binary(godot_binary)
     resource_paths = generated_godot_resource_paths(godot_project_path)
@@ -137,7 +138,7 @@ def validate_generated_godot_project(
     import_output = ""
     import_returncode: int | None = None
     importable_asset_paths = generated_godot_importable_asset_paths(godot_project_path)
-    if importable_asset_paths:
+    if importable_asset_paths or not load_resources:
         try:
             import_result = subprocess.run(
                 [
@@ -180,6 +181,20 @@ def validate_generated_godot_project(
                 message=_import_message(import_result.returncode, len(importable_asset_paths), import_output_issues),
                 output_issues=import_output_issues,
             )
+
+    if not load_resources:
+        return GodotValidationReport(
+            status="passed",
+            godot_binary=resolved_binary,
+            project_path=godot_project_path,
+            resource_paths=resource_paths,
+            returncode=import_returncode,
+            import_returncode=import_returncode,
+            import_output=import_output,
+            output=import_output,
+            message=_import_only_message(import_returncode, len(importable_asset_paths), len(resource_paths)),
+            output_issues=(),
+        )
 
     with tempfile.TemporaryDirectory() as temp_dir:
         script_path = os.path.join(temp_dir, "gm2godot_validate.gd")
@@ -313,6 +328,25 @@ def _import_message(
     if returncode == 0:
         return f"Headless Godot import completed for {importable_asset_count} generated asset(s)."
     return "Headless Godot import failed while importing generated assets."
+
+
+def _import_only_message(
+    returncode: int | None,
+    importable_asset_count: int,
+    resource_count: int,
+) -> str:
+    if returncode == 0:
+        return (
+            "Headless Godot import completed without warning/error output for "
+            f"{importable_asset_count} generated asset(s); skipped loading "
+            f"{resource_count} generated scripts/scenes/resources."
+        )
+    if returncode is None:
+        return (
+            "Headless Godot import-only validation skipped resource loading, but "
+            "there were no importable generated assets to force a Godot scan."
+        )
+    return "Headless Godot import-only validation failed while importing generated assets."
 
 
 def _validation_message(

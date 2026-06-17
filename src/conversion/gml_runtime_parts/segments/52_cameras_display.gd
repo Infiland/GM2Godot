@@ -551,6 +551,16 @@ static func gml_window_set_rectangle(x, y, w, h):
 	return null
 
 
+static func gml_window_set_cursor(cursor):
+	var cursor_id = int(_to_real(cursor))
+	if cursor_id == -1:
+		Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN)
+		return null
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	Input.set_default_cursor_shape(_gml_window_cursor_shape(cursor_id))
+	return null
+
+
 static func gml_window_set_min_width(w):
 	if _gml_window_mode() < DisplayServer.WINDOW_MODE_WINDOWED:
 		return null
@@ -708,6 +718,28 @@ static func _gml_window_mode():
 	if DisplayServer.get_name() == "headless":
 		return DisplayServer.WINDOW_MODE_MINIMIZED
 	return DisplayServer.window_get_mode()
+
+
+static func _gml_window_cursor_shape(cursor_id):
+	if cursor_id == 2:
+		return Input.CURSOR_IBEAM
+	if cursor_id == 3:
+		return Input.CURSOR_CROSS
+	if cursor_id == 6:
+		return Input.CURSOR_POINTING_HAND
+	if cursor_id == 9:
+		return Input.CURSOR_MOVE
+	if cursor_id == 10:
+		return Input.CURSOR_BDIAGSIZE
+	if cursor_id == 11:
+		return Input.CURSOR_VSIZE
+	if cursor_id == 12:
+		return Input.CURSOR_FDIAGSIZE
+	if cursor_id == 13:
+		return Input.CURSOR_HSIZE
+	if cursor_id == 1 or cursor_id == 4:
+		return Input.CURSOR_WAIT
+	return Input.CURSOR_ARROW
 
 
 static func _gml_dpi_to_x(dpi, screen_size):

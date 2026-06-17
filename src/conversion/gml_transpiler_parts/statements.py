@@ -1531,6 +1531,8 @@ def _global_scope_assignment_parts(
     if not isinstance(target_expr, _Name):
         return None
     name = target_expr.value
+    if name in _BUILTIN_GLOBAL_VARIABLES and name not in local_names:
+        return "GMRuntime.gml_global_scope()", json.dumps(name)
     if not _name_resolves_to_global(name, local_names, scope_context):
         return None
     return "GMRuntime.gml_global_scope()", json.dumps(name)
@@ -1545,6 +1547,12 @@ def _record_instance_assignment(
         return
 
     tokens = _expression_tokens(target.strip())
+    if len(tokens) >= 4 and tokens[0].kind == "IDENT" and tokens[1].value == "[":
+        name = tokens[0].value
+        if name not in local_names and name not in _BUILTIN_INSTANCE_VARIABLES:
+            instance_variables.add(name)
+        return
+
     if len(tokens) != 2 or tokens[0].kind != "IDENT" or tokens[1].kind != "EOF":
         return
 

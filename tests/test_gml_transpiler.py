@@ -637,6 +637,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_string_ord_at(s, 1)',
         )
 
+    def test_transpiles_string_hash_to_newline(self):
+        self.assertEqual(
+            transpile_gml_expression('string_hash_to_newline("a#b")'),
+            'GMRuntime.gml_string_hash_to_newline("a#b")',
+        )
+
     def test_transpiles_string_copy(self):
         self.assertEqual(
             transpile_gml_expression('string_copy(s, 1, 3)'),
@@ -2721,6 +2727,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "draw_line(0, 0, 10, 10); draw_rectangle(0, 0, 8, 8, false); "
                 "draw_line_width(0, 0, 10, 10, 3); "
                 "draw_rectangle_color(0, 0, 8, 8, c_red, c_white, c_blue, c_black, false); "
+                "draw_circle_color(4, 4, 2, c_white, c_black, false); "
                 "draw_circle(4, 4, 2, true); draw_triangle(0, 0, 4, 0, 0, 4, false); "
                 "draw_point(1, 1); draw_clear(c_black); seen = draw_get_alpha();",
                 indent="",
@@ -2732,6 +2739,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_draw_rectangle(0, 0, 8, 8, false)\n"
             "GMRuntime.gml_draw_line_width(0, 0, 10, 10, 3)\n"
             "GMRuntime.gml_draw_rectangle_color(0, 0, 8, 8, 0x0000ff, 0xffffff, 0xff0000, 0x000000, false)\n"
+            "GMRuntime.gml_draw_circle_color(4, 4, 2, 0xffffff, 0x000000, false)\n"
             "GMRuntime.gml_draw_circle(4, 4, 2, true)\n"
             "GMRuntime.gml_draw_triangle(0, 0, 4, 0, 0, 4, false)\n"
             "GMRuntime.gml_draw_point(1, 1)\n"
@@ -2877,7 +2885,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "avmx = window_views_mouse_get_x(); avmy = window_views_mouse_get_y();"
                 "window_set_fullscreen(false);"
                 "window_set_position(10, 20); window_set_size(640, 480);"
-                "window_set_rectangle(0, 0, 320, 240);"
+                "window_set_rectangle(0, 0, 320, 240); window_set_cursor(cr_handpoint);"
                 "window_set_min_width(200); window_set_max_width(2000);"
                 "window_set_min_height(150); window_set_max_height(1500);"
                 "window_minimise(); window_restore();"
@@ -2948,6 +2956,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_window_set_position(10, 20)\n"
             "GMRuntime.gml_window_set_size(640, 480)\n"
             "GMRuntime.gml_window_set_rectangle(0, 0, 320, 240)\n"
+            "GMRuntime.gml_window_set_cursor(6)\n"
             "GMRuntime.gml_window_set_min_width(200)\n"
             "GMRuntime.gml_window_set_max_width(2000)\n"
             "GMRuntime.gml_window_set_min_height(150)\n"
@@ -3386,7 +3395,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "pad_released = gamepad_button_check_released(0, gp_face3);"
                 "axis = gamepad_axis_value(0, gp_axislh);"
                 "gamepad_set_axis_deadzone(0, 0.2); deadzone = gamepad_get_axis_deadzone(0);"
-                "gamepad_set_vibration(0, 1, 0.5);",
+                "gamepad_set_vibration(0, 1, 0.5); gamepad_set_color(0, c_blue);",
                 indent="",
             ),
             "pressed = GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)\n"
@@ -3408,7 +3417,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "axis = GMRuntime.gml_gamepad_axis_value(0, JOY_AXIS_LEFT_X)\n"
             "GMRuntime.gml_gamepad_set_axis_deadzone(0, 0.2)\n"
             "deadzone = GMRuntime.gml_gamepad_get_axis_deadzone(0)\n"
-            "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)",
+            "GMRuntime.gml_gamepad_set_vibration(0, 1, 0.5)\n"
+            "GMRuntime.gml_gamepad_set_color(0, 0xff0000)",
         )
 
     def test_audio_helpers_lower_sound_assets_to_runtime(self):
@@ -3516,7 +3526,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "ok = room_exists(r_next);"
                 "name = room_get_name(r_next);"
                 "info = room_get_info(r_next);"
-                "room_goto_next(); room_goto_previous(); room_restart(); game_restart(); game_end();",
+                "room_goto_next(); room_goto_previous(); room_restart();"
+                "game_set_speed(60, gamespeed_fps); room_speed = 60;"
+                "game_restart(); game_end();",
                 indent="",
                 asset_names={"r_next"},
             ),
@@ -3527,6 +3539,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_room_goto_next()\n"
             "GMRuntime.gml_room_goto_previous()\n"
             "GMRuntime.gml_room_restart()\n"
+            "GMRuntime.gml_game_set_speed(60, 0)\n"
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "room_speed", 60)\n'
             "GMRuntime.gml_game_restart()\n"
             "GMRuntime.gml_game_end()",
         )
@@ -3920,6 +3934,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "gpu_set_alphatestref(128);"
                 "tex = sprite_get_texture(spr_player, 0);"
                 "uvs = sprite_get_uvs(spr_player, 0);"
+                "sw = sprite_get_width(spr_player); sh = sprite_get_height(spr_player);"
+                "sprite_set_offset(spr_player, 4, 5); sprite_delete(spr_player);"
                 "w = texture_get_width(tex);"
                 "tw = texture_get_texel_width(tex);"
                 "th = texture_get_texel_height(tex);"
@@ -3949,6 +3965,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_gpu_set_alphatestref(128)\n"
             "tex = GMRuntime.gml_sprite_get_texture(GMRuntime.gml_asset_get_index(\"spr_player\"), 0)\n"
             "uvs = GMRuntime.gml_sprite_get_uvs(GMRuntime.gml_asset_get_index(\"spr_player\"), 0)\n"
+            "sw = GMRuntime.gml_sprite_get_width(GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
+            "sh = GMRuntime.gml_sprite_get_height(GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
+            "GMRuntime.gml_sprite_set_offset(GMRuntime.gml_asset_get_index(\"spr_player\"), 4, 5)\n"
+            "GMRuntime.gml_sprite_delete(GMRuntime.gml_asset_get_index(\"spr_player\"))\n"
             "w = GMRuntime.gml_texture_get_width(tex)\n"
             "tw = GMRuntime.gml_texture_get_texel_width(tex)\n"
             "th = GMRuntime.gml_texture_get_texel_height(tex)\n"
@@ -4213,6 +4233,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_builtin_global("fps_real")',
         )
         self.assertEqual(
+            transpile_gml_expression("current_minute + current_second"),
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("current_minute"), GMRuntime.gml_builtin_global("current_second"))',
+        )
+        self.assertEqual(
             transpile_gml_code(
                 'info = os_get_info();'
                 'show_debug_message_ext("{0}:{1}", [os_get_language(), os_type]);'
@@ -4273,6 +4297,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_platform_service_call("iap", "iap_activate", [])\n'
             'GMRuntime.gml_platform_service_call("xboxlive", "xboxlive_achievements_set_progress", [user_id, "Game_Completed", 100])\n'
             'GMRuntime.gml_platform_service_call("xboxlive", "xboxlive_matchmaking_create", [])',
+        )
+
+    def test_admob_extension_calls_lower_to_quiet_runtime_bridge(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "if AdMob_Interstitial_IsLoaded() {"
+                "AdMob_Interstitial_Show();"
+                "} "
+                "AdMob_Banner_Hide();",
+                indent="",
+            ),
+            'if GMRuntime.gml_bool(GMRuntime.gml_admob_extension_call("AdMob_Interstitial_IsLoaded", [])):\n'
+            '\tGMRuntime.gml_admob_extension_call("AdMob_Interstitial_Show", [])\n'
+            'GMRuntime.gml_admob_extension_call("AdMob_Banner_Hide", [])',
         )
 
     def test_platform_service_helper_arity_errors_are_deterministic(self):
@@ -4426,6 +4464,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "position.x = GMRuntime.gml_add(position.x, localSpeed)",
         )
         self.assertEqual(instance_variables, {"superSpeed"})
+
+    def test_collects_indexed_instance_array_assignments(self):
+        instance_variables: set[str] = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                'strings[48] = "hello"; var local = []; local[0] = "skip";',
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            'GMRuntime.gml_array_set(strings, 48, "hello")\n'
+            "var local = []\n"
+            'GMRuntime.gml_array_set(local, 0, "skip")',
+        )
+        self.assertEqual(instance_variables, {"strings"})
 
     def test_sprite_builtins_are_not_collected_instance_variables(self):
         instance_variables: set[str] = set()

@@ -210,6 +210,20 @@ static func gml_steam_is_initialized():
 	return gml_bool(_gml_platform_service_try_call("steam", "steam_is_initialized", [], false))
 
 
+static func gml_admob_extension_call(api_name, args = []):
+	var api = str(api_name)
+	var resolved_args = args if typeof(args) == TYPE_ARRAY else []
+	if gml_platform_service_has_api("admob", api):
+		return gml_platform_service_call("admob", api, resolved_args)
+	if api.ends_with("_IsLoaded") or api.ends_with("_IsFormAvailable") or api.ends_with("_IsEnabled"):
+		return false
+	if api.ends_with("_GetWidth") or api.ends_with("_GetHeight") or api.ends_with("_GetStatus") or api.ends_with("_GetType") or api.ends_with("_Instances_Count"):
+		return 0
+	if api.ends_with("_Create") or api.ends_with("_Load") or api.ends_with("_Show") or api.ends_with("_Hide") or api.ends_with("_Remove") or api.ends_with("_Initialize"):
+		return 0
+	return null
+
+
 static func gml_browser_width():
 	return _gml_platform_service_try_call("web", "browser_width", [], DisplayServer.window_get_size().x)
 

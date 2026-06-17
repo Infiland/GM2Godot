@@ -478,6 +478,41 @@ static func gml_sprite_get_uvs(sprite, subimg):
 	return _gml_texture_uvs(frame["texture"])
 
 
+static func gml_sprite_get_width(sprite):
+	var data = _gml_draw_sprite_data(sprite)
+	if data == null:
+		return 0
+	if data.has("size"):
+		return int(data["size"].x)
+	var textures = data["textures"]
+	if textures.is_empty() or textures[0] == null:
+		return 0
+	return int(textures[0].get_width())
+
+
+static func gml_sprite_get_height(sprite):
+	var data = _gml_draw_sprite_data(sprite)
+	if data == null:
+		return 0
+	if data.has("size"):
+		return int(data["size"].y)
+	var textures = data["textures"]
+	if textures.is_empty() or textures[0] == null:
+		return 0
+	return int(textures[0].get_height())
+
+
+static func gml_sprite_set_offset(sprite, xoff, yoff):
+	var data = _gml_draw_sprite_data(sprite)
+	if data != null:
+		data["origin"] = Vector2(_to_real(xoff), _to_real(yoff))
+	return null
+
+
+static func gml_sprite_delete(sprite):
+	return gml_asset_release(sprite)
+
+
 static func gml_surface_get_texture(surface):
 	var resolved_surface = _gml_surface_resolve(surface)
 	if resolved_surface == null:
@@ -933,6 +968,20 @@ static func gml_draw_circle(x, y, radius, outline):
 		target.draw_arc(center, resolved_radius, 0.0, TAU, 64, _gml_draw_current_color(), _gml_draw_line_width())
 	else:
 		target.draw_circle(center, resolved_radius, _gml_draw_current_color())
+	return null
+
+
+static func gml_draw_circle_color(x, y, radius, col1, col2, outline):
+	var target = _gml_draw_target()
+	if target == null:
+		return null
+	var center = Vector2(_to_real(x), _to_real(y))
+	var resolved_radius = abs(_to_real(radius))
+	var color = _gml_draw_average_colour([col1, col2], 1.0)
+	if gml_bool(outline):
+		target.draw_arc(center, resolved_radius, 0.0, TAU, 64, color, _gml_draw_line_width())
+	else:
+		target.draw_circle(center, resolved_radius, color)
 	return null
 
 

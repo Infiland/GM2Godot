@@ -28,6 +28,10 @@ from src.conversion.gml_transpiler import (
 from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
+_SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
+    r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
+)
+
 
 class ParsedObject(TypedDict):
     sprite_name: str | None
@@ -442,6 +446,38 @@ class ObjectConverter(BaseConverter):
         parent_name = parsed["parent_object_name"]
         return (parent_name, *self._parent_object_chain(parent_name, seen))
 
+    def _object_inherits_sprite_runtime(self, object_name: str | None, seen: set[str] | None = None) -> bool:
+        if object_name is None:
+            return False
+        seen = set(seen or set())
+        if object_name in seen:
+            return False
+        seen.add(object_name)
+
+        parsed = self._parse_object_yy(object_name)
+        if parsed is None:
+            return False
+        if parsed["sprite_name"] is not None:
+            return True
+        if self._object_event_code_uses_sprite_runtime(object_name, parsed["event_list"]):
+            return True
+        return self._object_inherits_sprite_runtime(parsed["parent_object_name"], seen)
+
+    def _object_event_code_uses_sprite_runtime(self, object_name: str, event_list: list[JsonDict]) -> bool:
+        object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
+        for event in event_list:
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+            if mapping is None or not mapping.gml_filename:
+                continue
+            source_path = os.path.join(object_dir, mapping.gml_filename)
+            try:
+                with open(source_path, 'r', encoding='utf-8') as f:
+                    if _SPRITE_RUNTIME_IDENTIFIER_RE.search(f.read()) is not None:
+                        return True
+            except OSError:
+                continue
+        return False
+
     def _process_object(
         self,
         object_name: str,
@@ -473,6 +509,7 @@ class ObjectConverter(BaseConverter):
             parent_subfolder = self._get_object_subfolder(parent_object_name)
             parent_script_res_path = self._object_script_res_path(parent_object_name, parent_subfolder)
             inherited_event_functions = self._parent_event_function_names(parent_object_name)
+        inherited_sprite_runtime = self._object_inherits_sprite_runtime(parent_object_name)
         local_event_functions = self._event_function_names(event_list)
 
         if sprite_name is not None:
@@ -498,6 +535,7 @@ class ObjectConverter(BaseConverter):
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,
+                inherit_runtime=inherited_sprite_runtime,
             ),
             object_runtime=ObjectRuntimeConfig(
                 object_name=object_name,

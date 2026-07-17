@@ -23,7 +23,7 @@ class ConversionWorker(QObject):
     update_log_message = Signal(str)
     progress_updated = Signal(int)
     status_updated = Signal(str)
-    conversion_finished = Signal()
+    conversion_finished = Signal(bool, str)
 
     def __init__(self, gm_path: str, gm_platform: str, godot_path: str,
                  conversion_settings: dict[str, SettingValue],
@@ -58,5 +58,8 @@ class ConversionWorker(QObject):
                 self._godot_path,
                 self._conversion_settings,
             )
-        finally:
-            self.conversion_finished.emit()
+        except Exception as error:
+            error_message = str(error) or type(error).__name__
+            self.conversion_finished.emit(False, error_message)
+        else:
+            self.conversion_finished.emit(True, "")

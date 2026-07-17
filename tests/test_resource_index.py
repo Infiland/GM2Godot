@@ -219,6 +219,50 @@ class TestGameMakerResourceIndex(unittest.TestCase):
             os.path.join("tilesets", "ts_ground", "ts_ground.yy")
         ))
 
+    def test_skips_yyp_resource_that_escapes_through_symbolic_link(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_dir:
+            _write_file(
+                os.path.join(outside_dir, "s_escape.yy"),
+                _make_minimal_yy(
+                    "s_escape",
+                    "GMSprite",
+                    "Sprites",
+                    "folders/Sprites.yy",
+                ),
+            )
+            sprites_dir = os.path.join(self.gm_dir, "sprites")
+            os.makedirs(sprites_dir)
+            try:
+                os.symlink(
+                    outside_dir,
+                    os.path.join(sprites_dir, "linked"),
+                    target_is_directory=True,
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+            _write_file(
+                os.path.join(self.gm_dir, "TestProject.yyp"),
+                "{\n"
+                '  "resources":[\n'
+                '    {"id":{"name":"s_escape",'
+                '"path":"sprites/linked/s_escape.yy"}}\n'
+                "  ],\n"
+                '  "RoomOrderNodes":[],\n'
+                '  "resourceType":"GMProject"\n'
+                "}\n",
+            )
+
+            index = self._build_index()
+
+        self.assertIsNone(index.get_resource("sprites", "s_escape"))
+        self.assertTrue(
+            any(
+                "s_escape" in message and "symbolic link" in message
+                for message in self.logs
+            ),
+            self.logs,
+        )
+
     def test_preserves_manifest_resource_metadata_and_resolves_by_graph_fields(self) -> None:
         _write_file(
             os.path.join(self.gm_dir, "Graph.yyp"),

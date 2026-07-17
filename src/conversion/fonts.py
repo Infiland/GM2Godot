@@ -5,11 +5,21 @@ import os
 import platform
 import re
 import shutil
+import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Literal, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.generated_paths import (
+    generated_flat_resource_path,
+    generated_resource_stem,
+)
+from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 FONT_EXTENSIONS = ('.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2')
@@ -24,6 +34,37 @@ class FontData(TypedDict):
     AntiAlias: int
     includeTTF: bool
     TTFName: str
+
+
+def bundled_font_output_filename(ttf_name: str) -> str | None:
+    """Return the safe, deterministic filename used for an included font."""
+    normalized = ttf_name.replace('\\', '/')
+    if not normalized or normalized.startswith('/') or re.match(r'^[A-Za-z]:', normalized):
+        return None
+    parts = normalized.split('/')
+    if any(part in ('', '.', '..') for part in parts):
+        return None
+    stem, extension = os.path.splitext(parts[-1])
+    if not stem or extension.lower() not in FONT_EXTENSIONS:
+        return None
+    return generated_resource_stem(stem) + extension.lower()
+
+
+def resolve_bundled_font_source(yy_path: str, ttf_name: str) -> str | None:
+    """Resolve an included font without allowing the resource to escape its folder."""
+    output_filename = bundled_font_output_filename(ttf_name)
+    if output_filename is None:
+        return None
+
+    normalized = ttf_name.replace('\\', '/')
+    resource_dir = os.path.realpath(os.path.dirname(yy_path))
+    source_path = os.path.realpath(os.path.join(resource_dir, *normalized.split('/')))
+    try:
+        if os.path.commonpath((resource_dir, source_path)) != resource_dir:
+            return None
+    except ValueError:
+        return None
+    return source_path if os.path.isfile(source_path) else None
 
 
 def _get_system_font_dirs() -> list[str]:
@@ -75,6 +116,34 @@ def _find_system_font(font_name: str) -> str | None:
     return None
 
 
+def resolve_system_font_source(font_name: str) -> str | None:
+    """Return the system font file the converter would copy, if available."""
+    return _find_system_font(font_name)
+
+
+def _copy_font_file_atomically(
+    source_path: str,
+    destination_path: str,
+    *,
+    preserve_metadata: bool,
+) -> None:
+    """Stage a font beside its destination and publish only a complete copy."""
+    destination_name = os.path.basename(destination_path)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination_name}.",
+        suffix=".part",
+        dir=os.path.dirname(destination_path),
+    ) as staged_dir:
+        staged_path = os.path.join(staged_dir, destination_name)
+
+        if preserve_metadata:
+            shutil.copy2(source_path, staged_path)
+        else:
+            shutil.copyfile(source_path, staged_path)
+
+        os.replace(staged_path, destination_path)
+
+
 class FontConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
@@ -83,14 +152,44 @@ class FontConverter(BaseConverter):
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_fonts_path = os.path.join(self.godot_project_path, 'fonts')
+        self._font_output_paths: dict[str, str] = {}
 
     def find_font_files(self) -> list[str]:
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        if manifest.yyp_path is not None:
+            font_files: list[str] = []
+            seen_paths: set[str] = set()
+            for resource in manifest.resources:
+                if resource.kind.casefold() != "fonts":
+                    continue
+                source_path = resource.path.casefold()
+                if not source_path.endswith(".yy") or source_path.endswith(".old.yy"):
+                    continue
+                try:
+                    resolved = resolve_project_source_path(
+                        self.gm_project_path,
+                        resource.path,
+                    )
+                except ProjectSourcePathError:
+                    continue
+                if not os.path.isfile(resolved.filesystem_path):
+                    continue
+                canonical_path = os.path.normcase(
+                    os.path.realpath(resolved.filesystem_path)
+                )
+                if canonical_path in seen_paths:
+                    continue
+                seen_paths.add(canonical_path)
+                font_files.append(resolved.filesystem_path)
+            return font_files
+
         font_folder = os.path.join(self.gm_project_path, 'fonts')
         font_files: list[str] = []
-        for root, _, files in os.walk(font_folder):
+        for root, dirs, files in os.walk(font_folder):
+            dirs.sort()
             font_files.extend(
                 os.path.join(root, file)
-                for file in files
+                for file in sorted(files)
                 if file.lower().endswith('.yy') and not file.lower().endswith('.old.yy')
             )
         return font_files
@@ -141,44 +240,66 @@ class FontConverter(BaseConverter):
 
         font_name = font_data['name']
         system_font_name = font_data['fontName']
-        output_file: str | None = None
-
-        subfolder = self._get_subfolder_from_yy(yy_path)
-        if subfolder:
-            output_dir = os.path.join(self.godot_fonts_path, subfolder)
-        else:
-            output_dir = self.godot_fonts_path
-        os.makedirs(output_dir, exist_ok=True)
+        font_source_path: str | None = None
+        preserve_metadata = False
+        output_filename: str | None = None
+        bundled_font = False
 
         # 1. Try bundled TTF from GameMaker project
         if font_data['includeTTF'] and font_data['TTFName']:
-            ttf_path = os.path.join(os.path.dirname(yy_path), font_data['TTFName'])
-            if os.path.isfile(ttf_path):
-                output_file = font_data['TTFName']
-                shutil.copy2(ttf_path, os.path.join(output_dir, output_file))
-                if not self.compact_logging:
-                    self._safe_log(get_localized("Console_Convertor_Fonts_CopiedTTF").format(
-                        name=font_name, output_file=output_file))
+            ttf_path = resolve_bundled_font_source(yy_path, font_data['TTFName'])
+            bundled_output_file = bundled_font_output_filename(font_data['TTFName'])
+            if ttf_path is not None and bundled_output_file is not None:
+                font_source_path = ttf_path
+                output_filename = bundled_output_file
+                preserve_metadata = True
+                bundled_font = True
             else:
                 self._safe_log(get_localized("Console_Convertor_Fonts_TTFMissing").format(
                     name=font_name, ttf_name=font_data['TTFName']))
 
         # 2. Try finding the font on the system
-        if output_file is None:
-            system_path = _find_system_font(system_font_name)
+        if font_source_path is None:
+            system_path = resolve_system_font_source(system_font_name)
             if system_path:
-                output_file = font_name + os.path.splitext(system_path)[1]
-                shutil.copy2(system_path, os.path.join(output_dir, output_file))
-                if not self.compact_logging:
-                    self._safe_log(get_localized("Console_Convertor_Fonts_Converted").format(
-                        name=font_name, output_file=output_file))
+                font_source_path = system_path
+                output_filename = (
+                    generated_resource_stem(font_name)
+                    + os.path.splitext(system_path)[1].lower()
+                )
 
         # 3. Fall back to SystemFont .tres reference
-        if output_file is None:
-            output_file = font_name + '.tres'
+        if output_filename is None:
+            output_filename = generated_resource_stem(font_name) + '.tres'
+
+        output_path = self._font_output_destination(
+            yy_path,
+            font_name,
+            output_filename,
+        )
+        output_file = os.path.basename(output_path)
+
+        if font_source_path is not None:
+            _copy_font_file_atomically(
+                font_source_path,
+                output_path,
+                preserve_metadata=preserve_metadata,
+            )
+            if not self.compact_logging:
+                message_key = (
+                    "Console_Convertor_Fonts_CopiedTTF"
+                    if bundled_font
+                    else "Console_Convertor_Fonts_Converted"
+                )
+                self._safe_log(
+                    get_localized(message_key).format(
+                        name=font_name,
+                        output_file=output_file,
+                    )
+                )
+        else:
             tres_content = self._generate_system_font_tres(font_data)
-            tres_path = os.path.join(output_dir, output_file)
-            with open(tres_path, 'w', encoding='utf-8') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(tres_content)
             self._safe_log(get_localized("Console_Convertor_Fonts_SystemFontFallback").format(
                 name=font_name, font_name=system_font_name))
@@ -189,6 +310,36 @@ class FontConverter(BaseConverter):
                 name=font_name, size=size))
 
         return font_name
+
+    def _font_output_destination(
+        self,
+        yy_path: str,
+        font_name: str,
+        output_filename: str,
+    ) -> str:
+        # Imported lazily because the registry imports this module to plan font
+        # paths before any converter writes output.
+        from src.conversion.asset_output_paths import resource_filesystem_path
+
+        resource_name = os.path.splitext(os.path.basename(yy_path))[0]
+        resource_path = (
+            self._font_output_paths.get(resource_name)
+            or self._font_output_paths.get(font_name)
+        )
+        if resource_path is None:
+            output_stem, output_extension = os.path.splitext(output_filename)
+            resource_path = generated_flat_resource_path(
+                "fonts",
+                self._get_subfolder_from_yy(yy_path),
+                output_stem,
+                output_extension,
+            )
+        output_path = resource_filesystem_path(
+            self.godot_project_path,
+            resource_path,
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        return output_path
 
     def convert_fonts(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
@@ -205,6 +356,16 @@ class FontConverter(BaseConverter):
         if not font_files:
             self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
+
+        # Imported lazily to avoid the fonts -> asset registry -> fonts import
+        # cycle. The registry is the single authority for collision suffixes.
+        from src.conversion.asset_output_paths import build_asset_output_paths
+
+        self._font_output_paths = build_asset_output_paths(
+            self.gm_project_path,
+            self.godot_project_path,
+            conversion_running=self.conversion_running,
+        ).get("fonts", {})
 
         total_fonts = len(font_files)
         processed_fonts = 0

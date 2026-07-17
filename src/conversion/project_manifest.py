@@ -154,6 +154,7 @@ class GameMakerProjectManifest:
     included_files: tuple[ProjectIncludedFile, ...] = ()
     diagnostics: tuple[ProjectManifestDiagnostic, ...] = ()
     raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    ide_version: str = ""
 
     def get_option(self, key: str, platform: str | None = None) -> ProjectOption | None:
         folded_key = key.casefold()
@@ -246,6 +247,7 @@ def load_gamemaker_project_manifest(
         yyp_path=yyp_path,
         resource_type=_string_value(raw_data.get("resourceType")),
         resource_version=_string_value(raw_data.get("resourceVersion")),
+        ide_version=_project_ide_version(raw_data),
         resources=resources,
         configurations=configurations,
         options=options,
@@ -760,6 +762,13 @@ def _name_from_path(path: str) -> str:
 
 def _string_value(value: object) -> str:
     return value if isinstance(value, str) else ""
+
+
+def _project_ide_version(yyp_data: JsonDict) -> str:
+    metadata = yyp_data.get("MetaData")
+    if not isinstance(metadata, dict):
+        return ""
+    return _string_value(cast(JsonDict, metadata).get("IDEVersion"))
 
 
 def _int_value(value: object, default: int) -> int:

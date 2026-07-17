@@ -56,12 +56,24 @@ def _write_gm_project(gm_dir: Path) -> None:
                 _resource_entry("scripts", "scr_add"),
                 _resource_entry("scripts", "scr_modern"),
                 _resource_entry("scripts", "scr_context"),
+                _resource_entry("scripts", "scr_static"),
+                _resource_entry("scripts", "scr_constructor"),
+                _resource_entry("scripts", "scr_global_constructor"),
+                _resource_entry("scripts", "scr_conditional"),
             ],
             "RoomOrderNodes": [],
             "resourceType": "GMProject",
         },
     )
-    for script_name in ("scr_add", "scr_modern", "scr_context"):
+    for script_name in (
+        "scr_add",
+        "scr_modern",
+        "scr_context",
+        "scr_static",
+        "scr_constructor",
+        "scr_global_constructor",
+        "scr_conditional",
+    ):
         _write_json(
             gm_dir / "scripts" / script_name / f"{script_name}.yy",
             {
@@ -79,6 +91,35 @@ def _write_gm_project(gm_dir: Path) -> None:
     _write_text(
         gm_dir / "scripts" / "scr_context" / "scr_context.gml",
         "function scr_context(delta) { score += delta; return score; }",
+    )
+    _write_text(
+        gm_dir / "scripts" / "scr_static" / "scr_static.gml",
+        "function scr_static(delta) { static total = delta; total += 1; return total; }",
+    )
+    _write_text(
+        gm_dir / "scripts" / "scr_constructor" / "scr_constructor.gml",
+        "function scr_constructor(value = 0) constructor {\n"
+        "    static operate = function(a, b) { return invert(a) + b; }\n"
+        "    static invert = function(item) { return -item; }\n"
+        "    amount = value;\n"
+        "}\n"
+        "new scr_constructor();\n",
+    )
+    _write_text(
+        gm_dir / "scripts" / "scr_global_constructor" / "scr_global_constructor.gml",
+        "global.testAnonymousGlobalConstructor = function() constructor {}\n"
+        "function scr_global_constructor() constructor\n"
+        "{\n"
+        "    variable = 3.141;\n"
+        "}\n",
+    )
+    _write_text(
+        gm_dir / "scripts" / "scr_conditional" / "scr_conditional.gml",
+        "#if Android\n"
+        "function scr_conditional(value) { return value + 100; }\n"
+        "#else\n"
+        "function scr_conditional(value) { return value - 100; }\n"
+        "#endif\n",
     )
 
 
@@ -120,12 +161,18 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \tvar legacy_id = GMRuntime.gml_asset_get_index("scr_add")
             \tvar modern_id = GMRuntime.gml_asset_get_index("scr_modern")
             \tvar context_id = GMRuntime.gml_asset_get_index("scr_context")
+            \tvar static_id = GMRuntime.gml_asset_get_index("scr_static")
+            \tvar constructor_id = GMRuntime.gml_asset_get_index("scr_constructor")
+            \tvar global_constructor_id = GMRuntime.gml_asset_get_index("scr_global_constructor")
+            \tvar conditional_id = GMRuntime.gml_asset_get_index("scr_conditional")
 
             \tif not _check(GMRuntime.gml_script_exists(legacy_id), "script_exists failed"):
             \t\treturn
             \tif not _check(GMRuntime.gml_script_get_name(legacy_id) == "scr_add", "script_get_name failed"):
             \t\treturn
             \tif not _check(GMRuntime.gml_script_execute(legacy_id, [2, 3]) == 5, "script_execute legacy args failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_script_call(legacy_id, [7, 8], self, self) == 15, "transpiled script-call asset id failed"):
             \t\treturn
             \tif not _check(GMRuntime.gml_argument_count() == 0, "legacy argument scope did not restore"):
             \t\treturn
@@ -142,7 +189,37 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_variable_instance_set(self, "score", 10)
             \tif not _check(GMRuntime.gml_script_execute(context_id, [5], self, self) == 15, "caller-scoped script result failed"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_variable_instance_get(self, "score") == 15, "caller-scoped script mutation failed"):
+            \tif not _check(GMRuntime.gml_script_call(context_id, [2], self, self) == 17, "caller-scoped transpiled script call failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_variable_instance_get(self, "score") == 17, "caller-scoped script mutation failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_script_execute(static_id, [10]) == 11, "script static initialization failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_script_execute(static_id, [100]) == 12, "script static persistence failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_script_execute(conditional_id, [5]) == 105, "active conditional modern script failed"):
+            \t\treturn
+
+            \tvar constructor = GMRuntime.gml_script_get_callable(constructor_id)
+            \tif not _check(GMRuntime.is_method(constructor) and constructor.is_constructor, "constructor script did not register as a constructor"):
+            \t\treturn
+            \tvar operate = GMRuntime.gml_selector_get(constructor_id, "operate")
+            \tvar invert = GMRuntime.gml_selector_get(constructor, "invert")
+            \tif not _check(GMRuntime.gml_call_value(operate, [2, 3]) == 1, "constructor static sibling call failed"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_call_value(invert, [4]) == -4, "constructor static invert failed"):
+            \t\treturn
+            \tvar constructed = GMRuntime.gml_new(constructor_id, [9])
+            \tif not _check(GMRuntime.gml_variable_instance_get(constructed, "amount") == 9, "constructor asset id did not allocate an instance"):
+            \t\treturn
+            \tvar anonymous_constructor = GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "testAnonymousGlobalConstructor")
+            \tif not _check(GMRuntime.is_method(anonymous_constructor) and anonymous_constructor.is_constructor, "global anonymous constructor initializer did not run"):
+            \t\treturn
+            \tvar anonymous_instance = GMRuntime.gml_new(anonymous_constructor, [])
+            \tif not _check(GMRuntime.gml_is_instanceof(anonymous_instance, anonymous_constructor), "global anonymous constructor instance mismatch"):
+            \t\treturn
+            \tvar global_constructor_instance = GMRuntime.gml_new(global_constructor_id, [])
+            \tif not _check(is_equal_approx(GMRuntime.gml_variable_instance_get(global_constructor_instance, "variable"), 3.141), "named constructor beside global initializer failed"):
             \t\treturn
 
             \tvar method_a = GMRuntime.gml_method(self, Callable(self, "_identity"))
@@ -176,6 +253,7 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
 
             \tprint("SCRIPT_RUNTIME_SMOKE_OK")
+            \tGMRuntime.gm2godot_runtime_shutdown()
             \tget_tree().quit(0)
             """
         )
@@ -197,8 +275,16 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             _write_gm_project(gm_dir)
             _write_text(project_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(project_dir))
-            AssetRegistryConverter(gm_dir, project_dir).convert_all()
-            ScriptConverter(gm_dir, project_dir).convert_all()
+            AssetRegistryConverter(
+                gm_dir,
+                project_dir,
+                macro_configuration="Android",
+            ).convert_all()
+            ScriptConverter(
+                gm_dir,
+                project_dir,
+                macro_configuration="Android",
+            ).convert_all()
             _write_text(project_dir / "smoke.gd", smoke_script)
             _write_text(project_dir / "smoke.tscn", smoke_scene)
 

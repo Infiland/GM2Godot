@@ -134,9 +134,21 @@ class _StringLiteral:
 
 
 @dataclass(frozen=True)
+class _TemplateStringLiteral:
+    parts: tuple[str | _Expression, ...]
+
+
+@dataclass(frozen=True)
 class _NumberLiteral:
     value: str
     is_float_like: bool
+
+
+@dataclass(frozen=True)
+class _EnumMember:
+    enum_name: str
+    member: str
+    value: int
 
 
 @dataclass(frozen=True)
@@ -255,7 +267,9 @@ _Expression: TypeAlias = (
     | _NameOf
     | _Literal
     | _StringLiteral
+    | _TemplateStringLiteral
     | _NumberLiteral
+    | _EnumMember
     | _Unary
     | _Binary
     | _Ternary

@@ -48,6 +48,7 @@ from .model import (
     _DSGridAccess,
     _DSMapAccess,
     _DSListAccess,
+    _EnumMember,
     _Expression,
     _FunctionLiteral,
     _FunctionParameter,
@@ -64,6 +65,7 @@ from .model import (
     _StringLiteral,
     _StructAccess,
     _StructLiteral,
+    _TemplateStringLiteral,
     _Ternary,
     _Unary,
 )
@@ -240,6 +242,10 @@ def _emit_expression(
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
         return expr.value, _PRIMARY_PRECEDENCE
+    if isinstance(expr, _EnumMember):
+        return str(expr.value), _PRIMARY_PRECEDENCE
+    if isinstance(expr, _TemplateStringLiteral):
+        return _emit_template_string(expr, local_names, scope_context)
     if isinstance(expr, _NameOf):
         return json.dumps(expr.value), _PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
@@ -311,6 +317,18 @@ def _emit_expression(
                 _POSTFIX_PRECEDENCE,
             )
         if isinstance(expr.callee, _Name):
+            if (
+                expr.callee.value not in local_names
+                and scope_context.static_scope is not None
+                and expr.callee.value in scope_context.static_names
+            ):
+                callee = _emit_name(expr.callee.value, local_names, scope_context)[0]
+                return (
+                    "GMRuntime.gml_call_value("
+                    f"{callee}, [{args}], {scope_context.self_expression}, "
+                    f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
+                    _POSTFIX_PRECEDENCE,
+                )
             if expr.callee.value not in local_names:
                 return (
                     "GMRuntime.gml_call_named("
@@ -429,6 +447,45 @@ def _emit_expression(
     return f"GMRuntime.gml_selector_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
 
 
+def _emit_template_string(
+    expr: _TemplateStringLiteral,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> tuple[str, int]:
+    emitted_parts: list[str] = []
+    for part in expr.parts:
+        if isinstance(part, str):
+            if part:
+                emitted_parts.append(json.dumps(part))
+            continue
+        emitted = _emit_expression(
+            part,
+            local_names,
+            scope_context=scope_context,
+        )[0]
+        emitted_parts.append(emitted)
+
+    if not emitted_parts:
+        return '""', _PRIMARY_PRECEDENCE
+    if len(emitted_parts) == 1:
+        precedence = (
+            _PRIMARY_PRECEDENCE
+            if isinstance(expr.parts[0], str)
+            else _POSTFIX_PRECEDENCE
+        )
+        result = (
+            emitted_parts[0]
+            if isinstance(expr.parts[0], str)
+            else f"GMRuntime.gml_string({emitted_parts[0]})"
+        )
+        return result, precedence
+
+    return (
+        f"GMRuntime.gml_string_join([{', '.join(emitted_parts)}], \"\")",
+        _POSTFIX_PRECEDENCE,
+    )
+
+
 def _uses_direct_member_access(
     expr: _Member,
     scope_context: _ScopeContext | None = None,
@@ -448,6 +505,7 @@ def _emit_function_literal(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> str:
+    scope_context = _normalize_scope_context(scope_context)
     name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
     parameter_names = [parameter.name for parameter in expr.parameters]
     emitted_parameters = [
@@ -456,11 +514,30 @@ def _emit_function_literal(
     ]
     if expr.is_constructor:
         emitted_parameters.insert(0, "_gml_constructor_self = null")
+        function_self_expression = "_gml_constructor_self"
+    else:
+        emitted_parameters.insert(0, "_gml_method_self = null")
+        function_self_expression = "_gml_method_self"
     parameters = ", ".join(emitted_parameters)
+    function_scope_context = _ScopeContext(
+        self_expression=function_self_expression,
+        other_expression=scope_context.other_expression,
+        instance_target=function_self_expression,
+        global_scope=scope_context.global_scope,
+        global_names=scope_context.global_names,
+        asset_names=scope_context.asset_names,
+        direct_instance_names=scope_context.direct_instance_names,
+        dynamic_instance_names=scope_context.dynamic_instance_names,
+        static_scope=scope_context.static_scope,
+        static_names=scope_context.static_names,
+        static_prefix=scope_context.static_prefix,
+        extension_functions=scope_context.extension_functions,
+        extension_function_mappings=scope_context.extension_function_mappings,
+    )
     default_lines = _emit_function_parameter_default_lines(
         expr.parameters,
         parameter_names,
-        scope_context=scope_context,
+        scope_context=function_scope_context,
     )
     body_lines = [*default_lines, *expr.body_lines]
     if _can_emit_single_line_function_literal(body_lines):
@@ -616,8 +693,36 @@ def _emit_descriptor_call(
         return f"GMRuntime.{descriptor.lowering_target}({target})"
 
     if descriptor.lowering_kind == "print":
-        arg = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
-        return f"{descriptor.lowering_target}({arg})"
+        emitted_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        ]
+        values = ", ".join(emitted_args[1:])
+        return f"GMRuntime.{descriptor.lowering_target}({emitted_args[0]}, [{values}])"
+
+    if descriptor.lowering_kind == "runtime_array_sort":
+        emitted_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        ]
+        emitted_args.extend(
+            [scope_context.self_expression, scope_context.other_expression]
+        )
+        return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
+
+    if descriptor.lowering_kind == "runtime_array_foreach":
+        emitted_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        ]
+        if len(emitted_args) == 2:
+            emitted_args.append("0")
+        if len(emitted_args) == 3:
+            emitted_args.append("null")
+        emitted_args.extend(
+            [scope_context.self_expression, scope_context.other_expression]
+        )
+        return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
 
     if descriptor.lowering_kind == "runtime_instance_keyword_first_arg":
         first_arg = _emit_instance_keyword_argument(
@@ -671,6 +776,13 @@ def _emit_descriptor_call(
             )
         if descriptor.lowering_kind == "runtime_room_api":
             emitted_args = _emit_room_api_args(
+                descriptor,
+                args,
+                local_names,
+                scope_context=scope_context,
+            )
+        if descriptor.lowering_kind == "runtime_layer_api":
+            emitted_args = _emit_layer_api_args(
                 descriptor,
                 args,
                 local_names,
@@ -835,6 +947,26 @@ def _emit_room_api_args(
             emitted_args.append(_emit_asset_argument(arg, local_names, scope_context=scope_context))
         else:
             emitted_args.append(_emit_expression(arg, local_names, scope_context=scope_context)[0])
+    return emitted_args
+
+
+def _emit_layer_api_args(
+    descriptor: GMLFunctionDescriptor,
+    args: tuple[_Expression, ...],
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> list[str]:
+    asset_indices = asset_argument_indices(descriptor.name, "layer")
+    emitted_args: list[str] = []
+    for index, arg in enumerate(args):
+        if index in asset_indices:
+            emitted_args.append(
+                _emit_asset_argument(arg, local_names, scope_context=scope_context)
+            )
+        else:
+            emitted_args.append(
+                _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            )
     return emitted_args
 
 

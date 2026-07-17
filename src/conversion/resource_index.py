@@ -10,6 +10,10 @@ from src.conversion.project_manifest import (
     ProjectResourceReference,
     load_gamemaker_project_manifest,
 )
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
+)
 from src.conversion.type_defs import (
     ConversionRunning,
     JsonDict,
@@ -258,20 +262,28 @@ class GameMakerResourceIndex(BaseConverter):
         for resource_ref in self.project_manifest.resources:
             yyp_path = resource_ref.path
             kind = resource_ref.kind
+            name = resource_ref.name or self._name_from_yyp_path(yyp_path)
+            if not name:
+                continue
+            try:
+                resolved_path = resolve_project_source_path(
+                    self.gm_project_path,
+                    yyp_path,
+                )
+            except ProjectSourcePathError as exc:
+                self._safe_log(
+                    f"Warning: Skipping GameMaker resource {name}: {exc}"
+                )
+                continue
+            yyp_path = resolved_path.source_path
+            yy_path = resolved_path.filesystem_path
+
             if kind == "extensions":
-                name = resource_ref.name or self._name_from_yyp_path(yyp_path)
-                if name:
-                    yy_path = os.path.normpath(os.path.join(self.gm_project_path, yyp_path))
-                    self._index_extension_resource(name, yy_path, yyp_path)
+                self._index_extension_resource(name, yy_path, yyp_path)
                 continue
             if kind not in self.RESOURCE_EXTENSIONS:
                 continue
 
-            name = resource_ref.name or self._name_from_yyp_path(yyp_path)
-            if not name:
-                continue
-
-            yy_path = os.path.normpath(os.path.join(self.gm_project_path, yyp_path))
             if not os.path.isfile(yy_path):
                 self._safe_log(
                     f"Warning: Skipping missing GameMaker resource {name}: {yy_path}"
@@ -648,7 +660,13 @@ class GameMakerResourceIndex(BaseConverter):
         used_paths: set[str] = set()
         for kind in self.RESOURCE_EXTENSIONS:
             resources = self.resources.get(kind, {})
-            for name in sorted(resources):
+            for name in sorted(
+                resources,
+                key=lambda resource_name: (
+                    resource_name.lower(),
+                    resources[resource_name].yyp_path.replace("\\", "/"),
+                ),
+            ):
                 resource = resources[name]
                 suffix_index = 0
                 while True:

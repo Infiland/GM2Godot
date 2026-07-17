@@ -70,6 +70,7 @@ class TestOSDebugGCGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_clipboard_set_text("")
 
             \tGMRuntime.gml_show_debug_message_ext("OS_DEBUG_VALUE {0}", [os_type])
+            \tGMRuntime.gml_show_debug_message_ext("SHOW_DEBUG_VARIADIC {0}/{1}", ["alpha", 7])
             \tGMRuntime.gml_gc_enable(false)
             \tif not _check(GMRuntime.gml_gc_is_enabled() == false, "gc_enable false failed"):
             \t\treturn
@@ -128,6 +129,7 @@ class TestOSDebugGCGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("OS_DEBUG_VALUE", result.stdout)
+        self.assertIn("SHOW_DEBUG_VARIADIC alpha/7", result.stdout)
         self.assertIn("OS_DEBUG_GC_SMOKE_OK", result.stdout)
 
 

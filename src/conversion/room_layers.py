@@ -449,6 +449,26 @@ def decode_gamemaker_tile(raw_value: int) -> GameMakerTile:
     )
 
 
+def gamemaker_tile_transform_to_godot(
+    *, mirror: bool, flip: bool, rotate: bool
+) -> int:
+    """Map GameMaker's tile flags to Godot's eight transform orientations."""
+    if not rotate:
+        alternative_tile = 0
+        if mirror:
+            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_H
+        if flip:
+            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_V
+        return alternative_tile
+
+    alternative_tile = GODOT_TILE_TRANSFORM_TRANSPOSE
+    if not flip:
+        alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_H
+    if mirror:
+        alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_V
+    return alternative_tile
+
+
 def _tile_map_layer_lines(
     layer: JsonDict,
     parent_path: str,
@@ -535,6 +555,14 @@ def _tile_map_layer_lines(
         f"metadata/gamemaker_tile_non_empty_cell_count = {godot_value(len(cells))}",
         f"metadata/gamemaker_tile_transform_cell_count = {godot_value(transform_count)}",
         f"metadata/gamemaker_tile_empty_values = {godot_value([0, GAMEMAKER_EMPTY_TILE_SENTINEL])}",
+        "metadata/gamemaker_tile_raw_values = {values}".format(
+            values=godot_value(
+                [
+                    0 if value == GAMEMAKER_EMPTY_TILE_SENTINEL else value
+                    for value in decoded_tiles
+                ]
+            )
+        ),
     ])
     lines.append("")
     return lines
@@ -574,13 +602,11 @@ def _godot_tile_cells(
             continue
         tile = decode_gamemaker_tile(raw_tile)
         atlas_index = max(0, tile.tile_index - 1)
-        alternative_tile = 0
-        if tile.mirror:
-            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_H
-        if tile.flip:
-            alternative_tile |= GODOT_TILE_TRANSFORM_FLIP_V
-        if tile.rotate:
-            alternative_tile |= GODOT_TILE_TRANSFORM_TRANSPOSE
+        alternative_tile = gamemaker_tile_transform_to_godot(
+            mirror=tile.mirror,
+            flip=tile.flip,
+            rotate=tile.rotate,
+        )
         cells.append(
             GodotTileCell(
                 x=index % width,

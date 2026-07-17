@@ -12,11 +12,20 @@ from src.conversion.project_manifest import (
     load_gamemaker_project_manifest,
 )
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.fonts import (
+    bundled_font_output_filename,
+    resolve_bundled_font_source,
+    resolve_system_font_source,
+)
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
     generated_path_segment,
     generated_resource_stem,
+)
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
 )
 from src.conversion.script_functions import modern_script_function_names
 from src.conversion.type_defs import (
@@ -195,6 +204,7 @@ class AssetRegistryConverter(BaseConverter):
         compact_logging: bool = False,
         max_workers: int | None = None,
         organize_sounds_by_audio_group: bool = False,
+        macro_configuration: str | None = None,
     ) -> None:
         super().__init__(
             gm_project_path,
@@ -207,9 +217,11 @@ class AssetRegistryConverter(BaseConverter):
             max_workers=max_workers,
         )
         self.organize_sounds_by_audio_group = bool(organize_sounds_by_audio_group)
+        self.macro_configuration = macro_configuration
         self.project_manifest: GameMakerProjectManifest = load_gamemaker_project_manifest(
             self.gm_project_path
         )
+        self._system_font_paths: dict[str, str | None] = {}
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
         resources = sorted(
@@ -350,16 +362,33 @@ class AssetRegistryConverter(BaseConverter):
             if not isinstance(raw_path, str) or not raw_path:
                 continue
 
-            kind = self._normalize_yyp_kind(raw_path)
+            raw_name = resource_id.get("name")
+            name = (
+                raw_name
+                if isinstance(raw_name, str) and raw_name
+                else self._name_from_path(raw_path.replace("\\", "/"))
+            )
+            asset_label = name or "<unnamed>"
+            try:
+                resolved_path = resolve_project_source_path(
+                    self.gm_project_path,
+                    raw_path,
+                )
+            except ProjectSourcePathError as exc:
+                self._safe_log(
+                    f"Warning: Skipping GameMaker asset {asset_label}: {exc}"
+                )
+                continue
+            source_path = resolved_path.source_path
+
+            kind = self._normalize_yyp_kind(source_path)
             if kind not in self.RESOURCE_TYPE_BY_KIND or kind == "included_files":
                 continue
 
-            raw_name = resource_id.get("name")
-            name = raw_name if isinstance(raw_name, str) and raw_name else self._name_from_path(raw_path)
             if not name:
                 continue
 
-            yy_path = os.path.normpath(os.path.join(self.gm_project_path, raw_path))
+            yy_path = resolved_path.filesystem_path
             if not os.path.isfile(yy_path):
                 self._safe_log(f"Warning: Skipping missing GameMaker asset {name}: {yy_path}")
                 continue
@@ -369,7 +398,7 @@ class AssetRegistryConverter(BaseConverter):
                     kind=kind,
                     name=name,
                     yy_path=yy_path,
-                    source_path=raw_path.replace("\\", "/"),
+                    source_path=source_path,
                     raw_data=self._read_yy_file(yy_path) or {},
                 )
             )
@@ -428,8 +457,11 @@ class AssetRegistryConverter(BaseConverter):
             return ()
         try:
             with open(source_path, "r", encoding="utf-8") as source_file:
-                return modern_script_function_names(source_file.read())
-        except OSError:
+                return modern_script_function_names(
+                    source_file.read(),
+                    macro_configuration=self.macro_configuration,
+                )
+        except (OSError, GMLTranspileError):
             return ()
 
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
@@ -1107,31 +1139,37 @@ class AssetRegistryConverter(BaseConverter):
         ttf_name = resource.raw_data.get("TTFName")
         include_ttf = bool(resource.raw_data.get("includeTTF", False))
         if include_ttf and isinstance(ttf_name, str) and ttf_name:
-            source_ttf_path = os.path.join(os.path.dirname(resource.yy_path), ttf_name)
-            if os.path.isfile(source_ttf_path):
-                return self._flat_resource_path("fonts", subfolder, ttf_name, "")
+            source_ttf_path = resolve_bundled_font_source(resource.yy_path, ttf_name)
+            output_filename = bundled_font_output_filename(ttf_name)
+            if source_ttf_path is not None and output_filename is not None:
+                stem, extension = os.path.splitext(output_filename)
+                return self._flat_resource_path(
+                    "fonts",
+                    subfolder,
+                    stem,
+                    extension,
+                    suffix=suffix,
+                )
 
-        generated_path = self._find_generated_font_path(resource.name, subfolder)
-        if generated_path is not None:
-            return generated_path
+        system_font_name = resource.raw_data.get("fontName")
+        if isinstance(system_font_name, str) and system_font_name:
+            system_path = self._system_font_path(system_font_name)
+            if system_path is not None:
+                extension = os.path.splitext(system_path)[1].lower()
+                return self._flat_resource_path(
+                    "fonts",
+                    subfolder,
+                    resource.name,
+                    extension,
+                    suffix=suffix,
+                )
         return self._flat_resource_path("fonts", subfolder, resource.name, ".tres", suffix=suffix)
 
-    def _find_generated_font_path(self, font_name: str, subfolder: str) -> str | None:
-        search_dir = os.path.join(self.godot_project_path, "fonts", *subfolder.split("/")) if subfolder else os.path.join(self.godot_project_path, "fonts")
-        if not os.path.isdir(search_dir):
-            return None
-
-        try:
-            filenames = sorted(os.listdir(search_dir))
-        except OSError:
-            return None
-
-        for filename in filenames:
-            stem, ext = os.path.splitext(filename)
-            if stem == font_name and ext.lower() in (".ttf", ".otf", ".ttc", ".otc", ".woff", ".woff2", ".tres"):
-                relative_path = os.path.relpath(os.path.join(search_dir, filename), self.godot_project_path)
-                return "res://" + relative_path.replace(os.sep, "/")
-        return None
+    def _system_font_path(self, font_name: str) -> str | None:
+        cache_key = font_name.casefold()
+        if cache_key not in self._system_font_paths:
+            self._system_font_paths[cache_key] = resolve_system_font_source(font_name)
+        return self._system_font_paths[cache_key]
 
     def _get_subfolder_from_resource(self, resource: _ProjectResource) -> str:
         if not resource.yy_path:

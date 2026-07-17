@@ -13,6 +13,7 @@ from src.conversion.objects import ObjectConverter
 from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.project_settings import ProjectSettingsConverter
 from src.conversion.architecture_policy import write_architecture_policy_report
 from src.conversion.conversion_context import (
@@ -21,7 +22,10 @@ from src.conversion.conversion_context import (
     enabled_converter_keys,
     sound_group_folders_enabled,
 )
-from src.conversion.conversion_manifest import write_conversion_manifest
+from src.conversion.conversion_manifest import (
+    capture_conversion_output_snapshot,
+    write_conversion_manifest,
+)
 from src.conversion.conversion_plan import build_conversion_plan
 from src.conversion.diagnostics import DiagnosticCollector, write_conversion_diagnostic_reports
 from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
@@ -56,8 +60,11 @@ class Converter:
         self.diagnostics = DiagnosticCollector()
 
     def convert(self, gm_path: str, gm_platform: str, godot_path: str,
-                settings: Mapping[str, BoolSetting]) -> None:
-        self.diagnostics = DiagnosticCollector()
+                settings: Mapping[str, BoolSetting], *,
+                diagnostics: DiagnosticCollector | None = None) -> None:
+        output_snapshot = capture_conversion_output_snapshot(godot_path)
+        self.diagnostics = diagnostics if diagnostics is not None else DiagnosticCollector()
+        prepare_godot_project_destination(gm_path, godot_path)
         self.log_callback = self.diagnostics.wrap_log_callback(self._raw_log_callback)
         self.update_log_callback = self.diagnostics.wrap_log_callback(self._raw_update_log_callback)
         context = self._create_context(gm_path, gm_platform, godot_path, settings)
@@ -89,6 +96,7 @@ class Converter:
                 context.godot_project_path,
                 target_platform=context.target_platform,
                 enabled_converters=context.enabled_converters,
+                output_snapshot=output_snapshot,
             )
 
     def _create_context(
@@ -247,5 +255,6 @@ class Converter:
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
                 organize_sounds_by_audio_group=context.group_sounds_by_audio_group,
+                macro_configuration=context.target_platform,
             ).convert_all(),
         }

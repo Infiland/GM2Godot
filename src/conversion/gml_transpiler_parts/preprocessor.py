@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Iterable, TypeAlias
 
 from .identifiers import _validate_gml_identifier
+from .lexical import _is_verbatim_string_start, _read_verbatim_string
 from .model import GMLTranspileError
+from .tokens import _read_template_string
 from .utils import _join_macro_continuation_lines, _macro_configuration_matches, _strip_comments
 
 
@@ -63,6 +65,126 @@ class _ConditionalFrame:
     current_active: bool
     condition_satisfied: bool
     else_seen: bool = False
+
+
+def _blank_layout_span(buffer: list[str], start: int, end: int) -> None:
+    for index in range(start, end):
+        if buffer[index] not in "\r\n":
+            buffer[index] = " "
+
+
+def _preprocessor_source_views(source: str) -> tuple[str, str]:
+    """Return comment-free and code-only views without shifting source offsets."""
+    comments_masked = list(source)
+    code_only = list(source)
+    index = 0
+    quote: str | None = None
+    escaped = False
+    while index < len(source):
+        char = source[index]
+        if quote is not None:
+            if char not in "\r\n":
+                code_only[index] = " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+
+        if _is_verbatim_string_start(source, index):
+            literal = _read_verbatim_string(source, index)
+            end = index + len(literal)
+            _blank_layout_span(code_only, index, end)
+            index = end
+            continue
+
+        if source.startswith('$"', index):
+            literal = _read_template_string(source, index)
+            end = index + len(literal)
+            _blank_layout_span(code_only, index, end)
+            index = end
+            continue
+
+        if char in ("'", '"'):
+            quote = char
+            code_only[index] = " "
+            index += 1
+            continue
+
+        if source.startswith("//", index):
+            end = index + 2
+            while end < len(source) and source[end] not in "\r\n":
+                end += 1
+            _blank_layout_span(comments_masked, index, end)
+            _blank_layout_span(code_only, index, end)
+            index = end
+            continue
+
+        if source.startswith("/*", index):
+            comment_end = source.find("*/", index + 2)
+            end = len(source) if comment_end == -1 else comment_end + 2
+            _blank_layout_span(comments_masked, index, end)
+            _blank_layout_span(code_only, index, end)
+            index = end
+            continue
+
+        index += 1
+
+    return "".join(comments_masked), "".join(code_only)
+
+
+def _source_line_spans(source: str) -> tuple[tuple[int, int], ...]:
+    spans: list[tuple[int, int]] = []
+    start = 0
+    index = 0
+    while index < len(source):
+        if source[index] == "\r":
+            end = index + 1
+            if end < len(source) and source[end] == "\n":
+                end += 1
+            spans.append((start, end))
+            start = end
+            index = end
+            continue
+        if source[index] == "\n":
+            end = index + 1
+            spans.append((start, end))
+            start = end
+        index += 1
+    if start < len(source):
+        spans.append((start, len(source)))
+    return tuple(spans)
+
+
+def _line_content(source: str, span: tuple[int, int]) -> str:
+    start, end = span
+    if end > start and source[end - 1] == "\n":
+        end -= 1
+        if end > start and source[end - 1] == "\r":
+            end -= 1
+    elif end > start and source[end - 1] == "\r":
+        end -= 1
+    return source[start:end]
+
+
+def _logical_macro_line(
+    comments_masked: str,
+    line_spans: tuple[tuple[int, int], ...],
+    line_index: int,
+) -> tuple[str, int]:
+    logical_line = _line_content(comments_masked, line_spans[line_index])
+    last_line_index = line_index
+    while logical_line.lstrip().casefold().startswith("#macro") and logical_line.rstrip().endswith("\\"):
+        logical_line = logical_line.rstrip()[:-1].rstrip()
+        if last_line_index + 1 >= len(line_spans):
+            break
+        last_line_index += 1
+        continuation = _line_content(comments_masked, line_spans[last_line_index])
+        logical_line = f"{logical_line} {continuation.lstrip()}"
+    return logical_line, last_line_index
 
 
 def preprocess_gml_source(
@@ -216,6 +338,227 @@ def preprocess_gml_source(
         raise GMLTranspileError(diagnostics[0].format())
 
     return GMLPreprocessResult("\n".join(output_lines), tuple(diagnostics))
+
+
+def preprocess_gml_source_preserving_layout(
+    source: str,
+    *,
+    macro_configuration: str | None = None,
+    active_symbols: Iterable[str] | None = None,
+) -> GMLPreprocessResult:
+    """Select active preprocessor branches while preserving every source offset.
+
+    Conditional directives and inactive code are replaced with spaces, while
+    original line endings and active code remain byte-for-byte aligned. This is
+    used by modern-script discovery, whose declaration and initializer offsets
+    must still address the original GameMaker source.
+    """
+    symbols = {symbol.casefold() for symbol in (active_symbols or ())}
+    symbol_values: dict[str, str] = {}
+    if macro_configuration:
+        symbols.add(macro_configuration.casefold())
+
+    comments_masked, code_only = _preprocessor_source_views(source)
+    line_spans = _source_line_spans(source)
+    output = list(source)
+    diagnostics: list[GMLPreprocessorDiagnostic] = []
+    conditionals: list[_ConditionalFrame] = []
+    line_index = 0
+
+    while line_index < len(line_spans):
+        first_line_index = line_index
+        clean_line = _line_content(comments_masked, line_spans[first_line_index])
+        code_line = _line_content(code_only, line_spans[first_line_index])
+        code_directive_match = _DIRECTIVE_RE.match(code_line)
+        directive_match = (
+            _DIRECTIVE_RE.match(clean_line)
+            if code_directive_match is not None
+            else None
+        )
+        directive = (
+            f"#{directive_match.group(1)}".casefold()
+            if directive_match is not None
+            else None
+        )
+
+        last_line_index = first_line_index
+        logical_line = clean_line
+        if directive == "#macro":
+            logical_line, last_line_index = _logical_macro_line(
+                comments_masked,
+                line_spans,
+                first_line_index,
+            )
+            directive_match = _DIRECTIVE_RE.match(logical_line)
+
+        directive_body = (
+            directive_match.group(2).strip()
+            if directive_match is not None
+            else ""
+        )
+        active = _current_active(conditionals)
+        span_start = line_spans[first_line_index][0]
+        span_end = line_spans[last_line_index][1]
+        line_number = first_line_index + 1
+        line_index = last_line_index + 1
+
+        if directive in ("#if", "#ifdef", "#ifndef"):
+            condition_active = False
+            if active:
+                condition_active = _evaluate_conditional(
+                    directive,
+                    directive_body,
+                    symbols,
+                    symbol_values,
+                    diagnostics,
+                    line_number,
+                    logical_line,
+                )
+            conditionals.append(
+                _ConditionalFrame(
+                    parent_active=active,
+                    current_active=active and condition_active,
+                    condition_satisfied=active and condition_active,
+                )
+            )
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if directive == "#elif":
+            if not conditionals:
+                _add_diagnostic(
+                    diagnostics,
+                    line_number,
+                    directive,
+                    "Unmatched preprocessor directive #elif",
+                    logical_line,
+                )
+            else:
+                frame = conditionals[-1]
+                if frame.else_seen:
+                    _add_diagnostic(
+                        diagnostics,
+                        line_number,
+                        directive,
+                        "#elif after #else is not supported",
+                        logical_line,
+                    )
+                    frame.current_active = False
+                elif not frame.parent_active or frame.condition_satisfied:
+                    frame.current_active = False
+                else:
+                    condition_active = _evaluate_conditional(
+                        directive,
+                        directive_body,
+                        symbols,
+                        symbol_values,
+                        diagnostics,
+                        line_number,
+                        logical_line,
+                    )
+                    frame.current_active = frame.parent_active and condition_active
+                    frame.condition_satisfied = condition_active
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if directive == "#else":
+            if not conditionals:
+                _add_diagnostic(
+                    diagnostics,
+                    line_number,
+                    directive,
+                    "Unmatched preprocessor directive #else",
+                    logical_line,
+                )
+            else:
+                frame = conditionals[-1]
+                if frame.else_seen:
+                    _add_diagnostic(
+                        diagnostics,
+                        line_number,
+                        directive,
+                        "Duplicate preprocessor directive #else",
+                        logical_line,
+                    )
+                    frame.current_active = False
+                else:
+                    frame.current_active = frame.parent_active and not frame.condition_satisfied
+                    frame.condition_satisfied = True
+                    frame.else_seen = True
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if directive == "#endif":
+            if not conditionals:
+                _add_diagnostic(
+                    diagnostics,
+                    line_number,
+                    directive,
+                    "Unmatched preprocessor directive #endif",
+                    logical_line,
+                )
+            else:
+                conditionals.pop()
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if not active:
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if directive is None:
+            continue
+
+        if directive == "#macro":
+            _preprocess_macro(
+                directive_body,
+                symbols,
+                symbol_values,
+                macro_configuration,
+            )
+            continue
+
+        if directive in _EDITOR_ONLY_DIRECTIVES:
+            _blank_layout_span(output, span_start, span_end)
+            continue
+
+        if directive == "#define":
+            _preprocess_define(
+                directive_body,
+                symbols,
+                symbol_values,
+                diagnostics,
+                line_number,
+                logical_line,
+            )
+            continue
+
+        directive_name = directive if directive in _SUPPORTED_DIRECTIVES else directive
+        _add_diagnostic(
+            diagnostics,
+            line_number,
+            directive_name,
+            f"Unsupported preprocessor directive {directive_name}",
+            logical_line,
+        )
+        _blank_layout_span(output, span_start, span_end)
+
+    if conditionals:
+        _add_diagnostic(
+            diagnostics,
+            len(line_spans) or 1,
+            "#if",
+            "Unclosed preprocessor conditional",
+            "#if",
+        )
+
+    if diagnostics:
+        raise GMLTranspileError(diagnostics[0].format())
+
+    rendered_source = "".join(output)
+    if len(rendered_source) != len(source):
+        raise AssertionError("Layout-preserving preprocessing changed source length")
+    return GMLPreprocessResult(rendered_source, tuple(diagnostics))
 
 
 def _preprocess_define(
@@ -559,4 +902,5 @@ __all__ = [
     "GMLPreprocessResult",
     "GMLPreprocessorDiagnostic",
     "preprocess_gml_source",
+    "preprocess_gml_source_preserving_layout",
 ]

@@ -307,6 +307,22 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert layer_background_get_id is not None
         self.assertEqual(layer_background_get_id.status, "implemented")
         self.assertEqual(layer_background_get_id.issue_number, 566)
+        for api_name in (
+            "layer_tilemap_get_id",
+            "layer_tilemap_create",
+            "tilemap_set",
+            "tilemap_get",
+            "tilemap_get_width",
+            "tilemap_get_height",
+        ):
+            with self.subTest(api=api_name):
+                tilemap_entry = get_gml_api_entry(api_name)
+                self.assertIsNotNone(tilemap_entry)
+                assert tilemap_entry is not None
+                self.assertEqual(tilemap_entry.status, "implemented")
+                self.assertEqual(tilemap_entry.issue_number, 566)
+                self.assertEqual(tilemap_entry.runtime_support, "yes")
+                self.assertEqual(tilemap_entry.smoke_coverage, "yes")
         layer_sequence_create = get_gml_api_entry("layer_sequence_create")
         self.assertIsNotNone(layer_sequence_create)
         assert layer_sequence_create is not None

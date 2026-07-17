@@ -13,6 +13,7 @@ from src.conversion.project_manifest import (
     load_gamemaker_project_manifest,
     unsupported_project_option_diagnostics,
 )
+from src.conversion.project_godot import GodotProjectFile, atomic_rewrite_text, format_godot_string
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 class ProjectSettingsConverter(BaseConverter):
@@ -63,6 +64,17 @@ class ProjectSettingsConverter(BaseConverter):
             with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
             self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0]))
+
+            project_godot_path = os.path.join(
+                self.godot_project_path,
+                "project.godot",
+            )
+            if os.path.isfile(project_godot_path):
+                GodotProjectFile(project_godot_path).set_setting(
+                    "application",
+                    "config/icon",
+                    "res://icon.png",
+                )
         
             return True
         except Exception as e:
@@ -116,18 +128,17 @@ class ProjectSettingsConverter(BaseConverter):
             return
 
         try:
-            with open(project_godot_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-
             gm_project_name = self.get_gm_project_name()
             if gm_project_name:
-                content = re.sub(r'config/name=".*"', f'config/name="{gm_project_name}"', content)
-                self.log_callback(get_localized("Console_Convertor_Settings_UpdatedName").format(gm_project_name=gm_project_name))
+                updated = GodotProjectFile(project_godot_path).set_setting(
+                    "application",
+                    "config/name",
+                    gm_project_name,
+                )
+                if updated:
+                    self.log_callback(get_localized("Console_Convertor_Settings_UpdatedName").format(gm_project_name=gm_project_name))
             else:
                 self.log_callback(get_localized("Console_Convertor_Settings_Error_Name_GM"))
-
-            with open(project_godot_path, 'w', encoding='utf-8') as file:
-                file.write(content)
 
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_NameGeneric").format(error=str(e)))
@@ -143,13 +154,17 @@ class ProjectSettingsConverter(BaseConverter):
             with open(project_godot_path, 'r', encoding='utf-8') as file:
                 content = file.read()
 
-            content = re.sub(r'config/icon="res://.*"', 'config/icon="res://icon.png"', content)
-
-            for gm_option, platform, godot_setting, value_kind in self._project_setting_mappings():
+            for gm_option, platform, godot_section, godot_setting, value_kind in self._project_setting_mappings():
                 option = self.project_manifest.get_option(gm_option, platform)
                 if option is not None:
                     value = self._godot_project_setting_value(option.value, value_kind)
-                    content = self.update_godot_setting(content, godot_setting, value)
+                    content = self.update_godot_setting(
+                        content,
+                        godot_setting,
+                        value,
+                        section=godot_section,
+                        value_kind=value_kind,
+                    )
 
             for diagnostic in unsupported_project_option_diagnostics(
                 self.project_manifest,
@@ -158,32 +173,49 @@ class ProjectSettingsConverter(BaseConverter):
             ):
                 self._safe_log(f"{diagnostic.severity.title()}: {diagnostic.message}")
 
-            with open(project_godot_path, 'w', encoding='utf-8') as file:
-                file.write(content)
+            atomic_rewrite_text(project_godot_path, content)
 
             self.log_callback(get_localized("Console_Convertor_Settings_Updated"))
             
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_NotUpdated").format(error=str(e)))
 
-    def update_godot_setting(self, content: str, setting: str, value: object, section: str = "application") -> str:
-        if section not in content:
-            content += f"\n[{section}]\n"
-        
-        setting_pattern = f"{setting}\\s*=.*"
-        new_setting = f'{setting}={self._format_godot_value(value)}'
-        
-        if re.search(setting_pattern, content):
-            content = re.sub(setting_pattern, new_setting, content)
-        else:
-            section_match = re.search(f"\\[{section}\\]", content)
-            if section_match:
-                insert_pos = section_match.end()
-                content = f"{content[:insert_pos]}\n{new_setting}{content[insert_pos:]}"
-            else:
-                content += f"\n{new_setting}\n"
-        
-        return content
+    def update_godot_setting(
+        self,
+        content: str,
+        setting: str,
+        value: object,
+        section: str = "application",
+        value_kind: str | None = None,
+    ) -> str:
+        if section != "application":
+            content = self._remove_godot_setting_from_section(
+                content,
+                setting,
+                section="application",
+            )
+
+        new_setting = f'{setting}={self._format_godot_value(value, value_kind)}'
+        section_span = self._godot_section_span(content, section)
+        if section_span is None:
+            line_ending = self._line_ending(content)
+            separator = "" if not content or content.endswith(("\n", "\r")) else line_ending
+            return (
+                f"{content}{separator}{line_ending}[{section}]{line_ending}"
+                f"{new_setting}{line_ending}"
+            )
+
+        body_start, body_end = section_span
+        section_body = content[body_start:body_end]
+        setting_pattern = re.compile(
+            rf"(?m)^[ \t]*{re.escape(setting)}[ \t]*=.*$",
+        )
+        if setting_pattern.search(section_body):
+            updated_body = setting_pattern.sub(new_setting, section_body, count=1)
+            return f"{content[:body_start]}{updated_body}{content[body_end:]}"
+
+        line_ending = self._line_ending(content)
+        return f"{content[:body_start]}{new_setting}{line_ending}{content[body_start:]}"
 
     def read_audio_groups(self) -> List[str]:
         if self.project_manifest.yyp_path is None:
@@ -196,27 +228,93 @@ class ProjectSettingsConverter(BaseConverter):
         self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Found").format(audio_group_names=', '.join(audio_group_names)))
         return audio_group_names
 
-    def _project_setting_mappings(self) -> list[tuple[str, str, str, str]]:
+    def _project_setting_mappings(self) -> list[tuple[str, str, str, str, str]]:
         return [
-            ("option_windows_description_info", "windows", "config/description", "string"),
-            (f"option_{self.gm_platform}_version", self.gm_platform, "config/version", "string"),
-            ("option_windows_use_splash", "windows", "boot_splash/show_image", "bool"),
-            ("option_game_speed", "main", "run/max_fps", "int"),
-            (f"option_{self.gm_platform}_vsync", self.gm_platform, "window/vsync/vsync_mode", "vsync"),
-            (f"option_{self.gm_platform}_sync", self.gm_platform, "window/vsync/vsync_mode", "vsync"),
-            (f"option_{self.gm_platform}_resize_window", self.gm_platform, "window/size/resizable", "bool"),
-            ("option_windows_borderless", "windows", "window/size/borderless", "bool"),
+            ("option_windows_description_info", "windows", "application", "config/description", "string"),
+            (f"option_{self.gm_platform}_version", self.gm_platform, "application", "config/version", "string"),
+            ("option_windows_use_splash", "windows", "application", "boot_splash/show_image", "bool"),
+            ("option_game_speed", "main", "application", "run/max_fps", "int"),
+            (
+                f"option_{self.gm_platform}_vsync",
+                self.gm_platform,
+                "display",
+                "window/vsync/vsync_mode",
+                "vsync",
+            ),
+            (
+                f"option_{self.gm_platform}_sync",
+                self.gm_platform,
+                "display",
+                "window/vsync/vsync_mode",
+                "vsync",
+            ),
+            (
+                f"option_{self.gm_platform}_resize_window",
+                self.gm_platform,
+                "display",
+                "window/size/resizable",
+                "bool",
+            ),
+            ("option_windows_borderless", "windows", "display", "window/size/borderless", "bool"),
             (
                 f"option_{self.gm_platform}_interpolate_pixels",
                 self.gm_platform,
+                "rendering",
                 "textures/canvas_textures/default_texture_filter",
                 "texture_filter",
             ),
-            (f"option_{self.gm_platform}_start_fullscreen", self.gm_platform, "window/size/mode", "fullscreen"),
+            (
+                f"option_{self.gm_platform}_start_fullscreen",
+                self.gm_platform,
+                "display",
+                "window/size/mode",
+                "fullscreen",
+            ),
         ]
 
     def _supported_project_option_keys(self) -> set[str]:
-        return {key for key, _platform, _setting, _kind in self._project_setting_mappings()}
+        return {
+            key
+            for key, _platform, _section, _setting, _kind in self._project_setting_mappings()
+        }
+
+    @staticmethod
+    def _godot_section_span(content: str, section: str) -> tuple[int, int] | None:
+        header = re.search(
+            rf"(?m)^\[{re.escape(section)}\][ \t]*(?:\r?\n|$)",
+            content,
+        )
+        if header is None:
+            return None
+
+        body_start = header.end()
+        next_header = re.search(r"(?m)^\[[^\]\r\n]+\][ \t]*(?:\r?\n|$)", content[body_start:])
+        body_end = body_start + next_header.start() if next_header is not None else len(content)
+        return body_start, body_end
+
+    @classmethod
+    def _remove_godot_setting_from_section(
+        cls,
+        content: str,
+        setting: str,
+        *,
+        section: str,
+    ) -> str:
+        section_span = cls._godot_section_span(content, section)
+        if section_span is None:
+            return content
+
+        body_start, body_end = section_span
+        section_body = content[body_start:body_end]
+        setting_pattern = re.compile(
+            rf"(?m)^[ \t]*{re.escape(setting)}[ \t]*=.*(?:\r?\n|$)",
+        )
+        updated_body = setting_pattern.sub("", section_body)
+        return f"{content[:body_start]}{updated_body}{content[body_end:]}"
+
+    @staticmethod
+    def _line_ending(content: str) -> str:
+        return "\r\n" if "\r\n" in content else "\n"
 
     def _platform_from_options_path(self, file_path: str) -> str:
         options_root = os.path.join(self.gm_project_path, "options")
@@ -271,7 +369,9 @@ class ProjectSettingsConverter(BaseConverter):
             return 0
 
     @staticmethod
-    def _format_godot_value(value: object) -> str:
+    def _format_godot_value(value: object, value_kind: str | None = None) -> str:
+        if value_kind == "string":
+            return format_godot_string(str(value))
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, (int, float)) and not isinstance(value, bool):

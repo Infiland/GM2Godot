@@ -2,7 +2,7 @@
 
 <img width="802" height="632" alt="screen" src="https://github.com/user-attachments/assets/cedf47f5-6668-44ab-8cf6-959a21afd7fa" />
 
-GM2Godot converts GameMaker (2024.14.2) projects into Godot (4.6.2) projects. It includes a GUI, a headless CLI, a growing GMS2+ GML-to-GDScript transpiler, generated Godot runtime helpers, deterministic asset registries, diagnostics, compatibility reports, and fixture-backed regression tests.
+GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It converts supported project data and GML through a GUI or headless CLI, with generated Godot runtime helpers, deterministic asset registries, diagnostics, compatibility reports, and fixture-backed regression tests.
 
 ## Features
 
@@ -43,7 +43,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.6.1`.
+Current source version: `0.7.0`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 

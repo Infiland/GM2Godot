@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Preserve the licensed upstream fixture byte-for-byte, including trailing spaces.
+tests/fixtures/real_world/snap/SnapBufferReadYAML.gml whitespace=-trailing-space

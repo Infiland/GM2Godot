@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 
 import os
+import json
 import sys
 import shutil
 import tempfile
@@ -13,6 +14,7 @@ if PROJECT_ROOT not in sys.path:
 
 from PIL import Image
 from src.conversion.tilesets import TileSetConverter, TilesetData
+from src.conversion.asset_registry import AssetRegistryConverter
 
 
 def _make_tileset_yy_content(name: str, sprite_name: str, tile_width: int = 16, tile_height: int = 16,
@@ -377,6 +379,80 @@ class TestTileSetConverterSubfolders(unittest.TestCase):
             content = f.read()
 
         self.assertIn('res://tilesets/world/ts_terrain/ts_terrain.png', content)
+
+
+class TestTileSetGeneratedPathCollisions(unittest.TestCase):
+    def test_emitted_tilesets_match_collision_safe_registry_paths(self) -> None:
+        gm_dir = tempfile.mkdtemp()
+        godot_dir = tempfile.mkdtemp()
+        try:
+            _make_sprite_for_tileset(gm_dir, "s_tiles", width=32, height=16)
+            resources: list[dict[str, object]] = [
+                {
+                    "id": {
+                        "name": "s_tiles",
+                        "path": "sprites/s_tiles/s_tiles.yy",
+                    }
+                }
+            ]
+            for name in ("FooBar", "foo_bar"):
+                tileset_dir = os.path.join(gm_dir, "tilesets", name)
+                os.makedirs(tileset_dir)
+                with open(
+                    os.path.join(tileset_dir, name + ".yy"),
+                    "w",
+                    encoding="utf-8",
+                ) as tileset_file:
+                    tileset_file.write(
+                        _make_tileset_yy_content(name, "s_tiles", tile_count=2)
+                    )
+                resources.append(
+                    {"id": {"name": name, "path": f"tilesets/{name}/{name}.yy"}}
+                )
+            with open(
+                os.path.join(gm_dir, "CollisionTilesets.yyp"),
+                "w",
+                encoding="utf-8",
+            ) as project_file:
+                json.dump({"resources": resources, "RoomOrderNodes": []}, project_file)
+
+            TileSetConverter(
+                gm_dir,
+                godot_dir,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=2,
+            ).convert_all()
+            entries = AssetRegistryConverter(
+                gm_dir,
+                godot_dir,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+            ).build_entries()
+            paths = {
+                entry.name: entry.godot_path
+                for entry in entries
+                if entry.kind == "tilesets"
+            }
+
+            self.assertEqual(len(paths), 2)
+            self.assertEqual(len(set(paths.values())), 2)
+            for resource_path in paths.values():
+                tres_path = os.path.join(
+                    godot_dir,
+                    *resource_path.removeprefix("res://").split("/"),
+                )
+                texture_path = os.path.splitext(tres_path)[0] + ".png"
+                self.assertTrue(os.path.isfile(tres_path), resource_path)
+                self.assertTrue(os.path.isfile(texture_path), texture_path)
+                with open(tres_path, "r", encoding="utf-8") as tres_file:
+                    expected_texture = os.path.splitext(resource_path)[0] + ".png"
+                    self.assertIn(f'path="{expected_texture}"', tres_file.read())
+        finally:
+            shutil.rmtree(gm_dir)
+            shutil.rmtree(godot_dir)
 
 
 if __name__ == "__main__":

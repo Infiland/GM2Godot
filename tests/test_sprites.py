@@ -12,6 +12,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
+from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.sprites import AnimationData, CollisionData, SpriteConverter, SpriteParseResult
 
 
@@ -75,6 +77,16 @@ class TestSpriteConverterBasic(unittest.TestCase):
         godot_sprite_dir = os.path.join(self.godot_dir, "sprites", "test_sprite")
         png_files = [f for f in os.listdir(godot_sprite_dir) if f.endswith(".png")]
         self.assertEqual(len(png_files), 2)
+
+    def test_empty_layers_directory_does_not_create_phantom_sprite(self):
+        """The structural layers directory must not be mistaken for a sprite."""
+        os.makedirs(
+            os.path.join(self.gm_dir, "sprites", "test_sprite", "layers", "empty_layer")
+        )
+
+        converter = self._make_converter()
+
+        self.assertEqual(set(converter._find_all_sprite_images()), {"test_sprite"})
 
 
 class TestSpriteConverterCompactLogging(unittest.TestCase):
@@ -585,6 +597,153 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         converted = set(os.listdir(godot_sprites))
         self.assertIn("s_m", converted)
         self.assertIn("s_n", converted)
+
+
+class TestSpriteGeneratedPathCollisions(unittest.TestCase):
+    SPRITES = {
+        "Foo-Bar": (255, 0, 0, 255),
+        "Foo_Bar": (0, 128, 0, 255),
+        "foo bar": (0, 0, 255, 255),
+    }
+
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+
+        for index, (sprite_name, color) in enumerate(self.SPRITES.items()):
+            frame_guid = f"frame-{index}"
+            layer_guid = f"layer-{index}"
+            sprite_dir = os.path.join(self.gm_dir, "sprites", sprite_name)
+            frame_dir = os.path.join(sprite_dir, "layers", frame_guid)
+            os.makedirs(frame_dir)
+            with open(os.path.join(sprite_dir, sprite_name + ".yy"), "w", encoding="utf-8") as yy_file:
+                yy_file.write(_make_yy_content(sprite_name, [frame_guid], [layer_guid]))
+            Image.new("RGBA", (2, 2), color).save(
+                os.path.join(frame_dir, layer_guid + ".png"),
+                "PNG",
+            )
+
+        with open(os.path.join(self.gm_dir, "CollisionTest.yyp"), "w", encoding="utf-8") as yyp_file:
+            yyp_file.write(_make_yyp_content(list(self.SPRITES)))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_emitted_sprites_match_collision_safe_index_and_registry_paths(self) -> None:
+        SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+        ).convert_all()
+        resource_index = GameMakerResourceIndex(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).build()
+        registry_entries = AssetRegistryConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).build_entries()
+
+        index_paths = {
+            name: resource_index.resolve_godot_path("sprites", name)
+            for name in self.SPRITES
+        }
+        registry_paths = {
+            entry.name: entry.godot_path
+            for entry in registry_entries
+            if entry.kind == "sprites"
+        }
+        self.assertEqual(
+            index_paths,
+            {
+                "Foo-Bar": "res://sprites/foo_bar_2/foo_bar_2.tscn",
+                "Foo_Bar": "res://sprites/foo_bar_3/foo_bar_3.tscn",
+                "foo bar": "res://sprites/foo_bar/foo_bar.tscn",
+            },
+        )
+        self.assertEqual(index_paths, registry_paths)
+        self.assertEqual(len(set(index_paths.values())), len(self.SPRITES))
+
+        emitted_scene_paths: set[str] = set()
+        for root, _, filenames in os.walk(os.path.join(self.godot_dir, "sprites")):
+            for filename in filenames:
+                if filename.endswith(".tscn"):
+                    relative_path = os.path.relpath(os.path.join(root, filename), self.godot_dir)
+                    emitted_scene_paths.add("res://" + relative_path.replace(os.sep, "/"))
+        self.assertEqual(emitted_scene_paths, set(index_paths.values()))
+
+        for sprite_name, scene_path in index_paths.items():
+            assert scene_path is not None
+            texture_path = os.path.splitext(scene_path)[0] + ".png"
+            scene_file = os.path.join(self.godot_dir, scene_path.removeprefix("res://"))
+            texture_file = os.path.join(self.godot_dir, texture_path.removeprefix("res://"))
+            self.assertTrue(os.path.isfile(texture_file), texture_path)
+            with open(scene_file, "r", encoding="utf-8") as scene:
+                self.assertIn(f'path="{texture_path}"', scene.read())
+            with Image.open(texture_file) as image:
+                self.assertEqual(
+                    image.convert("RGBA").getpixel((0, 0)),
+                    self.SPRITES[sprite_name],
+                )
+
+    def test_missing_yyp_sprite_does_not_shift_emitted_collision_paths(self) -> None:
+        missing_sprite = "Foo+Bar"
+        with open(os.path.join(self.gm_dir, "CollisionTest.yyp"), "w", encoding="utf-8") as yyp_file:
+            yyp_file.write(_make_yyp_content([missing_sprite, *self.SPRITES]))
+
+        SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+        ).convert_all()
+        resource_index = GameMakerResourceIndex(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).build()
+        registry_entries = AssetRegistryConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).build_entries()
+
+        index_paths = {
+            name: resource_index.resolve_godot_path("sprites", name)
+            for name in self.SPRITES
+        }
+        registry_paths = {
+            entry.name: entry.godot_path
+            for entry in registry_entries
+            if entry.kind == "sprites"
+        }
+        emitted_scene_paths = {
+            "res://" + os.path.relpath(os.path.join(root, filename), self.godot_dir).replace(os.sep, "/")
+            for root, _, filenames in os.walk(os.path.join(self.godot_dir, "sprites"))
+            for filename in filenames
+            if filename.endswith(".tscn")
+        }
+
+        self.assertIsNone(resource_index.resolve_godot_path("sprites", missing_sprite))
+        self.assertNotIn(missing_sprite, registry_paths)
+        self.assertEqual(index_paths, registry_paths)
+        self.assertEqual(emitted_scene_paths, set(index_paths.values()))
 
 
 def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], layer_guids: list[str],

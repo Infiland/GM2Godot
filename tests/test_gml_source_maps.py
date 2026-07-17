@@ -74,6 +74,53 @@ class TestGMLSourceMaps(unittest.TestCase):
         self.assertGreaterEqual(len(case_collisions), 2)
         self.assertTrue(all(diagnostic.line in (2, 3) for diagnostic in case_collisions))
 
+    def test_initializer_values_are_not_reported_as_declared_identifiers(self) -> None:
+        diagnostics = analyze_gml_source_identifiers(
+            "\n".join(
+                [
+                    "var enabled = true;",
+                    "var values = [false, class], class = 1;",
+                    "function build(flag = false, class = true) {}",
+                ]
+            )
+        )
+
+        reserved = [
+            diagnostic
+            for diagnostic in diagnostics
+            if diagnostic.code == "GM2GD-GML-RESERVED-NAME"
+        ]
+
+        self.assertEqual(
+            [(diagnostic.identifier, diagnostic.line) for diagnostic in reserved],
+            [("class", 2), ("class", 3)],
+        )
+
+    def test_verbatim_contents_do_not_become_source_comments_or_identifiers(
+        self,
+    ) -> None:
+        source = (
+            'var text = @"\n'
+            "var class = 1;\n"
+            "FakeName = 1;\n"
+            "fakeName = 2;\n"
+            "// literal, not a source comment\n"
+            '";\n'
+            "var real_value = 1; // real source note\n"
+        )
+
+        diagnostics = analyze_gml_source_identifiers(source)
+        result = transpile_gml_code_with_source_map(
+            source,
+            preserve_source_comments=True,
+        )
+
+        self.assertEqual(diagnostics, ())
+        self.assertNotIn("# GML line 5:", result.code)
+        self.assertIn("# GML line 7: real source note", result.code)
+        mapped_lines = {entry.source_line for entry in result.source_map.entries}
+        self.assertTrue(mapped_lines.isdisjoint({2, 3, 4, 5}))
+
 
 if __name__ == "__main__":
     unittest.main()

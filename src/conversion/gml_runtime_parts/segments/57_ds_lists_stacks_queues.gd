@@ -156,10 +156,10 @@ static func _gml_ds_serialize_reference(kind, ds, seen):
 		return {"data": entries}
 	if kind == GML_DS_MAP_HANDLE_KIND:
 		var entries = []
-		for key in ds.keys():
+		for stored_key in ds.keys():
 			entries.append({
-				"key": _gml_ds_serialize_value(key, seen),
-				"value": _gml_ds_serialize_value(ds[key], seen)
+				"key": _gml_ds_serialize_value(_gml_ds_map_external_key(stored_key), seen),
+				"value": _gml_ds_serialize_value(ds[stored_key], seen)
 			})
 		return {"entries": entries}
 	if kind == GML_DS_GRID_HANDLE_KIND:
@@ -306,7 +306,11 @@ static func _gml_ds_apply_payload(kind, ds, payload):
 		ds.clear()
 		for entry in payload.get("entries", []):
 			if entry is Dictionary:
-				ds[_gml_ds_deserialize_value(entry.get("key", null))] = _gml_ds_deserialize_value(entry.get("value", null))
+				_gml_ds_map_set_value(
+					ds,
+					_gml_ds_deserialize_value(entry.get("key", null)),
+					_gml_ds_deserialize_value(entry.get("value", null))
+				)
 	elif kind == GML_DS_GRID_HANDLE_KIND:
 		ds["width"] = int(payload.get("width", 0))
 		ds["height"] = int(payload.get("height", 0))

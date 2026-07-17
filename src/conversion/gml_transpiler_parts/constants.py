@@ -86,6 +86,7 @@ _GENERATED_IDENTIFIER_PREFIX = "_gml_"
 _RIGHT_ASSOCIATIVE = {"??"}
 
 _GDSCRIPT_RESERVED_IDENTIFIERS = frozenset({
+    "_",
     "as",
     "break",
     "class",
@@ -1147,6 +1148,7 @@ _DS_GRID_FUNCTIONS = {
 
 _STRING_RUNTIME_FUNCTIONS = {
     "string_length": "gml_string_length",
+    "string_byte_length": "gml_string_byte_length",
     "string_char_at": "gml_string_char_at",
     "string_ord_at": "gml_string_ord_at",
     "string_copy": "gml_string_copy",
@@ -1176,6 +1178,7 @@ _ARRAY_RUNTIME_FUNCTIONS = {
     "array_push_back": "gml_array_push_back",
     "array_create": "gml_array_create",
     "array_length_1d": "gml_array_length_1d",
+    "array_length": "gml_array_length",
     "array_resize": "gml_array_resize",
     "array_pop": "gml_array_pop",
     "array_insert": "gml_array_insert",
@@ -1186,6 +1189,7 @@ _ARRAY_RUNTIME_FUNCTIONS = {
     "array_concat": "gml_array_concat",
     "array_contains": "gml_array_contains",
     "array_find_index": "gml_array_find_index",
+    "array_foreach": "gml_array_foreach",
     "array_filter": "gml_array_filter",
     "array_map": "gml_array_map",
     "array_reduce": "gml_array_reduce",
@@ -1429,6 +1433,12 @@ _LAYER_RUNTIME_FUNCTIONS = {
     "layer_background_get_id": "gml_layer_background_get_id",
     "layer_background_alpha": "gml_layer_background_alpha",
     "layer_background_blend": "gml_layer_background_blend",
+    "layer_tilemap_get_id": "gml_layer_tilemap_get_id",
+    "layer_tilemap_create": "gml_layer_tilemap_create",
+    "tilemap_set": "gml_tilemap_set",
+    "tilemap_get": "gml_tilemap_get",
+    "tilemap_get_width": "gml_tilemap_get_width",
+    "tilemap_get_height": "gml_tilemap_get_height",
 }
 
 _SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS = {

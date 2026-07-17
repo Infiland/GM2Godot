@@ -17,6 +17,7 @@ from src.conversion.gml_transpiler import (
     _NumberLiteral,
     _StringLiteral,
     _StructLiteral,
+    _TemplateStringLiteral,
     _expression_tokens,
     _tokenize,
     load_gml_extension_function_mappings,
@@ -212,6 +213,28 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression(r'"line\nnext"'), r'"line\nnext"')
         self.assertEqual(transpile_gml_expression(r'"C:\\tmp"'), r'"C:\\tmp"')
 
+    def test_decodes_gamemaker_string_character_escapes(self):
+        self.assertEqual(transpile_gml_expression(r'"\q"'), '"q"')
+        self.assertEqual(transpile_gml_expression(r"'\q; quote=\''"), r"'q; quote=\''")
+        self.assertEqual(transpile_gml_expression(r'"\u61a"'), r'"\u061a"')
+        self.assertEqual(
+            transpile_gml_expression(
+                r'"unicode=\u61; emoji=\u1F600; hex=\x41; octal=\101; vertical=\v"'
+            ),
+            r'"unicode=a; emoji=\ud83d\ude00; hex=A; octal=A; vertical=\u000b"',
+        )
+
+    def test_rejects_invalid_gamemaker_string_escapes(self):
+        for source, message in (
+            (r'"\u"', "Unicode escape.*requires at least one hex digit"),
+            (r'"\x"', "hexadecimal escape.*requires at least one hex digit"),
+            (r'"\u110000"', "not a valid Unicode scalar value"),
+            (r'"\uD800"', "not a valid Unicode scalar value"),
+        ):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, message):
+                    transpile_gml_expression(source)
+
     def test_preserves_string_literal_metadata(self):
         literal = _ExpressionParser(_expression_tokens('"hello"')).parse()
 
@@ -222,6 +245,240 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_rejects_unterminated_string_literals(self):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_expression('"unterminated')
+
+    def test_transpiles_documented_verbatim_string_forms_without_escapes(self):
+        self.assertEqual(transpile_gml_expression('@""'), '""')
+        self.assertEqual(transpile_gml_expression("@''"), '""')
+        self.assertEqual(
+            transpile_gml_expression('@"first\nsecond\\n"'),
+            '"first\\nsecond\\\\n"',
+        )
+        self.assertEqual(
+            transpile_gml_expression("@'double \" quote'"),
+            '"double \\" quote"',
+        )
+        self.assertEqual(
+            transpile_gml_expression(r'@"a\"'),
+            '"a\\\\"',
+        )
+
+    def test_verbatim_content_is_not_split_as_comments_or_statements(self):
+        source = (
+            'var text = @"line 1\n'
+            '// literal comment; { nested }\\n\n'
+            'line 3";\n'
+            'value = 2;'
+        )
+
+        self.assertEqual(
+            transpile_gml_code(source, indent=""),
+            'var text = "line 1\\n// literal comment; { nested }\\\\n\\nline 3"\n'
+            "value = 2",
+        )
+
+    def test_rejects_whitespace_and_missing_closer_in_verbatim_strings(self):
+        with self.assertRaisesRegex(GMLTranspileError, "Expected expression, got: @"):
+            transpile_gml_expression('@ "not contiguous"')
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "Unterminated verbatim string literal",
+        ):
+            transpile_gml_expression('@"unterminated')
+
+    def test_nested_template_expression_skips_verbatim_braces_and_comments(self):
+        self.assertEqual(
+            transpile_gml_expression('$"wrapped={@\'literal { } // text\'}"'),
+            'GMRuntime.gml_string_join(["wrapped=", "literal { } // text"], "")',
+        )
+
+    def test_tokenizes_template_string_as_one_literal(self):
+        source = '$"Hello {name}!" + 1'
+        tokens = _tokenize(source)
+
+        self.assertEqual(tokens[0].kind, "TEMPLATE_STRING")
+        self.assertEqual(tokens[0].value, '$"Hello {name}!"')
+        self.assertEqual(tokens[0].line, 1)
+        self.assertEqual(tokens[0].column, 1)
+        self.assertEqual(tokens[1].value, "+")
+
+        literal = _ExpressionParser(_expression_tokens('$"Hello {name}!"')).parse()
+        self.assertIsInstance(literal, _TemplateStringLiteral)
+        assert isinstance(literal, _TemplateStringLiteral)
+        self.assertEqual(literal.parts[0], "Hello ")
+        self.assertEqual(literal.parts[2], "!")
+
+    def test_transpiles_template_strings_with_implicit_string_conversion(self):
+        self.assertEqual(transpile_gml_expression('$""'), '""')
+        self.assertEqual(transpile_gml_expression('$"plain text"'), '"plain text"')
+        self.assertEqual(
+            transpile_gml_expression('$"{score}"'),
+            "GMRuntime.gml_string(score)",
+        )
+        self.assertEqual(
+            transpile_gml_expression('$"Hello {name}!"'),
+            'GMRuntime.gml_string_join(["Hello ", name, "!"], "")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('$"{score}/{true}/{undefined}"'),
+            'GMRuntime.gml_string_join([score, "/", true, "/", '
+            'GMRuntime.gml_undefined()], "")',
+        )
+
+    def test_transpiles_multiple_template_expressions_and_accessors(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                '$"Score {score + bonus}; first {_values[| 0]}"'
+            ),
+            'GMRuntime.gml_string_join(["Score ", '
+            'GMRuntime.gml_add(score, bonus), "; first ", '
+            'GMRuntime.gml_ds_list_find_value(_values, 0)], "")',
+        )
+
+    def test_transpiles_nested_template_and_struct_expressions(self):
+        self.assertEqual(
+            transpile_gml_expression('$"Outer {$"inner {value}"}"'),
+            'GMRuntime.gml_string_join(["Outer ", '
+            'GMRuntime.gml_string_join(["inner ", value], "")], "")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('$"Struct {({value: score}).value}"'),
+            'GMRuntime.gml_string_join(["Struct ", '
+            'GMRuntime.gml_selector_get((GMRuntime.gml_struct({"value": score})), '
+            '"value")], "")',
+        )
+
+    def test_preserves_template_string_escapes(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                r'$"Use \{literal\} and \"quotes\": {value}\n"'
+            ),
+            r'GMRuntime.gml_string_join(["Use {literal} and \"quotes\": ", '
+            r'value, "\n"], "")',
+        )
+
+    def test_decodes_gamemaker_template_string_character_escapes(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                r'$"unicode=\u61; emoji=\u1F600; hex=\x41; octal=\101; vertical=\v"'
+            ),
+            r'"unicode=a; emoji=\ud83d\ude00; hex=A; octal=A; vertical=\u000b"',
+        )
+        self.assertEqual(
+            transpile_gml_expression(r'$"\u61a"'),
+            r'"\u061a"',
+        )
+        self.assertEqual(
+            transpile_gml_expression(r'$"\1234"'),
+            '"S4"',
+        )
+        self.assertEqual(
+            transpile_gml_expression(r'$"\q"'),
+            '"q"',
+        )
+
+    def test_rejects_invalid_gamemaker_template_string_escapes(self):
+        cases = (
+            (r'$"\u"', "Unicode escape.*requires at least one hex digit"),
+            (r'$"\x"', "hexadecimal escape.*requires at least one hex digit"),
+            (r'$"\u110000"', "not a valid Unicode scalar value"),
+            (r'$"\uD800"', "not a valid Unicode scalar value"),
+        )
+
+        for source, message in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, message):
+                    transpile_gml_expression(source)
+
+    def test_template_strings_preserve_parser_context(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                '$"Answer {ANSWER}"',
+                macro_values={"ANSWER": "40 + 2"},
+            ),
+            'GMRuntime.gml_string_join(["Answer ", '
+            'GMRuntime.gml_add(40, 2)], "")',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                '$"Score {score}"',
+                global_names={"score"},
+            ),
+            'GMRuntime.gml_string_join(["Score ", '
+            'GMRuntime.gml_struct_get(GMRuntime.gml_global_scope(), "score")], "")',
+        )
+
+    def test_template_strings_allow_newlines_only_inside_expressions(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'var message = $"Result {\nvalue + 1\n}";',
+                indent="",
+            ),
+            'var message = GMRuntime.gml_string_join(["Result ", '
+            'GMRuntime.gml_add(value, 1)], "")',
+        )
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "Template string literal text cannot contain a newline",
+        ):
+            transpile_gml_expression('$"bad\ntext"')
+
+    def test_template_string_expressions_support_comments_with_braces(self):
+        self.assertEqual(
+            transpile_gml_expression('$"Value {1 /* ignored } */ + 2}"'),
+            'GMRuntime.gml_string_join(["Value ", '
+            'GMRuntime.gml_add(1, 2)], "")',
+        )
+        self.assertEqual(
+            transpile_gml_expression('$"Value {1 // ignored }\n + 2}"'),
+            'GMRuntime.gml_string_join(["Value ", '
+            'GMRuntime.gml_add(1, 2)], "")',
+        )
+
+    def test_template_strings_survive_preprocessing_and_declaration_splitting(self):
+        source = (
+            'var url = $"URL: {string("http://example.com")}";\n'
+            'var csv = $"CSV: {string("a,b")}", other = 1;\n'
+            'message = $"Equals: {string("a=b")}";'
+        )
+
+        self.assertEqual(
+            transpile_gml_code(source, indent=""),
+            'var url = GMRuntime.gml_string_join(["URL: ", '
+            'GMRuntime.gml_string("http://example.com")], "")\n'
+            'var csv = GMRuntime.gml_string_join(["CSV: ", '
+            'GMRuntime.gml_string("a,b")], "")\n'
+            'var other = 1\n'
+            'message = GMRuntime.gml_string_join(["Equals: ", '
+            'GMRuntime.gml_string("a=b")], "")',
+        )
+
+    def test_template_string_target_expressions_are_evaluated_once(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'inventory[? $"key {next_key()}"] += 1;',
+                indent="",
+            ),
+            'var _gml_map_key_0 = GMRuntime.gml_string_join(["key ", '
+            'GMRuntime.gml_call_named("next_key", [], self, other)], "")\n'
+            'GMRuntime.gml_ds_map_set(inventory, _gml_map_key_0, '
+            'GMRuntime.gml_add(GMRuntime.gml_ds_map_find_value('
+            'inventory, _gml_map_key_0), 1))',
+        )
+
+    def test_rejects_malformed_template_strings(self):
+        cases = (
+            ('$"unterminated', "Unterminated template string literal"),
+            ('$"value {name"', "Unterminated template string interpolation"),
+            ('$"value {}"', "Template string interpolation cannot be empty"),
+        )
+
+        for source, message in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, message):
+                    transpile_gml_expression(source)
+
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression('$"value {name +}"')
 
     def test_transpiles_logical_operators(self):
         self.assertEqual(
@@ -625,6 +882,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_string_length(s)",
         )
 
+    def test_transpiles_string_byte_length(self):
+        self.assertEqual(
+            transpile_gml_expression("string_byte_length(s)"),
+            "GMRuntime.gml_string_byte_length(s)",
+        )
+
     def test_transpiles_string_char_at(self):
         self.assertEqual(
             transpile_gml_expression('string_char_at(s, 1)'),
@@ -807,6 +1070,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'var RAINBOW = GMRuntime.gml_enum({"GREEN": 0})\nlabel = "GREEN"',
         )
 
+    def test_method_function_literals_resolve_fields_through_rebound_self(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                "method(scope, function() { return value; })"
+            ),
+            "GMRuntime.gml_method(scope, GMRuntime.gml_method(self, "
+            "func(_gml_method_self = null): return "
+            'GMRuntime.gml_variable_instance_get(_gml_method_self, "value")))',
+        )
+
     def test_rejects_nameof_non_name_expressions(self):
         with self.assertRaisesRegex(GMLTranspileError, "identifier"):
             transpile_gml_expression("nameof([score])")
@@ -896,7 +1169,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("enum RAINBOW { RED, ORANGE, GREEN }\ncolour = RAINBOW.GREEN", indent=""),
             'var RAINBOW = GMRuntime.gml_enum({"RED": 0, "ORANGE": 1, "GREEN": 2})\n'
-            'colour = GMRuntime.gml_selector_get(RAINBOW, "GREEN")',
+            "colour = 2",
         )
         self.assertEqual(
             transpile_gml_code(
@@ -914,6 +1187,24 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 indent="",
             ),
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
+        )
+
+    def test_lowers_project_global_enum_members_to_integer_constants(self):
+        enum_values = {
+            "AddingOperator": {
+                "equals": 0,
+                "add": 7,
+                "multiply": 11,
+            }
+        }
+
+        self.assertEqual(
+            transpile_gml_code(
+                "result = AddingOperator.add;",
+                indent="",
+                enum_values=enum_values,
+            ),
+            "result = 7",
         )
 
     def test_transpiles_macro_declarations_and_configuration_overrides(self):
@@ -1130,6 +1421,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'enum RAINBOW { GREEN }\nRAINBOW[$ "GREEN"] = 2',
             "enum RAINBOW { GREEN }\nRAINBOW.GREEN++",
             'enum RAINBOW { GREEN }\nstruct_set(RAINBOW, "GREEN", 2)',
+            'enum RAINBOW { GREEN }\nvar text = $"{struct_set(RAINBOW, "GREEN", 2)}"',
             "enum RAINBOW { GREEN }\nvar mutate = function() { RAINBOW.GREEN = 2; }",
         ]
 
@@ -1146,7 +1438,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("enum RAINBOW { GREEN }\nitems[RAINBOW.GREEN] = 2", indent=""),
             'var RAINBOW = GMRuntime.gml_enum({"GREEN": 0})\n'
-            'GMRuntime.gml_array_set(items, GMRuntime.gml_selector_get(RAINBOW, "GREEN"), 2)',
+            "GMRuntime.gml_array_set(items, 0, 2)",
         )
 
     def test_transpiles_nullish_operator(self):
@@ -1204,6 +1496,58 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             '"items": [[1], [2, 3]]})',
         )
 
+    def test_parses_double_quoted_struct_field_names(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                r'{"display name": 1, "punctuation.!?": 2, '
+                r'"Unicode 鍵": 3, "quote\" and slash\\": 4,}'
+            ),
+            'GMRuntime.gml_struct({"display name": 1, "punctuation.!?": 2, '
+            '"Unicode \\u9375": 3, "quote\\\" and slash\\\\": 4})',
+        )
+
+        literal = _ExpressionParser(
+            _expression_tokens(r'{"line\nname": 1, "Unicode 鍵": 2}')
+        ).parse()
+        self.assertIsInstance(literal, _StructLiteral)
+        assert isinstance(literal, _StructLiteral)
+        self.assertEqual(
+            [field_name for field_name, _field_value in literal.fields],
+            ["line\nname", "Unicode 鍵"],
+        )
+
+    def test_parses_nested_and_function_values_for_quoted_struct_fields(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                '{"nested value": {"child-key": value}, '
+                '"compute!": function(input) { return input + 1; }}'
+            ),
+            'GMRuntime.gml_struct({"nested value": '
+            'GMRuntime.gml_struct({"child-key": value}), '
+            '"compute!": func(_gml_method_self = null, input = null):\n'
+            '\tif input == null: input = GMRuntime.gml_undefined()\n'
+            '\treturn GMRuntime.gml_add(input, 1)\n'
+            '})',
+        )
+
+    def test_quoted_struct_fields_require_nonempty_double_quoted_names_and_values(self):
+        cases = (
+            ('{"": value}', "cannot be empty"),
+            ("{'Root': value}", "must use double quotes"),
+            ('{"Root"}', "Expected ':'"),
+            ('{"Root",}', "Expected ':'"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, message):
+                    transpile_gml_expression(source)
+
+        self.assertEqual(
+            transpile_gml_expression('{identifier_shorthand, "quoted": value,}'),
+            'GMRuntime.gml_struct({"identifier_shorthand": '
+            'identifier_shorthand, "quoted": value})',
+        )
+
     def test_preserves_struct_literal_metadata(self):
         literal = _ExpressionParser(_expression_tokens("{a: 1, child: {b: 2}, shorthand}")).parse()
 
@@ -1226,7 +1570,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_function_literals_inside_structs(self):
         self.assertEqual(
             transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
-            'GMRuntime.gml_struct({"apply": func(a = null, b = null):\n'
+            'GMRuntime.gml_struct({"apply": func(_gml_method_self = null, a = null, b = null):\n'
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null: b = GMRuntime.gml_undefined()\n"
             "\treturn GMRuntime.gml_add(a, b)\n"
@@ -1234,13 +1578,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression('string({toString: function() { return "ok"; }})'),
-            'GMRuntime.gml_string(GMRuntime.gml_struct({"toString": func(): return "ok"}))',
+            'GMRuntime.gml_string(GMRuntime.gml_struct({"toString": '
+            'func(_gml_method_self = null): return "ok"}))',
         )
 
     def test_function_literals_preserve_optional_defaults(self):
         self.assertEqual(
             transpile_gml_expression("function(a, b = 90) { return b; }"),
-            "GMRuntime.gml_method(self, func(a = null, b = null):\n"
+            "GMRuntime.gml_method(self, func(_gml_method_self = null, a = null, b = null):\n"
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null or GMRuntime.is_undefined(b): b = 90\n"
             "\treturn b\n"
@@ -1248,7 +1593,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("function(a, b = a + 1) { return b; }"),
-            "GMRuntime.gml_method(self, func(a = null, b = null):\n"
+            "GMRuntime.gml_method(self, func(_gml_method_self = null, a = null, b = null):\n"
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1)\n"
             "\treturn b\n"
@@ -1256,7 +1601,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("[function() { return 1; }]"),
-            "[GMRuntime.gml_method(self, func(): return 1)]",
+            "[GMRuntime.gml_method(self, func(_gml_method_self = null): return 1)]",
         )
 
     def test_omitted_call_arguments_emit_gml_undefined(self):
@@ -1617,18 +1962,57 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "function counter() { show_debug_message(n); static n = 0; n += 1; return n; }"
         )
 
-        self.assertIn("GMRuntime.gml_static_bind(func counter():", output)
+        self.assertIn("GMRuntime.gml_static_bind(func counter(_gml_method_self = null):", output)
         self.assertIn('GMRuntime.gml_static_scope("gml_static:counter:', output)
         self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", output)
         self.assertIn('[["n", func(): return 0]]', output)
         self.assertIn(
-            "print(GMRuntime.gml_struct_get(_gml_static_scope_",
+            "GMRuntime.gml_show_debug_message("
+            "GMRuntime.gml_struct_get(_gml_static_scope_",
             output,
         )
         self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", output)
         self.assertLess(
             output.index("GMRuntime.gml_static_initialize"),
-            output.index("print"),
+            output.index("GMRuntime.gml_show_debug_message"),
+        )
+
+    def test_transpiles_static_variables_in_extracted_function_body(self):
+        output = transpile_gml_code(
+            "static total = 10;\n"
+            "static callback = function(value = {amount: 1})\n"
+            "{\n"
+            "    return value.amount;\n"
+            "};\n"
+            "total += delta;\n"
+            "return callback;",
+            indent="",
+            local_names={"delta"},
+            return_depth=1,
+            static_scope_prefix="scr_static.scr_static",
+        )
+
+        self.assertIn(
+            'GMRuntime.gml_static_scope("scr_static.scr_static:<anonymous>:0:',
+            output,
+        )
+        self.assertIn('[["total", func(): return 10], ["callback", func(): return', output)
+        self.assertIn("func(_gml_method_self = null, value = null):", output)
+        self.assertIn(
+            'value = GMRuntime.gml_struct({"amount": 1})',
+            output,
+        )
+        self.assertIn(
+            "GMRuntime.gml_struct_set(_gml_static_scope_",
+            output,
+        )
+        self.assertIn(
+            'return GMRuntime.gml_struct_get(_gml_static_scope_',
+            output,
+        )
+        self.assertLess(
+            output.index("GMRuntime.gml_static_initialize"),
+            output.index("GMRuntime.gml_struct_set"),
         )
 
     def test_rejects_static_declarations_outside_functions(self):
@@ -1643,10 +2027,61 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn("GMRuntime.gml_constructor(self, GMRuntime.gml_static_bind(func Point", output)
         self.assertIn('"Point"', output)
         self.assertIn(
-            '["make", func(): return GMRuntime.gml_method(_gml_constructor_self, func(): return 1)]',
+            '["make", func(): return GMRuntime.gml_method(_gml_constructor_self, '
+            'func(_gml_method_self = null): return 1)]',
             output,
         )
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", output)
+
+    def test_transpiles_semicolonless_constructor_static_methods_on_separate_lines(self):
+        output = transpile_gml_expression(
+            "function Adding() constructor {\n"
+            "static operate = function(a, b) { return a + b; }\n"
+            "static invert = function(value) { return operate(-value, 0); }\n"
+            "}"
+        )
+
+        self.assertIn(
+            '["operate", func(): return GMRuntime.gml_method(_gml_constructor_self,',
+            output,
+        )
+        self.assertIn(
+            '["invert", func(): return GMRuntime.gml_method(_gml_constructor_self,',
+            output,
+        )
+        self.assertIn(
+            'GMRuntime.gml_struct_get(_gml_static_scope_',
+            output,
+        )
+        self.assertNotIn('gml_call_named("operate"', output)
+        self.assertNotIn("Unexpected token", output)
+
+    def test_nested_callback_in_constructor_static_switch_keeps_lambda_indentation(self):
+        output = transpile_gml_expression(
+            "function Adding() constructor {\n"
+            "static operate = function(values, kind) {\n"
+            "switch (kind) {\n"
+            "case 1: {\n"
+            "array_foreach(values, function(value, index) { values[index] = value; });\n"
+            "break;\n"
+            "}\n"
+            "}\n"
+            "}\n"
+            "}"
+        )
+        lines = output.splitlines()
+        callback_line = next(
+            line
+            for line in lines
+            if "array_foreach" in line and "func(_gml_method_self" in line
+        )
+        callback_body_line = lines[lines.index(callback_line) + 1]
+
+        callback_indent = len(callback_line) - len(callback_line.lstrip("\t"))
+        callback_body_indent = len(callback_body_line) - len(
+            callback_body_line.lstrip("\t")
+        )
+        self.assertEqual(callback_body_indent, callback_indent + 1)
 
     def test_transpiles_constructor_inheritance_before_child_statics(self):
         output = transpile_gml_expression(
@@ -1838,11 +2273,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_function_return_statements(self):
         self.assertEqual(
             transpile_gml_expression("function() { return; }"),
-            "GMRuntime.gml_method(self, func(): return)",
+            "GMRuntime.gml_method(self, func(_gml_method_self = null): return)",
         )
         self.assertEqual(
             transpile_gml_expression("function() { return score + bonus; }"),
-            "GMRuntime.gml_method(self, func(): return GMRuntime.gml_add(score, bonus))",
+            "GMRuntime.gml_method(self, func(_gml_method_self = null): return "
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_method_self, "score"), '
+            'GMRuntime.gml_variable_instance_get(_gml_method_self, "bonus")))',
         )
 
     def test_rejects_return_outside_functions_and_methods(self):
@@ -1861,10 +2298,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_function_exit_as_early_return(self):
         self.assertEqual(
             transpile_gml_expression("function() { if done begin exit; end return score; }"),
-            "GMRuntime.gml_method(self, func():\n"
-            "\tif GMRuntime.gml_bool(done):\n"
+            "GMRuntime.gml_method(self, func(_gml_method_self = null):\n"
+            '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
             "\t\treturn\n"
-            "\treturn score\n"
+            '\treturn GMRuntime.gml_variable_instance_get(_gml_method_self, "score")\n'
             ")",
         )
 
@@ -1895,16 +2332,21 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
     def test_transpiles_throw_statements(self):
         cases = (
-            ('throw "bad";', 'return GMRuntime.gml_throw("bad")'),
-            ("throw 404;", "return GMRuntime.gml_throw(404)"),
+            ('throw "bad";', 'GMRuntime.gml_throw("bad")\nreturn'),
+            ("throw 404;", "GMRuntime.gml_throw(404)\nreturn"),
             (
                 "throw {message: reason, code: 404};",
-                'return GMRuntime.gml_throw(GMRuntime.gml_struct({"message": reason, "code": 404}))',
+                'GMRuntime.gml_throw(GMRuntime.gml_struct({"message": reason, "code": 404}))\nreturn',
             ),
         )
         for source, expected in cases:
             with self.subTest(source=source):
                 self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
+        self.assertEqual(
+            transpile_gml_code('throw "bad";', indent="", return_depth=1),
+            'return GMRuntime.gml_throw("bad")',
+        )
 
         with self.assertRaisesRegex(GMLTranspileError, "throw requires an expression"):
             transpile_gml_code("throw;", indent="")
@@ -1920,7 +2362,23 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "throw":', output)
         self.assertIn('var err = GMRuntime.gml_exception_struct(_gml_try_control_0["value"])', output)
         self.assertIn('message = GMRuntime.gml_selector_get(err, "message")', output)
-        self.assertIn('return _gml_try_control_0["value"]', output)
+        self.assertNotIn('return _gml_try_control_0["value"]', output)
+        self.assertIn(
+            'if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "throw":\n\treturn',
+            output,
+        )
+
+    def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
+        output = transpile_gml_code(
+            "try { value = real(text); } catch (_) {}",
+            indent="",
+        )
+
+        self.assertIn(
+            'var __ = GMRuntime.gml_exception_struct(_gml_try_control_0["value"])',
+            output,
+        )
+        self.assertNotIn("var _ =", output)
 
     def test_transpiles_try_finally_blocks(self):
         output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
@@ -1929,8 +2387,22 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertIn("while true:\n\tscore = 1\n\tbreak", output)
         self.assertIn("cleaned = true", output)
         self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "return":', output)
-        self.assertIn('return _gml_try_control_0["value"]', output)
+        self.assertNotIn('return _gml_try_control_0["value"]', output)
+        self.assertIn(
+            'if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "return":\n\treturn',
+            output,
+        )
         self.assertIn('if not GMRuntime.is_undefined(_gml_try_control_0) and _gml_try_control_0["kind"] == "throw":', output)
+
+    def test_try_dispatch_preserves_return_values_in_value_returning_functions(self):
+        output = transpile_gml_code(
+            "try { return 42; } finally { cleaned = true; }",
+            indent="",
+            return_depth=1,
+        )
+
+        self.assertIn('_gml_try_control_0 = {"kind": "return", "value": 42}', output)
+        self.assertIn('return _gml_try_control_0["value"]', output)
 
     def test_transpiles_nested_try_catch_propagation(self):
         output = transpile_gml_code(
@@ -1954,7 +2426,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             indent="",
         )
         self.assertIn('_gml_try_control_0 = {"kind": "return", "value": 1}', return_output)
-        self.assertIn("cleaned = true", return_output)
+        self.assertIn(
+            'GMRuntime.gml_variable_instance_set(_gml_method_self, "cleaned", true)',
+            return_output,
+        )
         self.assertIn('return _gml_try_control_0["value"]', return_output)
 
         break_output = transpile_gml_code(
@@ -2008,7 +2483,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_code("delete items[2];", indent=""),
-            "GMRuntime.gml_array_delete(items, 2)",
+            "GMRuntime.gml_array_delete(items, 2, 1)",
         )
         self.assertEqual(
             transpile_gml_code('delete inventory[? "food"];', indent=""),
@@ -2160,6 +2635,39 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "while GMRuntime.gml_bool(count):\n\tcount = GMRuntime.gml_sub(count, 1)",
         )
 
+    def test_control_flow_accepts_newline_before_braced_body(self):
+        source = (
+            "if (first)\n{\ncall_a();\n}\n"
+            "else if (second)\n{\ncall_b();\n}\n"
+            "else\n{\ncall_c();\n}\n"
+            "while (running)\n{\ntick();\n}\n"
+            "repeat (2)\n{\ntick();\n}\n"
+            "for (var i = 0; i < 1; i++)\n{\ntick();\n}\n"
+            "do\n{\ntick();\n}\nuntil (done);"
+        )
+
+        self.assertEqual(
+            transpile_gml_code(source, indent=""),
+            "if GMRuntime.gml_bool(first):\n"
+            '\tGMRuntime.gml_call_named("call_a", [], self, other)\n'
+            "elif GMRuntime.gml_bool(second):\n"
+            '\tGMRuntime.gml_call_named("call_b", [], self, other)\n'
+            "else:\n"
+            '\tGMRuntime.gml_call_named("call_c", [], self, other)\n'
+            "while GMRuntime.gml_bool(running):\n"
+            '\tGMRuntime.gml_call_named("tick", [], self, other)\n'
+            "for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count(2)):\n"
+            '\tGMRuntime.gml_call_named("tick", [], self, other)\n'
+            "var i = 0\n"
+            "while GMRuntime.gml_lt(i, 1):\n"
+            '\tGMRuntime.gml_call_named("tick", [], self, other)\n'
+            "\ti = GMRuntime.gml_add(i, 1)\n"
+            "while true:\n"
+            '\tGMRuntime.gml_call_named("tick", [], self, other)\n'
+            "\tif GMRuntime.gml_bool(done):\n"
+            "\t\tbreak",
+        )
+
     def test_while_condition_stays_in_loop_header(self):
         self.assertEqual(
             transpile_gml_code(
@@ -2196,21 +2704,33 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_repeat_blocks(self):
         self.assertEqual(
             transpile_gml_code("repeat (3) begin score += 1; end", indent=""),
-            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(3)):\n"
+            "for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count(3)):\n"
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
         self.assertEqual(
             transpile_gml_code("repeat (count + 1) score += 1;", indent=""),
-            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(GMRuntime.gml_add(count, 1))):\n"
+            "for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count(GMRuntime.gml_add(count, 1))):\n"
             "\tscore = GMRuntime.gml_add(score, 1)",
         )
 
     def test_repeat_count_expression_uses_runtime_rounding_once(self):
         self.assertEqual(
             transpile_gml_code("repeat (next_count()) score += 1;", indent=""),
-            'for _gml_repeat_index in range(GMRuntime.gml_repeat_count('
+            'for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count('
             'GMRuntime.gml_call_named("next_count", [], self, other))):\n'
             "\tscore = GMRuntime.gml_add(score, 1)",
+        )
+
+    def test_multiple_repeat_loops_use_distinct_godot_iterators(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "repeat (2) first(); repeat (3) second();",
+                indent="",
+            ),
+            "for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count(2)):\n"
+            '\tGMRuntime.gml_call_named("first", [], self, other)\n'
+            "for _gml_repeat_index_1 in range(GMRuntime.gml_repeat_count(3)):\n"
+            '\tGMRuntime.gml_call_named("second", [], self, other)',
         )
 
     def test_transpiles_break_and_continue_inside_repeat(self):
@@ -2219,7 +2739,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "repeat (count) begin if should_skip begin continue; end if done begin break; end score += 1; end",
                 indent="",
             ),
-            "for _gml_repeat_index in range(GMRuntime.gml_repeat_count(count)):\n"
+            "for _gml_repeat_index_0 in range(GMRuntime.gml_repeat_count(count)):\n"
             "\tif GMRuntime.gml_bool(should_skip):\n"
             "\t\tcontinue\n"
             "\tif GMRuntime.gml_bool(done):\n"
@@ -2468,7 +2988,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_nested_function_local_vars_do_not_hoist_to_enclosing_scope(self):
         self.assertEqual(
             transpile_gml_code("var fn = function() { var inner = 1; return inner; };", indent=""),
-            "var fn = GMRuntime.gml_method(self, func():\n"
+            "var fn = GMRuntime.gml_method(self, func(_gml_method_self = null):\n"
             "\tvar inner = 1\n"
             "\treturn inner\n"
             ")",
@@ -3066,6 +3586,24 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_selector_set(player, "inventory", _gml_array_target_0)',
         )
 
+    def test_transpiles_lts_direct_array_accessors(self):
+        self.assertEqual(
+            transpile_gml_expression("items[@ index]"),
+            "GMRuntime.gml_array_get(items, index)",
+        )
+        self.assertEqual(
+            transpile_gml_code("_dst[@ _i] = _dst_value;", indent=""),
+            "GMRuntime.gml_array_set(_dst, _i, _dst_value)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "_tokens[@ array_length(_tokens)] = [value];",
+                indent="",
+            ),
+            "GMRuntime.gml_array_set(_tokens, "
+            "GMRuntime.gml_array_length(_tokens), [value])",
+        )
+
     def test_transpiles_multidimensional_array_assignments(self):
         self.assertEqual(
             transpile_gml_code("grid[x][y] = value;", indent=""),
@@ -3134,7 +3672,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "value = 1; try_to_modify_value(value); result = value;",
                 indent="",
             ),
-            "var try_to_modify_value = GMRuntime.gml_method(self, func(argument0 = null):\n"
+            "var try_to_modify_value = GMRuntime.gml_method(self, "
+            "func(_gml_method_self = null, argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\targument0 = 2\n"
             ")\n"
@@ -3150,7 +3689,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "items = [1]; try_to_modify_array(items); value = items[1];",
                 indent="",
             ),
-            "var try_to_modify_array = GMRuntime.gml_method(self, func(argument0 = null):\n"
+            "var try_to_modify_array = GMRuntime.gml_method(self, "
+            "func(_gml_method_self = null, argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\tGMRuntime.gml_array_push(argument0, [2])\n"
             ")\n"
@@ -3181,6 +3721,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "n = GMRuntime.gml_array_length_1d(arr)",
         )
 
+    def test_transpiles_array_length(self):
+        self.assertEqual(
+            transpile_gml_code("n = array_length(arr);", indent=""),
+            "n = GMRuntime.gml_array_length(arr)",
+        )
+
     def test_transpiles_array_resize(self):
         self.assertEqual(
             transpile_gml_code("array_resize(arr, 10);", indent=""),
@@ -3207,15 +3753,57 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
     def test_transpiles_array_delete(self):
         self.assertEqual(
-            transpile_gml_code("array_delete(arr, 0);", indent=""),
-            "GMRuntime.gml_array_delete(arr, 0)",
+            transpile_gml_code("array_delete(arr, 0, 3);", indent=""),
+            "GMRuntime.gml_array_delete(arr, 0, 3)",
         )
+        self.assertEqual(
+            transpile_gml_code(
+                "array_delete(_nameArray, "
+                "__SnapToJSONArrayFindIndex(_nameArray, _name), 1);",
+                indent="",
+            ),
+            'GMRuntime.gml_array_delete(_nameArray, '
+            'GMRuntime.gml_call_named("__SnapToJSONArrayFindIndex", '
+            '[_nameArray, _name], self, other), 1)',
+        )
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "array_delete.*expects 3.*got 2",
+        ):
+            transpile_gml_code("array_delete(arr, 0);", indent="")
 
     def test_transpiles_array_sort(self):
         self.assertEqual(
-            transpile_gml_code("array_sort(arr);", indent=""),
-            "GMRuntime.gml_array_sort(arr)",
+            transpile_gml_code("array_sort(arr, true);", indent=""),
+            "GMRuntime.gml_array_sort(arr, true, self, other)",
         )
+        self.assertEqual(
+            transpile_gml_code("array_sort(arr, comparator);", indent=""),
+            "GMRuntime.gml_array_sort(arr, comparator, self, other)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "array_sort(arr, function(current, next) "
+                "{ return current - next; });",
+                indent="",
+            ),
+            "GMRuntime.gml_array_sort(arr, GMRuntime.gml_method(self, "
+            "func(_gml_method_self = null, current = null, next = null):\n"
+            "\tif current == null: current = GMRuntime.gml_undefined()\n"
+            "\tif next == null: next = GMRuntime.gml_undefined()\n"
+            "\treturn GMRuntime.gml_sub(current, next)\n"
+            "), self, other)",
+        )
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "array_sort.*expects 2.*got 1",
+        ):
+            transpile_gml_code("array_sort(arr);", indent="")
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "array_sort.*expects 2.*got 3",
+        ):
+            transpile_gml_code("array_sort(arr, true, false);", indent="")
 
     def test_transpiles_array_shuffle(self):
         self.assertEqual(
@@ -3248,6 +3836,39 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("idx = array_find_index(arr, 42);", indent=""),
             "idx = GMRuntime.gml_array_find_index(arr, 42)",
         )
+
+    def test_transpiles_array_foreach(self):
+        self.assertEqual(
+            transpile_gml_code("array_foreach(arr, callback);", indent=""),
+            "GMRuntime.gml_array_foreach(arr, callback, 0, null, self, other)",
+        )
+        self.assertEqual(
+            transpile_gml_code("array_foreach(arr, callback, -2);", indent=""),
+            "GMRuntime.gml_array_foreach(arr, callback, -2, null, self, other)",
+        )
+        self.assertEqual(
+            transpile_gml_code("array_foreach(arr, callback, 3, -3);", indent=""),
+            "GMRuntime.gml_array_foreach(arr, callback, 3, -3, self, other)",
+        )
+        inline = transpile_gml_code(
+            "array_foreach(arr, function(value, index) { seen[index] = value; });",
+            indent="",
+        )
+        self.assertTrue(inline.startswith("GMRuntime.gml_array_foreach(arr, GMRuntime.gml_method(self, "))
+        self.assertTrue(inline.endswith("), 0, null, self, other)"))
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "array_foreach.*expects 2 to 4.*got 1",
+        ):
+            transpile_gml_code("array_foreach(arr);", indent="")
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "array_foreach.*expects 2 to 4.*got 5",
+        ):
+            transpile_gml_code(
+                "array_foreach(arr, callback, 0, 1, 2);",
+                indent="",
+            )
 
     def test_transpiles_array_map(self):
         self.assertEqual(
@@ -3369,6 +3990,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 with self.assertRaisesRegex(GMLTranspileError, "Increment expression target must be assignable"):
                     transpile_gml_code(source, indent="")
 
+    def test_transpiles_postincrement_in_simple_array_assignment_index(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "var index = 0; var values = []; values[@ index++] = next_value();",
+                indent="",
+            ),
+            "var index = 0\n"
+            "var values = []\n"
+            "var _gm2gd_mutation_value_0 = index\n"
+            "index = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "GMRuntime.gml_array_set(values, _gm2gd_mutation_value_0, "
+            'GMRuntime.gml_call_named("next_value", [], self, other))',
+        )
+
     def test_assignment_expression_results_cover_member_and_accessor_targets(self):
         self.assertEqual(
             transpile_gml_code("result = mystruct.a += 1;", indent=""),
@@ -3405,8 +4040,34 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_expression_statements(self):
         self.assertEqual(
             transpile_gml_code("show_debug_message(score ?? 0);", indent=""),
-            "print(score if not GMRuntime.gml_is_nullish(score) else 0)",
+            "GMRuntime.gml_show_debug_message("
+            "score if not GMRuntime.gml_is_nullish(score) else 0, [])",
         )
+
+    def test_show_debug_message_supports_lts_variadic_format_arguments(self):
+        self.assertEqual(
+            transpile_gml_code('show_debug_message("Ready");', indent=""),
+            'GMRuntime.gml_show_debug_message("Ready", [])',
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                'show_debug_message("Adding: {0}", _message);',
+                indent="",
+            ),
+            'GMRuntime.gml_show_debug_message("Adding: {0}", [_message])',
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                'show_debug_message("{0}/{1}", label, value);',
+                indent="",
+            ),
+            'GMRuntime.gml_show_debug_message("{0}/{1}", [label, value])',
+        )
+        with self.assertRaisesRegex(
+            GMLTranspileError,
+            "show_debug_message.*at least 1.*got 0",
+        ):
+            transpile_gml_code("show_debug_message();", indent="")
 
     def test_local_vars_shadow_instance_position_builtins(self):
         self.assertEqual(
@@ -3422,6 +4083,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_code("if score > 0 { score -= 1; } else { score = 0; }", indent=""),
             "if GMRuntime.gml_gt(score, 0):\n\tscore = GMRuntime.gml_sub(score, 1)\nelse:\n\tscore = 0",
+        )
+
+    def test_parenthesized_condition_can_continue_after_its_first_group(self):
+        self.assertEqual(
+            transpile_gml_code(
+                'if ((token == "]") || (token == "}")) && (previous == ",") '
+                "{ trailing = true; }",
+                indent="",
+            ),
+            'if ((GMRuntime.gml_eq(token, "]")) or (GMRuntime.gml_eq(token, "}"))) '
+            'and (GMRuntime.gml_eq(previous, ",")):\n'
+            "\ttrailing = true",
         )
 
     def test_transpiles_if_blocks_with_single_equals_conditions(self):
@@ -3683,6 +4356,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_layer_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "layer_create.*expects 1 to 2.*got 3"):
             transpile_gml_code('layer_create(1, "A", "B");', indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "layer_tilemap_create.*expects 6.*got 5"):
+            transpile_gml_code(
+                "layer_tilemap_create(layer_id, 0, 0, ts_ground, 2);",
+                indent="",
+                asset_names={"ts_ground"},
+            )
+
+    def test_tilemap_helpers_lower_tileset_assets_and_runtime_calls(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "map_id = layer_tilemap_create(layer_id, 3, 4, ts_ground, 2, 2);"
+                "same_id = layer_tilemap_get_id(layer_id);"
+                "ok = tilemap_set(map_id, tiledata, 1, 0);"
+                "data = tilemap_get(map_id, 1, 0);"
+                "width = tilemap_get_width(map_id);"
+                "height = tilemap_get_height(map_id);",
+                indent="",
+                asset_names={"ts_ground"},
+            ),
+            'map_id = GMRuntime.gml_layer_tilemap_create(layer_id, 3, 4, GMRuntime.gml_asset_get_index("ts_ground"), 2, 2)\n'
+            "same_id = GMRuntime.gml_layer_tilemap_get_id(layer_id)\n"
+            "ok = GMRuntime.gml_tilemap_set(map_id, tiledata, 1, 0)\n"
+            "data = GMRuntime.gml_tilemap_get(map_id, 1, 0)\n"
+            "width = GMRuntime.gml_tilemap_get_width(map_id)\n"
+            "height = GMRuntime.gml_tilemap_get_height(map_id)",
+        )
 
     def test_sequence_timeline_helpers_lower_to_runtime(self):
         self.assertEqual(

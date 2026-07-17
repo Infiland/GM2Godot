@@ -13,6 +13,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.sounds import SoundConverter
+from src.conversion.asset_output_paths import build_asset_output_paths
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 
@@ -118,6 +119,83 @@ class TestSoundConverterBasic(unittest.TestCase):
         self.assertIn('type="AudioStreamWAV"', content)
         self.assertIn('source_file="res://sounds/jump/jump.wav"', content)
         self.assertIn('edit/loop_mode=0', content)
+
+
+class TestSoundGeneratedPathCollisions(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        _make_sound_yy(self.gm_dir, "sndHit", {"soundFile": "sound.wav"})
+        _make_sound_yy(self.gm_dir, "snd_hit", {"soundFile": "sound.wav"})
+        for index, resource_name in enumerate(("sndHit", "snd_hit"), start=1):
+            with open(
+                os.path.join(self.gm_dir, "sounds", resource_name, "sound.wav"),
+                "wb",
+            ) as sound_file:
+                sound_file.write(bytes([index]) * 64)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_emitted_sounds_match_collision_safe_registry_paths(self) -> None:
+        converter = SoundConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        paths = build_asset_output_paths(self.gm_dir, self.godot_dir)["sounds"]
+        self.assertEqual(len({path.casefold() for path in paths.values()}), 2)
+        payloads: list[bytes] = []
+        for resource_name in ("sndHit", "snd_hit"):
+            output_path = os.path.join(
+                self.godot_dir,
+                *paths[resource_name].removeprefix("res://").split("/"),
+            )
+            with open(output_path, "rb") as sound_file:
+                payloads.append(sound_file.read())
+            self.assertTrue(os.path.isfile(output_path + ".import"))
+        self.assertNotEqual(payloads[0], payloads[1])
+
+    def test_yyp_orphan_cannot_compete_for_referenced_output(self) -> None:
+        with open(os.path.join(self.gm_dir, "CollisionSounds.yyp"), "w", encoding="utf-8") as project_file:
+            json.dump(
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": "sndHit",
+                                "path": "sounds/sndHit/sndHit.yy",
+                            }
+                        }
+                    ]
+                },
+                project_file,
+            )
+
+        for _attempt in range(4):
+            shutil.rmtree(self.godot_dir)
+            os.makedirs(self.godot_dir)
+            SoundConverter(
+                self.gm_dir,
+                self.godot_dir,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=2,
+            ).convert_all()
+            output_path = os.path.join(
+                self.godot_dir,
+                "sounds",
+                "snd_hit",
+                "sound.wav",
+            )
+            with open(output_path, "rb") as sound_file:
+                self.assertEqual(sound_file.read(), bytes([1]) * 64)
 
 
 class TestSoundConverterFormats(unittest.TestCase):

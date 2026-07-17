@@ -20,7 +20,7 @@ This file tracks GML frontend and semantic coverage needed for full transpilatio
 - [x] `//` comments.
 - [x] `/* */` comments.
 - [ ] Preserve comments and source spans for source maps.
-- [ ] Template strings or interpolation if supported by target GameMaker versions.
+- [x] GameMaker LTS 2026 template strings with expression interpolation and escaped braces; covered by parser tests in [`tests/test_gml_transpiler.py`](../tests/test_gml_transpiler.py) and Godot runtime tests in [`tests/test_template_strings_godot.py`](../tests/test_template_strings_godot.py).
 - [ ] Full reserved-name diagnostics.
 - [ ] Case-sensitivity compatibility diagnostics.
 

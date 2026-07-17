@@ -194,6 +194,133 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(sprite_element.get_parent() == fx_node, "layer_element_move did not reparent element"):
         \t\treturn
 
+        \tvar image = Image.create(32, 16, false, Image.FORMAT_RGBA8)
+        \tfor tile_offset in [0, 16]:
+        \t\timage.fill_rect(Rect2i(tile_offset, 0, 8, 8), Color(1, 0, 0, 1))
+        \t\timage.fill_rect(Rect2i(tile_offset + 8, 0, 8, 8), Color(0, 1, 0, 1))
+        \t\timage.fill_rect(Rect2i(tile_offset, 8, 8, 8), Color(0, 0, 1, 1))
+        \t\timage.fill_rect(Rect2i(tile_offset + 8, 8, 8, 8), Color(1, 1, 0, 1))
+        \tvar texture = ImageTexture.create_from_image(image)
+        \tvar atlas = TileSetAtlasSource.new()
+        \tatlas.texture = texture
+        \tatlas.texture_region_size = Vector2i(16, 16)
+        \tatlas.create_tile(Vector2i(0, 0))
+        \tatlas.create_tile(Vector2i(1, 0))
+        \tvar tile_set = TileSet.new()
+        \ttile_set.tile_size = Vector2i(16, 16)
+        \ttile_set.add_source(atlas, 0)
+        \ttile_set.set_meta("gamemaker_tileset_out_columns", 2)
+        \tvar tile_set_id = GMRuntime.gml_asset_register_dynamic("ts_runtime", "tileset", tile_set)
+        \tif not _check(not GMRuntime.gml_handle_is_valid(GMRuntime.gml_layer_tilemap_create(fx, 0, 0, -999, 1, 1)), "invalid tileset created a tilemap"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_handle_is_valid(GMRuntime.gml_layer_tilemap_create(fx, 0, 0, tile_set_id, 0, 1)), "zero-width tilemap was accepted"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_handle_is_valid(GMRuntime.gml_layer_tilemap_create("MissingLayer", 0, 0, tile_set_id, 1, 1)), "missing layer created a tilemap"):
+        \t\treturn
+        \tvar tilemap = GMRuntime.gml_layer_tilemap_create(fx, 3, 4, tile_set_id, 4, 2)
+        \tif not _check(GMRuntime.gml_handle_is_valid(tilemap), "layer_tilemap_create returned invalid handle"):
+        \t\treturn
+        \tvar tilemap_node = GMRuntime.gml_handle_resolve(tilemap)
+        \tif not _check(tilemap_node is TileMapLayer and tilemap_node.get_parent() == fx_node, "runtime tilemap node mismatch"):
+        \t\treturn
+        \tif not _check(tilemap_node.position == Vector2(3, 4) and tilemap_node.tile_set == tile_set, "runtime tilemap properties mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_get_element_type(tilemap) == "tilemap", "runtime tilemap element type mismatch"):
+        \t\treturn
+        \tvar found_tilemap = GMRuntime.gml_layer_tilemap_get_id(fx)
+        \tif not _check(GMRuntime.gml_handle_is_valid(found_tilemap) and found_tilemap.index == tilemap.index, "layer_tilemap_get_id mismatch"):
+        \t\treturn
+        \tvar named_tilemap = GMRuntime.gml_layer_tilemap_get_id("Effects")
+        \tif not _check(GMRuntime.gml_handle_is_valid(named_tilemap) and named_tilemap.index == tilemap.index, "named layer tilemap lookup mismatch"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_get_width(tilemap) == 4 and GMRuntime.gml_tilemap_get_height(tilemap) == 2, "runtime tilemap dimensions mismatch"):
+        \t\treturn
+        \tvar gm_transforms = [
+        \t\t0,
+        \t\tGMRuntime.GML_TILEMAP_MIRROR,
+        \t\tGMRuntime.GML_TILEMAP_FLIP,
+        \t\tGMRuntime.GML_TILEMAP_MIRROR | GMRuntime.GML_TILEMAP_FLIP,
+        \t\tGMRuntime.GML_TILEMAP_ROTATE,
+        \t\tGMRuntime.GML_TILEMAP_MIRROR | GMRuntime.GML_TILEMAP_ROTATE,
+        \t\tGMRuntime.GML_TILEMAP_FLIP | GMRuntime.GML_TILEMAP_ROTATE,
+        \t\tGMRuntime.GML_TILEMAP_MIRROR | GMRuntime.GML_TILEMAP_FLIP | GMRuntime.GML_TILEMAP_ROTATE,
+        \t]
+        \tvar h = GMRuntime.GML_TILEMAP_GODOT_FLIP_H
+        \tvar v = GMRuntime.GML_TILEMAP_GODOT_FLIP_V
+        \tvar t = GMRuntime.GML_TILEMAP_GODOT_TRANSPOSE
+        \tvar expected_godot_transforms = [0, h, v, h | v, h | t, h | v | t, t, v | t]
+        \tfor transform_index in range(gm_transforms.size()):
+        \t\tvar coords = Vector2i(transform_index % 4, transform_index / 4)
+        \t\tvar tiledata = 1 | gm_transforms[transform_index]
+        \t\tif not _check(GMRuntime.gml_tilemap_set(tilemap, tiledata, coords.x, coords.y), "tilemap_set transform failed at " + str(transform_index)):
+        \t\t\treturn
+        \t\tif not _check(GMRuntime.gml_tilemap_get(tilemap, coords.x, coords.y) == tiledata, "tilemap_get transform mismatch at " + str(transform_index)):
+        \t\t\treturn
+        \t\tif not _check(tilemap_node.get_cell_alternative_tile(coords) == expected_godot_transforms[transform_index], "tile transform orientation mismatch at " + str(transform_index)):
+        \t\t\treturn
+        \tif not _check(tilemap_node.get_cell_source_id(Vector2i(0, 0)) == 0 and tilemap_node.get_cell_atlas_coords(Vector2i(0, 0)) == Vector2i(0, 0), "base tile atlas mapping mismatch"):
+        \t\treturn
+        \t# Authored room metadata preserves every non-rendering/custom tile-data bit.
+        \ttilemap_node.set_meta("gamemaker_tile_raw_cells", {})
+        \tvar authored_values = []
+        \tfor transform_index in range(gm_transforms.size()):
+        \t\tauthored_values.append(1 | gm_transforms[transform_index] | (1 << 20))
+        \ttilemap_node.set_meta("gamemaker_tile_raw_values", authored_values)
+        \tfor transform_index in range(gm_transforms.size()):
+        \t\tvar coords = Vector2i(transform_index % 4, transform_index / 4)
+        \t\tif not _check(GMRuntime.gml_tilemap_get(tilemap, coords.x, coords.y) == authored_values[transform_index], "authored raw tile data mismatch at " + str(transform_index)):
+        \t\t\treturn
+        \t# Verify inverse decoding independently of either raw-value cache.
+        \ttilemap_node.remove_meta("gamemaker_tile_raw_values")
+        \tfor transform_index in range(gm_transforms.size()):
+        \t\tvar coords = Vector2i(transform_index % 4, transform_index / 4)
+        \t\tvar tiledata = 1 | gm_transforms[transform_index]
+        \t\tif not _check(GMRuntime.gml_tilemap_get(tilemap, coords.x, coords.y) == tiledata, "tilemap inverse transform mismatch at " + str(transform_index)):
+        \t\t\treturn
+        \tvar custom_bit = 1 << 20
+        \tif not _check(GMRuntime.gml_tilemap_set(tilemap, custom_bit, 0, 0), "custom-only tile data was rejected"):
+        \t\treturn
+        \tif not _check(tilemap_node.get_cell_source_id(Vector2i(0, 0)) == -1, "custom-only empty tile was drawn"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_get(tilemap, 0, 0) == custom_bit, "custom-only tile data did not round-trip"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_set(tilemap, 0, 0, 0) and GMRuntime.gml_tilemap_get(tilemap, 0, 0) == 0, "empty tile semantics mismatch"):
+        \t\treturn
+        \tif not _check(tilemap_node.get_cell_source_id(Vector2i(0, 0)) == -1, "empty tile was not erased"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_tilemap_set(tilemap, 1, -1, 0) and GMRuntime.gml_tilemap_get(tilemap, 4, 0) == -1, "tilemap bounds semantics mismatch"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_tilemap_set(tilemap, 99, 0, 0), "nonexistent atlas tile was accepted"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_tilemap_set(-999, 1, 0, 0) and GMRuntime.gml_tilemap_get(-999, 0, 0) == -1, "invalid tilemap handle semantics mismatch"):
+        \t\treturn
+
+        \t# Atlas-grid fallback must account for margins and separation.
+        \tvar spaced_image = Image.create(48, 44, false, Image.FORMAT_RGBA8)
+        \tspaced_image.fill(Color.WHITE)
+        \tvar spaced_atlas = TileSetAtlasSource.new()
+        \tspaced_atlas.texture = ImageTexture.create_from_image(spaced_image)
+        \tspaced_atlas.texture_region_size = Vector2i(16, 16)
+        \tspaced_atlas.margins = Vector2i(8, 4)
+        \tspaced_atlas.separation = Vector2i(8, 8)
+        \tif not _check(spaced_atlas.get_atlas_grid_size() == Vector2i(2, 2), "spaced atlas fixture grid mismatch"):
+        \t\treturn
+        \tfor atlas_y in range(2):
+        \t\tfor atlas_x in range(2):
+        \t\t\tspaced_atlas.create_tile(Vector2i(atlas_x, atlas_y))
+        \tvar spaced_tile_set = TileSet.new()
+        \tspaced_tile_set.tile_size = Vector2i(16, 16)
+        \tspaced_tile_set.add_source(spaced_atlas, 0)
+        \tvar spaced_id = GMRuntime.gml_asset_register_dynamic("ts_spaced", "tileset", spaced_tile_set)
+        \tvar spaced_tilemap = GMRuntime.gml_layer_tilemap_create(fx, 0, 0, spaced_id, 1, 1)
+        \tif not _check(GMRuntime.gml_tilemap_set(spaced_tilemap, 3, 0, 0), "spaced atlas tilemap_set failed"):
+        \t\treturn
+        \tvar spaced_node = GMRuntime.gml_handle_resolve(spaced_tilemap)
+        \tif not _check(spaced_node.get_cell_atlas_coords(Vector2i.ZERO) == Vector2i(0, 1), "atlas grid fallback ignored margins/separation"):
+        \t\treturn
+        \tif not _check(spaced_tile_set.has_meta("_gm2godot_tilemap_atlas_layout"), "atlas layout was not cached"):
+        \t\treturn
+
         \tvar particles = GMRuntime.gml_part_system_create_layer(fx, false)
         \tvar particle_record = GMRuntime.gml_handle_resolve(particles)
         \tif not _check(particle_record["node"].get_parent() == fx_node, "particle layer resolver ignored layer handle"):
@@ -202,6 +329,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_layer_destroy(fx), "layer_destroy returned false"):
         \t\treturn
         \tif not _check(not GMRuntime.gml_handle_is_valid(fx), "layer_destroy did not invalidate handle"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_handle_is_valid(tilemap), "layer_destroy did not invalidate tilemap handle"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_handle_is_valid(spaced_tilemap), "layer_destroy did not invalidate spaced tilemap handle"):
         \t\treturn
 
         \tprint("LAYERS_RUNTIME_SMOKE_OK")

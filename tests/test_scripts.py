@@ -12,6 +12,19 @@ from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
     ScriptConverter,
 )
+from src.conversion.script_functions import (
+    modern_script_function_declarations,
+    modern_script_structure,
+)
+
+
+SNAP_BUFFER_READ_YAML_FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "real_world"
+    / "snap"
+    / "SnapBufferReadYAML.gml"
+)
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:
@@ -172,6 +185,498 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('GMRuntime.gml_variable_instance_set(_gml_script_self, "x"', script)
         self.assertNotIn("position.x", script)
 
+    def test_modern_script_body_initializes_and_uses_static_variables(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(delta)\n"
+            "{\n"
+            "    static total = 10;\n"
+            "    static callback = function(value)\n"
+            "    {\n"
+            "        return value + 1;\n"
+            "    };\n"
+            "    total += delta;\n"
+            "    return callback;\n"
+            "}\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'GMRuntime.gml_static_scope("scr_modern.scr_modern:<anonymous>:0:',
+            script,
+        )
+        self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", script)
+        self.assertIn("func(_gml_method_self = null, value = null):", script)
+        self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", script)
+        self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", script)
+
+    def test_modern_script_verbatim_default_ignores_literal_delimiters(self) -> None:
+        self._write_project()
+        source = (
+            "function scr_modern(\n"
+            "    value = @'line 1,) } // literal\n"
+            "line 2 with \"quotes\"',\n"
+            "    other = 2\n"
+            ")\n"
+            "{\n"
+            "    return value;\n"
+            "}\n"
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            source,
+        )
+
+        declarations = modern_script_function_declarations(source)
+        self.assertIsNotNone(declarations)
+        assert declarations is not None
+        self.assertEqual(
+            declarations[0].parameters[0].default,
+            "@'line 1,) } // literal\nline 2 with \"quotes\"'",
+        )
+        self.assertEqual(declarations[0].parameters[1].name, "other")
+
+        self._converter().convert_all()
+
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'value = "line 1,) } // literal\\nline 2 with \\"quotes\\""',
+            script,
+        )
+
+    def test_discovers_constructor_and_explicit_top_level_initialization(self) -> None:
+        structure = modern_script_structure(
+            "function Adding() constructor {\n"
+            "    static operate = function(a, b) { return a + b; }\n"
+            "}\n"
+            "new Adding();\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(len(structure.declarations), 1)
+        self.assertEqual(structure.declarations[0].name, "Adding")
+        self.assertTrue(structure.declarations[0].is_constructor)
+        self.assertEqual(len(structure.top_level_statements), 1)
+        self.assertEqual(
+            structure.top_level_statements[0].constructor_name,
+            "Adding",
+        )
+
+    def test_discovers_modern_functions_around_top_level_enum(self) -> None:
+        declarations = modern_script_function_declarations(
+            "enum TokenKind\n"
+            "{\n"
+            "    STRING,\n"
+            "    COLLECTION = 4,\n"
+            "}\n"
+            "function decode(value)\n"
+            "{\n"
+            "    return value == TokenKind.STRING;\n"
+            "}\n"
+            "enum ResultKind { OK, ERROR }\n"
+            "function Builder() constructor\n"
+            "{\n"
+            "    static read = function() { return ResultKind.OK; }\n"
+            "}\n"
+        )
+
+        self.assertIsNotNone(declarations)
+        assert declarations is not None
+        self.assertEqual(
+            tuple(declaration.name for declaration in declarations),
+            ("decode", "Builder"),
+        )
+        self.assertFalse(declarations[0].is_constructor)
+        self.assertTrue(declarations[1].is_constructor)
+
+    def test_discovers_modern_functions_around_top_level_macros(self) -> None:
+        declarations = modern_script_function_declarations(
+            "function decode() { return TOKEN_SYMBOL; }\n"
+            "#macro TOKEN_SYMBOL 0\n"
+            "#macro Android:TOKEN_LITERAL 1\n"
+            "#macro COMBINED (TOKEN_SYMBOL + \\\n"
+            "    TOKEN_LITERAL)\n"
+            "function environment() { return COMBINED; }\n"
+        )
+
+        self.assertIsNotNone(declarations)
+        assert declarations is not None
+        self.assertEqual(
+            tuple(declaration.name for declaration in declarations),
+            ("decode", "environment"),
+        )
+
+    def test_discovers_only_active_conditional_modern_functions_with_exact_offsets(self) -> None:
+        source = (
+            "#define FEATURE_ENABLED\r\n"
+            "#if defined(FEATURE_ENABLED) && Android\r\n"
+            "function android_impl() { return 11; }\r\n"
+            "#else\r\n"
+            "function desktop_impl() { return 22; }\r\n"
+            "#endif\r\n"
+            "function Builder() constructor {}\r\n"
+            "#if Android\r\n"
+            "new Builder();\r\n"
+            "#endif\r\n"
+        )
+
+        android_structure = modern_script_structure(
+            source,
+            macro_configuration="Android",
+        )
+        desktop_structure = modern_script_structure(
+            source,
+            macro_configuration="Windows",
+        )
+
+        self.assertIsNotNone(android_structure)
+        self.assertIsNotNone(desktop_structure)
+        assert android_structure is not None
+        assert desktop_structure is not None
+        self.assertEqual(
+            tuple(declaration.name for declaration in android_structure.declarations),
+            ("android_impl", "Builder"),
+        )
+        self.assertEqual(
+            tuple(declaration.name for declaration in desktop_structure.declarations),
+            ("desktop_impl", "Builder"),
+        )
+        self.assertEqual(len(android_structure.top_level_statements), 1)
+        self.assertEqual(desktop_structure.top_level_statements, ())
+        initializer = android_structure.top_level_statements[0]
+        self.assertEqual(initializer.source, "new Builder();")
+        self.assertEqual(source[initializer.start:initializer.end], initializer.source)
+
+    def test_discovers_named_constructor_after_global_anonymous_constructor(self) -> None:
+        structure = modern_script_structure(
+            "global.testAnonymousGlobalConstructor = function() constructor {}\n"
+            "function TestGlobalConstructor() constructor\n"
+            "{\n"
+            "    variable = 3.141;\n"
+            "}\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(len(structure.declarations), 1)
+        self.assertEqual(structure.declarations[0].name, "TestGlobalConstructor")
+        self.assertTrue(structure.declarations[0].is_constructor)
+        self.assertEqual(
+            tuple(
+                statement.source
+                for statement in structure.top_level_statements
+            ),
+            ("global.testAnonymousGlobalConstructor = function() constructor {}",),
+        )
+
+    def test_preserves_supported_top_level_statement_order_and_multiplicity(self) -> None:
+        structure = modern_script_structure(
+            "function Probe() constructor {}\n"
+            "global.First = function() constructor {};\n"
+            "new Probe();\n"
+            "global.Child = function(value): global.First(value) constructor {\n"
+            "    child_value = value;\n"
+            "};\n"
+            "new Probe();\n"
+            "new Probe();\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(
+            tuple(statement.kind for statement in structure.top_level_statements),
+            (
+                "global_constructor_assignment",
+                "constructor_call",
+                "global_constructor_assignment",
+                "constructor_call",
+                "constructor_call",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                statement.constructor_name
+                for statement in structure.top_level_statements
+                if statement.kind == "constructor_call"
+            ),
+            ("Probe", "Probe", "Probe"),
+        )
+        self.assertIn(
+            ": global.First(value) constructor",
+            structure.top_level_statements[2].source,
+        )
+
+    def test_discovers_standalone_global_anonymous_constructor_script(self) -> None:
+        structure = modern_script_structure(
+            "global.Parent = function(value) constructor { parent_value = value; };\n"
+            "global.Child = function(value): global.Parent(value) constructor {\n"
+            "    child_value = value + 1;\n"
+            "};\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(structure.declarations, ())
+        self.assertEqual(len(structure.top_level_statements), 2)
+        self.assertTrue(
+            all(
+                statement.kind == "global_constructor_assignment"
+                for statement in structure.top_level_statements
+            )
+        )
+
+    def test_converts_global_anonymous_constructor_initializer(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "global.testAnonymousGlobalConstructor = function() constructor {}\n"
+            "function scr_modern() constructor\n"
+            "{\n"
+            "    variable = 3.141;\n"
+            "}\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'GMRuntime.gml_selector_set(GMRuntime.gml_global_scope(), '
+            '"testAnonymousGlobalConstructor", GMRuntime.gml_constructor(',
+            script,
+        )
+        self.assertIn("func _gm_script_call(_gml_constructor_self = null):", script)
+        self.assertIn(
+            'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "variable", 3.141)',
+            script,
+        )
+
+    def test_converts_standalone_derived_global_constructor_initializer(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "global.Parent = function(value) constructor { parent_value = value; };\n"
+            "global.Child = function(value): global.Parent(value) constructor {\n"
+            "    child_value = value + 1;\n"
+            "};\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("func gm2godot_initialize_top_level():", script)
+        self.assertIn(
+            "GMRuntime.gml_constructor_inherit(_gml_constructor_self, "
+            'GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "Parent"), '
+            "[value])",
+            script,
+        )
+        self.assertIn(
+            '"initializer": Callable(_gm_initializer_owner_1, '
+            '"gm2godot_initialize_top_level")',
+            registry,
+        )
+
+    def test_emits_top_level_initializers_in_source_order_without_deduplication(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern() constructor {}\n"
+            "/* keep source-map line offsets\n"
+            "   across stripped comments */\n"
+            "global.First = function() constructor {};\n"
+            "new scr_modern();\n"
+            "global.Second = function() constructor {};\n"
+            "new scr_modern();\n"
+            "new scr_modern();\n",
+        )
+
+        self._converter().convert_all()
+
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        source_map = cast(
+            dict[str, object],
+            json.loads(
+                (
+                    self.godot_dir
+                    / "scripts"
+                    / "game"
+                    / "scr_modern.gd.gmlmap.json"
+                ).read_text(encoding="utf-8")
+            ),
+        )
+        first_assignment = script.index('"First"')
+        first_new = script.index(
+            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])'
+        )
+        second_assignment = script.index('"Second"')
+        self.assertLess(first_assignment, first_new)
+        self.assertLess(first_new, second_assignment)
+        self.assertEqual(
+            script.count(
+                'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])'
+            ),
+            3,
+        )
+        initializer_entries = [
+            entry
+            for entry in cast(list[dict[str, object]], source_map["entries"])
+            if entry["event"] == "script:scr_modern:top-level"
+        ]
+        self.assertTrue(initializer_entries)
+        first_initializer_entry = initializer_entries[0]
+        self.assertEqual(first_initializer_entry["source_line"], 4)
+        self.assertIn(
+            "global.First",
+            cast(str, first_initializer_entry["source_text"]),
+        )
+        self.assertEqual(
+            script.splitlines()[
+                cast(int, first_initializer_entry["generated_line"]) - 1
+            ].strip(),
+            first_initializer_entry["generated_text"],
+        )
+
+    def test_discovers_all_functions_in_snap_buffer_read_yaml_fixture(self) -> None:
+        declarations = modern_script_function_declarations(
+            SNAP_BUFFER_READ_YAML_FIXTURE.read_text(encoding="utf-8")
+        )
+
+        self.assertIsNotNone(declarations)
+        assert declarations is not None
+        self.assertEqual(
+            tuple(declaration.name for declaration in declarations),
+            (
+                "SnapBufferReadYAML",
+                "__SnapFromYAMLBufferTokenizer",
+                "__SnapFromYAMLBufferBuilder",
+            ),
+        )
+        self.assertEqual(
+            tuple(declaration.is_constructor for declaration in declarations),
+            (False, True, True),
+        )
+
+    def test_converts_full_snap_buffer_read_yaml_fixture(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            SNAP_BUFFER_READ_YAML_FIXTURE.read_text(encoding="utf-8"),
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertTrue(
+            all(
+                diagnostic.code == "GM2GD-GML-CASE-COLLISION"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertIn("Converted script: scr_modern", self.logs)
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        self.assertIn("func _gm_script_call_SnapBufferReadYAML(", script)
+        self.assertIn("func _gm_script_call___SnapFromYAMLBufferTokenizer(", script)
+        self.assertIn("func _gm_script_call___SnapFromYAMLBufferBuilder(", script)
+        self.assertEqual(
+            script.count("GMRuntime.gml_array_set(_field_order_array, _gm2gd_mutation_value_"),
+            2,
+        )
+
+    def test_converts_constructor_script_static_methods_and_registry_identity(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern() constructor {\n"
+            "    static operate = function(a, b) { return a + b; }\n"
+            "    static invert = function(value) { return -value; }\n"
+            "}\n"
+            "new scr_modern();\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("var _gm_constructor_scr_modern = GMRuntime.gml_constructor(", script)
+        self.assertIn("func _gm_script_call(_gml_constructor_self = null):", script)
+        self.assertIn('["operate", func(): return GMRuntime.gml_method(', script)
+        self.assertIn('["invert", func(): return GMRuntime.gml_method(', script)
+        self.assertIn("GMRuntime.gml_static_bind(", script)
+        self.assertIn(
+            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])',
+            script,
+        )
+        self.assertIn("func gm2godot_initialize_top_level():", script)
+        self.assertIn("var _gm_constructor_1 =", registry)
+        self.assertIn('"callable": _gm_constructor_1', registry)
+        self.assertIn('"scoped_callable": _gm_constructor_1', registry)
+
     def test_converts_scripts_with_mapped_extension_calls(self) -> None:
         self._write_project()
         project_path = self.gm_dir / "ScriptTest.yyp"
@@ -216,8 +721,40 @@ class TestScriptConverter(unittest.TestCase):
         self._converter(macro_configuration="Android").convert_all()
 
         modern_script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(
+            encoding="utf-8"
+        )
         self.assertIn("return 11", modern_script)
         self.assertNotIn("return 22", modern_script)
+        self.assertIn("func gm2godot_callable():", modern_script)
+        self.assertNotIn("GMRuntime.gml_method(_gml_script_self, func scr_modern", modern_script)
+        self.assertIn('"legacy_arguments": false', registry)
+
+    def test_project_macros_expand_across_scripts_with_configuration_precedence(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_add" / "scr_add.gml",
+            "#macro Android:BASE 7\n"
+            "#macro BASE 4\n"
+            "#macro DOUBLE (BASE * 2)\n",
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(value = BASE) { return DOUBLE + value; }",
+        )
+
+        self._converter(macro_configuration="Android").convert_all()
+
+        modern_script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        self.assertIn("value = 7", modern_script)
+        self.assertIn(
+            "return GMRuntime.gml_add((GMRuntime.gml_mul(7, 2)), value)",
+            modern_script,
+        )
+        self.assertNotIn('"BASE"', modern_script)
+        self.assertNotIn('"DOUBLE"', modern_script)
 
     def test_converts_multi_function_script_assets_and_declared_registry_names(self) -> None:
         self._write_project()

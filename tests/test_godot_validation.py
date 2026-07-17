@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+# pyright: reportPrivateUsage=false
+
 import base64
 import json
+import os
+import signal
 import shutil
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src import cli
 from src.conversion.godot_validation import (
@@ -14,6 +22,7 @@ from src.conversion.godot_validation import (
     find_godot_binary,
     generated_godot_importable_asset_paths,
     generated_godot_resource_paths,
+    _run_godot_command,
     validate_generated_godot_project,
 )
 
@@ -81,6 +90,143 @@ class TestGodotValidation(unittest.TestCase):
         )
         return project_dir
 
+    def _write_fake_godot(self, script: str) -> Path:
+        fake_godot = self.temp_dir / "fake-godot"
+        fake_godot.write_text("#!/bin/sh\n" + script, encoding="utf-8")
+        fake_godot.chmod(0o755)
+        return fake_godot
+
+    @staticmethod
+    def _high_volume_output_shell(
+        first_line: str,
+        last_line: str,
+        *,
+        central_line: str = "CENTRAL_OUTPUT_MUST_BE_DISCARDED",
+        last_to_stderr: bool = False,
+    ) -> str:
+        last_redirect = " >&2" if last_to_stderr else ""
+        return (
+            f"printf '%s\\n' '{first_line}'\n"
+            "i=0\n"
+            "while [ \"$i\" -lt 200 ]; do\n"
+            "  if [ \"$i\" -eq 100 ]; then\n"
+            f"    printf '%s\\n' '{central_line}'\n"
+            "  else\n"
+            "    printf 'filler-%03d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' \"$i\"\n"
+            "  fi\n"
+            "  i=$((i + 1))\n"
+            "done\n"
+            f"printf '%s\\n' '{last_line}'{last_redirect}\n"
+        )
+
+    def test_find_godot_binary_uses_version_neutral_macos_app_path(self) -> None:
+        macos_app_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
+
+        def is_existing_candidate(candidate: str) -> bool:
+            return candidate == macos_app_binary
+
+        with (
+            patch("src.conversion.godot_validation.os.environ.get", return_value=None),
+            patch("src.conversion.godot_validation.shutil.which", return_value=None),
+            patch(
+                "src.conversion.godot_validation.os.path.isfile",
+                side_effect=is_existing_candidate,
+            ) as is_file,
+        ):
+            resolved_binary = find_godot_binary()
+
+        self.assertEqual(resolved_binary, macos_app_binary)
+        is_file.assert_called_once_with(macos_app_binary)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX process groups")
+    def test_command_exit_with_inherited_stdout_remains_bounded(self) -> None:
+        project_dir = self._write_project()
+        fake_godot = self._write_fake_godot("sleep 3 &\nexit 0\n")
+        existing_readers = {
+            thread.ident
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+        }
+        started = time.monotonic()
+
+        report = validate_generated_godot_project(
+            str(project_dir),
+            godot_binary=str(fake_godot),
+            timeout=1,
+        )
+
+        elapsed = time.monotonic() - started
+        lingering_readers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+            and thread.ident not in existing_readers
+        ]
+        self.assertEqual(report.status, "passed", report.output)
+        self.assertEqual(report.returncode, 0)
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(lingering_readers, [])
+
+    @unittest.skipUnless(os.name == "posix", "requires fork and POSIX sessions")
+    def test_detached_stdout_holder_does_not_consume_remaining_timeout(self) -> None:
+        child_pid_path = self.temp_dir / "detached-child.pid"
+        fake_godot = self.temp_dir / "detached-stdout-holder.py"
+        fake_godot.write_text(
+            "\n".join(
+                (
+                    "import os",
+                    "import time",
+                    "from pathlib import Path",
+                    "",
+                    "child_pid = os.fork()",
+                    "if child_pid == 0:",
+                    "    os.setsid()",
+                    f"    Path({os.fspath(child_pid_path)!r}).write_text(str(os.getpid()))",
+                    "    time.sleep(30)",
+                    "    os._exit(0)",
+                    "os._exit(0)",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        existing_readers = {
+            thread.ident
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+        }
+        started = time.monotonic()
+        child_pid: int | None = None
+
+        try:
+            result = _run_godot_command(
+                [sys.executable, os.fspath(fake_godot)],
+                timeout=3,
+            )
+            elapsed = time.monotonic() - started
+            for _attempt in range(100):
+                if child_pid_path.is_file():
+                    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+                    break
+                time.sleep(0.01)
+        finally:
+            if child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        lingering_readers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+            and thread.ident not in existing_readers
+        ]
+        self.assertEqual(result.returncode, 0)
+        self.assertLess(elapsed, 1.5)
+        self.assertIsNotNone(child_pid)
+        self.assertEqual(lingering_readers, [])
+
     def test_resource_path_discovery_is_deterministic(self) -> None:
         project_dir = self._write_project()
 
@@ -129,6 +275,149 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(issues[0].severity, "error")
         self.assertEqual(issues[0].line, "ERROR: Failed loading resource.")
         self.assertEqual(issues[1].severity, "warning")
+
+    def test_resource_validation_bounds_output_and_keeps_deterministic_context(self) -> None:
+        project_dir = self._write_project()
+        fake_godot = self._write_fake_godot(
+            self._high_volume_output_shell(
+                "FIRST RESOURCE VALIDATION CONTEXT",
+                "LAST RESOURCE VALIDATION CONTEXT",
+                central_line="ERROR: CENTRAL OUTPUT MUST BE SUMMARIZED",
+            )
+            + "exit 0\n"
+        )
+
+        with patch(
+            "src.conversion.godot_validation._GODOT_OUTPUT_CAPTURE_LIMIT_BYTES",
+            256,
+        ):
+            with patch(
+                "src.conversion.godot_validation._GODOT_OUTPUT_READ_CHUNK_BYTES",
+                17,
+            ):
+                first_report = validate_generated_godot_project(
+                    str(project_dir),
+                    godot_binary=str(fake_godot),
+                )
+            with patch(
+                "src.conversion.godot_validation._GODOT_OUTPUT_READ_CHUNK_BYTES",
+                4096,
+            ):
+                second_report = validate_generated_godot_project(
+                    str(project_dir),
+                    godot_binary=str(fake_godot),
+                )
+
+        self.assertEqual(first_report.status, "failed")
+        self.assertEqual(first_report.returncode, 0)
+        self.assertEqual(first_report.output, second_report.output)
+        self.assertIn("FIRST RESOURCE VALIDATION CONTEXT", first_report.output)
+        self.assertIn("LAST RESOURCE VALIDATION CONTEXT", first_report.output)
+        self.assertIn("GM2Godot: Godot output truncated", first_report.output)
+        self.assertNotIn("ERROR: CENTRAL OUTPUT MUST BE SUMMARIZED", first_report.output)
+        self.assertIn("omitted 1 additional Godot error diagnostic", first_report.output)
+        self.assertLess(len(first_report.output.encode("utf-8")), 512)
+        self.assertEqual(len(first_report.output_issues), 1)
+
+    def test_import_validation_bounds_output_and_preserves_exit_status(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self._write_fake_godot(
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--import\" ]; then\n"
+            + self._high_volume_output_shell(
+                "FIRST IMPORT CONTEXT",
+                "WARNING: LAST IMPORT CONTEXT",
+            )
+            + "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'resource validation should not run'\n"
+            "exit 31\n"
+        )
+
+        with patch(
+            "src.conversion.godot_validation._GODOT_OUTPUT_CAPTURE_LIMIT_BYTES",
+            256,
+        ):
+            report = validate_generated_godot_project(
+                str(project_dir),
+                godot_binary=str(fake_godot),
+            )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(report.import_returncode, 0)
+        self.assertIn("FIRST IMPORT CONTEXT", report.import_output)
+        self.assertIn("WARNING: LAST IMPORT CONTEXT", report.import_output)
+        self.assertIn("GM2Godot: Godot output truncated", report.import_output)
+        self.assertNotIn("CENTRAL_OUTPUT_MUST_BE_DISCARDED", report.import_output)
+        self.assertNotIn("resource validation should not run", report.output)
+        self.assertLess(len(report.import_output.encode("utf-8")), 512)
+
+    def test_boot_validation_bounds_combined_stdout_and_stderr(self) -> None:
+        project_dir = self._write_project()
+        fake_godot = self._write_fake_godot(
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--quit-after\" ]; then\n"
+            + self._high_volume_output_shell(
+                "FIRST BOOT CONTEXT",
+                "ERROR: LAST BOOT STDERR CONTEXT",
+                last_to_stderr=True,
+            )
+            + "    exit 23\n"
+            "  fi\n"
+            "done\n"
+            "printf '%s\\n' 'GM2GODOT_VALIDATION_OK 2'\n"
+            "exit 0\n"
+        )
+
+        with patch(
+            "src.conversion.godot_validation._GODOT_OUTPUT_CAPTURE_LIMIT_BYTES",
+            256,
+        ):
+            report = validate_generated_godot_project(
+                str(project_dir),
+                godot_binary=str(fake_godot),
+                boot_frames=2,
+            )
+
+        self.assertEqual(report.status, "failed")
+        self.assertEqual(report.boot_returncode, 23)
+        self.assertIn("FIRST BOOT CONTEXT", report.boot_output)
+        self.assertIn("ERROR: LAST BOOT STDERR CONTEXT", report.boot_output)
+        self.assertIn("GM2Godot: Godot output truncated", report.boot_output)
+        self.assertNotIn("CENTRAL_OUTPUT_MUST_BE_DISCARDED", report.boot_output)
+        self.assertLess(len(report.boot_output.encode("utf-8")), 512)
+        self.assertEqual(report.output_issues[-1].line, "ERROR: LAST BOOT STDERR CONTEXT")
+
+    def test_import_timeout_returns_bounded_partial_output(self) -> None:
+        project_dir = self._write_png_sprite_project()
+        fake_godot = self._write_fake_godot(
+            self._high_volume_output_shell(
+                "FIRST TIMEOUT CONTEXT",
+                "LAST TIMEOUT CONTEXT",
+            )
+            + "sleep 5\n"
+        )
+
+        with patch(
+            "src.conversion.godot_validation._GODOT_OUTPUT_CAPTURE_LIMIT_BYTES",
+            256,
+        ):
+            report = validate_generated_godot_project(
+                str(project_dir),
+                godot_binary=str(fake_godot),
+                timeout=1,
+                load_resources=False,
+            )
+
+        self.assertEqual(report.status, "passed")
+        self.assertIsNone(report.import_returncode)
+        self.assertIn("ran for 1 seconds", report.message)
+        self.assertIn("FIRST TIMEOUT CONTEXT", report.import_output)
+        self.assertIn("LAST TIMEOUT CONTEXT", report.import_output)
+        self.assertIn("GM2Godot: Godot output truncated", report.import_output)
+        self.assertNotIn("CENTRAL_OUTPUT_MUST_BE_DISCARDED", report.import_output)
+        self.assertLess(len(report.import_output.encode("utf-8")), 512)
 
     def test_validation_fails_when_godot_outputs_error_with_zero_exit(self) -> None:
         project_dir = self._write_project()

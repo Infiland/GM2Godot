@@ -383,8 +383,9 @@ static func _gml_http_headers(headers):
 	elif is_handle(headers):
 		var map_value = _gml_resolve_ds_map(headers)
 		if map_value is Dictionary:
-			for key in map_value.keys():
-				result.append(str(key) + ": " + str(map_value[key]))
+			for stored_key in map_value.keys():
+				var key = _gml_ds_map_external_key(stored_key)
+				result.append(str(key) + ": " + str(map_value[stored_key]))
 	return result
 
 

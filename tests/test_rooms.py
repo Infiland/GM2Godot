@@ -24,6 +24,7 @@ from src.conversion.room_layers import (
     GODOT_TILE_TRANSFORM_TRANSPOSE,
     decode_gamemaker_tile,
     decode_tile_compressed_data,
+    gamemaker_tile_transform_to_godot,
     is_empty_gamemaker_tile,
 )
 
@@ -646,7 +647,7 @@ class TestRoomConverter(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "decoded 1 cells, expected 4"):
             decode_tile_compressed_data(2, 2, [1], tile_data_format=0)
 
-    def test_gamemaker_tile_flags_map_to_godot_alternative_bits(self):
+    def test_gamemaker_tile_flags_decode_from_tile_data(self):
         raw_tile = 3 | GAMEMAKER_TILE_MIRROR_BIT | GAMEMAKER_TILE_FLIP_BIT | GAMEMAKER_TILE_ROTATE_BIT
         tile = decode_gamemaker_tile(raw_tile)
 
@@ -654,10 +655,32 @@ class TestRoomConverter(unittest.TestCase):
         self.assertTrue(tile.mirror)
         self.assertTrue(tile.flip)
         self.assertTrue(tile.rotate)
-        self.assertEqual(
-            GODOT_TILE_TRANSFORM_FLIP_H | GODOT_TILE_TRANSFORM_FLIP_V | GODOT_TILE_TRANSFORM_TRANSPOSE,
-            28672,
-        )
+
+    def test_gamemaker_tile_transforms_map_all_eight_orientations(self):
+        h = GODOT_TILE_TRANSFORM_FLIP_H
+        v = GODOT_TILE_TRANSFORM_FLIP_V
+        t = GODOT_TILE_TRANSFORM_TRANSPOSE
+        expected = {
+            (False, False, False): 0,
+            (True, False, False): h,
+            (False, True, False): v,
+            (True, True, False): h | v,
+            (False, False, True): h | t,
+            (True, False, True): h | v | t,
+            (False, True, True): t,
+            (True, True, True): v | t,
+        }
+
+        for (mirror, flip, rotate), alternative_tile in expected.items():
+            with self.subTest(mirror=mirror, flip=flip, rotate=rotate):
+                self.assertEqual(
+                    gamemaker_tile_transform_to_godot(
+                        mirror=mirror,
+                        flip=flip,
+                        rotate=rotate,
+                    ),
+                    alternative_tile,
+                )
 
     def test_tile_layer_emits_tilemaplayer_with_decoded_cells(self):
         self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground")])
@@ -692,6 +715,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
         self.assertIn('metadata/gamemaker_tile_empty_values = [0, -2147483648]', content)
+        self.assertIn('metadata/gamemaker_tile_raw_values = [1, 1, 0, 2, 0, 0]', content)
 
     def test_tile_layer_accepts_raw_tile_data_format_zero(self):
         self._write_yyp(["r_raw_tiles"], extra_resources=[("tilesets", "ts_ground")])

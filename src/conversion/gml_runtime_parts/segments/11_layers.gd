@@ -1,3 +1,13 @@
+const GML_TILEMAP_EMPTY_SENTINEL = -2147483648
+const GML_TILEMAP_INDEX_MASK = 0x0007ffff
+const GML_TILEMAP_MIRROR = 0x10000000
+const GML_TILEMAP_FLIP = 0x20000000
+const GML_TILEMAP_ROTATE = 0x40000000
+const GML_TILEMAP_GODOT_FLIP_H = 1 << 12
+const GML_TILEMAP_GODOT_FLIP_V = 1 << 13
+const GML_TILEMAP_GODOT_TRANSPOSE = 1 << 14
+
+
 static func gml_layer_register_scene(scene, clear_existing = true):
 	if clear_existing:
 		_gml_layer_clear_registry()
@@ -229,6 +239,117 @@ static func gml_layer_get_all_elements(layer):
 			continue
 		elements.append(_gml_layer_element_register(child))
 	return elements
+
+
+static func gml_layer_tilemap_get_id(layer):
+	var layer_node = _gml_layer_resolve_node(layer)
+	if not (layer_node is Node):
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	for child in layer_node.get_children():
+		if child is TileMapLayer or (
+			child is Object and child.has_meta("gamemaker_tile_layer")
+		):
+			return _gml_layer_element_register(child)
+	return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+
+
+static func gml_layer_tilemap_create(layer, x, y, tileset, width, height):
+	var layer_node = _gml_layer_resolve_node(layer)
+	if not (layer_node is Node):
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	var tile_set = _gml_draw_tileset_resource(tileset)
+	if not (tile_set is TileSet):
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	var resolved_width = int(_to_real(width))
+	var resolved_height = int(_to_real(height))
+	if resolved_width <= 0 or resolved_height <= 0:
+		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
+	var node = TileMapLayer.new()
+	node.name = "TileMap"
+	node.position = Vector2(_to_real(x), _to_real(y))
+	node.tile_set = tile_set
+	node.set_meta("gamemaker_layer_element_type", "tilemap")
+	node.set_meta("gamemaker_tile_layer", true)
+	node.set_meta("gamemaker_tileset", tileset)
+	node.set_meta("gamemaker_tile_width", resolved_width)
+	node.set_meta("gamemaker_tile_height", resolved_height)
+	node.set_meta("gamemaker_tile_raw_cells", {})
+	layer_node.add_child(node)
+	return _gml_layer_element_register(node)
+
+
+static func gml_tilemap_set(tilemap_element_id, tiledata, xcell, ycell):
+	var node = _gml_layer_element_resolve_node(tilemap_element_id)
+	if not (node is TileMapLayer):
+		return false
+	var coords = Vector2i(int(_to_real(xcell)), int(_to_real(ycell)))
+	if not _gml_tilemap_coords_in_bounds(node, coords):
+		return false
+	var tile_value = int(_to_real(tiledata))
+	var raw_cells: Dictionary = node.get_meta("gamemaker_tile_raw_cells", {})
+	var tile_index = tile_value & GML_TILEMAP_INDEX_MASK
+	if tile_value == GML_TILEMAP_EMPTY_SENTINEL or tile_index == 0:
+		node.erase_cell(coords)
+		raw_cells[coords] = tile_value
+		node.set_meta("gamemaker_tile_raw_cells", raw_cells)
+		return true
+	var layout = _gml_tilemap_atlas_layout(node.tile_set)
+	if layout.is_empty():
+		return false
+	var atlas_index = tile_index - 1
+	var atlas_coords = Vector2i(
+		atlas_index % int(layout["columns"]),
+		int(floor(float(atlas_index) / float(layout["columns"])))
+	)
+	var source = layout["source"]
+	if source is TileSetAtlasSource and not source.has_tile(atlas_coords):
+		return false
+	var alternative_tile = _gml_tilemap_transform_to_godot(tile_value)
+	node.set_cell(coords, int(layout["source_id"]), atlas_coords, alternative_tile)
+	raw_cells[coords] = tile_value
+	node.set_meta("gamemaker_tile_raw_cells", raw_cells)
+	return true
+
+
+static func gml_tilemap_get(tilemap_element_id, xcell, ycell):
+	var node = _gml_layer_element_resolve_node(tilemap_element_id)
+	if not (node is TileMapLayer):
+		return -1
+	var coords = Vector2i(int(_to_real(xcell)), int(_to_real(ycell)))
+	if not _gml_tilemap_coords_in_bounds(node, coords):
+		return -1
+	var raw_cells: Dictionary = node.get_meta("gamemaker_tile_raw_cells", {})
+	if raw_cells.has(coords):
+		return int(raw_cells[coords])
+	var authored_values = node.get_meta("gamemaker_tile_raw_values", [])
+	var authored_index = coords.y * int(node.get_meta("gamemaker_tile_width", 0)) + coords.x
+	if authored_values is Array and authored_index >= 0 and authored_index < authored_values.size():
+		return int(authored_values[authored_index])
+	var source_id = node.get_cell_source_id(coords)
+	if source_id < 0:
+		return 0
+	var layout = _gml_tilemap_atlas_layout(node.tile_set)
+	if layout.is_empty():
+		return -1
+	var atlas_coords = node.get_cell_atlas_coords(coords)
+	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x + 1
+	var alternative_tile = node.get_cell_alternative_tile(coords)
+	tile_value |= _gml_tilemap_transform_from_godot(alternative_tile)
+	return tile_value
+
+
+static func gml_tilemap_get_width(tilemap_element_id):
+	var node = _gml_layer_element_resolve_node(tilemap_element_id)
+	if not (node is TileMapLayer):
+		return -1
+	return int(node.get_meta("gamemaker_tile_width", 0))
+
+
+static func gml_tilemap_get_height(tilemap_element_id):
+	var node = _gml_layer_element_resolve_node(tilemap_element_id)
+	if not (node is TileMapLayer):
+		return -1
+	return int(node.get_meta("gamemaker_tile_height", 0))
 
 
 static func gml_layer_element_move(element, layer):
@@ -654,6 +775,81 @@ static func _gml_layer_element_unregister_handle(handle, invalidate = true):
 		_gml_layer_element_handles_by_node_id.erase(node.get_instance_id())
 	if invalidate:
 		gml_handle_invalidate(handle)
+
+
+static func _gml_tilemap_coords_in_bounds(node, coords):
+	if not (node is TileMapLayer):
+		return false
+	var width = int(node.get_meta("gamemaker_tile_width", 0))
+	var height = int(node.get_meta("gamemaker_tile_height", 0))
+	return coords.x >= 0 and coords.y >= 0 and coords.x < width and coords.y < height
+
+
+static func _gml_tilemap_transform_to_godot(tile_value):
+	var mirror = (tile_value & GML_TILEMAP_MIRROR) != 0
+	var flip = (tile_value & GML_TILEMAP_FLIP) != 0
+	var rotate = (tile_value & GML_TILEMAP_ROTATE) != 0
+	if not rotate:
+		var unrotated = 0
+		if mirror:
+			unrotated |= GML_TILEMAP_GODOT_FLIP_H
+		if flip:
+			unrotated |= GML_TILEMAP_GODOT_FLIP_V
+		return unrotated
+	var rotated = GML_TILEMAP_GODOT_TRANSPOSE
+	if not flip:
+		rotated |= GML_TILEMAP_GODOT_FLIP_H
+	if mirror:
+		rotated |= GML_TILEMAP_GODOT_FLIP_V
+	return rotated
+
+
+static func _gml_tilemap_transform_from_godot(alternative_tile):
+	var flip_h = (alternative_tile & GML_TILEMAP_GODOT_FLIP_H) != 0
+	var flip_v = (alternative_tile & GML_TILEMAP_GODOT_FLIP_V) != 0
+	var transpose = (alternative_tile & GML_TILEMAP_GODOT_TRANSPOSE) != 0
+	if not transpose:
+		var unrotated = 0
+		if flip_h:
+			unrotated |= GML_TILEMAP_MIRROR
+		if flip_v:
+			unrotated |= GML_TILEMAP_FLIP
+		return unrotated
+	var rotated = GML_TILEMAP_ROTATE
+	if flip_v:
+		rotated |= GML_TILEMAP_MIRROR
+	if not flip_h:
+		rotated |= GML_TILEMAP_FLIP
+	return rotated
+
+
+static func _gml_tilemap_atlas_layout(tile_set):
+	if not (tile_set is TileSet) or tile_set.get_source_count() <= 0:
+		return {}
+	var cached_layout = tile_set.get_meta("_gm2godot_tilemap_atlas_layout", {})
+	if (
+		cached_layout is Dictionary
+		and cached_layout.get("source") is TileSetAtlasSource
+		and int(cached_layout.get("columns", 0)) > 0
+	):
+		return cached_layout
+	var source_id = tile_set.get_source_id(0)
+	var source = tile_set.get_source(source_id)
+	if not (source is TileSetAtlasSource):
+		return {}
+	var columns = int(tile_set.get_meta("gamemaker_tileset_out_columns", 0))
+	if columns <= 0:
+		var grid_size = source.get_atlas_grid_size()
+		if grid_size.x <= 0:
+			return {}
+		columns = grid_size.x
+	var layout = {
+		"source_id": source_id,
+		"source": source,
+		"columns": columns,
+	}
+	tile_set.set_meta("_gm2godot_tilemap_atlas_layout", layout)
+	return layout
 
 
 static func _gml_layer_node_is_background(node):

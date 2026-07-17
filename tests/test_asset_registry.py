@@ -98,7 +98,11 @@ class TestAssetRegistryConverter(unittest.TestCase):
             _minimal_yy(name, resource_type, parent_path, extra),
         )
 
-    def _converter(self, organize_sounds_by_audio_group: bool = False) -> AssetRegistryConverter:
+    def _converter(
+        self,
+        organize_sounds_by_audio_group: bool = False,
+        macro_configuration: str | None = None,
+    ) -> AssetRegistryConverter:
         return AssetRegistryConverter(
             self.gm_dir,
             self.godot_dir,
@@ -106,7 +110,30 @@ class TestAssetRegistryConverter(unittest.TestCase):
             progress_callback=lambda _value: None,
             conversion_running=lambda: True,
             organize_sounds_by_audio_group=organize_sounds_by_audio_group,
+            macro_configuration=macro_configuration,
         )
+
+    def test_bundled_font_registry_path_matches_safe_emitted_filename(self) -> None:
+        _write_yyp(self.gm_dir, [("fonts", "fnt_ui")])
+        self._write_resource(
+            "fonts",
+            "fnt_ui",
+            "GMFont",
+            "folders/Fonts/UI.yy",
+            {
+                "includeTTF": True,
+                "TTFName": "CustomFont.TTF",
+            },
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "fonts", "fnt_ui", "CustomFont.TTF"),
+            "font bytes",
+        )
+
+        entries = self._converter().build_entries()
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].godot_path, "res://fonts/ui/custom_font.ttf")
 
     def test_builds_registry_entries_for_core_asset_types(self) -> None:
         _write_yyp(
@@ -323,6 +350,99 @@ class TestAssetRegistryConverter(unittest.TestCase):
 
         self.assertEqual(first_ids, second_ids)
 
+    def test_backslash_yyp_path_resolves_existing_resource_and_normalizes_source_path(self) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "s_player",
+                            "path": "sprites\\s_player\\s_player.yy",
+                        }
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites/Actors.yy",
+        )
+
+        entries = self._converter().build_entries()
+        by_name = {entry.name: entry for entry in entries}
+
+        self.assertIn("s_player", by_name)
+        self.assertEqual(by_name["s_player"].source_path, "sprites/s_player/s_player.yy")
+        self.assertEqual(
+            by_name["s_player"].godot_path,
+            "res://sprites/actors/s_player/s_player.tscn",
+        )
+
+    def test_unsafe_yyp_paths_are_skipped_with_clear_diagnostics(self) -> None:
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites/Actors.yy",
+        )
+        valid_yy_path = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_player",
+            "s_player.yy",
+        )
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "s_player",
+                            "path": "sprites/s_player/s_player.yy",
+                        }
+                    },
+                    {
+                        "id": {
+                            "name": "s_traversal",
+                            "path": "sprites/../../outside.yy",
+                        }
+                    },
+                    {
+                        "id": {
+                            "name": "s_absolute",
+                            "path": valid_yy_path,
+                        }
+                    },
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+
+        entries = self._converter().build_entries()
+
+        self.assertEqual([entry.name for entry in entries], ["s_player"])
+        self.assertTrue(
+            any(
+                "s_traversal" in message
+                and "escapes the selected GameMaker project root" in message
+                for message in self.logs
+            ),
+            self.logs,
+        )
+        self.assertTrue(
+            any(
+                "s_absolute" in message and "must be relative" in message
+                for message in self.logs
+            ),
+            self.logs,
+        )
+
     def test_build_entries_includes_modern_script_function_assets(self) -> None:
         _write_yyp(self.gm_dir, [("scripts", "ending")])
         self._write_resource("scripts", "ending", "GMScript", "folders/Scripts/Game.yy")
@@ -354,6 +474,61 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 "script_source_path": "scripts/ending/ending.yy",
             },
         )
+
+    def test_script_function_assets_follow_selected_macro_configuration(self) -> None:
+        _write_yyp(self.gm_dir, [("scripts", "conditional")])
+        self._write_resource(
+            "scripts",
+            "conditional",
+            "GMScript",
+            "folders/Scripts/Game.yy",
+        )
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "scripts",
+                "conditional",
+                "conditional.gml",
+            ),
+            "#if Android\n"
+            "function android_only() { return 11; }\n"
+            "#else\n"
+            "function desktop_only() { return 22; }\n"
+            "#endif\n"
+            "function shared_function() { return 33; }\n",
+        )
+
+        entries = self._converter(macro_configuration="Android").build_entries()
+        names = {entry.name for entry in entries}
+
+        self.assertIn("conditional", names)
+        self.assertIn("android_only", names)
+        self.assertIn("shared_function", names)
+        self.assertNotIn("desktop_only", names)
+
+    def test_invalid_script_conditional_does_not_abort_registry_discovery(self) -> None:
+        _write_yyp(self.gm_dir, [("scripts", "conditional")])
+        self._write_resource(
+            "scripts",
+            "conditional",
+            "GMScript",
+            "folders/Scripts/Game.yy",
+        )
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "scripts",
+                "conditional",
+                "conditional.gml",
+            ),
+            "#if Android &&\n"
+            "function android_only() { return 11; }\n"
+            "#endif\n",
+        )
+
+        entries = self._converter(macro_configuration="Android").build_entries()
+
+        self.assertEqual([entry.name for entry in entries], ["conditional"])
 
     def test_convert_all_writes_runtime_registry_script(self) -> None:
         _write_yyp(

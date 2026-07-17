@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import shutil
@@ -9,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.shaders import ShaderConverter
+from src.conversion.asset_output_paths import build_asset_output_paths
 
 SAMPLE_FSH = """\
 precision highp float;
@@ -138,6 +140,209 @@ class TestShaderConverterEmpty(unittest.TestCase):
         converter.convert_all()  # should not raise
         self.assertTrue(len(self.logs) > 0,
                         "Expected log message when shaders directory missing")
+
+
+class TestShaderGeneratedPathCollisions(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        for resource_name, marker in (("shdGlow", "MARKER_ONE"), ("shd_glow", "MARKER_TWO")):
+            shader_dir = os.path.join(self.gm_dir, "shaders", resource_name)
+            os.makedirs(shader_dir)
+            with open(os.path.join(shader_dir, resource_name + ".yy"), "w", encoding="utf-8") as yy_file:
+                yy_file.write(
+                    '{"name":"' + resource_name
+                    + '","parent":{"name":"Shaders","path":"folders/Shaders.yy"}}'
+                )
+            with open(os.path.join(shader_dir, resource_name + ".fsh"), "w", encoding="utf-8") as shader_file:
+                shader_file.write(SAMPLE_FSH + "\n// " + marker + "\n")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def test_emitted_shaders_match_collision_safe_registry_paths(self) -> None:
+        converter = ShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        paths = build_asset_output_paths(self.gm_dir, self.godot_dir)["shaders"]
+        self.assertEqual(len({path.casefold() for path in paths.values()}), 2)
+        contents: list[str] = []
+        for resource_name in ("shdGlow", "shd_glow"):
+            output_path = os.path.join(
+                self.godot_dir,
+                *paths[resource_name].removeprefix("res://").split("/"),
+            )
+            with open(output_path, encoding="utf-8") as shader_file:
+                contents.append(shader_file.read())
+        self.assertIn("MARKER_ONE", contents[0])
+        self.assertIn("MARKER_TWO", contents[1])
+
+
+class TestShaderAssetOwnershipAndStages(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_shader_asset(
+        self,
+        resource_name: str,
+        *,
+        vertex_source: str | None = None,
+        fragment_source: str | None = None,
+    ) -> str:
+        shader_dir = os.path.join(self.gm_dir, "shaders", resource_name)
+        os.makedirs(shader_dir)
+        yy_path = os.path.join(shader_dir, resource_name + ".yy")
+        with open(yy_path, "w", encoding="utf-8") as yy_file:
+            json.dump(
+                {
+                    "name": resource_name,
+                    "resourceType": "GMShader",
+                    "parent": {
+                        "name": "Shaders",
+                        "path": "folders/Shaders.yy",
+                    },
+                },
+                yy_file,
+            )
+        if vertex_source is not None:
+            with open(
+                os.path.join(shader_dir, resource_name + ".vsh"),
+                "w",
+                encoding="utf-8",
+            ) as vertex_file:
+                vertex_file.write(vertex_source)
+        if fragment_source is not None:
+            with open(
+                os.path.join(shader_dir, resource_name + ".fsh"),
+                "w",
+                encoding="utf-8",
+            ) as fragment_file:
+                fragment_file.write(fragment_source)
+        return f"shaders/{resource_name}/{resource_name}.yy"
+
+    def _write_yyp(self, resources: list[tuple[str, str]]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "ShaderOwnership.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "%Name": "Shader Ownership",
+                    "resources": [
+                        {"id": {"name": name, "path": path}}
+                        for name, path in resources
+                    ],
+                },
+                project_file,
+            )
+
+    def _convert(self) -> None:
+        ShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=2,
+        ).convert_all()
+
+    def test_dual_stage_asset_publishes_one_complete_shader(self) -> None:
+        vertex_source = """\
+precision highp float;
+varying vec2 v_shared;
+uniform float amount;
+
+void main()
+{
+    v_shared = vec2(amount);
+}
+// VERTEX_MARKER
+"""
+        fragment_source = """\
+precision mediump float;
+varying vec2 v_shared;
+uniform float amount;
+
+void main()
+{
+    gl_FragColor = vec4(v_shared, amount, 1.0);
+}
+// FRAGMENT_MARKER
+"""
+        shader_path = self._write_shader_asset(
+            "shdPair",
+            vertex_source=vertex_source,
+            fragment_source=fragment_source,
+        )
+        self._write_yyp([("shdPair", shader_path)])
+
+        self._convert()
+
+        resource_path = build_asset_output_paths(
+            self.gm_dir,
+            self.godot_dir,
+        )["shaders"]["shdPair"]
+        output_path = os.path.join(
+            self.godot_dir,
+            *resource_path.removeprefix("res://").split("/"),
+        )
+        with open(output_path, encoding="utf-8") as shader_file:
+            content = shader_file.read()
+
+        self.assertEqual(content.count("shader_type canvas_item;"), 1)
+        self.assertEqual(content.count("varying vec2 v_shared;"), 1)
+        self.assertEqual(content.count("uniform float amount;"), 1)
+        self.assertEqual(content.count("void vertex()"), 1)
+        self.assertEqual(content.count("void fragment()"), 1)
+        self.assertIn("VERTEX_MARKER", content)
+        self.assertIn("FRAGMENT_MARKER", content)
+        self.assertNotIn("precision ", content)
+
+    def test_yyp_ownership_excludes_orphan_normalized_path_collision(self) -> None:
+        referenced_path = self._write_shader_asset(
+            "shdGlow",
+            fragment_source=SAMPLE_FSH + "\n// REFERENCED_MARKER\n",
+        )
+        self._write_shader_asset(
+            "shd_glow",
+            fragment_source=SAMPLE_FSH + "\n// ORPHAN_MARKER\n",
+        )
+        self._write_yyp([("shdGlow", referenced_path)])
+
+        self._convert()
+
+        paths = build_asset_output_paths(self.gm_dir, self.godot_dir)["shaders"]
+        self.assertEqual(set(paths), {"shdGlow"})
+        output_path = os.path.join(
+            self.godot_dir,
+            *paths["shdGlow"].removeprefix("res://").split("/"),
+        )
+        with open(output_path, encoding="utf-8") as shader_file:
+            content = shader_file.read()
+        self.assertIn("REFERENCED_MARKER", content)
+        self.assertNotIn("ORPHAN_MARKER", content)
+        generated_shaders = [
+            os.path.join(root, filename)
+            for root, _directories, filenames in os.walk(
+                os.path.join(self.godot_dir, "shaders")
+            )
+            for filename in filenames
+            if filename.endswith(".gdshader")
+        ]
+        self.assertEqual(generated_shaders, [output_path])
 
 
 class TestShaderConverterSubfolders(unittest.TestCase):

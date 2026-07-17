@@ -17,7 +17,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src import cli
-from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+from src.conversion.diagnostics import (
+    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
+    DiagnosticCollector,
+)
 from src.conversion.godot_validation import GodotValidationReport
 
 
@@ -66,7 +69,7 @@ class TestCLIReports(unittest.TestCase):
             exit_code = cli.main(["--version"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.6.1")
+        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.7.0")
 
     def test_list_converters_writes_text_inventory(self) -> None:
         output = io.StringIO()
@@ -105,7 +108,7 @@ class TestCLIReports(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "GM2Godot 0.6.1")
+        self.assertEqual(result.stdout.strip(), "GM2Godot 0.7.0")
 
     def test_app_entrypoint_routes_global_cli_flags(self) -> None:
         app_entrypoint = importlib.import_module("main")
@@ -234,19 +237,30 @@ class TestCLIReports(unittest.TestCase):
         with open(os.path.join(godot_dir, "project.godot"), "w", encoding="utf-8") as project_file:
             project_file.write('[application]\nconfig/name="Demo"\n')
 
-        exit_code = cli.main([
-            "convert",
-            "--gm-project",
-            gm_dir,
-            "--godot-project",
-            godot_dir,
-            "--only",
-            "asset_registry",
-            "--report-dir",
-            report_dir,
-            "--max-warnings",
-            "0",
-        ])
+        report_destinations: list[str] = []
+        original_write_reports = DiagnosticCollector.write_reports
+
+        def track_report_write(
+            diagnostics: DiagnosticCollector,
+            destination: str | os.PathLike[str],
+        ) -> tuple[str, str]:
+            report_destinations.append(os.fspath(destination))
+            return original_write_reports(diagnostics, destination)
+
+        with patch.object(DiagnosticCollector, "write_reports", track_report_write):
+            exit_code = cli.main([
+                "convert",
+                "--gm-project",
+                gm_dir,
+                "--godot-project",
+                godot_dir,
+                "--only",
+                "asset_registry",
+                "--report-dir",
+                report_dir,
+                "--max-warnings",
+                "0",
+            ])
 
         self.assertEqual(exit_code, 2)
         self.assertTrue(os.path.isfile(os.path.join(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)))
@@ -258,6 +272,8 @@ class TestCLIReports(unittest.TestCase):
         codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
         self.assertIn("GM2GD-WARNING", codes)
         self.assertIn("GM2GD-CLI-TARGET-PLATFORM", codes)
+        self.assertEqual(codes.count("GM2GD-CLI-TARGET-PLATFORM"), 1)
+        self.assertEqual(report_destinations, [godot_dir, report_dir])
 
 
 if __name__ == "__main__":

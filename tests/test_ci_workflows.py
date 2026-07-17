@@ -56,6 +56,8 @@ class TestCIWorkflows(unittest.TestCase):
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
         content = workflow.read_text(encoding="utf-8")
 
+        self.assertIn("pip install -r requirements.txt", content)
+        self.assertNotIn("pip install Pillow", content)
         self.assertIn("python -m unittest discover tests/ -v", content)
         self.assertTrue((PROJECT_ROOT / "tests" / "test_golden_conversion.py").is_file())
         self.assertTrue((PROJECT_ROOT / "tests" / "test_cli.py").is_file())

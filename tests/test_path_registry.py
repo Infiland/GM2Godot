@@ -101,6 +101,34 @@ class TestPathRegistry(unittest.TestCase):
         self.assertTrue(scene_exists)
         self.assertEqual(render_path_registry_script(()), "extends RefCounted\n\nstatic func entries():\n\treturn []\n")
 
+    def test_skips_uncontained_path_metadata_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as gm_dir, tempfile.TemporaryDirectory() as outside_dir:
+            outside_yy = os.path.join(outside_dir, "path_outside.yy")
+            with open(outside_yy, "w", encoding="utf-8") as source_file:
+                source_file.write('{"name":"path_outside","points":[{"x":99,"y":99}]}')
+            linked_dir = os.path.join(gm_dir, "paths", "path_linked")
+            os.makedirs(linked_dir)
+            linked_yy = os.path.join(linked_dir, "path_linked.yy")
+            try:
+                os.symlink(outside_yy, linked_yy)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            entries = build_path_registry_entries(
+                gm_dir,
+                (
+                    _AssetEntry(1, "path_parent", "paths", "../../../outside.yy"),
+                    _AssetEntry(
+                        2,
+                        "path_linked",
+                        "paths",
+                        "paths/path_linked/path_linked.yy",
+                    ),
+                ),
+            )
+
+        self.assertEqual(entries, ())
+
 
 if __name__ == "__main__":
     unittest.main()

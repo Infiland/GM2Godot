@@ -13,7 +13,12 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.sounds import SoundConverter
-from src.conversion.asset_output_paths import build_asset_output_paths
+from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.asset_output_paths import (
+    build_asset_output_paths,
+    resource_filesystem_path,
+)
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
 
@@ -25,6 +30,7 @@ class SoundConverterKwargs(TypedDict, total=False):
     progress_callback: ProgressCallback
     conversion_running: ConversionRunning
     organize_by_audio_group: NotRequired[bool]
+    diagnostics: NotRequired[DiagnosticCollector]
 
 
 MINIMAL_SOUND_YY: SoundYY = {
@@ -119,6 +125,24 @@ class TestSoundConverterBasic(unittest.TestCase):
         self.assertIn('type="AudioStreamWAV"', content)
         self.assertIn('source_file="res://sounds/jump/jump.wav"', content)
         self.assertIn('edit/loop_mode=0', content)
+
+    def test_import_source_path_uses_escaped_godot_string_literal(self) -> None:
+        converter = self._make_converter()
+        sound_file = 'clip"\\\n[remap]\nimporter=\t\x01evil.wav'
+        expected_path = f"res://sounds/injected/{sound_file}"
+
+        content = converter._generate_import_file(sound_file, "injected")
+
+        self.assertIsNotNone(content)
+        assert content is not None
+        source_line = next(
+            line for line in content.splitlines() if line.startswith("source_file=")
+        )
+        self.assertEqual(
+            source_line,
+            "source_file=" + json.dumps(expected_path, ensure_ascii=False),
+        )
+        self.assertNotIn('\n[remap]\nimporter=', content)
 
 
 class TestSoundGeneratedPathCollisions(unittest.TestCase):
@@ -523,6 +547,452 @@ class TestSoundConverterSubfolders(unittest.TestCase):
             'source_file="res://sounds/audiogroup_music/sfx/theme/theme.wav"',
             content,
         )
+
+
+class TestSoundConverterSourcePathContainment(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    def _make_converter(
+        self,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> SoundConverter:
+        return SoundConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+    def _write_yyp(self, resources: list[tuple[str, str]]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "SoundPaths.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "resources": [
+                        {"id": {"name": name, "path": path}}
+                        for name, path in resources
+                    ]
+                },
+                project_file,
+            )
+
+    def _write_sound_yy(self, sound_name: str, sound_file: object) -> str:
+        sound_dir = os.path.join(self.gm_dir, "sounds", sound_name)
+        os.makedirs(sound_dir, exist_ok=True)
+        data = dict(MINIMAL_SOUND_YY)
+        data["name"] = sound_name
+        data["%Name"] = sound_name
+        data["soundFile"] = sound_file
+        yy_path = os.path.join(sound_dir, f"{sound_name}.yy")
+        with open(yy_path, "w", encoding="utf-8") as yy_file:
+            json.dump(data, yy_file)
+        return yy_path
+
+    def test_accepts_contained_manifest_and_disk_discovered_sound_yy(self) -> None:
+        referenced_yy = _make_sound_yy(self.gm_dir, "snd_referenced")
+        orphan_yy = _make_sound_yy(self.gm_dir, "snd_orphan")
+        converter = self._make_converter()
+
+        self.assertEqual(
+            set(converter.find_sound_files()),
+            {referenced_yy, orphan_yy},
+        )
+
+        self._write_yyp(
+            [("snd_referenced", r"sounds\snd_referenced\snd_referenced.yy")]
+        )
+
+        self.assertEqual(converter.find_sound_files(), [referenced_yy])
+
+    def test_rejects_cross_family_manifest_resource_after_normalization(
+        self,
+    ) -> None:
+        cross_family_yy = os.path.join(
+            self.gm_dir,
+            "objects",
+            "snd_cross_family",
+            "snd_cross_family.yy",
+        )
+        os.makedirs(os.path.dirname(cross_family_yy))
+        with open(cross_family_yy, "w", encoding="utf-8") as yy_file:
+            json.dump(MINIMAL_SOUND_YY, yy_file)
+        self._write_yyp(
+            [
+                (
+                    "snd_cross_family",
+                    "sounds/../objects/snd_cross_family/snd_cross_family.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+
+        sound_files = self._make_converter(diagnostics).find_sound_files()
+
+        self.assertEqual(sound_files, [])
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "SoundPaths.yyp")
+        self.assertEqual(rejected[0].resource, "snd_cross_family")
+        self.assertEqual(rejected[0].resource_type, "sound")
+        self.assertEqual(rejected[0].manifest_entry, "resources[0].id.path")
+
+    def test_accepts_owner_and_project_relative_sound_file_forms(self) -> None:
+        references = {
+            "snd_owner": "snd_owner.wav",
+            "snd_project": "sounds/shared/snd_project.wav",
+            "snd_placeholder": (
+                "${project_dir}/sounds/shared/snd_placeholder.wav"
+            ),
+            "snd_backslash": r"sounds\shared\snd_backslash.wav",
+        }
+        shared_dir = os.path.join(self.gm_dir, "sounds", "shared")
+        os.makedirs(shared_dir)
+        yy_paths: dict[str, str] = {}
+        expected_payloads: dict[str, bytes] = {}
+        for index, (sound_name, sound_file) in enumerate(
+            references.items(),
+            start=1,
+        ):
+            yy_path = self._write_sound_yy(sound_name, sound_file)
+            yy_paths[sound_name] = yy_path
+            payload = bytes([index]) * 16
+            expected_payloads[sound_name] = payload
+            audio_path = (
+                os.path.join(os.path.dirname(yy_path), sound_file)
+                if sound_name == "snd_owner"
+                else os.path.join(shared_dir, f"{sound_name}.wav")
+            )
+            with open(audio_path, "wb") as audio_file:
+                audio_file.write(payload)
+
+        converter = self._make_converter()
+        self._write_yyp(
+            [
+                (sound_name, f"sounds/{sound_name}/{sound_name}.yy")
+                for sound_name in references
+            ]
+        )
+        converter.convert_all()
+
+        for sound_name in yy_paths:
+            with self.subTest(sound_name=sound_name):
+                output_path = resource_filesystem_path(
+                    self.godot_dir,
+                    converter._sound_output_paths[sound_name],
+                )
+                with open(output_path, "rb") as output_file:
+                    self.assertEqual(
+                        output_file.read(),
+                        expected_payloads[sound_name],
+                    )
+
+    def test_rejects_unsafe_sound_file_paths_with_owner_diagnostics(self) -> None:
+        outside_path = os.path.join(self.outside_dir, "outside.wav")
+        with open(outside_path, "wb") as outside_file:
+            outside_file.write(b"outside project audio")
+
+        traversal_directory = os.path.join(
+            self.gm_dir,
+            "sounds",
+            "snd_traversal",
+        )
+        unsafe_paths = {
+            "snd_traversal": os.path.relpath(
+                outside_path,
+                traversal_directory,
+            ),
+            "snd_absolute": outside_path,
+            "snd_drive_absolute": r"C:\Games\Outside\sound.wav",
+            "snd_drive_relative": r"C:Outside\sound.wav",
+            "snd_unc": r"\\server\share\sound.wav",
+            "snd_nul": "sound\0.wav",
+            "snd_symlink": "linked.wav",
+        }
+        yy_paths = {
+            sound_name: self._write_sound_yy(sound_name, sound_file)
+            for sound_name, sound_file in unsafe_paths.items()
+        }
+        try:
+            os.symlink(
+                outside_path,
+                os.path.join(
+                    self.gm_dir,
+                    "sounds",
+                    "snd_symlink",
+                    "linked.wav",
+                ),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+        for sound_name, yy_path in yy_paths.items():
+            with self.subTest(sound_name=sound_name):
+                result = converter._process_sound(yy_path)
+                self.assertIsNotNone(result)
+                assert result is not None
+                self.assertFalse(result["success"])
+
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), len(unsafe_paths), rejected)
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {
+                f"sounds/{sound_name}/{sound_name}.yy"
+                for sound_name in unsafe_paths
+            },
+        )
+        self.assertTrue(
+            all(diagnostic.resource_type == "sound" for diagnostic in rejected)
+        )
+        self.assertTrue(
+            all(diagnostic.manifest_entry == "soundFile" for diagnostic in rejected)
+        )
+        self.assertFalse(
+            any(
+                files
+                for _root, _directories, files in os.walk(self.godot_dir)
+            )
+        )
+
+    def test_rejects_non_string_and_empty_sound_file_without_coercion(
+        self,
+    ) -> None:
+        malformed_values: dict[str, object] = {
+            "snd_number": 7,
+            "snd_boolean": True,
+            "snd_null": None,
+            "snd_list": ["list.wav"],
+            "snd_object": {"path": "object.wav"},
+            "snd_empty": "",
+        }
+        yy_paths = {
+            sound_name: self._write_sound_yy(sound_name, sound_file)
+            for sound_name, sound_file in malformed_values.items()
+        }
+        for sound_name in ("snd_number", "snd_boolean", "snd_null"):
+            coerced_name = str(malformed_values[sound_name])
+            with open(
+                os.path.join(os.path.dirname(yy_paths[sound_name]), coerced_name),
+                "wb",
+            ) as audio_file:
+                audio_file.write(b"must not be copied")
+
+        safe_yy = self._write_sound_yy("snd_safe", "snd_safe.wav")
+        with open(
+            os.path.join(os.path.dirname(safe_yy), "snd_safe.wav"),
+            "wb",
+        ) as safe_audio:
+            safe_audio.write(b"safe sibling")
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        safe_output = resource_filesystem_path(
+            self.godot_dir,
+            converter._sound_output_paths["snd_safe"],
+        )
+        with open(safe_output, "rb") as safe_audio:
+            self.assertEqual(safe_audio.read(), b"safe sibling")
+        for sound_name in malformed_values:
+            self.assertFalse(
+                os.path.exists(os.path.join(self.godot_dir, "sounds", sound_name))
+            )
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), len(malformed_values), rejected)
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in rejected},
+            set(malformed_values),
+        )
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {
+                f"sounds/{sound_name}/{sound_name}.yy"
+                for sound_name in malformed_values
+            },
+        )
+        self.assertTrue(
+            all(
+                diagnostic.resource_type == "sound"
+                and diagnostic.manifest_entry == "soundFile"
+                for diagnostic in rejected
+            )
+        )
+
+    def test_shared_pipeline_dedupes_identical_unsafe_sound_file_rejection(
+        self,
+    ) -> None:
+        outside_audio = os.path.join(self.outside_dir, "outside.wav")
+        with open(outside_audio, "wb") as audio_file:
+            audio_file.write(b"outside")
+        sound_name = "snd_shared_diagnostic"
+        sound_directory = os.path.join(self.gm_dir, "sounds", sound_name)
+        unsafe_reference = os.path.relpath(outside_audio, sound_directory)
+        self._write_sound_yy(sound_name, unsafe_reference)
+        diagnostics = DiagnosticCollector()
+        rejection_logs: list[str] = []
+        sound_converter = SoundConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=rejection_logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        sound_converter.convert_all()
+        AssetRegistryConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=rejection_logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).build_entries()
+
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        emitted_rejections = [
+            message
+            for message in rejection_logs
+            if "Rejected GameMaker source path" in message
+        ]
+        self.assertEqual(len(emitted_rejections), 2, emitted_rejections)
+        self.assertEqual(emitted_rejections[0], emitted_rejections[1])
+
+    def test_disk_fallback_rejects_external_directory_and_keeps_safe_sibling(
+        self,
+    ) -> None:
+        safe_yy = _make_sound_yy(self.gm_dir, "snd_safe")
+        outside_sound_directory = os.path.join(
+            self.outside_dir,
+            "snd_directory_link",
+        )
+        os.makedirs(outside_sound_directory)
+        with open(
+            os.path.join(outside_sound_directory, "snd_directory_link.yy"),
+            "w",
+            encoding="utf-8",
+        ) as yy_file:
+            json.dump(MINIMAL_SOUND_YY, yy_file)
+        try:
+            os.symlink(
+                outside_sound_directory,
+                os.path.join(
+                    self.gm_dir,
+                    "sounds",
+                    "snd_directory_link",
+                ),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        diagnostics = DiagnosticCollector()
+
+        sound_files = self._make_converter(diagnostics).find_sound_files()
+
+        self.assertEqual(sound_files, [safe_yy])
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "sounds")
+        self.assertEqual(rejected[0].resource, "snd_directory_link")
+        self.assertEqual(rejected[0].resource_type, "sound")
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "discovered sound entry",
+        )
+
+    def test_rejects_manifest_sound_yy_path_outside_project(self) -> None:
+        outside_yy = os.path.join(self.outside_dir, "snd_escape.yy")
+        with open(outside_yy, "w", encoding="utf-8") as yy_file:
+            json.dump(MINIMAL_SOUND_YY, yy_file)
+        unsafe_path = os.path.relpath(outside_yy, self.gm_dir).replace(
+            os.sep,
+            "/",
+        )
+        self._write_yyp(
+            [("snd_escape", f"sounds/../{unsafe_path}")]
+        )
+        diagnostics = DiagnosticCollector()
+
+        sound_files = self._make_converter(diagnostics).find_sound_files()
+
+        self.assertEqual(sound_files, [])
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "SoundPaths.yyp")
+        self.assertEqual(rejected[0].resource, "snd_escape")
+        self.assertEqual(rejected[0].resource_type, "sound")
+        self.assertEqual(rejected[0].manifest_entry, "resources[0].id.path")
+
+    def test_rejects_disk_discovered_yy_symlink_to_outside_project(self) -> None:
+        outside_yy = os.path.join(self.outside_dir, "snd_link.yy")
+        with open(outside_yy, "w", encoding="utf-8") as yy_file:
+            json.dump(MINIMAL_SOUND_YY, yy_file)
+        sound_dir = os.path.join(self.gm_dir, "sounds", "snd_link")
+        os.makedirs(sound_dir)
+        linked_yy = os.path.join(sound_dir, "snd_link.yy")
+        try:
+            os.symlink(outside_yy, linked_yy)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        diagnostics = DiagnosticCollector()
+
+        sound_files = self._make_converter(diagnostics).find_sound_files()
+
+        self.assertEqual(sound_files, [])
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "sounds/snd_link")
+        self.assertEqual(rejected[0].resource, "snd_link")
+        self.assertEqual(rejected[0].resource_type, "sound")
+        self.assertEqual(rejected[0].manifest_entry, "discovered .yy")
+        self.assertIn(linked_yy, rejected[0].message)
 
 
 class TestSoundConverterEdgeCases(unittest.TestCase):

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
@@ -12,7 +13,8 @@ from src.conversion.project_manifest import (
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    resolve_project_source_path,
+    resolve_project_sidecar_source_path,
+    validate_project_resource_source_path,
 )
 from src.conversion.type_defs import (
     ConversionRunning,
@@ -100,11 +102,12 @@ class GameMakerResourceIndex(BaseConverter):
                  conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None,
                  compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging,
-                         max_workers=max_workers)
+                         max_workers=max_workers, diagnostics=diagnostics)
         self.yyp_path: str | None = None
         self.yyp_data: JsonDict | None = None
         self.project_manifest: GameMakerProjectManifest | None = None
@@ -126,6 +129,9 @@ class GameMakerResourceIndex(BaseConverter):
         self.room_order = []
         self.used_room_order_fallback = False
         self.project_manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            self.project_manifest
+        )
         self.yyp_path = self.project_manifest.yyp_path
         self.yyp_data = self.project_manifest.raw_data if self.project_manifest.raw_data else None
 
@@ -163,9 +169,15 @@ class GameMakerResourceIndex(BaseConverter):
         except OSError:
             return None
 
-        if not yyp_files:
-            return None
-        return os.path.join(self.gm_project_path, yyp_files[0])
+        for filename in yyp_files:
+            resolved = self._resolve_project_source(
+                filename,
+                resource_type="project",
+                field="project file",
+            )
+            if resolved is not None and os.path.isfile(resolved.filesystem_path):
+                return resolved.filesystem_path
+        return None
 
     def get_resource(self, kind: str, name: str) -> IndexedResource | None:
         """Return an indexed non-room resource, or a room resource, by kind/name."""
@@ -265,14 +277,38 @@ class GameMakerResourceIndex(BaseConverter):
             name = resource_ref.name or self._name_from_yyp_path(yyp_path)
             if not name:
                 continue
+            source_owner = (
+                resource_ref.source.path
+                if resource_ref.source is not None
+                else self.yyp_path
+            )
+            source_field = (
+                f"{resource_ref.source.field_path}.id.path"
+                if resource_ref.source is not None
+                else "resource path"
+            )
+            resolved_path = self._resolve_project_source(
+                yyp_path,
+                owner_source_path=source_owner,
+                resource=name,
+                resource_type=resource_ref.resource_type or kind,
+                field=source_field,
+            )
+            if resolved_path is None:
+                continue
             try:
-                resolved_path = resolve_project_source_path(
-                    self.gm_project_path,
-                    yyp_path,
+                validate_project_resource_source_path(
+                    resolved_path,
+                    kind,
                 )
             except ProjectSourcePathError as exc:
-                self._safe_log(
-                    f"Warning: Skipping GameMaker resource {name}: {exc}"
+                self._report_source_path_rejection(
+                    yyp_path,
+                    exc,
+                    owner_source_path=source_owner,
+                    resource=name,
+                    resource_type=resource_ref.resource_type or kind,
+                    field=source_field,
                 )
                 continue
             yyp_path = resolved_path.source_path
@@ -294,29 +330,119 @@ class GameMakerResourceIndex(BaseConverter):
 
     def _index_disk_resources(self) -> None:
         for kind in self.RESOURCE_EXTENSIONS:
-            kind_dir = os.path.join(self.gm_project_path, kind)
-            if not os.path.isdir(kind_dir):
+            resolved_kind_dir = self._resolve_discovered_project_source(
+                os.path.join(self.gm_project_path, kind),
+                resource_type=kind,
+                field="disk fallback directory",
+            )
+            if (
+                resolved_kind_dir is None
+                or not os.path.isdir(resolved_kind_dir.filesystem_path)
+            ):
                 continue
 
-            for name in sorted(os.listdir(kind_dir)):
-                resource_dir = os.path.join(kind_dir, name)
-                yy_path = os.path.join(resource_dir, name + ".yy")
-                if not os.path.isdir(resource_dir) or not os.path.isfile(yy_path):
-                    continue
-                yyp_path = "/".join([kind, name, name + ".yy"])
-                self.resources[kind][name] = self._make_resource(
-                    kind, name, yy_path, yyp_path
+            for name in sorted(os.listdir(resolved_kind_dir.filesystem_path)):
+                resolved_resource_dir = self._resolve_discovered_project_source(
+                    os.path.join(resolved_kind_dir.filesystem_path, name),
+                    owner_source_path=resolved_kind_dir.source_path,
+                    resource=name,
+                    resource_type=kind,
+                    field="disk fallback resource directory",
                 )
-        extensions_dir = os.path.join(self.gm_project_path, "extensions")
-        if not os.path.isdir(extensions_dir):
+                if (
+                    resolved_resource_dir is None
+                    or not os.path.isdir(resolved_resource_dir.filesystem_path)
+                ):
+                    continue
+                resolved_yy = self._resolve_discovered_project_source(
+                    os.path.join(
+                        resolved_resource_dir.filesystem_path,
+                        name + ".yy",
+                    ),
+                    owner_source_path=resolved_resource_dir.source_path,
+                    resource=name,
+                    resource_type=kind,
+                    field="disk fallback resource metadata",
+                )
+                if resolved_yy is None:
+                    continue
+                try:
+                    validate_project_resource_source_path(
+                        resolved_yy,
+                        kind,
+                    )
+                except ProjectSourcePathError as exc:
+                    self._report_source_path_rejection(
+                        resolved_yy.source_path,
+                        exc,
+                        owner_source_path=resolved_resource_dir.source_path,
+                        resource=name,
+                        resource_type=kind,
+                        field="disk fallback resource metadata",
+                    )
+                    continue
+                if not os.path.isfile(resolved_yy.filesystem_path):
+                    continue
+                self.resources[kind][name] = self._make_resource(
+                    kind,
+                    name,
+                    resolved_yy.filesystem_path,
+                    resolved_yy.source_path,
+                )
+        resolved_extensions_dir = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, "extensions"),
+            resource_type="extensions",
+            field="disk fallback directory",
+        )
+        if (
+            resolved_extensions_dir is None
+            or not os.path.isdir(resolved_extensions_dir.filesystem_path)
+        ):
             return
-        for name in sorted(os.listdir(extensions_dir)):
-            extension_dir = os.path.join(extensions_dir, name)
-            yy_path = os.path.join(extension_dir, name + ".yy")
-            if not os.path.isdir(extension_dir) or not os.path.isfile(yy_path):
+        for name in sorted(os.listdir(resolved_extensions_dir.filesystem_path)):
+            resolved_extension_dir = self._resolve_discovered_project_source(
+                os.path.join(resolved_extensions_dir.filesystem_path, name),
+                owner_source_path=resolved_extensions_dir.source_path,
+                resource=name,
+                resource_type="extensions",
+                field="disk fallback resource directory",
+            )
+            if (
+                resolved_extension_dir is None
+                or not os.path.isdir(resolved_extension_dir.filesystem_path)
+            ):
                 continue
-            yyp_path = "/".join(["extensions", name, name + ".yy"])
-            self._index_extension_resource(name, yy_path, yyp_path)
+            resolved_yy = self._resolve_discovered_project_source(
+                os.path.join(resolved_extension_dir.filesystem_path, name + ".yy"),
+                owner_source_path=resolved_extension_dir.source_path,
+                resource=name,
+                resource_type="extensions",
+                field="disk fallback resource metadata",
+            )
+            if resolved_yy is None:
+                continue
+            try:
+                validate_project_resource_source_path(
+                    resolved_yy,
+                    "extensions",
+                )
+            except ProjectSourcePathError as exc:
+                self._report_source_path_rejection(
+                    resolved_yy.source_path,
+                    exc,
+                    owner_source_path=resolved_extension_dir.source_path,
+                    resource=name,
+                    resource_type="extensions",
+                    field="disk fallback resource metadata",
+                )
+                continue
+            if not os.path.isfile(resolved_yy.filesystem_path):
+                continue
+            self._index_extension_resource(
+                name,
+                resolved_yy.filesystem_path,
+                resolved_yy.source_path,
+            )
 
     def _index_extension_resource(self, name: str, yy_path: str, yyp_path: str) -> None:
         if not os.path.isfile(yy_path):
@@ -403,6 +529,28 @@ class GameMakerResourceIndex(BaseConverter):
             )
             return None
 
+        raw_creation_code_file = data.get("creationCodeFile")
+        creation_code_file = (
+            raw_creation_code_file
+            if isinstance(raw_creation_code_file, str)
+            else ""
+        )
+        if (
+            raw_creation_code_file is not None
+            and not isinstance(raw_creation_code_file, str)
+        ):
+            self._report_source_path_rejection(
+                repr(raw_creation_code_file),
+                ProjectSourcePathError(
+                    "GameMaker room creationCodeFile must be a string: "
+                    f"{raw_creation_code_file!r}"
+                ),
+                owner_source_path=resource.yyp_path,
+                resource=resource.name,
+                resource_type="room",
+                field="creationCodeFile",
+            )
+
         return IndexedRoom(
             name=resource.name,
             yy_path=resource.yy_path,
@@ -416,7 +564,7 @@ class GameMakerResourceIndex(BaseConverter):
             layers=data.get("layers") or [],
             instance_creation_order=data.get("instanceCreationOrder") or [],
             parent_room=data.get("parentRoom"),
-            creation_code_file=data.get("creationCodeFile") or "",
+            creation_code_file=creation_code_file,
             inherit_code=bool(data.get("inheritCode", False)),
             inherit_creation_order=bool(data.get("inheritCreationOrder", False)),
             inherit_layers=bool(data.get("inheritLayers", False)),
@@ -575,13 +723,23 @@ class GameMakerResourceIndex(BaseConverter):
     def _inherited_creation_code_file(self, parent: IndexedRoom) -> str:
         if not parent.creation_code_file:
             return ""
-        normalized = parent.creation_code_file.replace("\\", "/")
-        if normalized.startswith("rooms/") or normalized.startswith("${project_dir}/"):
-            return normalized
-        if os.path.isabs(normalized):
-            return normalized
-        parent_dir = os.path.relpath(os.path.dirname(parent.yy_path), self.gm_project_path)
-        return "/".join([parent_dir.replace(os.sep, "/"), normalized])
+        try:
+            resolved = resolve_project_sidecar_source_path(
+                self.gm_project_path,
+                parent.yyp_path,
+                parent.creation_code_file,
+            )
+        except ProjectSourcePathError as exc:
+            self._report_source_path_rejection(
+                parent.creation_code_file,
+                exc,
+                owner_source_path=parent.yyp_path,
+                resource=parent.name,
+                resource_type="room",
+                field="creationCodeFile",
+            )
+            return ""
+        return resolved.source_path
 
     @staticmethod
     def _room_reference_name(reference: JsonDict | None) -> str:

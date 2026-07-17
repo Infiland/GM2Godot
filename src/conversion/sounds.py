@@ -11,9 +11,15 @@ from typing import TypedDict, cast
 from src.localization import get_localized
 from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
 from src.conversion.project_manifest import load_gamemaker_project_manifest
-from src.conversion.project_source_paths import ProjectSourcePathError, resolve_project_source_path
+from src.conversion.project_godot import format_godot_string
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    validate_project_resource_source_path,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -40,45 +46,155 @@ class SoundConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False, max_workers: int | None = None,
-                 organize_by_audio_group: bool = False) -> None:
+                 organize_by_audio_group: bool = False,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
         self.organize_by_audio_group = bool(organize_by_audio_group)
         self._sound_output_paths: dict[str, str] = {}
 
     def find_sound_files(self) -> list[str]:
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="sound",
+        )
         if manifest.yyp_path is not None:
             referenced_files: list[str] = []
             for resource in manifest.resources:
                 if resource.kind.casefold() != "sounds":
                     continue
+                manifest_field = (
+                    f"{resource.source.field_path}.id.path"
+                    if resource.source is not None and resource.source.field_path
+                    else "resources[].id.path"
+                )
+                resolved = self._resolve_project_source(
+                    resource.path,
+                    owner_source_path=manifest.yyp_path,
+                    resource=resource.name,
+                    resource_type="sound",
+                    field=manifest_field,
+                )
+                if resolved is None:
+                    continue
                 try:
-                    resolved = resolve_project_source_path(
-                        self.gm_project_path,
-                        resource.path,
-                    )
+                    validate_project_resource_source_path(resolved, "sounds")
                 except ProjectSourcePathError as exc:
-                    self._safe_log(
-                        f"Warning: Skipping GameMaker sound {resource.name}: {exc}"
+                    self._report_source_path_rejection(
+                        resource.path,
+                        exc,
+                        owner_source_path=manifest.yyp_path,
+                        resource=resource.name,
+                        resource_type="sound",
+                        field=manifest_field,
                     )
                     continue
-                if resolved.source_path.casefold().endswith(".yy") and os.path.isfile(
-                    resolved.filesystem_path
-                ):
+                if os.path.isfile(resolved.filesystem_path):
                     referenced_files.append(resolved.filesystem_path)
             return referenced_files
 
-        sound_folder = os.path.join(self.gm_project_path, 'sounds')
+        sound_folder = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'sounds'),
+            resource_type="sound",
+            field="sounds directory",
+        )
+        if sound_folder is None:
+            return []
+
         sound_files: list[str] = []
-        for root, _, files in os.walk(sound_folder):
-            sound_files.extend(
-                os.path.join(root, file)
-                for file in files
-                if file.lower().endswith('.yy') and not file.lower().endswith('.old.yy')
+        pending_directories = [sound_folder]
+        visited_directories: set[str] = set()
+        while pending_directories:
+            directory = pending_directories.pop()
+            resolved_directory = self._resolve_discovered_project_source(
+                directory.filesystem_path,
+                owner_source_path=directory.source_path,
+                resource=os.path.basename(directory.source_path),
+                resource_type="sound",
+                field="discovered sound directory",
             )
-        return sound_files
+            if resolved_directory is None or not os.path.isdir(
+                resolved_directory.filesystem_path
+            ):
+                continue
+
+            canonical_directory = os.path.normcase(
+                os.path.realpath(resolved_directory.filesystem_path)
+            )
+            if canonical_directory in visited_directories:
+                continue
+            visited_directories.add(canonical_directory)
+
+            child_directories: list[ResolvedProjectSourcePath] = []
+            try:
+                with os.scandir(resolved_directory.filesystem_path) as entries:
+                    for entry in sorted(entries, key=lambda item: item.name):
+                        filename = entry.name
+                        lower_filename = filename.casefold()
+                        is_sound_yy = (
+                            lower_filename.endswith('.yy')
+                            and not lower_filename.endswith('.old.yy')
+                        )
+                        try:
+                            is_unlinked_directory = entry.is_dir(
+                                follow_symlinks=False
+                            )
+                            is_symlink = entry.is_symlink()
+                        except OSError:
+                            continue
+                        if not is_sound_yy and not is_unlinked_directory and not is_symlink:
+                            continue
+
+                        resolved_entry = self._resolve_discovered_project_source(
+                            entry.path,
+                            owner_source_path=resolved_directory.source_path,
+                            resource=(
+                                os.path.splitext(filename)[0]
+                                if is_sound_yy
+                                else filename
+                            ),
+                            resource_type="sound",
+                            field=(
+                                "discovered .yy"
+                                if is_sound_yy
+                                else "discovered sound entry"
+                            ),
+                        )
+                        if resolved_entry is None:
+                            continue
+
+                        if os.path.isdir(resolved_entry.filesystem_path):
+                            # Preserve os.walk's historical behavior for contained
+                            # directory links while still rejecting escaping links.
+                            if not is_symlink:
+                                child_directories.append(resolved_entry)
+                            continue
+                        if is_sound_yy and os.path.isfile(
+                            resolved_entry.filesystem_path
+                        ):
+                            try:
+                                validate_project_resource_source_path(
+                                    resolved_entry,
+                                    "sounds",
+                                )
+                            except ProjectSourcePathError as exc:
+                                self._report_source_path_rejection(
+                                    entry.path,
+                                    exc,
+                                    owner_source_path=resolved_directory.source_path,
+                                    resource=os.path.splitext(filename)[0],
+                                    resource_type="sound",
+                                    field="discovered .yy",
+                                )
+                                continue
+                            sound_files.append(resolved_entry.filesystem_path)
+            except OSError:
+                continue
+            pending_directories.extend(reversed(child_directories))
+        return sorted(sound_files)
 
     def _parse_sound_yy(self, yy_path: str) -> SoundData | None:
         data = self._read_yy_file(yy_path)
@@ -86,10 +202,36 @@ class SoundConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=yy_path))
             return None
 
+        raw_sound_file = data.get('soundFile')
+        if not isinstance(raw_sound_file, str) or not raw_sound_file:
+            raw_name = data.get('name')
+            sound_name = (
+                raw_name
+                if isinstance(raw_name, str) and raw_name
+                else os.path.splitext(os.path.basename(yy_path))[0]
+            )
+            rejected_value = (
+                raw_sound_file
+                if isinstance(raw_sound_file, str)
+                else repr(raw_sound_file)
+            )
+            self._report_source_path_rejection(
+                rejected_value,
+                ProjectSourcePathError(
+                    "GameMaker soundFile must be a non-empty string: "
+                    f"{raw_sound_file!r}"
+                ),
+                owner_source_path=yy_path,
+                resource=sound_name,
+                resource_type="sound",
+                field="soundFile",
+            )
+            return None
+
         try:
             return {
                 'name': str(data['name']),
-                'soundFile': str(data.get('soundFile', '')),
+                'soundFile': raw_sound_file,
                 'volume': float(data.get('volume', 1.0)),
                 'type': int(data.get('type', 0)),
                 'bitDepth': int(data.get('bitDepth', 16)),
@@ -159,7 +301,7 @@ class SoundConverter(BaseConverter):
                 f'path=""\n'
                 f'\n'
                 f'[deps]\n'
-                f'source_file="{res_path}"\n'
+                f'source_file={format_godot_string(res_path)}\n'
                 f'dest_files=[]\n'
                 f'\n'
                 f'[params]\n'
@@ -183,7 +325,7 @@ class SoundConverter(BaseConverter):
                 f'path=""\n'
                 f'\n'
                 f'[deps]\n'
-                f'source_file="{res_path}"\n'
+                f'source_file={format_godot_string(res_path)}\n'
                 f'dest_files=[]\n'
                 f'\n'
                 f'[params]\n'
@@ -202,7 +344,7 @@ class SoundConverter(BaseConverter):
                 f'path=""\n'
                 f'\n'
                 f'[deps]\n'
-                f'source_file="{res_path}"\n'
+                f'source_file={format_godot_string(res_path)}\n'
                 f'dest_files=[]\n'
                 f'\n'
                 f'[params]\n'
@@ -218,25 +360,70 @@ class SoundConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        sound_data = self._parse_sound_yy(yy_path)
+        discovered_name = os.path.splitext(os.path.basename(yy_path))[0]
+        resolved_yy = self._resolve_discovered_project_source(
+            yy_path,
+            owner_source_path=yy_path,
+            resource=discovered_name,
+            resource_type="sound",
+            field="sound .yy",
+        )
+        if resolved_yy is None:
+            return {
+                'success': False,
+                'name': discovered_name,
+                'audio_group': 'audiogroup_default',
+            }
+        try:
+            validate_project_resource_source_path(resolved_yy, "sounds")
+        except ProjectSourcePathError as exc:
+            self._report_source_path_rejection(
+                yy_path,
+                exc,
+                owner_source_path=yy_path,
+                resource=discovered_name,
+                resource_type="sound",
+                field="sound .yy",
+            )
+            return {
+                'success': False,
+                'name': discovered_name,
+                'audio_group': 'audiogroup_default',
+            }
+
+        sound_data = self._parse_sound_yy(resolved_yy.filesystem_path)
         if sound_data is None:
-            sound_name = os.path.splitext(os.path.basename(yy_path))[0]
-            return {'success': False, 'name': sound_name, 'audio_group': 'audiogroup_default'}
+            return {
+                'success': False,
+                'name': discovered_name,
+                'audio_group': 'audiogroup_default',
+            }
 
         sound_name = sound_data['name']
-        sound_file = sound_data['soundFile']
+        sound_file_reference = sound_data['soundFile']
         audio_group = sound_data['audioGroupId'] or 'audiogroup_default'
 
-        if not sound_file:
+        if not sound_file_reference:
             self._safe_log(get_localized("Console_Convertor_Sounds_NoFile").format(name=sound_name))
             return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
-        audio_path = os.path.join(os.path.dirname(yy_path), sound_file)
-        if not os.path.isfile(audio_path):
-            self._safe_log(get_localized("Console_Convertor_Sounds_FileMissing").format(
-                name=sound_name, sound_file=sound_file))
+        resolved_audio = self._resolve_project_source(
+            sound_file_reference,
+            owner_source_path=resolved_yy.source_path,
+            resource=sound_name,
+            resource_type="sound",
+            field="soundFile",
+        )
+        if resolved_audio is None:
             return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
+        audio_path = resolved_audio.filesystem_path
+        if not os.path.isfile(audio_path):
+            self._safe_log(get_localized("Console_Convertor_Sounds_FileMissing").format(
+                name=sound_name, sound_file=sound_file_reference))
+            return {'success': False, 'name': sound_name, 'audio_group': audio_group}
+
+        sound_file = os.path.basename(audio_path)
         resource_path = self._sound_output_paths.get(sound_name, "")
         if resource_path:
             dest_path = resource_filesystem_path(self.godot_project_path, resource_path)
@@ -245,7 +432,7 @@ class SoundConverter(BaseConverter):
             res_subfolder = os.path.dirname(resource_relative).replace("\\", "/")
             sound_file = os.path.basename(dest_path)
         else:
-            subfolder = self._get_subfolder_from_yy(yy_path)
+            subfolder = self._get_subfolder_from_yy(resolved_yy.filesystem_path)
             output_dir, res_subfolder = self._build_output_paths(sound_name, subfolder, audio_group)
             dest_path = os.path.join(output_dir, sound_file)
         os.makedirs(output_dir, exist_ok=True)
@@ -277,12 +464,6 @@ class SoundConverter(BaseConverter):
     def convert_sounds(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_sounds_path, exist_ok=True)
-
-        gm_sounds_path = os.path.join(self.gm_project_path, 'sounds')
-
-        if not os.path.exists(gm_sounds_path):
-            self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
-            return
 
         sound_files = sorted(self.find_sound_files())
 

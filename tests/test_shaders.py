@@ -1,7 +1,7 @@
 import json
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -11,6 +11,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.shaders import ShaderConverter
 from src.conversion.asset_output_paths import build_asset_output_paths
+from src.conversion.diagnostics import DiagnosticCollector
 
 SAMPLE_FSH = """\
 precision highp float;
@@ -343,6 +344,489 @@ void main()
             if filename.endswith(".gdshader")
         ]
         self.assertEqual(generated_shaders, [output_path])
+
+
+class TestShaderSourcePathContainment(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.gm_dir, "shaders"))
+        self.diagnostics = DiagnosticCollector()
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    @staticmethod
+    def _write_json(path: str, value: object) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as output_file:
+            json.dump(value, output_file)
+
+    @staticmethod
+    def _write_fragment(path: str, marker: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fragment_file:
+            fragment_file.write(SAMPLE_FSH + f"\n// {marker}\n")
+
+    def _write_yyp(self, resources: list[tuple[str, str]]) -> str:
+        yyp_path = os.path.join(self.gm_dir, "ShaderContainment.yyp")
+        self._write_json(
+            yyp_path,
+            {
+                "%Name": "Shader Containment",
+                "resources": [
+                    {
+                        "id": {"name": name, "path": path},
+                        "resourceType": "GMShader",
+                    }
+                    for name, path in resources
+                ],
+            },
+        )
+        return yyp_path
+
+    def _make_converter(self) -> ShaderConverter:
+        return ShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=self.diagnostics,
+        )
+
+    def _source_path_rejections(self):
+        return [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+
+    def _generated_shaders(self) -> list[str]:
+        return [
+            os.path.join(root, filename)
+            for root, _directories, filenames in os.walk(self.godot_dir)
+            for filename in filenames
+            if filename.endswith(".gdshader")
+        ]
+
+    def test_rejects_malformed_manifest_shader_paths_with_yyp_diagnostics(
+        self,
+    ) -> None:
+        outside_yy = os.path.join(self.outside_dir, "outside.yy")
+        self._write_json(
+            outside_yy,
+            {"name": "outside", "resourceType": "GMShader"},
+        )
+        self._write_fragment(
+            os.path.splitext(outside_yy)[0] + ".fsh",
+            "OUTSIDE_MANIFEST_STAGE",
+        )
+        relative_outside = os.path.relpath(outside_yy, self.gm_dir).replace(
+            os.sep,
+            "/",
+        )
+        unsafe_paths = [
+            f"shaders/../{relative_outside}",
+            outside_yy,
+            r"C:\Games\Outside\shader.yy",
+            r"C:Outside\shader.yy",
+            r"\\server\share\shader.yy",
+            "shaders/bad\0shader.yy",
+        ]
+        self._write_yyp(
+            [
+                (f"shd_unsafe_{index}", path)
+                for index, path in enumerate(unsafe_paths)
+            ]
+        )
+
+        self._make_converter().convert_all()
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), len(unsafe_paths), rejected)
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in rejected},
+            {f"shd_unsafe_{index}" for index in range(len(unsafe_paths))},
+        )
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {"ShaderContainment.yyp"},
+        )
+        self.assertEqual(
+            {diagnostic.manifest_entry for diagnostic in rejected},
+            {
+                f"resources[{index}].id.path"
+                for index in range(len(unsafe_paths))
+            },
+        )
+        self.assertTrue(
+            all(diagnostic.resource_type == "shader" for diagnostic in rejected)
+        )
+        self.assertEqual(self._generated_shaders(), [])
+
+    def test_rejects_manifest_yy_and_stage_symlink_escapes(self) -> None:
+        outside_yy = os.path.join(self.outside_dir, "outside.yy")
+        outside_fragment = os.path.join(self.outside_dir, "outside.fsh")
+        self._write_json(
+            outside_yy,
+            {"name": "outside", "resourceType": "GMShader"},
+        )
+        self._write_fragment(outside_fragment, "OUTSIDE_FILE_LINK")
+
+        yy_link_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_yy_link",
+        )
+        os.makedirs(yy_link_directory)
+        stage_link_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_stage_link",
+        )
+        os.makedirs(stage_link_directory)
+        self._write_json(
+            os.path.join(stage_link_directory, "shd_stage_link.yy"),
+            {"name": "shd_stage_link", "resourceType": "GMShader"},
+        )
+
+        outside_asset_directory = os.path.join(
+            self.outside_dir,
+            "outside_asset",
+        )
+        self._write_json(
+            os.path.join(outside_asset_directory, "shd_directory_link.yy"),
+            {"name": "shd_directory_link", "resourceType": "GMShader"},
+        )
+        self._write_fragment(
+            os.path.join(outside_asset_directory, "shd_directory_link.fsh"),
+            "OUTSIDE_DIRECTORY_LINK",
+        )
+        try:
+            os.symlink(
+                outside_yy,
+                os.path.join(yy_link_directory, "shd_yy_link.yy"),
+            )
+            os.symlink(
+                outside_fragment,
+                os.path.join(stage_link_directory, "shd_stage_link.fsh"),
+            )
+            os.symlink(
+                outside_asset_directory,
+                os.path.join(
+                    self.gm_dir,
+                    "shaders",
+                    "shd_directory_link",
+                ),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        self._write_yyp(
+            [
+                ("shd_yy_link", "shaders/shd_yy_link/shd_yy_link.yy"),
+                (
+                    "shd_stage_link",
+                    "shaders/shd_stage_link/shd_stage_link.yy",
+                ),
+                (
+                    "shd_directory_link",
+                    "shaders/shd_directory_link/shd_directory_link.yy",
+                ),
+            ]
+        )
+
+        self._make_converter().convert_all()
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 3, rejected)
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in rejected},
+            {"shd_yy_link", "shd_stage_link", "shd_directory_link"},
+        )
+        stage_rejection = next(
+            diagnostic
+            for diagnostic in rejected
+            if diagnostic.resource == "shd_stage_link"
+        )
+        self.assertEqual(
+            stage_rejection.source_path,
+            "shaders/shd_stage_link/shd_stage_link.yy",
+        )
+        self.assertEqual(stage_rejection.manifest_entry, "derived .fsh stage")
+        self.assertEqual(self._generated_shaders(), [])
+
+    def test_manifest_requires_shader_yy_family_and_suffix(self) -> None:
+        cross_family_yy = os.path.join(
+            self.gm_dir,
+            "objects",
+            "shd_cross_family",
+            "shd_cross_family.yy",
+        )
+        self._write_json(
+            cross_family_yy,
+            {"name": "shd_cross_family", "resourceType": "GMShader"},
+        )
+        self._write_fragment(
+            os.path.splitext(cross_family_yy)[0] + ".fsh",
+            "CROSS_FAMILY_STAGE",
+        )
+        non_yy_path = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_non_yy",
+            "shd_non_yy.fsh",
+        )
+        self._write_fragment(non_yy_path, "NON_YY_MANIFEST_STAGE")
+        safe_yy = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_safe",
+            "shd_safe.yy",
+        )
+        self._write_json(
+            safe_yy,
+            {"name": "shd_safe", "resourceType": "GMShader"},
+        )
+        self._write_fragment(
+            os.path.splitext(safe_yy)[0] + ".fsh",
+            "SAFE_MANIFEST_STAGE",
+        )
+        self._write_yyp(
+            [
+                (
+                    "shd_cross_family",
+                    "shaders/../objects/shd_cross_family/shd_cross_family.yy",
+                ),
+                ("shd_non_yy", "shaders/shd_non_yy/shd_non_yy.fsh"),
+                ("shd_safe", "shaders/shd_safe/shd_safe.yy"),
+            ]
+        )
+
+        self._make_converter().convert_all()
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(
+            [
+                (
+                    diagnostic.resource,
+                    diagnostic.source_path,
+                    diagnostic.manifest_entry,
+                )
+                for diagnostic in rejected
+            ],
+            [
+                (
+                    "shd_cross_family",
+                    "ShaderContainment.yyp",
+                    "resources[0].id.path",
+                ),
+                (
+                    "shd_non_yy",
+                    "ShaderContainment.yyp",
+                    "resources[1].id.path",
+                ),
+            ],
+        )
+        generated = self._generated_shaders()
+        self.assertEqual(len(generated), 1, generated)
+        with open(generated[0], encoding="utf-8") as shader_file:
+            contents = shader_file.read()
+        self.assertIn("SAFE_MANIFEST_STAGE", contents)
+        self.assertNotIn("CROSS_FAMILY_STAGE", contents)
+        self.assertNotIn("NON_YY_MANIFEST_STAGE", contents)
+
+    def test_disk_fallback_rejects_file_and_directory_symlink_escapes(
+        self,
+    ) -> None:
+        outside_fragment = os.path.join(self.outside_dir, "outside.fsh")
+        self._write_fragment(outside_fragment, "OUTSIDE_DISK_FILE")
+        outside_shader_directory = os.path.join(
+            self.outside_dir,
+            "outside_shader_directory",
+        )
+        self._write_fragment(
+            os.path.join(outside_shader_directory, "outside_dir.fsh"),
+            "OUTSIDE_DISK_DIRECTORY",
+        )
+        containing_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "contained",
+        )
+        self._write_fragment(
+            os.path.join(containing_directory, "shd_safe_sibling.fsh"),
+            "SAFE_DISK_SIBLING",
+        )
+        try:
+            os.symlink(
+                outside_fragment,
+                os.path.join(containing_directory, "shd_file_link.fsh"),
+            )
+            os.symlink(
+                outside_shader_directory,
+                os.path.join(containing_directory, "linked_directory"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        self._make_converter().convert_all()
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 2, rejected)
+        self.assertEqual(
+            {
+                (
+                    diagnostic.resource,
+                    diagnostic.source_path,
+                    diagnostic.manifest_entry,
+                )
+                for diagnostic in rejected
+            },
+            {
+                (
+                    "shd_file_link",
+                    "shaders/contained",
+                    "discovered .fsh stage",
+                ),
+                (
+                    "linked_directory",
+                    "shaders/contained",
+                    "discovered shader directory",
+                ),
+            },
+        )
+        generated = self._generated_shaders()
+        self.assertEqual(len(generated), 1, generated)
+        with open(generated[0], encoding="utf-8") as shader_file:
+            contents = shader_file.read()
+        self.assertIn("SAFE_DISK_SIBLING", contents)
+        self.assertNotIn("OUTSIDE_DISK_FILE", contents)
+        self.assertNotIn("OUTSIDE_DISK_DIRECTORY", contents)
+
+    def test_disk_fallback_rejects_yy_symlink_but_converts_safe_stage(
+        self,
+    ) -> None:
+        shader_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_safe_stage",
+        )
+        self._write_fragment(
+            os.path.join(shader_directory, "shd_safe_stage.fsh"),
+            "SAFE_STAGE",
+        )
+        outside_yy = os.path.join(self.outside_dir, "outside.yy")
+        self._write_json(
+            outside_yy,
+            {"name": "outside_name", "resourceType": "GMShader"},
+        )
+        try:
+            os.symlink(
+                outside_yy,
+                os.path.join(shader_directory, "shd_safe_stage.yy"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        self._make_converter().convert_all()
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].resource, "shd_safe_stage")
+        self.assertEqual(rejected[0].manifest_entry, "discovered .yy")
+        self.assertEqual(
+            rejected[0].source_path,
+            "shaders/shd_safe_stage",
+        )
+        generated = self._generated_shaders()
+        self.assertEqual(len(generated), 1, generated)
+        with open(generated[0], encoding="utf-8") as shader_file:
+            self.assertIn("SAFE_STAGE", shader_file.read())
+
+    def test_disk_fallback_rejects_contained_cross_family_shader_yy_link(
+        self,
+    ) -> None:
+        linked_name = "shd_cross_family_link"
+        wrong_family_yy = os.path.join(
+            self.gm_dir,
+            "objects",
+            "wrong_shader",
+            "target.yy",
+        )
+        self._write_json(
+            wrong_family_yy,
+            {
+                "name": "WRONG_FAMILY_SHADER_NAME",
+                "resourceType": "GMShader",
+            },
+        )
+        linked_directory = os.path.join(self.gm_dir, "shaders", linked_name)
+        os.makedirs(linked_directory)
+        try:
+            os.symlink(
+                wrong_family_yy,
+                os.path.join(linked_directory, linked_name + ".yy"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        self._write_fragment(
+            os.path.join(linked_directory, linked_name + ".fsh"),
+            "LINKED_DIRECTORY_SAFE_STAGE",
+        )
+
+        safe_name = "shd_safe_sibling"
+        safe_directory = os.path.join(self.gm_dir, "shaders", safe_name)
+        self._write_json(
+            os.path.join(safe_directory, safe_name + ".yy"),
+            {"name": safe_name, "resourceType": "GMShader"},
+        )
+        self._write_fragment(
+            os.path.join(safe_directory, safe_name + ".fsh"),
+            "SAFE_SIBLING_STAGE",
+        )
+
+        self._make_converter().convert_all()
+
+        generated = self._generated_shaders()
+        self.assertEqual(len(generated), 2, generated)
+        generated_by_name = {os.path.basename(path): path for path in generated}
+        self.assertNotIn("wrong_family_shader_name.gdshader", generated_by_name)
+        with open(
+            generated_by_name[linked_name + ".gdshader"],
+            encoding="utf-8",
+        ) as shader_file:
+            self.assertIn("LINKED_DIRECTORY_SAFE_STAGE", shader_file.read())
+        with open(
+            generated_by_name[safe_name + ".gdshader"],
+            encoding="utf-8",
+        ) as shader_file:
+            self.assertIn("SAFE_SIBLING_STAGE", shader_file.read())
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, f"shaders/{linked_name}")
+        self.assertEqual(rejected[0].resource, linked_name)
+        self.assertEqual(rejected[0].resource_type, "shader")
+        self.assertEqual(rejected[0].manifest_entry, "discovered .yy")
+
+    def test_convert_shader_rejects_direct_source_outside_project(self) -> None:
+        outside_fragment = os.path.join(self.outside_dir, "outside.fsh")
+        output_path = os.path.join(self.godot_dir, "outside.gdshader")
+        self._write_fragment(outside_fragment, "DIRECT_OUTSIDE")
+
+        self._make_converter().convert_shader(outside_fragment, output_path)
+
+        self.assertFalse(os.path.exists(output_path))
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].resource, "outside")
+        self.assertEqual(rejected[0].resource_type, "shader")
+        self.assertEqual(rejected[0].manifest_entry, "shader stage")
 
 
 class TestShaderConverterSubfolders(unittest.TestCase):

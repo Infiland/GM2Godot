@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, cast
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectTextureGroup,
@@ -14,7 +16,6 @@ from src.conversion.project_manifest import (
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.fonts import (
     bundled_font_output_filename,
-    resolve_bundled_font_source,
     resolve_system_font_source,
 )
 from src.conversion.generated_paths import (
@@ -25,7 +26,8 @@ from src.conversion.generated_paths import (
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    resolve_project_source_path,
+    is_safe_project_source_component,
+    validate_project_resource_source_path,
 )
 from src.conversion.script_functions import modern_script_function_names
 from src.conversion.type_defs import (
@@ -205,6 +207,7 @@ class AssetRegistryConverter(BaseConverter):
         max_workers: int | None = None,
         organize_sounds_by_audio_group: bool = False,
         macro_configuration: str | None = None,
+        diagnostics: DiagnosticCollector | None = None,
     ) -> None:
         super().__init__(
             gm_project_path,
@@ -215,6 +218,7 @@ class AssetRegistryConverter(BaseConverter):
             update_log_callback,
             compact_logging,
             max_workers=max_workers,
+            diagnostics=diagnostics,
         )
         self.organize_sounds_by_audio_group = bool(organize_sounds_by_audio_group)
         self.macro_configuration = macro_configuration
@@ -297,7 +301,12 @@ class AssetRegistryConverter(BaseConverter):
         self._write_timeline_action_scripts(entries)
         write_path_registry(self.gm_project_path, self.godot_project_path, entries)
         write_animation_curve_registry(self.gm_project_path, self.godot_project_path, entries)
-        write_extension_compatibility_outputs(self.gm_project_path, self.godot_project_path)
+        write_extension_compatibility_outputs(
+            self.gm_project_path,
+            self.godot_project_path,
+            diagnostics=self.diagnostics,
+            log_callback=self.log_callback,
+        )
 
         self.log_callback(
             "Generated GameMaker asset registry: {path} ({count} assets)".format(
@@ -318,39 +327,52 @@ class AssetRegistryConverter(BaseConverter):
         )
 
     def _load_project_resources(self) -> tuple[_ProjectResource, ...]:
-        yyp_path = self._find_yyp_path()
-        if yyp_path is not None:
-            yyp_data = self._read_yy_file(yyp_path)
-            if yyp_data is not None:
-                resources = list(self._resources_from_yyp(yyp_data))
-                resources.extend(self._included_files_from_disk())
-                return tuple(self._dedupe_resources(resources))
+        manifest_rejected_fields = (
+            self._record_project_manifest_source_path_diagnostics(
+                self.project_manifest,
+                include_project_sources=True,
+            )
+        )
+        yyp_path = self.project_manifest.yyp_path
+        manifest_parse_failed = any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in self.project_manifest.diagnostics
+        )
+        yyp_source_path = self._diagnostic_source_path(yyp_path)
+        if (
+            yyp_path is not None
+            and yyp_source_path is not None
+            and not manifest_parse_failed
+        ):
+            resources = list(
+                self._resources_from_yyp(
+                    self.project_manifest.raw_data,
+                    yyp_source_path,
+                    manifest_rejected_fields,
+                )
+            )
+            resources.extend(self._included_files_from_disk())
+            return tuple(self._dedupe_resources(resources))
 
+        if yyp_path is not None:
             self._safe_log("Warning: Could not parse GameMaker project .yyp; using disk asset scan.")
 
         resources = list(self._resources_from_disk())
         resources.extend(self._included_files_from_disk())
         return tuple(self._dedupe_resources(resources))
 
-    def _find_yyp_path(self) -> str | None:
-        try:
-            yyp_files = sorted(
-                name for name in os.listdir(self.gm_project_path) if name.endswith(".yyp")
-            )
-        except OSError:
-            return None
-
-        if not yyp_files:
-            return None
-        return os.path.join(self.gm_project_path, yyp_files[0])
-
-    def _resources_from_yyp(self, yyp_data: JsonDict) -> tuple[_ProjectResource, ...]:
+    def _resources_from_yyp(
+        self,
+        yyp_data: JsonDict,
+        yyp_source_path: str,
+        manifest_rejected_fields: frozenset[str],
+    ) -> tuple[_ProjectResource, ...]:
         resource_entries = yyp_data.get("resources")
         if not isinstance(resource_entries, list):
             return ()
 
         resources: list[_ProjectResource] = []
-        for raw_entry in cast(list[object], resource_entries):
+        for index, raw_entry in enumerate(cast(list[object], resource_entries)):
             if not isinstance(raw_entry, dict):
                 continue
             entry = cast(JsonDict, raw_entry)
@@ -358,6 +380,9 @@ class AssetRegistryConverter(BaseConverter):
             if not isinstance(raw_id, dict):
                 continue
             resource_id = cast(JsonDict, raw_id)
+            field = f"resources[{index}].id.path"
+            if field in manifest_rejected_fields:
+                continue
             raw_path = resource_id.get("path")
             if not isinstance(raw_path, str) or not raw_path:
                 continue
@@ -368,20 +393,41 @@ class AssetRegistryConverter(BaseConverter):
                 if isinstance(raw_name, str) and raw_name
                 else self._name_from_path(raw_path.replace("\\", "/"))
             )
-            asset_label = name or "<unnamed>"
+            kind_hint = self._normalize_yyp_kind(raw_path.replace("\\", "/"))
+            resolved_path = self._resolve_project_source(
+                raw_path,
+                owner_source_path=yyp_source_path,
+                resource=name or "<unnamed>",
+                resource_type=self.RESOURCE_TYPE_BY_KIND.get(
+                    kind_hint,
+                    kind_hint or "asset",
+                ),
+                field=field,
+            )
+            if resolved_path is None:
+                continue
+
+            declared_kind = self.FOLDER_BY_KIND.get(kind_hint, kind_hint)
             try:
-                resolved_path = resolve_project_source_path(
-                    self.gm_project_path,
-                    raw_path,
+                validate_project_resource_source_path(
+                    resolved_path,
+                    declared_kind,
                 )
             except ProjectSourcePathError as exc:
-                self._safe_log(
-                    f"Warning: Skipping GameMaker asset {asset_label}: {exc}"
+                self._report_source_path_rejection(
+                    raw_path,
+                    exc,
+                    owner_source_path=yyp_source_path,
+                    resource=name or "<unnamed>",
+                    resource_type=self.RESOURCE_TYPE_BY_KIND.get(
+                        kind_hint,
+                        kind_hint or "asset",
+                    ),
+                    field=field,
                 )
                 continue
-            source_path = resolved_path.source_path
 
-            kind = self._normalize_yyp_kind(source_path)
+            kind = kind_hint
             if kind not in self.RESOURCE_TYPE_BY_KIND or kind == "included_files":
                 continue
 
@@ -389,6 +435,7 @@ class AssetRegistryConverter(BaseConverter):
                 continue
 
             yy_path = resolved_path.filesystem_path
+            source_path = resolved_path.source_path
             if not os.path.isfile(yy_path):
                 self._safe_log(f"Warning: Skipping missing GameMaker asset {name}: {yy_path}")
                 continue
@@ -410,45 +457,166 @@ class AssetRegistryConverter(BaseConverter):
             if kind == "included_files":
                 continue
             folder = self.FOLDER_BY_KIND[kind]
-            kind_dir = os.path.join(self.gm_project_path, folder)
-            if not os.path.isdir(kind_dir):
+            resource_type = self.RESOURCE_TYPE_BY_KIND[kind]
+            kind_source = self._resolve_discovered_project_source(
+                os.path.join(self.gm_project_path, folder),
+                resource_type=resource_type,
+                field="disk fallback kind directory",
+            )
+            if kind_source is None or not os.path.isdir(
+                kind_source.filesystem_path
+            ):
                 continue
 
             try:
-                resource_names = sorted(os.listdir(kind_dir))
+                resource_names = sorted(os.listdir(kind_source.filesystem_path))
             except OSError:
                 continue
 
             for name in resource_names:
-                resource_dir = os.path.join(kind_dir, name)
-                yy_path = os.path.join(resource_dir, name + ".yy")
-                if not os.path.isdir(resource_dir) or not os.path.isfile(yy_path):
+                resource_source = self._resolve_discovered_project_source(
+                    os.path.join(kind_source.filesystem_path, name),
+                    owner_source_path=kind_source.source_path,
+                    resource=name,
+                    resource_type=resource_type,
+                    field="disk fallback resource directory",
+                )
+                if resource_source is None or not os.path.isdir(
+                    resource_source.filesystem_path
+                ):
                     continue
-                source_path = "/".join([folder, name, name + ".yy"])
+                yy_source = self._resolve_discovered_project_source(
+                    os.path.join(
+                        resource_source.filesystem_path,
+                        name + ".yy",
+                    ),
+                    owner_source_path=resource_source.source_path,
+                    resource=name,
+                    resource_type=resource_type,
+                    field="disk fallback resource metadata",
+                )
+                if yy_source is None:
+                    continue
+                try:
+                    validate_project_resource_source_path(
+                        yy_source,
+                        folder,
+                    )
+                except ProjectSourcePathError as exc:
+                    self._report_source_path_rejection(
+                        yy_source.source_path,
+                        exc,
+                        owner_source_path=resource_source.source_path,
+                        resource=name,
+                        resource_type=resource_type,
+                        field="disk fallback resource metadata",
+                    )
+                    continue
+                if not os.path.isfile(yy_source.filesystem_path):
+                    continue
                 resources.append(
                     _ProjectResource(
                         kind=kind,
                         name=name,
-                        yy_path=yy_path,
-                        source_path=source_path,
-                        raw_data=self._read_yy_file(yy_path) or {},
+                        yy_path=yy_source.filesystem_path,
+                        source_path=yy_source.source_path,
+                        raw_data=(
+                            self._read_yy_file(yy_source.filesystem_path) or {}
+                        ),
                     )
                 )
         return tuple(resources)
 
     def _script_source_gml_path(self, resource: _ProjectResource) -> str | None:
-        script_dir = os.path.dirname(resource.yy_path)
-        preferred_path = os.path.join(script_dir, resource.name + ".gml")
-        if os.path.isfile(preferred_path):
-            return preferred_path
-        if not os.path.isdir(script_dir):
+        yy_source = self._resolve_project_source(
+            resource.source_path,
+            resource=resource.name,
+            resource_type="script",
+            field="script .yy",
+        )
+        if yy_source is None or not os.path.isfile(yy_source.filesystem_path):
             return None
+
+        script_directory = self._resolve_discovered_project_source(
+            os.path.dirname(yy_source.filesystem_path),
+            owner_source_path=yy_source.source_path,
+            resource=resource.name,
+            resource_type="script",
+            field="script source directory",
+        )
+        if script_directory is None or not os.path.isdir(
+            script_directory.filesystem_path
+        ):
+            return None
+
+        preferred_filename = resource.name + ".gml"
+        excluded_filenames = {preferred_filename}
+        preferred_source = None
+        if not is_safe_project_source_component(resource.name):
+            normalized_preferred_filename = posixpath.basename(
+                posixpath.normpath(preferred_filename.replace("\\", "/"))
+            )
+            if normalized_preferred_filename:
+                excluded_filenames.add(normalized_preferred_filename)
+            self._report_source_path_rejection(
+                preferred_filename,
+                ProjectSourcePathError(
+                    "GameMaker script resource names used to derive source "
+                    "filenames must identify exactly one path component: "
+                    f"{resource.name!r}"
+                ),
+                owner_source_path=yy_source.source_path,
+                resource=resource.name,
+                resource_type="script",
+                field="preferred script source",
+            )
+        else:
+            preferred_source = self._resolve_project_source(
+                preferred_filename,
+                owner_source_path=yy_source.source_path,
+                resource=resource.name,
+                resource_type="script",
+                field="preferred script source",
+            )
+        if preferred_source is not None:
+            owner_directory = posixpath.dirname(yy_source.source_path)
+            preferred_directory = posixpath.dirname(preferred_source.source_path)
+            if preferred_directory != owner_directory:
+                self._report_source_path_rejection(
+                    preferred_filename,
+                    ProjectSourcePathError(
+                        "GameMaker script source derived from the resource name "
+                        "must be next to its script .yy owner: "
+                        f"{preferred_filename!r}"
+                    ),
+                    owner_source_path=yy_source.source_path,
+                    resource=resource.name,
+                    resource_type="script",
+                    field="preferred script source",
+                )
+                preferred_source = None
+            elif os.path.isfile(preferred_source.filesystem_path):
+                return preferred_source.filesystem_path
+
         try:
-            for filename in sorted(os.listdir(script_dir)):
-                if filename.endswith(".gml"):
-                    return os.path.join(script_dir, filename)
+            filenames = sorted(os.listdir(script_directory.filesystem_path))
         except OSError:
             return None
+        for filename in filenames:
+            if not filename.endswith(".gml") or filename in excluded_filenames:
+                continue
+            discovered_source = self._resolve_discovered_project_source(
+                os.path.join(script_directory.filesystem_path, filename),
+                owner_source_path=yy_source.source_path,
+                resource=resource.name,
+                resource_type="script",
+                field="discovered script source",
+            )
+            if discovered_source is None or not os.path.isfile(
+                discovered_source.filesystem_path
+            ):
+                continue
+            return discovered_source.filesystem_path
         return None
 
     def _script_function_names(self, resource: _ProjectResource) -> tuple[str, ...]:
@@ -465,28 +633,73 @@ class AssetRegistryConverter(BaseConverter):
             return ()
 
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
-        datafiles_dir = os.path.join(self.gm_project_path, "datafiles")
-        if not os.path.isdir(datafiles_dir):
+        datafiles_source = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, "datafiles"),
+            resource_type="included_file",
+            field="datafiles directory",
+        )
+        if datafiles_source is None or not os.path.isdir(
+            datafiles_source.filesystem_path
+        ):
             return ()
 
         resources: list[_ProjectResource] = []
-        for root, dirs, files in os.walk(datafiles_dir):
-            dirs.sort()
-            for filename in sorted(files):
-                if filename.endswith(".yy"):
+        pending_directories = [
+            (
+                datafiles_source.filesystem_path,
+                datafiles_source.source_path,
+            )
+        ]
+        visited_directories: set[str] = set()
+        while pending_directories:
+            directory_path, directory_source_path = pending_directories.pop()
+            canonical_directory = os.path.normcase(os.path.realpath(directory_path))
+            if canonical_directory in visited_directories:
+                continue
+            visited_directories.add(canonical_directory)
+            try:
+                entry_names = sorted(os.listdir(directory_path), reverse=True)
+            except OSError:
+                continue
+            for entry_name in entry_names:
+                entry_path = os.path.join(directory_path, entry_name)
+                entry_is_symlink = os.path.islink(entry_path)
+                entry_source = self._resolve_discovered_project_source(
+                    entry_path,
+                    owner_source_path=directory_source_path,
+                    resource=entry_name,
+                    resource_type="included_file",
+                    field="discovered datafiles entry",
+                )
+                if entry_source is None:
                     continue
-                file_path = os.path.join(root, filename)
-                rel_path = os.path.relpath(file_path, datafiles_dir).replace(os.sep, "/")
+                if os.path.isdir(entry_source.filesystem_path):
+                    if not entry_is_symlink:
+                        pending_directories.append(
+                            (
+                                entry_source.filesystem_path,
+                                entry_source.source_path,
+                            )
+                        )
+                    continue
+                if entry_name.endswith(".yy") or not os.path.isfile(
+                    entry_source.filesystem_path
+                ):
+                    continue
+                rel_path = posixpath.relpath(
+                    entry_source.source_path,
+                    datafiles_source.source_path,
+                )
                 resources.append(
                     _ProjectResource(
                         kind="included_files",
                         name=rel_path,
                         yy_path="",
-                        source_path="datafiles/" + rel_path,
+                        source_path=entry_source.source_path,
                         raw_data={},
                     )
                 )
-        return tuple(resources)
+        return tuple(sorted(resources, key=lambda resource: resource.source_path))
 
     @staticmethod
     def _dedupe_resources(resources: list[_ProjectResource]) -> tuple[_ProjectResource, ...]:
@@ -555,9 +768,19 @@ class AssetRegistryConverter(BaseConverter):
         return ""
 
     def _sound_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
-        sound_file = resource.raw_data.get("soundFile")
-        if not isinstance(sound_file, str) or not sound_file:
+        sound_file_reference = resource.raw_data.get("soundFile")
+        if not isinstance(sound_file_reference, str) or not sound_file_reference:
             return ""
+        sound_source = self._resolve_project_source(
+            sound_file_reference,
+            owner_source_path=resource.source_path,
+            resource=resource.name,
+            resource_type="sound",
+            field="soundFile",
+        )
+        if sound_source is None:
+            return ""
+        sound_filename = os.path.basename(sound_source.filesystem_path)
 
         parts = ["sounds"]
         if self.organize_sounds_by_audio_group:
@@ -565,7 +788,7 @@ class AssetRegistryConverter(BaseConverter):
             parts.append(generated_path_segment(audio_group or "audiogroup_default", "audiogroup_default"))
         subfolder = self._get_subfolder_from_resource(resource)
         parts.extend(part for part in subfolder.split("/") if part)
-        parts.extend([generated_resource_stem(resource.name) + suffix, sound_file])
+        parts.extend([generated_resource_stem(resource.name) + suffix, sound_filename])
         return "res://" + "/".join(parts)
 
     def _metadata(
@@ -869,9 +1092,8 @@ class AssetRegistryConverter(BaseConverter):
             if action is not None:
                 actions.append(action)
 
-        source_filename = self._timeline_source_filename(resource, moment, frame)
-        if source_filename:
-            source_path = self._resource_relative_path(resource, source_filename)
+        source_path = self._timeline_source_path(resource, moment, frame)
+        if source_path:
             actions.append({
                 "kind": "gml",
                 "source_path": source_path,
@@ -881,8 +1103,17 @@ class AssetRegistryConverter(BaseConverter):
 
     def _timeline_discovered_source_actions(self, resource: _ProjectResource) -> list[tuple[int, list[JsonDict]]]:
         discovered: list[tuple[int, list[JsonDict]]] = []
+        timeline_directory = self._resolve_discovered_project_source(
+            os.path.dirname(resource.yy_path),
+            owner_source_path=resource.source_path,
+            resource=resource.name,
+            resource_type="timeline",
+            field="timeline source directory",
+        )
+        if timeline_directory is None:
+            return discovered
         try:
-            filenames = sorted(os.listdir(os.path.dirname(resource.yy_path)))
+            filenames = sorted(os.listdir(timeline_directory.filesystem_path))
         except OSError:
             return discovered
 
@@ -892,17 +1123,29 @@ class AssetRegistryConverter(BaseConverter):
             frame = self._timeline_frame_from_filename(filename)
             if frame is None:
                 continue
+            resolved_source = self._resolve_discovered_project_source(
+                os.path.join(timeline_directory.filesystem_path, filename),
+                owner_source_path=resource.source_path,
+                resource=resource.name,
+                resource_type="timeline",
+                field="discovered timeline moment source",
+            )
+            if (
+                resolved_source is None
+                or not os.path.isfile(resolved_source.filesystem_path)
+            ):
+                continue
             discovered.append((
                 frame,
                 [{
                     "kind": "gml",
-                    "source_path": self._resource_relative_path(resource, filename),
+                    "source_path": resolved_source.source_path,
                     "script_path": self._timeline_action_script_resource_path(resource.name, frame),
                 }],
             ))
         return discovered
 
-    def _timeline_source_filename(
+    def _timeline_source_path(
         self,
         resource: _ProjectResource,
         moment: JsonDict,
@@ -911,15 +1154,32 @@ class AssetRegistryConverter(BaseConverter):
         for key in ("gmlFile", "eventFile", "filename", "source", "sourceFile"):
             value = moment.get(key)
             if isinstance(value, str) and value:
-                return value
+                resolved_source = self._resolve_project_source(
+                    value,
+                    owner_source_path=resource.source_path,
+                    resource=resource.name,
+                    resource_type="timeline",
+                    field=key,
+                )
+                return resolved_source.source_path if resolved_source is not None else ""
         for candidate in (
             f"Moment_{frame}.gml",
             f"moment_{frame}.gml",
             f"Timeline_{frame}.gml",
             f"{frame}.gml",
         ):
-            if os.path.isfile(os.path.join(os.path.dirname(resource.yy_path), candidate)):
-                return candidate
+            resolved_source = self._resolve_project_source(
+                candidate,
+                owner_source_path=resource.source_path,
+                resource=resource.name,
+                resource_type="timeline",
+                field="implicit timeline moment source",
+            )
+            if (
+                resolved_source is not None
+                and os.path.isfile(resolved_source.filesystem_path)
+            ):
+                return resolved_source.source_path
         return ""
 
     def _raw_action_items(self, moment: JsonDict) -> list[object]:
@@ -1008,23 +1268,40 @@ class AssetRegistryConverter(BaseConverter):
                     source_path = action.get("source_path")
                     script_path = action.get("script_path")
                     if isinstance(source_path, str) and isinstance(script_path, str):
-                        self._write_timeline_action_script(entry.name, frame, source_path, script_path, asset_names)
+                        self._write_timeline_action_script(
+                            entry.name,
+                            frame,
+                            entry.source_path,
+                            source_path,
+                            script_path,
+                            asset_names,
+                        )
 
     def _write_timeline_action_script(
         self,
         timeline_name: str,
         frame: int,
+        owner_source_path: str,
         source_path: str,
         script_path: str,
         asset_names: set[str],
     ) -> None:
         if not script_path.startswith("res://"):
             return
-        gm_source_path = os.path.join(self.gm_project_path, *source_path.split("/"))
+        resolved_source = self._resolve_project_source(
+            source_path,
+            owner_source_path=owner_source_path,
+            resource=timeline_name,
+            resource_type="timeline",
+            field="timeline action source_path",
+        )
+        if resolved_source is None:
+            return
+        gm_source_path = resolved_source.filesystem_path
         try:
             with open(gm_source_path, "r", encoding="utf-8") as source_file:
                 source = source_file.read()
-        except OSError:
+        except (OSError, ValueError):
             self._safe_log(
                 "Warning: Could not read GameMaker timeline moment code for "
                 f"{timeline_name} frame {frame}: {gm_source_path}"
@@ -1078,12 +1355,6 @@ class AssetRegistryConverter(BaseConverter):
                 ])
             )
 
-    def _resource_relative_path(self, resource: _ProjectResource, filename: str) -> str:
-        return os.path.join(
-            os.path.dirname(resource.source_path),
-            filename,
-        ).replace(os.sep, "/")
-
     @staticmethod
     def _timeline_action_script_resource_path(timeline_name: str, frame: int) -> str:
         safe_name = generated_resource_stem(timeline_name)
@@ -1111,9 +1382,8 @@ class AssetRegistryConverter(BaseConverter):
             return {}
 
         ordered: list[str] = []
-        yyp_path = self._find_yyp_path()
-        yyp_data = self._read_yy_file(yyp_path) if yyp_path is not None else None
-        if yyp_data is not None and "RoomOrderNodes" in yyp_data:
+        yyp_data = self.project_manifest.raw_data
+        if "RoomOrderNodes" in yyp_data:
             for raw_node in cast(list[object], yyp_data.get("RoomOrderNodes", [])):
                 if not isinstance(raw_node, dict):
                     continue
@@ -1139,9 +1409,19 @@ class AssetRegistryConverter(BaseConverter):
         ttf_name = resource.raw_data.get("TTFName")
         include_ttf = bool(resource.raw_data.get("includeTTF", False))
         if include_ttf and isinstance(ttf_name, str) and ttf_name:
-            source_ttf_path = resolve_bundled_font_source(resource.yy_path, ttf_name)
+            source_ttf = self._resolve_project_source(
+                ttf_name,
+                owner_source_path=resource.source_path,
+                resource=resource.name,
+                resource_type="font",
+                field="TTFName",
+            )
             output_filename = bundled_font_output_filename(ttf_name)
-            if source_ttf_path is not None and output_filename is not None:
+            if (
+                source_ttf is not None
+                and output_filename is not None
+                and os.path.isfile(source_ttf.filesystem_path)
+            ):
                 stem, extension = os.path.splitext(output_filename)
                 return self._flat_resource_path(
                     "fonts",

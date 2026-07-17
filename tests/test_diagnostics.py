@@ -67,6 +67,39 @@ class TestDiagnosticCollector(unittest.TestCase):
         self.assertEqual(diagnostic.resource_type, "object")
         self.assertEqual(diagnostic.event, "_ready")
 
+    def test_exact_structured_duplicates_are_deduped(self):
+        diagnostics = DiagnosticCollector()
+
+        diagnostics.add(
+            "warning",
+            "GM2GD-SOURCE-PATH-REJECTED",
+            "Warning: Rejected GameMaker source path '../outside.wav'.",
+            source_path="sounds/snd_test/snd_test.yy",
+            resource="snd_test",
+            resource_type="sound",
+            manifest_entry="soundFile",
+        )
+        diagnostics.add(
+            "warning",
+            "GM2GD-SOURCE-PATH-REJECTED",
+            "Warning: Rejected GameMaker source path '../outside.wav'.",
+            source_path="sounds/snd_test/snd_test.yy",
+            resource="snd_test",
+            resource_type="sound",
+            manifest_entry="soundFile",
+        )
+        diagnostics.add(
+            "warning",
+            "GM2GD-SOURCE-PATH-REJECTED",
+            "Warning: Rejected GameMaker source path '../outside.wav'.",
+            source_path="sounds/snd_test/snd_test.yy",
+            resource="snd_other",
+            resource_type="sound",
+            manifest_entry="soundFile",
+        )
+
+        self.assertEqual(len(diagnostics.diagnostics()), 2)
+
     def test_reports_are_written_as_deterministic_json_and_markdown(self):
         tmp_dir = tempfile.mkdtemp()
         try:

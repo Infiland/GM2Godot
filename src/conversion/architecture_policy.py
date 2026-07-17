@@ -8,6 +8,10 @@ from typing import Iterable, cast
 
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.runtime_managers import runtime_manager_definitions
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_filesystem_source_path,
+)
 from src.conversion.type_defs import JsonDict
 
 ARCHITECTURE_POLICY_RELATIVE_PATH = os.path.join("gm2godot", "architecture_policy.json")
@@ -320,9 +324,17 @@ def _read_gml_sources(gm_project_path: str) -> str:
                 continue
             path = os.path.join(root, filename)
             try:
-                with open(path, "r", encoding="utf-8") as source_file:
+                resolved = resolve_project_filesystem_source_path(
+                    gm_project_path,
+                    path,
+                )
+                with open(
+                    resolved.filesystem_path,
+                    "r",
+                    encoding="utf-8",
+                ) as source_file:
                     chunks.append(source_file.read())
-            except OSError:
+            except (OSError, ProjectSourcePathError):
                 continue
     return "\n".join(chunks)
 

@@ -4,6 +4,7 @@ import os
 import re
 import json
 import shutil
+import posixpath
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Literal, NotRequired, TypedDict, cast
 
@@ -14,19 +15,25 @@ from src.conversion.asset_output_paths import (
     resource_sibling_path,
 )
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import (
     generated_nested_resource_path,
 )
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
+    is_safe_project_source_component,
     ProjectSourcePathError,
-    resolve_project_source_path,
+    ResolvedProjectSourcePath,
+    validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
 class TilesetData(TypedDict):
+    source_path: str
     sprite_name: str
     sprite_path: str
+    sprite_reference_field: str
     tileWidth: int
     tileHeight: int
     tilehsep: int
@@ -64,12 +71,15 @@ class TileSetConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_tilesets_path = os.path.join(self.godot_project_path, 'tilesets')
         self._tileset_output_paths: dict[str, str] = {}
+        self._tileset_source_paths: dict[str, str] = {}
 
     def _get_valid_tileset_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of tileset name -> subfolder.
@@ -77,26 +87,49 @@ class TileSetConverter(BaseConverter):
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all tilesets on disk.
         """
+        self._tileset_source_paths = {}
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="tileset",
+            include_project_sources=True,
+        )
         try:
-            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
-            if not yyp_files:
+            if manifest.yyp_path is None:
                 return None
-
-            yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
-            with open(yyp_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            yyp_source = self._resolve_discovered_project_source(
+                manifest.yyp_path,
+                resource_type="project",
+                field="projectFile",
+            )
+            if yyp_source is None:
+                return None
+            if any(
+                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+                for diagnostic in manifest.diagnostics
+            ):
+                raise TypeError("GameMaker project root must be an object")
+            data = manifest.raw_data
 
             valid_tilesets: dict[str, str] = {}
-            for resource in cast(list[JsonDict], data.get('resources', [])):
-                res_id = cast(JsonDict, resource.get('id', {}))
+            resources = data.get('resources', [])
+            if not isinstance(resources, list):
+                return valid_tilesets
+            for index, resource in enumerate(cast(list[object], resources)):
+                if not isinstance(resource, dict):
+                    continue
+                raw_id = cast(JsonDict, resource).get('id', {})
+                if not isinstance(raw_id, dict):
+                    continue
+                res_id = cast(JsonDict, raw_id)
                 raw_path = res_id.get('path', '')
                 if not isinstance(raw_path, str):
                     continue
+                field = f"resources[{index}].id.path"
+                if field in manifest_rejected_fields:
+                    continue
                 path = raw_path.replace('\\', '/')
-                if path.startswith('tilesets/'):
+                if path.partition('/')[0].casefold() == 'tilesets':
                     raw_name = res_id.get('name', '')
                     name = (
                         raw_name
@@ -105,39 +138,140 @@ class TileSetConverter(BaseConverter):
                     )
                     if not name:
                         continue
-                    try:
-                        resolved_path = resolve_project_source_path(
-                            self.gm_project_path,
-                            path,
-                        )
-                    except ProjectSourcePathError as exc:
-                        self._safe_log(
-                            f"Warning: Skipping GameMaker tileset {name}: {exc}"
-                        )
+                    resolved_path = self._resolve_project_source(
+                        path,
+                        owner_source_path=yyp_source.source_path,
+                        resource=name,
+                        resource_type="tileset",
+                        field=field,
+                    )
+                    if resolved_path is None or not self._source_has_resource_kind(
+                        resolved_path,
+                        "tilesets",
+                        rejected_path=path,
+                        owner_source_path=yyp_source.source_path,
+                        resource=name,
+                        field=field,
+                    ):
                         continue
                     yy_path = resolved_path.filesystem_path
+                    if not os.path.isfile(yy_path):
+                        continue
+                    self._tileset_source_paths[name] = resolved_path.source_path
                     valid_tilesets[name] = self._get_subfolder_from_yy(yy_path)
 
             return valid_tilesets
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
 
-    def _parse_tileset_yy(self, tileset_name: str) -> TilesetData | None:
+    def _source_has_resource_kind(
+        self,
+        resolved: ResolvedProjectSourcePath,
+        resource_kind: str,
+        *,
+        rejected_path: str,
+        owner_source_path: StrPath,
+        resource: str,
+        field: str,
+    ) -> bool:
+        try:
+            validate_project_resource_source_path(resolved, resource_kind)
+            return True
+        except ProjectSourcePathError as error:
+            self._report_source_path_rejection(
+                rejected_path,
+                error,
+                owner_source_path=owner_source_path,
+                resource=resource,
+                resource_type="tileset",
+                field=field,
+            )
+            return False
+
+    def _resolve_tileset_yy_source(
+        self,
+        tileset_name: str,
+        source_path: str | None = None,
+    ) -> ResolvedProjectSourcePath | None:
+        declared_source_path = source_path or self._tileset_source_paths.get(
+            tileset_name
+        )
+        if declared_source_path is not None:
+            rejected_path = declared_source_path
+            owner_source_path = os.path.dirname(declared_source_path)
+            resolved = self._resolve_project_source(
+                declared_source_path,
+                resource=tileset_name,
+                resource_type="tileset",
+                field="tileset .yy",
+            )
+        else:
+            candidate = os.path.join(
+                self.gm_project_path,
+                'tilesets',
+                tileset_name,
+                tileset_name + '.yy',
+            )
+            rejected_path = candidate
+            owner_source_path = os.path.dirname(candidate)
+            resolved = self._resolve_discovered_project_source(
+                candidate,
+                owner_source_path=os.path.dirname(candidate),
+                resource=tileset_name,
+                resource_type="tileset",
+                field="tileset .yy",
+            )
+        if resolved is None:
+            return None
+        if not self._source_has_resource_kind(
+            resolved,
+            "tilesets",
+            rejected_path=rejected_path,
+            owner_source_path=owner_source_path,
+            resource=tileset_name,
+            field="tileset .yy",
+        ):
+            return None
+        self._tileset_source_paths[tileset_name] = resolved.source_path
+        return resolved
+
+    def _parse_tileset_yy(
+        self,
+        tileset_name: str,
+        source_path: str | None = None,
+    ) -> TilesetData | None:
         """Read and parse a tileset .yy file.
 
         Returns a dict with tileset properties, or None on failure.
         """
-        yy_path = os.path.join(self.gm_project_path, 'tilesets', tileset_name, tileset_name + '.yy')
+        resolved_tileset = self._resolve_tileset_yy_source(
+            tileset_name,
+            source_path,
+        )
+        if resolved_tileset is None:
+            return None
+        yy_path = resolved_tileset.filesystem_path
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
             data = cast(JsonDict, json.loads(cleaned))
 
-            sprite_id = cast(JsonDict, data.get('spriteId', {}))
+            sprite_reference = self._resolve_sprite_reference(
+                tileset_name,
+                resolved_tileset.source_path,
+                data.get('spriteId'),
+            )
+            sprite_name = ""
+            sprite_path = ""
+            sprite_reference_field = "spriteId"
+            if sprite_reference is not None:
+                sprite_name, sprite_path, sprite_reference_field = sprite_reference
             return {
-                "sprite_name": str(sprite_id.get('name', '')),
-                "sprite_path": str(sprite_id.get('path', '')),
+                "source_path": resolved_tileset.source_path,
+                "sprite_name": sprite_name,
+                "sprite_path": sprite_path,
+                "sprite_reference_field": sprite_reference_field,
                 "tileWidth": int(data.get('tileWidth', 16)),
                 "tileHeight": int(data.get('tileHeight', 16)),
                 "tilehsep": int(data.get('tilehsep', 0)),
@@ -157,15 +291,151 @@ class TileSetConverter(BaseConverter):
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
 
-    def _find_sprite_image(self, sprite_name: str) -> str | None:
+    def _resolve_sprite_reference(
+        self,
+        tileset_name: str,
+        tileset_source_path: str,
+        raw_sprite_id: object,
+    ) -> tuple[str, str, str] | None:
+        if raw_sprite_id is None:
+            return None
+        if not isinstance(raw_sprite_id, dict):
+            self._reject_sprite_reference(
+                tileset_name,
+                tileset_source_path,
+                repr(raw_sprite_id),
+                "spriteId",
+                "GameMaker tileset spriteId must be an object",
+            )
+            return None
+
+        sprite_id = cast(JsonDict, raw_sprite_id)
+        if "path" in sprite_id:
+            raw_path = sprite_id.get("path")
+            if not isinstance(raw_path, str) or not raw_path:
+                self._reject_sprite_reference(
+                    tileset_name,
+                    tileset_source_path,
+                    raw_path if isinstance(raw_path, str) else repr(raw_path),
+                    "spriteId.path",
+                    "GameMaker tileset spriteId.path must be a non-empty string",
+                )
+                return None
+            resolved = self._resolve_project_source(
+                raw_path,
+                owner_source_path=tileset_source_path,
+                resource=tileset_name,
+                resource_type="tileset",
+                field="spriteId.path",
+            )
+            if resolved is None or not self._source_has_resource_kind(
+                resolved,
+                "sprites",
+                rejected_path=raw_path,
+                owner_source_path=tileset_source_path,
+                resource=tileset_name,
+                field="spriteId.path",
+            ):
+                return None
+            sprite_name = posixpath.splitext(
+                posixpath.basename(resolved.source_path)
+            )[0]
+            return sprite_name, resolved.source_path, "spriteId.path"
+
+        raw_name = sprite_id.get("name")
+        if not isinstance(raw_name, str) or not self._valid_reference_component(
+            raw_name
+        ):
+            self._reject_sprite_reference(
+                tileset_name,
+                tileset_source_path,
+                raw_name if isinstance(raw_name, str) else repr(raw_name),
+                "spriteId.name",
+                "Legacy GameMaker tileset spriteId.name must be a safe resource name",
+            )
+            return None
+
+        legacy_path = f"sprites/{raw_name}/{raw_name}.yy"
+        resolved = self._resolve_project_source(
+            legacy_path,
+            owner_source_path=tileset_source_path,
+            resource=tileset_name,
+            resource_type="tileset",
+            field="spriteId.name",
+        )
+        if resolved is None or not self._source_has_resource_kind(
+            resolved,
+            "sprites",
+            rejected_path=legacy_path,
+            owner_source_path=tileset_source_path,
+            resource=tileset_name,
+            field="spriteId.name",
+        ):
+            return None
+        return raw_name, resolved.source_path, "spriteId.name"
+
+    def _reject_sprite_reference(
+        self,
+        tileset_name: str,
+        tileset_source_path: str,
+        rejected_path: str,
+        field: str,
+        message: str,
+    ) -> None:
+        self._report_source_path_rejection(
+            rejected_path,
+            ProjectSourcePathError(f"{message}: {rejected_path!r}"),
+            owner_source_path=tileset_source_path,
+            resource=tileset_name,
+            resource_type="tileset",
+            field=field,
+        )
+
+    @staticmethod
+    def _valid_reference_component(value: str) -> bool:
+        return is_safe_project_source_component(value)
+
+    def _find_sprite_image(
+        self,
+        sprite_name: str,
+        sprite_source_path: str | None = None,
+        *,
+        tileset_name: str | None = None,
+        tileset_source_path: str | None = None,
+        sprite_reference_field: str = "spriteId.path",
+    ) -> tuple[ResolvedProjectSourcePath, str] | None:
         """Find the primary layer image for a sprite referenced by a tileset.
 
         Parses the sprite's .yy to identify the first visible layer, then
         locates the corresponding PNG under layers/{frame_guid}/{layer_guid}.png.
-        Returns the image path or None.
+        Returns the contained image source and owning sprite field, or None.
         """
-        sprite_dir = os.path.join(self.gm_project_path, 'sprites', sprite_name)
-        yy_path = os.path.join(sprite_dir, sprite_name + '.yy')
+        resource_name = tileset_name or sprite_name
+        if sprite_source_path is None:
+            if not self._valid_reference_component(sprite_name):
+                return None
+            sprite_source_path = f"sprites/{sprite_name}/{sprite_name}.yy"
+            sprite_reference_field = "spriteId.name"
+
+        resolved_sprite = self._resolve_project_source(
+            sprite_source_path,
+            owner_source_path=tileset_source_path,
+            resource=resource_name,
+            resource_type="tileset",
+            field=sprite_reference_field,
+        )
+        if resolved_sprite is None or not self._source_has_resource_kind(
+            resolved_sprite,
+            "sprites",
+            rejected_path=sprite_source_path,
+            owner_source_path=tileset_source_path or resolved_sprite.source_path,
+            resource=resource_name,
+            field=sprite_reference_field,
+        ):
+            return None
+
+        sprite_dir = os.path.dirname(resolved_sprite.filesystem_path)
+        yy_path = resolved_sprite.filesystem_path
 
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
@@ -174,40 +444,180 @@ class TileSetConverter(BaseConverter):
             data = cast(JsonDict, json.loads(cleaned))
 
             # Get the first frame GUID
-            frames = cast(list[JsonDict], data.get('frames', []))
-            if not frames:
+            raw_frames = data.get('frames', [])
+            if not isinstance(raw_frames, list) or not raw_frames:
                 return None
-            frame_guid = str(frames[0].get('name', ''))
+            raw_frame = cast(list[object], raw_frames)[0]
+            if not isinstance(raw_frame, dict):
+                self._reject_sprite_reference(
+                    resource_name,
+                    resolved_sprite.source_path,
+                    repr(raw_frame),
+                    "frames[0]",
+                    "GameMaker sprite frame reference must be an object",
+                )
+                return None
+            frame_value = cast(JsonDict, raw_frame).get('name', '')
+            if not isinstance(frame_value, str) or not self._valid_reference_component(
+                frame_value
+            ):
+                self._reject_sprite_reference(
+                    resource_name,
+                    resolved_sprite.source_path,
+                    frame_value if isinstance(frame_value, str) else repr(frame_value),
+                    "frames[0].name",
+                    "GameMaker sprite frame name must be a safe path component",
+                )
+                return None
+            frame_guid = frame_value
 
             # Get the primary visible layer GUID
-            primary_layer_guid = None
-            layers = cast(list[JsonDict], data.get('layers', []))
-            for layer in layers:
-                if layer.get('visible', True):
-                    primary_layer_guid = str(layer.get('name', ''))
-                    break
-            if primary_layer_guid is None and layers:
-                primary_layer_guid = str(layers[0].get('name', ''))
-
-            if not frame_guid or not primary_layer_guid:
+            raw_layers = data.get('layers', [])
+            if not isinstance(raw_layers, list) or not raw_layers:
+                return None
+            layers: list[tuple[int, JsonDict]] = []
+            for index, raw_layer in enumerate(cast(list[object], raw_layers)):
+                if not isinstance(raw_layer, dict):
+                    continue
+                layers.append((index, cast(JsonDict, raw_layer)))
+            if not layers:
                 return None
 
+            primary_layer: tuple[int, JsonDict] | None = None
+            for index, layer in layers:
+                if layer.get('visible', True):
+                    primary_layer = (index, layer)
+                    break
+            if primary_layer is None:
+                primary_layer = layers[0]
+
+            layer_index, layer = primary_layer
+            layer_value = layer.get('name', '')
+            if not isinstance(layer_value, str) or not self._valid_reference_component(
+                layer_value
+            ):
+                self._reject_sprite_reference(
+                    resource_name,
+                    resolved_sprite.source_path,
+                    layer_value if isinstance(layer_value, str) else repr(layer_value),
+                    f"layers[{layer_index}].name",
+                    "GameMaker sprite layer name must be a safe path component",
+                )
+                return None
+            primary_layer_guid = layer_value
+
             # Look for the image at layers/{frame_guid}/{layer_guid}.png
-            image_path = os.path.join(sprite_dir, 'layers', frame_guid, primary_layer_guid + '.png')
-            if os.path.isfile(image_path):
-                return image_path
+            layers_path = os.path.join(sprite_dir, 'layers')
+            resolved_layers = self._resolve_discovered_project_source(
+                layers_path,
+                owner_source_path=resolved_sprite.source_path,
+                resource=resource_name,
+                resource_type="tileset",
+                field="layers",
+            )
+            if resolved_layers is None:
+                return None
+
+            frame_path = os.path.join(
+                resolved_layers.filesystem_path,
+                frame_guid,
+            )
+            resolved_frame = self._resolve_discovered_project_source(
+                frame_path,
+                owner_source_path=resolved_sprite.source_path,
+                resource=resource_name,
+                resource_type="tileset",
+                field="frames[0].name",
+            )
+            if resolved_frame is None:
+                return None
+
+            image_path = os.path.join(
+                resolved_frame.filesystem_path,
+                primary_layer_guid + '.png',
+            )
+            resolved_image = self._resolve_discovered_project_source(
+                image_path,
+                owner_source_path=resolved_sprite.source_path,
+                resource=resource_name,
+                resource_type="tileset",
+                field=f"layers[{layer_index}].name",
+            )
+            if resolved_image is None:
+                return None
+            if os.path.isfile(resolved_image.filesystem_path):
+                return resolved_image, f"layers[{layer_index}].name"
 
         except (OSError, json.JSONDecodeError, KeyError, TypeError, IndexError, ValueError):
             pass
 
         # Fallback: look for any PNG in the layers directory
         layers_dir = os.path.join(sprite_dir, 'layers')
-        if os.path.isdir(layers_dir):
-            for root, _, files in os.walk(layers_dir):
-                for file in files:
-                    if file.lower().endswith('.png'):
-                        return os.path.join(root, file)
+        return self._find_fallback_sprite_png(
+            layers_dir,
+            tileset_name=resource_name,
+            sprite_source_path=resolved_sprite.source_path,
+            field="layers",
+        )
 
+    def _find_fallback_sprite_png(
+        self,
+        directory: str,
+        *,
+        tileset_name: str,
+        sprite_source_path: str,
+        field: str,
+    ) -> tuple[ResolvedProjectSourcePath, str] | None:
+        resolved_directory = self._resolve_discovered_project_source(
+            directory,
+            owner_source_path=sprite_source_path,
+            resource=tileset_name,
+            resource_type="tileset",
+            field=field,
+        )
+        if resolved_directory is None or not os.path.isdir(
+            resolved_directory.filesystem_path
+        ):
+            return None
+
+        try:
+            entries = os.listdir(resolved_directory.filesystem_path)
+        except OSError:
+            return None
+
+        resolved_entries: list[tuple[str, ResolvedProjectSourcePath]] = []
+        for entry in entries:
+            candidate = os.path.join(resolved_directory.filesystem_path, entry)
+            resolved_candidate = self._resolve_discovered_project_source(
+                candidate,
+                owner_source_path=sprite_source_path,
+                resource=tileset_name,
+                resource_type="tileset",
+                field=field,
+            )
+            if resolved_candidate is not None:
+                resolved_entries.append((entry, resolved_candidate))
+
+        for entry, resolved_candidate in resolved_entries:
+            if entry.lower().endswith('.png') and os.path.isfile(
+                resolved_candidate.filesystem_path
+            ):
+                return resolved_candidate, field
+
+        for _entry, resolved_candidate in resolved_entries:
+            if (
+                not os.path.isdir(resolved_candidate.filesystem_path)
+                or os.path.islink(resolved_candidate.filesystem_path)
+            ):
+                continue
+            image_path = self._find_fallback_sprite_png(
+                resolved_candidate.filesystem_path,
+                tileset_name=tileset_name,
+                sprite_source_path=sprite_source_path,
+                field=field,
+            )
+            if image_path is not None:
+                return image_path
         return None
 
     def _generate_tileset_tres(
@@ -276,7 +686,12 @@ class TileSetConverter(BaseConverter):
         columns = max(1, columns)
         return [(index % columns, index // columns) for index in range(tile_count)]
 
-    def _process_tileset(self, tileset_name: str, subfolder: str = "") -> TilesetResult | None:
+    def _process_tileset(
+        self,
+        tileset_name: str,
+        subfolder: str = "",
+        tileset_source_path: str | None = None,
+    ) -> TilesetResult | None:
         """Process a single tileset: parse, copy image, generate .tres.
 
         Returns a dict with conversion results, or None if stopped.
@@ -284,13 +699,27 @@ class TileSetConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        tileset_data = self._parse_tileset_yy(tileset_name)
+        tileset_data = self._parse_tileset_yy(
+            tileset_name,
+            tileset_source_path,
+        )
         if tileset_data is None:
             return {"success": False, "name": tileset_name, "error": "parse_failed"}
 
         sprite_name = tileset_data["sprite_name"]
-        image_path = self._find_sprite_image(sprite_name)
-        if image_path is None:
+        sprite_path = tileset_data["sprite_path"]
+        image_match = (
+            self._find_sprite_image(
+                sprite_name,
+                sprite_path,
+                tileset_name=tileset_name,
+                tileset_source_path=tileset_data["source_path"],
+                sprite_reference_field=tileset_data["sprite_reference_field"],
+            )
+            if sprite_path
+            else None
+        )
+        if image_match is None:
             self._safe_log(get_localized("Console_Convertor_Tilesets_SpriteNotFound").format(
                 name=tileset_name, sprite_name=sprite_name))
             return {"success": False, "name": tileset_name, "error": "sprite_not_found",
@@ -313,7 +742,24 @@ class TileSetConverter(BaseConverter):
         # Copy the sprite image as the tileset texture
         tileset_stem = os.path.splitext(os.path.basename(tres_path))[0]
         dest_image = os.path.join(output_dir, tileset_stem + '.png')
-        shutil.copy2(image_path, dest_image)
+        image_source, image_field = image_match
+        resolved_image = self._resolve_discovered_project_source(
+            image_source.filesystem_path,
+            owner_source_path=sprite_path,
+            resource=tileset_name,
+            resource_type="tileset",
+            field=image_field,
+        )
+        if resolved_image is None or not os.path.isfile(
+            resolved_image.filesystem_path
+        ):
+            return {
+                "success": False,
+                "name": tileset_name,
+                "error": "sprite_not_found",
+                "sprite_name": sprite_name,
+            }
+        shutil.copy2(resolved_image.filesystem_path, dest_image)
 
         # Generate and write the .tres file
         tres_content = self._generate_tileset_tres(
@@ -353,31 +799,77 @@ class TileSetConverter(BaseConverter):
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_tilesets_path, exist_ok=True)
 
-        gm_tilesets_path = os.path.join(self.gm_project_path, 'tilesets')
-
-        if not os.path.exists(gm_tilesets_path):
+        resolved_tilesets_root = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'tilesets'),
+            resource_type="tileset",
+            field="tilesets directory",
+        )
+        if (
+            resolved_tilesets_root is None
+            or not os.path.isdir(resolved_tilesets_root.filesystem_path)
+        ):
             self.log_callback(get_localized("Console_Convertor_Tilesets_Error_NotFound").format(
                 gm_project_path=self.gm_project_path))
             return
 
-        # Discover tileset directories by walking the tilesets folder
         tileset_names: list[str] = []
-        for entry in os.listdir(gm_tilesets_path):
-            entry_path = os.path.join(gm_tilesets_path, entry)
-            yy_path = os.path.join(entry_path, entry + '.yy')
-            if os.path.isdir(entry_path) and os.path.isfile(yy_path):
-                tileset_names.append(entry)
-
-        # Filter against .yyp if available
-        valid_names = self._get_valid_tileset_names()
         tileset_subfolders: dict[str, str] = {}
+        valid_names = self._get_valid_tileset_names()
         if valid_names is not None:
-            tileset_names = [n for n in tileset_names if n in valid_names]
-            tileset_subfolders = {n: valid_names[n] for n in tileset_names}
+            for name, subfolder in valid_names.items():
+                source_path = self._tileset_source_paths.get(name)
+                resolved = self._resolve_tileset_yy_source(name, source_path)
+                if resolved is None or not os.path.isfile(resolved.filesystem_path):
+                    continue
+                tileset_names.append(name)
+                tileset_subfolders[name] = subfolder
         else:
-            for name in tileset_names:
-                yy_path = os.path.join(self.gm_project_path, 'tilesets', name, name + '.yy')
-                tileset_subfolders[name] = self._get_subfolder_from_yy(yy_path)
+            for entry in os.listdir(resolved_tilesets_root.filesystem_path):
+                entry_path = os.path.join(
+                    resolved_tilesets_root.filesystem_path,
+                    entry,
+                )
+                resolved_directory = self._resolve_discovered_project_source(
+                    entry_path,
+                    owner_source_path=resolved_tilesets_root.source_path,
+                    resource=entry,
+                    resource_type="tileset",
+                    field="tileset directory",
+                )
+                if resolved_directory is None or not os.path.isdir(
+                    resolved_directory.filesystem_path
+                ):
+                    continue
+
+                yy_path = os.path.join(
+                    resolved_directory.filesystem_path,
+                    entry + '.yy',
+                )
+                resolved_yy = self._resolve_discovered_project_source(
+                    yy_path,
+                    owner_source_path=resolved_directory.source_path,
+                    resource=entry,
+                    resource_type="tileset",
+                    field="tileset .yy",
+                )
+                if (
+                    resolved_yy is None
+                    or not self._source_has_resource_kind(
+                        resolved_yy,
+                        "tilesets",
+                        rejected_path=yy_path,
+                        owner_source_path=resolved_directory.source_path,
+                        resource=entry,
+                        field="tileset .yy",
+                    )
+                    or not os.path.isfile(resolved_yy.filesystem_path)
+                ):
+                    continue
+                self._tileset_source_paths[entry] = resolved_yy.source_path
+                tileset_names.append(entry)
+                tileset_subfolders[entry] = self._get_subfolder_from_yy(
+                    resolved_yy.filesystem_path
+                )
 
         if not tileset_names:
             self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
@@ -394,7 +886,12 @@ class TileSetConverter(BaseConverter):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map: dict[Future[TilesetResult | None], str] = {
-                executor.submit(self._process_tileset, name, tileset_subfolders.get(name, "")): name
+                executor.submit(
+                    self._process_tileset,
+                    name,
+                    tileset_subfolders.get(name, ""),
+                    self._tileset_source_paths.get(name),
+                ): name
                 for name in tileset_names
             }
             for future in as_completed(futures_map):

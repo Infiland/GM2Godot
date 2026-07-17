@@ -1,5 +1,6 @@
 # pyright: reportPrivateUsage=false
 import os
+import posixpath
 import re
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,10 +41,14 @@ from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_sour
 from src.conversion.gml_transpiler_parts.model import _Token
 from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.project_source_paths import (
+    is_safe_project_source_component,
     ProjectSourcePathError,
+    ResolvedProjectSourcePath,
     project_gml_source_paths,
     resolve_project_source_path,
+    validate_project_resource_source_path,
 )
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.script_generator import (
@@ -99,8 +104,11 @@ _SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS = (
 
 
 class ParsedObject(TypedDict):
+    source_path: str
     sprite_name: str | None
+    sprite_source_path: str | None
     parent_object_name: str | None
+    parent_object_source_path: str | None
     event_list: list[JsonDict]
     solid: bool
     persistent: bool
@@ -286,6 +294,8 @@ class ObjectConverter(BaseConverter):
         self._project_enum_values_cache: dict[str, dict[str, int]] | None = None
         self._project_macro_values_cache: dict[str, str] | None = None
         self._asset_output_paths: dict[str, dict[str, str]] = {}
+        self._object_source_paths: dict[str, str] = {}
+        self._project_resource_names_by_path: dict[tuple[str, str], str] | None = None
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of object name -> subfolder.
@@ -293,23 +303,37 @@ class ObjectConverter(BaseConverter):
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all objects on disk.
         """
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="object",
+            include_project_sources=True,
+        )
         try:
-            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
-            if not yyp_files:
+            if manifest.yyp_path is None:
                 return None
-
-            yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
-            with open(yyp_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            yyp_source = self._resolve_discovered_project_source(
+                manifest.yyp_path,
+                resource_type="project",
+                field="projectFile",
+            )
+            if yyp_source is None:
+                return None
+            if any(
+                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+                for diagnostic in manifest.diagnostics
+            ):
+                raise TypeError("GameMaker project root must be an object")
+            data = manifest.raw_data
 
             valid_objects: dict[str, str] = {}
-            for resource in cast(list[JsonDict], data.get('resources', [])):
+            for index, resource in enumerate(cast(list[JsonDict], data.get('resources', []))):
                 res_id = cast(JsonDict, resource.get('id', {}))
                 raw_path = res_id.get('path', '')
                 if not isinstance(raw_path, str):
+                    continue
+                field = f"resources[{index}].id.path"
+                if field in manifest_rejected_fields:
                     continue
                 path = raw_path.replace('\\', '/')
                 if path.startswith('objects/'):
@@ -321,23 +345,54 @@ class ObjectConverter(BaseConverter):
                     )
                     if not name:
                         continue
-                    try:
-                        resolved_path = resolve_project_source_path(
-                            self.gm_project_path,
-                            path,
-                        )
-                    except ProjectSourcePathError as exc:
-                        self._safe_log(
-                            f"Warning: Skipping GameMaker object {name}: {exc}"
-                        )
+                    resolved_path = self._resolve_project_source(
+                        path,
+                        owner_source_path=yyp_source.source_path,
+                        resource=name,
+                        resource_type="object",
+                        field=field,
+                    )
+                    if resolved_path is None or not self._source_has_resource_kind(
+                        resolved_path,
+                        "objects",
+                        rejected_path=path,
+                        owner_source_path=yyp_source.source_path,
+                        resource=name,
+                        field=field,
+                    ):
                         continue
                     yy_path = resolved_path.filesystem_path
+                    self._object_source_paths[name] = resolved_path.source_path
                     valid_objects[name] = self._get_subfolder_from_yy(yy_path)
 
             return valid_objects
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_YYPFilterWarning"))
             return None
+
+    def _source_has_resource_kind(
+        self,
+        resolved: ResolvedProjectSourcePath,
+        resource_kind: str,
+        *,
+        rejected_path: str,
+        owner_source_path: StrPath,
+        resource: str,
+        field: str,
+    ) -> bool:
+        try:
+            validate_project_resource_source_path(resolved, resource_kind)
+            return True
+        except ProjectSourcePathError as error:
+            self._report_source_path_rejection(
+                rejected_path,
+                error,
+                owner_source_path=owner_source_path,
+                resource=resource,
+                resource_type="object",
+                field=field,
+            )
+            return False
 
     def _get_project_asset_names(self) -> set[str]:
         """Return GameMaker resource names that can collide with unscoped GML identifiers."""
@@ -352,6 +407,7 @@ class ObjectConverter(BaseConverter):
                 progress_callback=lambda _value: None,
                 conversion_running=self.conversion_running,
                 macro_configuration=self.macro_configuration,
+                diagnostics=self.diagnostics,
             )
             asset_names = {entry.name for entry in registry_converter.build_entries()}
             self._project_asset_names_cache = asset_names
@@ -360,10 +416,18 @@ class ObjectConverter(BaseConverter):
             pass
 
         try:
-            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
-            if yyp_files:
-                yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
-                with open(yyp_path, 'r', encoding='utf-8') as f:
+            yyp_files = sorted(
+                f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')
+            )
+            for yyp_filename in yyp_files:
+                yyp_source = self._resolve_discovered_project_source(
+                    os.path.join(self.gm_project_path, yyp_filename),
+                    resource_type="project",
+                    field="project asset-name discovery",
+                )
+                if yyp_source is None or not os.path.isfile(yyp_source.filesystem_path):
+                    continue
+                with open(yyp_source.filesystem_path, 'r', encoding='utf-8') as f:
                     content = f.read()
 
                 cleaned = re.sub(r',\s*([}\]])', r'\1', content)
@@ -382,17 +446,29 @@ class ObjectConverter(BaseConverter):
 
         asset_names = set()
         for resource_dir in ("objects", "sprites", "sounds", "rooms", "scripts"):
-            root = os.path.join(self.gm_project_path, resource_dir)
-            if not os.path.isdir(root):
+            resolved_root = self._resolve_discovered_project_source(
+                os.path.join(self.gm_project_path, resource_dir),
+                resource_type="project_resource",
+                field="asset-name discovery directory",
+            )
+            if resolved_root is None or not os.path.isdir(resolved_root.filesystem_path):
                 continue
             try:
-                asset_names.update(
-                    name
-                    for name in os.listdir(root)
-                    if os.path.isdir(os.path.join(root, name))
-                )
+                names = sorted(os.listdir(resolved_root.filesystem_path))
             except OSError:
                 continue
+            for name in names:
+                resolved_resource = self._resolve_discovered_project_source(
+                    os.path.join(resolved_root.filesystem_path, name),
+                    owner_source_path=resolved_root.source_path,
+                    resource=name,
+                    resource_type="project_resource",
+                    field="asset-name discovery resource",
+                )
+                if resolved_resource is not None and os.path.isdir(
+                    resolved_resource.filesystem_path
+                ):
+                    asset_names.add(name)
         self._project_asset_names_cache = asset_names
         return set(asset_names)
 
@@ -443,57 +519,347 @@ class ObjectConverter(BaseConverter):
             )
         return dict(self._project_macro_values_cache)
 
-    def _parse_object_yy(self, object_name: str) -> ParsedObject | None:
+    def _resolve_object_yy_source(
+        self,
+        object_name: str,
+        source_path: str | None = None,
+    ) -> ResolvedProjectSourcePath | None:
+        if source_path is not None:
+            resolved = self._resolve_project_source(
+                source_path,
+                resource=object_name,
+                resource_type="object",
+                field="object.yy",
+            )
+            owner_source_path: StrPath = os.path.dirname(source_path)
+            rejected_path = source_path
+        else:
+            candidate = os.path.join(
+                self.gm_project_path,
+                "objects",
+                object_name,
+                object_name + ".yy",
+            )
+            resolved = self._resolve_discovered_project_source(
+                candidate,
+                owner_source_path=os.path.dirname(candidate),
+                resource=object_name,
+                resource_type="object",
+                field="object.yy",
+            )
+            owner_source_path = os.path.dirname(candidate)
+            rejected_path = candidate
+        if resolved is None or not self._source_has_resource_kind(
+            resolved,
+            "objects",
+            rejected_path=rejected_path,
+            owner_source_path=owner_source_path,
+            resource=object_name,
+            field="object.yy",
+        ):
+            return None
+        return resolved
+
+    def _resolve_resource_reference(
+        self,
+        value: object,
+        *,
+        owner_source_path: str,
+        owner_name: str,
+        field: str,
+        resource_kind: str,
+    ) -> tuple[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+
+        reference = cast(JsonDict, value)
+        raw_path = reference.get("path")
+        raw_name = reference.get("name")
+        reference_field = f"{field}.path"
+        legacy_name_reference = "path" not in reference
+        if legacy_name_reference:
+            if not isinstance(raw_name, str) or not is_safe_project_source_component(
+                raw_name
+            ):
+                rejected_name = (
+                    raw_name if isinstance(raw_name, str) else repr(raw_name)
+                )
+                self._report_source_path_rejection(
+                    rejected_name,
+                    ProjectSourcePathError(
+                        "Legacy GameMaker resource reference name must be one "
+                        f"safe path component: {raw_name!r}"
+                    ),
+                    owner_source_path=owner_source_path,
+                    resource=owner_name,
+                    resource_type="object",
+                    field=f"{field}.name",
+                )
+                return None
+            raw_path = f"{resource_kind}/{raw_name}/{raw_name}.yy"
+            reference_field = f"{field}.name"
+        elif not isinstance(raw_path, str) or not raw_path:
+            rejected_path = raw_path if isinstance(raw_path, str) else repr(raw_path)
+            self._report_source_path_rejection(
+                rejected_path,
+                ProjectSourcePathError(
+                    "GameMaker resource reference path must be a non-empty "
+                    f"string: {raw_path!r}"
+                ),
+                owner_source_path=owner_source_path,
+                resource=owner_name,
+                resource_type="object",
+                field=reference_field,
+            )
+            return None
+
+        resolved = self._resolve_project_source(
+            raw_path,
+            owner_source_path=owner_source_path,
+            resource=owner_name,
+            resource_type="object",
+            field=reference_field,
+        )
+        if resolved is None or not self._source_has_resource_kind(
+            resolved,
+            resource_kind,
+            rejected_path=raw_path,
+            owner_source_path=owner_source_path,
+            resource=owner_name,
+            field=reference_field,
+        ):
+            return None
+
+        reference_name = (
+            raw_name
+            if legacy_name_reference and isinstance(raw_name, str)
+            else self._logical_resource_name(resource_kind, resolved)
+        )
+        if not reference_name:
+            return None
+        return reference_name, resolved.source_path
+
+    def _logical_resource_name(
+        self,
+        resource_kind: str,
+        resolved: ResolvedProjectSourcePath,
+    ) -> str:
+        if self._project_resource_names_by_path is None:
+            names_by_path: dict[tuple[str, str], str] = {}
+            manifest = load_gamemaker_project_manifest(self.gm_project_path)
+            for resource in manifest.resources:
+                kind = resource.kind.casefold()
+                if kind not in {"sprites", "objects"}:
+                    continue
+                try:
+                    resource_source = resolve_project_source_path(
+                        self.gm_project_path,
+                        resource.path,
+                    )
+                    validate_project_resource_source_path(
+                        resource_source,
+                        kind,
+                    )
+                except ProjectSourcePathError:
+                    continue
+                if is_safe_project_source_component(resource.name):
+                    names_by_path.setdefault(
+                        (kind, resource_source.source_path),
+                        resource.name,
+                    )
+            self._project_resource_names_by_path = names_by_path
+
+        manifest_name = self._project_resource_names_by_path.get(
+            (resource_kind.casefold(), resolved.source_path),
+            "",
+        )
+        if manifest_name:
+            return manifest_name
+
+        referenced_data = self._read_yy_file(resolved.filesystem_path)
+        if referenced_data is not None:
+            for key in ("%Name", "name"):
+                value = referenced_data.get(key)
+                if isinstance(value, str) and is_safe_project_source_component(value):
+                    return value
+
+        fallback_name = posixpath.splitext(
+            posixpath.basename(resolved.source_path)
+        )[0]
+        return (
+            fallback_name
+            if is_safe_project_source_component(fallback_name)
+            else ""
+        )
+
+    def _sanitize_object_events(
+        self,
+        raw_event_list: object,
+        *,
+        owner_source_path: str,
+        object_name: str,
+    ) -> list[JsonDict]:
+        if not isinstance(raw_event_list, list):
+            return []
+
+        events: list[JsonDict] = []
+        for index, raw_event in enumerate(cast(list[object], raw_event_list)):
+            if not isinstance(raw_event, dict):
+                continue
+            event: JsonDict = {
+                key: value
+                for key, value in cast(dict[object, object], raw_event).items()
+                if isinstance(key, str)
+            }
+            if isinstance(event.get("collisionObjectId"), dict):
+                collision_reference = self._resolve_resource_reference(
+                    event["collisionObjectId"],
+                    owner_source_path=owner_source_path,
+                    owner_name=object_name,
+                    field=f"eventList[{index}].collisionObjectId",
+                    resource_kind="objects",
+                )
+                event["collisionObjectId"] = (
+                    {
+                        "name": collision_reference[0],
+                        "path": collision_reference[1],
+                    }
+                    if collision_reference is not None
+                    else None
+                )
+
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+            if mapping is not None and not self._event_mapping_paths_are_contained(
+                owner_source_path,
+                object_name,
+                mapping,
+                field=f"eventList[{index}].sourceFile",
+            ):
+                continue
+            events.append(event)
+        return events
+
+    def _event_mapping_paths_are_contained(
+        self,
+        owner_source_path: str,
+        object_name: str,
+        mapping: EventMapping,
+        *,
+        field: str,
+    ) -> bool:
+        for filename in _event_source_filenames(mapping):
+            if self._resolve_event_source(
+                owner_source_path,
+                object_name,
+                filename,
+                field=field,
+            ) is None:
+                return False
+        return True
+
+    def _resolve_event_source(
+        self,
+        owner_source_path: str,
+        object_name: str,
+        filename: str,
+        *,
+        field: str = "eventList[].sourceFile",
+    ) -> ResolvedProjectSourcePath | None:
+        if not is_safe_project_source_component(filename):
+            self._report_source_path_rejection(
+                filename,
+                ProjectSourcePathError(
+                    "GameMaker object event source must be one safe filename "
+                    f"component: {filename!r}"
+                ),
+                owner_source_path=owner_source_path,
+                resource=object_name,
+                resource_type="object",
+                field=field,
+            )
+            return None
+        resolved = self._resolve_project_source(
+            filename,
+            owner_source_path=owner_source_path,
+            resource=object_name,
+            resource_type="object",
+            field=field,
+        )
+        if resolved is None:
+            return None
+        owner_directory = posixpath.dirname(owner_source_path.replace("\\", "/"))
+        if posixpath.dirname(resolved.source_path) == owner_directory:
+            return resolved
+        self._report_source_path_rejection(
+            filename,
+            ProjectSourcePathError(
+                "GameMaker object event filenames must stay beside their "
+                "declaring object .yy file"
+            ),
+            owner_source_path=owner_source_path,
+            resource=object_name,
+            resource_type="object",
+            field=field,
+        )
+        return None
+
+    def _parse_object_yy(
+        self,
+        object_name: str,
+        object_source_path: str | None = None,
+    ) -> ParsedObject | None:
         """Parse an object .yy file and extract the sprite reference and event list.
 
         Returns a dict with 'sprite_name' (str or None) and 'event_list' (list)
         or None if parsing fails.
         """
-        yy_path = os.path.join(self.gm_project_path, 'objects', object_name, object_name + '.yy')
+        resolved_object = self._resolve_object_yy_source(
+            object_name,
+            object_source_path or self._object_source_paths.get(object_name),
+        )
+        if resolved_object is None:
+            return None
+        yy_path = resolved_object.filesystem_path
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
             data = cast(JsonDict, json.loads(cleaned))
 
-            sprite_id = data.get('spriteId')
-            sprite_name: str | None = None
-            if isinstance(sprite_id, dict):
-                sprite_data = cast(JsonDict, sprite_id)
-                sprite_name = cast(str | None, sprite_data.get('name', None))
+            sprite_reference = self._resolve_resource_reference(
+                data.get("spriteId"),
+                owner_source_path=resolved_object.source_path,
+                owner_name=object_name,
+                field="spriteId",
+                resource_kind="sprites",
+            )
+            parent_reference = self._resolve_resource_reference(
+                data.get("parentObjectId"),
+                owner_source_path=resolved_object.source_path,
+                owner_name=object_name,
+                field="parentObjectId",
+                resource_kind="objects",
+            )
+            event_list = self._sanitize_object_events(
+                data.get("eventList", []),
+                owner_source_path=resolved_object.source_path,
+                object_name=object_name,
+            )
 
-            event_list = cast(list[JsonDict], data.get('eventList', []))
-            parent_object_name = self._parse_parent_object_name(data.get('parentObjectId'))
-
-            return {
-                "sprite_name": sprite_name,
-                "parent_object_name": parent_object_name,
-                "event_list": event_list,
-                "solid": bool(data.get("solid", False)),
-                "persistent": bool(data.get("persistent", False)),
-            }
+            return ParsedObject(
+                source_path=resolved_object.source_path,
+                sprite_name=sprite_reference[0] if sprite_reference is not None else None,
+                sprite_source_path=sprite_reference[1] if sprite_reference is not None else None,
+                parent_object_name=parent_reference[0] if parent_reference is not None else None,
+                parent_object_source_path=parent_reference[1] if parent_reference is not None else None,
+                event_list=event_list,
+                solid=bool(data.get("solid", False)),
+                persistent=bool(data.get("persistent", False)),
+            )
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_ParseError").format(
                 yy_path=yy_path, object_name=object_name))
             return None
-
-    def _parse_parent_object_name(self, parent_object_id: object) -> str | None:
-        if not isinstance(parent_object_id, dict):
-            return None
-
-        parent_data = cast(JsonDict, parent_object_id)
-        parent_name = parent_data.get("name")
-        if isinstance(parent_name, str) and parent_name:
-            return parent_name
-
-        parent_path = parent_data.get("path")
-        if not isinstance(parent_path, str):
-            return None
-
-        path_parts = parent_path.replace("\\", "/").split("/")
-        if len(path_parts) >= 2 and path_parts[0] == "objects" and path_parts[1]:
-            return path_parts[1]
-        return None
 
     def _object_script_res_path(self, object_name: str, subfolder: str = "") -> str:
         return resource_sibling_path(
@@ -507,14 +873,41 @@ class ObjectConverter(BaseConverter):
             generated_nested_resource_path("objects", subfolder, object_name, ".tscn"),
         )
 
-    def _get_object_subfolder(self, object_name: str) -> str:
-        yy_path = os.path.join(self.gm_project_path, 'objects', object_name, object_name + '.yy')
-        return self._get_subfolder_from_yy(yy_path)
+    def _get_object_subfolder(
+        self,
+        object_name: str,
+        object_source_path: str | None = None,
+    ) -> str:
+        resolved = self._resolve_object_yy_source(
+            object_name,
+            object_source_path or self._object_source_paths.get(object_name),
+        )
+        return (
+            self._get_subfolder_from_yy(resolved.filesystem_path)
+            if resolved is not None
+            else ""
+        )
 
-    def _get_sprite_subfolder(self, sprite_name: str) -> str:
-        """Resolve a sprite's subfolder by reading its .yy file from the GM project."""
-        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
-        return self._get_subfolder_from_yy(yy_path)
+    def _get_sprite_subfolder(
+        self,
+        sprite_source_path: str,
+        *,
+        owner_source_path: str,
+        object_name: str,
+    ) -> str:
+        """Resolve a sprite's subfolder from the object's contained reference."""
+        resolved = self._resolve_project_source(
+            sprite_source_path,
+            owner_source_path=owner_source_path,
+            resource=object_name,
+            resource_type="object",
+            field="spriteId.path",
+        )
+        return (
+            self._get_subfolder_from_yy(resolved.filesystem_path)
+            if resolved is not None
+            else ""
+        )
 
     def _sprite_scene_exists(self, sprite_name: str, sprite_subfolder: str = "") -> bool:
         """Check whether the converted sprite scene exists in the Godot project."""
@@ -601,6 +994,7 @@ class ObjectConverter(BaseConverter):
     def _load_event_code_bodies(
         self,
         object_name: str,
+        object_source_path: str,
         event_list: list[JsonDict],
         inherited_event_functions: set[str] | None = None,
         asset_names: set[str] | None = None,
@@ -615,7 +1009,6 @@ class ObjectConverter(BaseConverter):
         instance_variables: set[str] = set(project_script_instance_variables or set())
         inherited_functions = inherited_event_functions or set()
         source_entries: list[ObjectEventSource] = []
-        object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
         asset_name_set = set(asset_names or set())
 
         for event in event_list or []:
@@ -623,9 +1016,17 @@ class ObjectConverter(BaseConverter):
             if mapping is None or not mapping.gml_filename:
                 continue
 
-            source_path = self._event_source_path(object_dir, mapping)
+            source_path = self._event_source_path(
+                object_source_path,
+                object_name,
+                mapping,
+            )
             if source_path is None:
-                self._record_missing_event_source(object_name, object_dir, mapping)
+                self._record_missing_event_source(
+                    object_name,
+                    object_source_path,
+                    mapping,
+                )
                 continue
 
             try:
@@ -721,22 +1122,32 @@ class ObjectConverter(BaseConverter):
 
         return code_bodies, instance_variables, source_maps
 
-    def _event_source_path(self, object_dir: str, mapping: EventMapping) -> str | None:
+    def _event_source_path(
+        self,
+        object_source_path: str,
+        object_name: str,
+        mapping: EventMapping,
+    ) -> str | None:
         for filename in _event_source_filenames(mapping):
-            source_path = os.path.join(object_dir, filename)
-            if os.path.isfile(source_path):
-                return source_path
+            resolved = self._resolve_event_source(
+                object_source_path,
+                object_name,
+                filename,
+            )
+            if resolved is not None and os.path.isfile(resolved.filesystem_path):
+                return resolved.filesystem_path
         return None
 
     def _record_missing_event_source(
         self,
         object_name: str,
-        object_dir: str,
+        object_source_path: str,
         mapping: EventMapping,
     ) -> None:
         if not mapping.gml_filename.startswith("Collision_"):
             return
         filenames = _event_source_filenames(mapping)
+        owner_directory = os.path.dirname(object_source_path).replace(os.sep, "/")
         message = (
             "Warning: Missing GameMaker collision event code file for "
             f"{object_name}/{mapping.godot_func}; looked for {', '.join(filenames)}"
@@ -746,7 +1157,11 @@ class ObjectConverter(BaseConverter):
                 "warning",
                 "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE",
                 message,
-                source_path=os.path.join(object_dir, filenames[0]) if filenames else object_dir,
+                source_path=(
+                    f"{owner_directory}/{filenames[0]}"
+                    if filenames
+                    else object_source_path
+                ),
                 resource=object_name,
                 resource_type="object",
                 event=mapping.godot_func,
@@ -791,11 +1206,18 @@ class ObjectConverter(BaseConverter):
             return f"super.{mapping.godot_func}()"
         return f"super.{mapping.godot_func}({mapping.params})"
 
-    def _parent_event_function_names(self, parent_object_name: str | None) -> set[str]:
+    def _parent_event_function_names(
+        self,
+        parent_object_name: str | None,
+        parent_object_source_path: str | None,
+    ) -> set[str]:
         if parent_object_name is None:
             return set()
 
-        parsed_parent = self._parse_object_yy(parent_object_name)
+        parsed_parent = self._parse_object_yy(
+            parent_object_name,
+            parent_object_source_path,
+        )
         if parsed_parent is None:
             return set()
 
@@ -814,20 +1236,38 @@ class ObjectConverter(BaseConverter):
                 function_names.add(mapping.godot_func)
         return function_names
 
-    def _parent_object_chain(self, object_name: str, seen: set[str] | None = None) -> tuple[str, ...]:
+    def _parent_object_chain(
+        self,
+        object_name: str,
+        object_source_path: str | None = None,
+        seen: set[str] | None = None,
+        parsed_object: ParsedObject | None = None,
+    ) -> tuple[str, ...]:
         seen = set(seen or set())
         if object_name in seen:
             return ()
         seen.add(object_name)
 
-        parsed = self._parse_object_yy(object_name)
+        parsed = parsed_object or self._parse_object_yy(object_name, object_source_path)
         if parsed is None or parsed["parent_object_name"] is None:
             return ()
 
         parent_name = parsed["parent_object_name"]
-        return (parent_name, *self._parent_object_chain(parent_name, seen))
+        return (
+            parent_name,
+            *self._parent_object_chain(
+                parent_name,
+                parsed["parent_object_source_path"],
+                seen,
+            ),
+        )
 
-    def _object_inherits_sprite_runtime(self, object_name: str | None, seen: set[str] | None = None) -> bool:
+    def _object_inherits_sprite_runtime(
+        self,
+        object_name: str | None,
+        object_source_path: str | None = None,
+        seen: set[str] | None = None,
+    ) -> bool:
         if object_name is None:
             return False
         seen = set(seen or set())
@@ -835,22 +1275,40 @@ class ObjectConverter(BaseConverter):
             return False
         seen.add(object_name)
 
-        parsed = self._parse_object_yy(object_name)
+        parsed = self._parse_object_yy(object_name, object_source_path)
         if parsed is None:
             return False
         if parsed["sprite_name"] is not None:
             return True
-        if self._object_event_code_uses_sprite_runtime(object_name, parsed["event_list"]):
+        if self._object_event_code_uses_sprite_runtime(
+            object_name,
+            parsed["source_path"],
+            parsed["event_list"],
+        ):
             return True
-        return self._object_inherits_sprite_runtime(parsed["parent_object_name"], seen)
+        return self._object_inherits_sprite_runtime(
+            parsed["parent_object_name"],
+            parsed["parent_object_source_path"],
+            seen,
+        )
 
-    def _object_event_code_uses_sprite_runtime(self, object_name: str, event_list: list[JsonDict]) -> bool:
-        object_dir = os.path.join(self.gm_project_path, 'objects', object_name)
+    def _object_event_code_uses_sprite_runtime(
+        self,
+        object_name: str,
+        object_source_path: str,
+        event_list: list[JsonDict],
+    ) -> bool:
         for event in event_list:
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
             if mapping is None or not mapping.gml_filename:
                 continue
-            source_path = os.path.join(object_dir, mapping.gml_filename)
+            source_path = self._event_source_path(
+                object_source_path,
+                object_name,
+                mapping,
+            )
+            if source_path is None:
+                continue
             try:
                 with open(source_path, 'r', encoding='utf-8') as f:
                     if _SPRITE_RUNTIME_IDENTIFIER_RE.search(f.read()) is not None:
@@ -868,6 +1326,7 @@ class ObjectConverter(BaseConverter):
         project_script_instance_variables: set[str] | None = None,
         enum_values: Mapping[str, Mapping[str, int]] | None = None,
         macro_values: Mapping[str, str] | None = None,
+        object_source_path: str | None = None,
     ) -> ObjectProcessResult | None:
         """Process a single object: parse .yy, generate scene and script, write files.
 
@@ -876,12 +1335,14 @@ class ObjectConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        parsed = self._parse_object_yy(object_name)
+        parsed = self._parse_object_yy(object_name, object_source_path)
         if parsed is None:
             return {"success": False, "name": object_name, "has_sprite": False, "sprite_name": None, "event_count": 0}
 
         sprite_name = parsed["sprite_name"]
+        sprite_source_path = parsed["sprite_source_path"]
         parent_object_name = parsed["parent_object_name"]
+        parent_object_source_path = parsed["parent_object_source_path"]
         event_list = parsed["event_list"]
         solid = bool(parsed.get("solid", False))
         persistent = bool(parsed.get("persistent", False))
@@ -890,16 +1351,29 @@ class ObjectConverter(BaseConverter):
         inherited_event_functions: set[str] = set()
 
         if parent_object_name is not None and parent_object_name != object_name:
-            parent_subfolder = self._get_object_subfolder(parent_object_name)
+            parent_subfolder = self._get_object_subfolder(
+                parent_object_name,
+                parent_object_source_path,
+            )
             parent_script_res_path = self._object_script_res_path(parent_object_name, parent_subfolder)
-            inherited_event_functions = self._parent_event_function_names(parent_object_name)
-        inherited_sprite_runtime = self._object_inherits_sprite_runtime(parent_object_name)
+            inherited_event_functions = self._parent_event_function_names(
+                parent_object_name,
+                parent_object_source_path,
+            )
+        inherited_sprite_runtime = self._object_inherits_sprite_runtime(
+            parent_object_name,
+            parent_object_source_path,
+        )
         local_event_functions = self._event_function_names(event_list)
 
-        if sprite_name is not None:
+        if sprite_name is not None and sprite_source_path is not None:
             sprite_scene_path = (sprite_scene_paths or {}).get(sprite_name)
             if sprite_scene_path is None:
-                sprite_subfolder = self._get_sprite_subfolder(sprite_name)
+                sprite_subfolder = self._get_sprite_subfolder(
+                    sprite_source_path,
+                    owner_source_path=parsed["source_path"],
+                    object_name=object_name,
+                )
                 if self._sprite_scene_exists(sprite_name, sprite_subfolder):
                     sprite_scene_path = self._asset_output_paths.get("sprites", {}).get(
                         sprite_name,
@@ -919,6 +1393,7 @@ class ObjectConverter(BaseConverter):
 
         code_bodies, instance_variables, event_source_maps = self._load_event_code_bodies(
             object_name,
+            parsed["source_path"],
             event_list,
             inherited_event_functions=inherited_event_functions,
             asset_names=asset_names,
@@ -943,7 +1418,11 @@ class ObjectConverter(BaseConverter):
             ),
             object_runtime=ObjectRuntimeConfig(
                 object_name=object_name,
-                parent_object_names=self._parent_object_chain(object_name),
+                parent_object_names=self._parent_object_chain(
+                    object_name,
+                    parsed["source_path"],
+                    parsed_object=parsed,
+                ),
                 solid=solid,
                 persistent=persistent,
                 inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
@@ -992,27 +1471,72 @@ class ObjectConverter(BaseConverter):
         os.makedirs(self.godot_objects_path, exist_ok=True)
 
         gm_objects_path = os.path.join(self.gm_project_path, 'objects')
-        if not os.path.isdir(gm_objects_path):
+        resolved_objects_root = self._resolve_discovered_project_source(
+            gm_objects_path,
+            resource_type="object",
+            field="objectsDirectory",
+        )
+        if (
+            resolved_objects_root is None
+            or not os.path.isdir(resolved_objects_root.filesystem_path)
+        ):
             self.log_callback(get_localized("Console_Convertor_Objects_Error_NotFound"))
             return
 
         write_gml_runtime(self.godot_project_path)
 
-        object_names = [
-            name for name in os.listdir(gm_objects_path)
-            if os.path.isdir(os.path.join(gm_objects_path, name))
-            and os.path.isfile(os.path.join(gm_objects_path, name, name + '.yy'))
-        ]
-
         valid_names = self._get_valid_object_names()
-        object_subfolders = {}
+        object_names: list[str] = []
+        object_subfolders: dict[str, str] = {}
         if valid_names is not None:
-            object_names = [name for name in object_names if name in valid_names]
-            object_subfolders = {name: valid_names[name] for name in object_names}
+            for name, subfolder in valid_names.items():
+                source_path = self._object_source_paths.get(name)
+                resolved = self._resolve_object_yy_source(name, source_path)
+                if resolved is None or not os.path.isfile(resolved.filesystem_path):
+                    continue
+                object_names.append(name)
+                object_subfolders[name] = subfolder
         else:
-            for name in object_names:
-                yy_path = os.path.join(self.gm_project_path, 'objects', name, name + '.yy')
-                object_subfolders[name] = self._get_subfolder_from_yy(yy_path)
+            for name in os.listdir(resolved_objects_root.filesystem_path):
+                object_directory = self._resolve_discovered_project_source(
+                    os.path.join(resolved_objects_root.filesystem_path, name),
+                    resource=name,
+                    resource_type="object",
+                    field="objectDirectory",
+                )
+                if (
+                    object_directory is None
+                    or not os.path.isdir(object_directory.filesystem_path)
+                ):
+                    continue
+                yy_source = self._resolve_discovered_project_source(
+                    os.path.join(object_directory.filesystem_path, name + ".yy"),
+                    owner_source_path=object_directory.source_path,
+                    resource=name,
+                    resource_type="object",
+                    field="object.yy",
+                )
+                if (
+                    yy_source is None
+                    or not self._source_has_resource_kind(
+                        yy_source,
+                        "objects",
+                        rejected_path=os.path.join(
+                            object_directory.filesystem_path,
+                            name + ".yy",
+                        ),
+                        owner_source_path=object_directory.source_path,
+                        resource=name,
+                        field="object.yy",
+                    )
+                    or not os.path.isfile(yy_source.filesystem_path)
+                ):
+                    continue
+                self._object_source_paths[name] = yy_source.source_path
+                object_names.append(name)
+                object_subfolders[name] = self._get_subfolder_from_yy(
+                    yy_source.filesystem_path
+                )
 
         if not object_names:
             self.log_callback(get_localized("Console_Convertor_Objects_Complete"))
@@ -1042,6 +1566,7 @@ class ObjectConverter(BaseConverter):
                     project_script_instance_variables,
                     enum_values,
                     macro_values,
+                    self._object_source_paths.get(name),
                 ): name
                 for name in object_names
             }

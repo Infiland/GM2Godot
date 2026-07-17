@@ -6,7 +6,10 @@ import re
 from typing import NamedTuple, Protocol, cast
 
 from src.conversion.architecture_policy import layer_policy_metadata_lines
-from src.conversion.room_creation_code import resolve_instance_creation_code
+from src.conversion.room_creation_code import (
+    CreationCodeSourceResolver,
+    resolve_instance_creation_code,
+)
 from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
 
 
@@ -109,11 +112,13 @@ class RoomLayerSerializationContext:
         gm_project_path: str | None = None,
         resource_index: RoomLayerResourceIndex | None = None,
         warn_callback: LogCallback | None = None,
+        creation_code_source_resolver: CreationCodeSourceResolver | None = None,
     ) -> None:
         self.room = room
         self.gm_project_path = gm_project_path
         self.resource_index = resource_index
         self.warn_callback = warn_callback
+        self.creation_code_source_resolver = creation_code_source_resolver
         self.ext_resource_ids: dict[tuple[str, str], str] = {}
         self.creation_order = _instance_creation_order(room)
 
@@ -207,9 +212,16 @@ def serialize_room_layers(
     gm_project_path: str | None = None,
     resource_index: RoomLayerResourceIndex | None = None,
     warn_callback: LogCallback | None = None,
+    creation_code_source_resolver: CreationCodeSourceResolver | None = None,
 ) -> SerializedRoomLayers:
     """Serialize GameMaker room layers and supported layer children."""
-    context = RoomLayerSerializationContext(room, gm_project_path, resource_index, warn_callback)
+    context = RoomLayerSerializationContext(
+        room,
+        gm_project_path,
+        resource_index,
+        warn_callback,
+        creation_code_source_resolver,
+    )
     node_lines: list[str] = []
     node_lines.extend(_camera_node_lines(context))
     used_names: dict[str, int] = {}
@@ -1190,6 +1202,8 @@ def _instance_scene_lines(
         context.room,
         instance,
         warn_callback=context.warn,
+        gm_project_path=context.gm_project_path,
+        source_resolver=context.creation_code_source_resolver,
     )
     if ext_resource_id is None:
         lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']

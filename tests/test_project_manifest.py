@@ -4,6 +4,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -134,6 +135,363 @@ class TestGameMakerProjectManifest(unittest.TestCase):
         self.assertTrue(
             any(diagnostic.code == "GM2GD-PROJECT-RESOURCE-CONFLICT" for diagnostic in manifest.diagnostics)
         )
+
+    def test_invalid_resource_path_kind_takes_precedence_over_declared_type(
+        self,
+    ) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "ConflictingKind.yyp"),
+            json.dumps(
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": "s_conflicting",
+                                "path": "sprites/../../outside.yy",
+                            },
+                            "resourceType": "GMObject",
+                        }
+                    ],
+                    "resourceType": "GMProject",
+                }
+            ),
+        )
+
+        manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].resource, "s_conflicting")
+        self.assertEqual(rejected[0].resource_kind, "sprites")
+        self.assertEqual(rejected[0].resource_type, "GMSprite")
+        assert rejected[0].source is not None
+        self.assertEqual(
+            rejected[0].source.field_path,
+            "resources[0].id.path",
+        )
+
+    def test_invalid_resource_paths_report_missing_and_actual_legacy_fields(
+        self,
+    ) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "MalformedPaths.yyp"),
+            json.dumps(
+                {
+                    "resources": [
+                        {
+                            "id": {"name": "s_missing"},
+                            "resourceType": "GMSprite",
+                        },
+                        {
+                            "Key": "room-null",
+                            "Value": {
+                                "name": "r_null",
+                                "resourcePath": None,
+                                "resourceType": "GMRoom",
+                            },
+                        },
+                        {
+                            "Key": "script-empty",
+                            "Value": {
+                                "name": "scr_empty",
+                                "resource_path": "",
+                                "resourceType": "GMScript",
+                            },
+                        },
+                        {
+                            "name": "snd_numeric",
+                            "path": 7,
+                            "resourceType": "GMSound",
+                        },
+                    ],
+                    "resourceType": "GMProject",
+                }
+            ),
+        )
+
+        manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 4, rejected)
+        self.assertEqual(
+            {
+                diagnostic.source.field_path
+                for diagnostic in rejected
+                if diagnostic.source is not None
+            },
+            {
+                "resources[0].id.path",
+                "resources[1].Value.resourcePath",
+                "resources[2].Value.resource_path",
+                "resources[3].path",
+            },
+        )
+        self.assertIn("<missing>", rejected[0].message)
+        self.assertEqual(manifest.resources, ())
+
+    def test_duplicate_rejected_resource_paths_have_entry_specific_lines(
+        self,
+    ) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "DuplicateRejectedPaths.yyp"),
+            "{\n"
+            '  "resources": [\n'
+            '    {"id":{"name":"s_first","path":"../../outside.yy"}},\n'
+            '    {"id":{"name":"s_second","path":"../../outside.yy"}}\n'
+            "  ]\n"
+            "}\n",
+        )
+
+        manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 2, rejected)
+        self.assertEqual(
+            [
+                diagnostic.source.line
+                for diagnostic in rejected
+                if diagnostic.source is not None
+            ],
+            [3, 4],
+        )
+
+    def test_skips_project_yyp_symlink_that_resolves_outside_project(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yyp = os.path.join(outside_dir, "Outside.yyp")
+            _write_file(
+                outside_yyp,
+                '{"%Name":"Outside","resourceType":"GMProject"}',
+            )
+            try:
+                os.symlink(
+                    outside_yyp,
+                    os.path.join(self.gm_dir, "AOutside.yyp"),
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+            _write_file(
+                os.path.join(self.gm_dir, "BInside.yyp"),
+                '{"%Name":"Inside","resourceType":"GMProject"}',
+            )
+
+            manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        self.assertEqual(manifest.project_name, "Inside")
+        self.assertEqual(manifest.yyp_path, os.path.join(self.gm_dir, "BInside.yyp"))
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        assert rejected[0].source is not None
+        self.assertEqual(
+            rejected[0].source.path,
+            os.path.join(self.gm_dir, "AOutside.yyp"),
+        )
+        self.assertEqual(rejected[0].source.field_path, "AOutside.yyp")
+
+    def test_skips_non_file_yyp_candidate_with_source_diagnostic(self) -> None:
+        invalid_yyp = os.path.join(self.gm_dir, "AInvalid.yyp")
+        os.makedirs(invalid_yyp)
+        _write_file(
+            os.path.join(self.gm_dir, "BInside.yyp"),
+            '{"%Name":"Inside","resourceType":"GMProject"}',
+        )
+
+        manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        self.assertEqual(manifest.project_name, "Inside")
+        self.assertEqual(
+            manifest.yyp_path,
+            os.path.join(self.gm_dir, "BInside.yyp"),
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        assert rejected[0].source is not None
+        self.assertEqual(rejected[0].source.path, invalid_yyp)
+        self.assertEqual(rejected[0].source.field_path, "AInvalid.yyp")
+        self.assertIn("not a regular .yyp file", rejected[0].message)
+
+    def test_skips_project_option_symlink_that_resolves_outside_project(self) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "Manifest.yyp"),
+            '{"%Name":"Inside","resourceType":"GMProject"}',
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "options", "main", "options_main.yy"),
+            '{"option_game_speed":60}',
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_options = os.path.join(outside_dir, "options_windows.yy")
+            _write_file(outside_options, '{"option_windows_version":"outside"}')
+            linked_options = os.path.join(
+                self.gm_dir,
+                "options",
+                "windows",
+                "options_windows.yy",
+            )
+            os.makedirs(os.path.dirname(linked_options))
+            try:
+                os.symlink(outside_options, linked_options)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        self.assertIsNotNone(manifest.get_option("option_game_speed", "main"))
+        self.assertIsNone(manifest.get_option("option_windows_version", "windows"))
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        assert rejected[0].source is not None
+        self.assertEqual(rejected[0].source.path, linked_options)
+        self.assertEqual(
+            rejected[0].source.field_path,
+            "options/windows/options_windows.yy",
+        )
+
+    def test_skips_project_option_symlink_to_contained_wrong_family(self) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "Manifest.yyp"),
+            '{"%Name":"Inside","resourceType":"GMProject"}',
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "options", "main", "options_main.yy"),
+            '{"option_game_speed":60}',
+        )
+        wrong_family_target = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_options_decoy",
+            "s_options_decoy.yy",
+        )
+        _write_file(
+            wrong_family_target,
+            '{"option_windows_version":"wrong-family"}',
+        )
+        linked_options = os.path.join(
+            self.gm_dir,
+            "options",
+            "windows",
+            "options_windows.yy",
+        )
+        os.makedirs(os.path.dirname(linked_options), exist_ok=True)
+        try:
+            os.symlink(wrong_family_target, linked_options)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        with patch("builtins.open", wraps=open) as tracked_open:
+            manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        game_speed = manifest.get_option("option_game_speed", "main")
+        self.assertIsNotNone(game_speed)
+        assert game_speed is not None
+        self.assertEqual(game_speed.value, 60)
+        self.assertIsNone(
+            manifest.get_option("option_windows_version", "windows")
+        )
+        opened_paths = {
+            os.path.realpath(call.args[0])
+            for call in tracked_open.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        }
+        self.assertNotIn(os.path.realpath(wrong_family_target), opened_paths)
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        assert rejected[0].source is not None
+        self.assertEqual(rejected[0].source.path, linked_options)
+        self.assertEqual(
+            rejected[0].source.field_path,
+            "options/windows/options_windows.yy",
+        )
+
+    def test_skips_project_option_directory_symlink_with_source_diagnostic(self) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "Manifest.yyp"),
+            '{"%Name":"Inside","resourceType":"GMProject"}',
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "options", "main", "options_main.yy"),
+            '{"option_game_speed":60}',
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            _write_file(
+                os.path.join(outside_dir, "options_linux.yy"),
+                '{"option_linux_display_name":"outside"}',
+            )
+            linked_directory = os.path.join(self.gm_dir, "options", "linux")
+            try:
+                os.symlink(outside_dir, linked_directory)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        self.assertIsNotNone(manifest.get_option("option_game_speed", "main"))
+        self.assertIsNone(manifest.get_option("option_linux_display_name", "linux"))
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        assert rejected[0].source is not None
+        self.assertEqual(rejected[0].source.path, linked_directory)
+        self.assertEqual(rejected[0].source.field_path, "options/linux")
+
+    def test_skips_project_option_root_symlink_with_source_diagnostic(self) -> None:
+        _write_file(
+            os.path.join(self.gm_dir, "Manifest.yyp"),
+            '{"%Name":"Inside","resourceType":"GMProject"}',
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            _write_file(
+                os.path.join(outside_dir, "main", "options_main.yy"),
+                '{"option_game_speed":999}',
+            )
+            linked_root = os.path.join(self.gm_dir, "options")
+            try:
+                os.symlink(outside_dir, linked_root)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            manifest = load_gamemaker_project_manifest(self.gm_dir)
+
+        self.assertIsNone(manifest.get_option("option_game_speed", "main"))
+        rejected = [
+            diagnostic
+            for diagnostic in manifest.diagnostics
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        assert rejected[0].source is not None
+        self.assertEqual(rejected[0].source.path, linked_root)
+        self.assertEqual(rejected[0].source.field_path, "options")
 
     def test_ide_version_is_empty_when_metadata_is_absent_or_malformed(self) -> None:
         yyp_path = os.path.join(self.gm_dir, "VersionFallback.yyp")

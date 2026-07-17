@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2 - 2026-07-17
+
+- Confined nested GameMaker `.yy` sidecar and fallback-scan paths to the declared project root, rejecting traversal, absolute-path, drive-relative, NUL, and symlink escapes with source-linked diagnostics.
+
 ## 0.7.1 - 2026-07-17
 
 - Added immutable GameMaker LTS 2026 SNAP and Adding fixtures to CI with exact Godot 4.7.1 conversion, generated-resource validation, short runtime boot checks, and bounded failure reports.

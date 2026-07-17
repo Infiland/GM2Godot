@@ -1,11 +1,13 @@
 # pyright: reportPrivateUsage=false
 
+import json
 import os
 import sys
 import shutil
 import tempfile
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -13,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
 
 from PIL import Image
 from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.sprites import AnimationData, CollisionData, SpriteConverter, SpriteParseResult
 
@@ -510,6 +513,29 @@ class TestGetValidSpriteNames(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result, {})
 
+    def test_skips_external_yyp_link_before_contained_project_file(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yyp = os.path.join(outside_dir, "Outside.yyp")
+            with open(outside_yyp, "w", encoding="utf-8") as project_file:
+                project_file.write(_make_yyp_content(["s_outside"]))
+            try:
+                os.symlink(
+                    outside_yyp,
+                    os.path.join(self.gm_dir, "AOutside.yyp"),
+                )
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Symbolic links are unavailable: {error}")
+            with open(
+                os.path.join(self.gm_dir, "BInside.yyp"),
+                "w",
+                encoding="utf-8",
+            ) as project_file:
+                project_file.write(_make_yyp_content(["s_inside"]))
+
+            result = self._make_converter()._get_valid_sprite_names()
+
+        self.assertEqual(result, {"s_inside": ""})
+
 
 class TestSpriteConverterFiltering(unittest.TestCase):
     """Test that orphaned sprites are filtered out based on .yyp."""
@@ -862,6 +888,623 @@ def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], lay
         pbs=playback_speed, pbst=playback_speed_type, pb=playback,
         kf=keyframes_json,
     )
+
+
+class TestSpriteConverterSourcePathContainment(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    def _make_converter(
+        self,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> SpriteConverter:
+        return SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+    def _write_yyp(self, resources: list[dict[str, object]]) -> str:
+        yyp_path = os.path.join(self.gm_dir, "SpritePaths.yyp")
+        with open(yyp_path, "w", encoding="utf-8") as yyp_file:
+            json.dump({"resources": resources}, yyp_file)
+        return yyp_path
+
+    def _write_yy(self, relative_path: str, content: str) -> str:
+        yy_path = os.path.join(self.gm_dir, *relative_path.split("/"))
+        os.makedirs(os.path.dirname(yy_path), exist_ok=True)
+        with open(yy_path, "w", encoding="utf-8") as yy_file:
+            yy_file.write(content)
+        return yy_path
+
+    @staticmethod
+    def _write_png(path: str, color: str = "red") -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Image.new("RGBA", (2, 2), color).save(path, "PNG")
+
+    @staticmethod
+    def _rejections(
+        diagnostics: DiagnosticCollector,
+    ) -> list[ConversionDiagnostic]:
+        return [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+
+    def test_manifest_discovery_reads_selected_yyp_once(self) -> None:
+        yyp_path = self._write_yyp([])
+
+        with patch("builtins.open", wraps=open) as tracked_open:
+            valid_sprites = self._make_converter()._get_valid_sprite_names()
+
+        self.assertEqual(valid_sprites, {})
+        yyp_reads = [
+            call
+            for call in tracked_open.call_args_list
+            if call.args
+            and isinstance(call.args[0], (str, os.PathLike))
+            and os.path.abspath(os.fspath(call.args[0])) == yyp_path
+        ]
+        self.assertEqual(len(yyp_reads), 1, yyp_reads)
+
+    def test_declared_yy_path_drives_lts_order_metadata_and_subfolder(self) -> None:
+        sprite_name = "s_declared"
+        yy_relative_path = "sprites/source_folder/metadata.yy"
+        frame_guids = ["frame-z", "frame-a"]
+        layer_guids = ["layer-z", "layer-a"]
+        yy_content = _make_yy_content_with_sequence(
+            sprite_name,
+            frame_guids,
+            layer_guids,
+            width=8,
+            height=6,
+            bbox_right=7,
+            bbox_bottom=5,
+            playback_speed=12.0,
+            frame_lengths=[1.0, 2.0],
+        ).replace(
+            f'"name":"{sprite_name}",',
+            (
+                f'"name":"{sprite_name}",\n'
+                '  "parent":{"path":"folders/Sprites/Characters/Heroes.yy"},'
+            ),
+        )
+        yy_path = self._write_yy(yy_relative_path, yy_content)
+        sprite_directory = os.path.dirname(yy_path)
+        frame_colors = [("red", "blue"), ("green", "yellow")]
+        for frame_guid, colors in zip(frame_guids, frame_colors):
+            for layer_guid, color in zip(layer_guids, colors):
+                self._write_png(
+                    os.path.join(
+                        sprite_directory,
+                        "layers",
+                        frame_guid,
+                        layer_guid + ".png",
+                    ),
+                    color,
+                )
+        self._write_yyp(
+            [
+                {
+                    "id": {"name": sprite_name, "path": yy_relative_path},
+                    "resourceType": "GMSprite",
+                }
+            ]
+        )
+
+        self._make_converter().convert_all()
+
+        output_directory = os.path.join(
+            self.godot_dir,
+            "sprites",
+            "characters",
+            "heroes",
+            sprite_name,
+        )
+        expected_colors = ["blue", "yellow"]
+        for index, expected_color in enumerate(expected_colors, start=1):
+            with Image.open(
+                os.path.join(output_directory, f"{sprite_name}_{index}.png")
+            ) as image:
+                self.assertEqual(
+                    image.convert("RGBA").getpixel((0, 0)),
+                    Image.new("RGBA", (1, 1), expected_color).getpixel((0, 0)),
+                )
+        with open(
+            os.path.join(output_directory, f"{sprite_name}.tscn"),
+            "r",
+            encoding="utf-8",
+        ) as scene_file:
+            scene = scene_file.read()
+        self.assertIn('"speed": 12.0', scene)
+        self.assertIn('"duration": 2.0', scene)
+        self.assertIn("metadata/gamemaker_width = 8", scene)
+        self.assertIn("metadata/gamemaker_height = 6", scene)
+
+    def test_normal_direct_sprite_path_still_converts(self) -> None:
+        sprite_name = "s_direct"
+        yy_relative_path = f"sprites/{sprite_name}/{sprite_name}.yy"
+        self._write_yy(
+            yy_relative_path,
+            _make_yy_content(sprite_name, ["frame"], ["layer"]),
+        )
+        self._write_png(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                sprite_name,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+        self._write_yyp(
+            [{"id": {"name": sprite_name, "path": yy_relative_path}}]
+        )
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    sprite_name,
+                    sprite_name + ".png",
+                )
+            )
+        )
+
+    def test_normal_disk_fallback_sprite_still_converts(self) -> None:
+        sprite_name = "s_fallback"
+        self._write_yy(
+            f"sprites/{sprite_name}/{sprite_name}.yy",
+            _make_yy_content(sprite_name, ["frame"], ["layer"]),
+        )
+        self._write_png(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                sprite_name,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    sprite_name,
+                    sprite_name + ".png",
+                )
+            )
+        )
+
+    def test_rejects_unsafe_declared_sprite_yy_path_forms(self) -> None:
+        outside_yy = os.path.join(self.outside_dir, "outside.yy")
+        with open(outside_yy, "w", encoding="utf-8") as yy_file:
+            yy_file.write(_make_yy_content("outside", ["frame"], ["layer"]))
+        unsafe_paths = [
+            os.path.relpath(outside_yy, self.gm_dir).replace(os.sep, "/"),
+            outside_yy,
+            r"C:\Games\Outside\sprite.yy",
+            r"C:Outside\sprite.yy",
+            r"\\server\share\sprite.yy",
+            "sprites/s_bad/s_bad\0.yy",
+        ]
+        self._write_yyp(
+            [
+                {
+                    "id": {"name": f"s_bad_{index}", "path": path},
+                    "resourceType": "GMSprite",
+                }
+                for index, path in enumerate(unsafe_paths)
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+
+        valid_names = self._make_converter(diagnostics)._get_valid_sprite_names()
+
+        self.assertEqual(valid_names, {})
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), len(unsafe_paths), rejected)
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {"SpritePaths.yyp"},
+        )
+        self.assertEqual(
+            {diagnostic.manifest_entry for diagnostic in rejected},
+            {
+                f"resources[{index}].id.path"
+                for index in range(len(unsafe_paths))
+            },
+        )
+        self.assertTrue(
+            all(diagnostic.resource_type == "sprite" for diagnostic in rejected)
+        )
+
+    def test_rejects_normalized_cross_family_manifest_path_and_keeps_safe_sibling(
+        self,
+    ) -> None:
+        sprite_name = "s_cross_family"
+        self._write_yy(
+            "sounds/s_cross_family/decoy.yy",
+            _make_yy_content(sprite_name, ["frame"], ["layer"]),
+        )
+        safe_yy_relative = "sprites/s_cross_family/safe.yy"
+        safe_yy = self._write_yy(
+            safe_yy_relative,
+            _make_yy_content(sprite_name, ["frame"], ["layer"]),
+        )
+        self._write_yyp(
+            [
+                {
+                    "id": {
+                        "name": sprite_name,
+                        "path": "sprites/../sounds/s_cross_family/decoy.yy",
+                    },
+                    "resourceType": "GMSprite",
+                },
+                {
+                    "id": {"name": sprite_name, "path": safe_yy_relative},
+                    "resourceType": "GMSprite",
+                },
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        valid_names = converter._get_valid_sprite_names()
+
+        self.assertEqual(valid_names, {sprite_name: ""})
+        self.assertEqual(converter._yyp_sprite_yy_paths, {sprite_name: safe_yy})
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "SpritePaths.yyp")
+        self.assertEqual(rejected[0].resource, sprite_name)
+        self.assertEqual(rejected[0].resource_type, "sprite")
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    def test_rejects_declared_yy_file_link_to_outside_project(self) -> None:
+        sprite_name = "s_direct_link"
+        outside_yy = os.path.join(self.outside_dir, "outside.yy")
+        with open(outside_yy, "w", encoding="utf-8") as yy_file:
+            yy_file.write(_make_yy_content(sprite_name, ["frame"], ["layer"]))
+        yy_relative_path = f"sprites/{sprite_name}/{sprite_name}.yy"
+        linked_yy = os.path.join(self.gm_dir, *yy_relative_path.split("/"))
+        os.makedirs(os.path.dirname(linked_yy))
+        try:
+            os.symlink(outside_yy, linked_yy)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        self._write_yyp(
+            [{"id": {"name": sprite_name, "path": yy_relative_path}}]
+        )
+        diagnostics = DiagnosticCollector()
+
+        valid_names = self._make_converter(diagnostics)._get_valid_sprite_names()
+
+        self.assertEqual(valid_names, {})
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "SpritePaths.yyp")
+        self.assertEqual(rejected[0].resource, sprite_name)
+        self.assertEqual(rejected[0].manifest_entry, "resources[0].id.path")
+
+    def test_rejects_disk_fallback_resource_directory_link(self) -> None:
+        sprite_name = "s_directory_link"
+        outside_sprite_directory = os.path.join(
+            self.outside_dir,
+            sprite_name,
+        )
+        os.makedirs(outside_sprite_directory)
+        with open(
+            os.path.join(outside_sprite_directory, sprite_name + ".yy"),
+            "w",
+            encoding="utf-8",
+        ) as yy_file:
+            yy_file.write(_make_yy_content(sprite_name, ["frame"], ["layer"]))
+        self._write_png(
+            os.path.join(
+                outside_sprite_directory,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+        sprite_root = os.path.join(self.gm_dir, "sprites")
+        os.makedirs(sprite_root)
+        try:
+            os.symlink(
+                outside_sprite_directory,
+                os.path.join(sprite_root, sprite_name),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics).convert_all()
+
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "sprites", sprite_name))
+        )
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "sprites")
+        self.assertEqual(rejected[0].resource, sprite_name)
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "discovered sprite directory",
+        )
+
+    def test_rejects_disk_fallback_yy_file_link_but_keeps_legacy_images(self) -> None:
+        sprite_name = "s_yy_link"
+        sprite_directory = os.path.join(self.gm_dir, "sprites", sprite_name)
+        os.makedirs(sprite_directory)
+        outside_yy = os.path.join(self.outside_dir, sprite_name + ".yy")
+        with open(outside_yy, "w", encoding="utf-8") as yy_file:
+            yy_file.write(
+                _make_yy_content_with_collision(
+                    sprite_name,
+                    ["frame"],
+                    ["layer"],
+                    width=99,
+                )
+            )
+        try:
+            os.symlink(
+                outside_yy,
+                os.path.join(sprite_directory, sprite_name + ".yy"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        self._write_png(
+            os.path.join(
+                sprite_directory,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics).convert_all()
+
+        output_directory = os.path.join(
+            self.godot_dir,
+            "sprites",
+            sprite_name,
+        )
+        self.assertTrue(os.path.isfile(os.path.join(output_directory, sprite_name + ".png")))
+        with open(
+            os.path.join(output_directory, sprite_name + ".tscn"),
+            "r",
+            encoding="utf-8",
+        ) as scene_file:
+            self.assertNotIn("gamemaker_width = 99", scene_file.read())
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, f"sprites/{sprite_name}")
+        self.assertEqual(rejected[0].resource, sprite_name)
+        self.assertEqual(rejected[0].manifest_entry, "discovered sprite .yy")
+
+    def test_disk_fallback_rejects_contained_cross_family_sprite_yy_link(
+        self,
+    ) -> None:
+        linked_name = "s_cross_family_link"
+        wrong_family_yy = self._write_yy(
+            "sounds/wrong_sprite/target.yy",
+            _make_yy_content_with_collision(
+                linked_name,
+                ["frame"],
+                ["layer"],
+                width=99,
+            ),
+        )
+        linked_directory = os.path.join(self.gm_dir, "sprites", linked_name)
+        os.makedirs(linked_directory)
+        try:
+            os.symlink(
+                wrong_family_yy,
+                os.path.join(linked_directory, linked_name + ".yy"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        self._write_png(
+            os.path.join(
+                linked_directory,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+
+        safe_name = "s_safe_sibling"
+        self._write_yy(
+            f"sprites/{safe_name}/{safe_name}.yy",
+            _make_yy_content(safe_name, ["frame"], ["layer"]),
+        )
+        self._write_png(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                safe_name,
+                "layers",
+                "frame",
+                "layer.png",
+            )
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics).convert_all()
+
+        linked_scene = os.path.join(
+            self.godot_dir,
+            "sprites",
+            linked_name,
+            linked_name + ".tscn",
+        )
+        with open(linked_scene, "r", encoding="utf-8") as scene_file:
+            self.assertNotIn("gamemaker_width = 99", scene_file.read())
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    safe_name,
+                    safe_name + ".tscn",
+                )
+            )
+        )
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, f"sprites/{linked_name}")
+        self.assertEqual(rejected[0].resource, linked_name)
+        self.assertEqual(rejected[0].resource_type, "sprite")
+        self.assertEqual(rejected[0].manifest_entry, "discovered sprite .yy")
+
+    def test_rejects_layers_and_frame_directory_links(self) -> None:
+        resources: list[dict[str, object]] = []
+        outside_layers = os.path.join(self.outside_dir, "layers")
+        self._write_png(
+            os.path.join(outside_layers, "frame", "layer.png")
+        )
+
+        layers_sprite = "s_layers_link"
+        layers_yy_relative = f"sprites/{layers_sprite}/{layers_sprite}.yy"
+        layers_yy = self._write_yy(
+            layers_yy_relative,
+            _make_yy_content(layers_sprite, ["frame"], ["layer"]),
+        )
+        try:
+            os.symlink(
+                outside_layers,
+                os.path.join(os.path.dirname(layers_yy), "layers"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        resources.append(
+            {"id": {"name": layers_sprite, "path": layers_yy_relative}}
+        )
+
+        frame_sprite = "s_frame_link"
+        frame_yy_relative = f"sprites/{frame_sprite}/{frame_sprite}.yy"
+        frame_yy = self._write_yy(
+            frame_yy_relative,
+            _make_yy_content(frame_sprite, ["frame"], ["layer"]),
+        )
+        frame_layers = os.path.join(os.path.dirname(frame_yy), "layers")
+        os.makedirs(frame_layers)
+        try:
+            os.symlink(
+                os.path.join(outside_layers, "frame"),
+                os.path.join(frame_layers, "frame"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        resources.append(
+            {"id": {"name": frame_sprite, "path": frame_yy_relative}}
+        )
+        self._write_yyp(resources)
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics).convert_all()
+
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 2, rejected)
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {
+                layers_yy_relative,
+                frame_yy_relative,
+            },
+        )
+        self.assertEqual(
+            {diagnostic.manifest_entry for diagnostic in rejected},
+            {"layers directory", "frames[].name"},
+        )
+
+    def test_revalidates_png_after_discovery_before_copy(self) -> None:
+        sprite_name = "s_png_link"
+        yy_relative_path = f"sprites/{sprite_name}/{sprite_name}.yy"
+        yy_path = self._write_yy(
+            yy_relative_path,
+            _make_yy_content(sprite_name, ["frame"], ["layer"]),
+        )
+        sprite_directory = os.path.dirname(yy_path)
+        png_path = os.path.join(
+            sprite_directory,
+            "layers",
+            "frame",
+            "layer.png",
+        )
+        self._write_png(png_path)
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+        discovered = converter._find_all_sprite_images(
+            {sprite_name: sprite_directory},
+            {sprite_name: yy_path},
+        )
+        outside_png = os.path.join(self.outside_dir, "outside.png")
+        self._write_png(outside_png, "blue")
+        os.unlink(png_path)
+        try:
+            os.symlink(outside_png, png_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        os.makedirs(
+            os.path.join(self.godot_dir, "sprites", sprite_name),
+            exist_ok=True,
+        )
+
+        result = converter._process_sprite(
+            sprite_name,
+            1,
+            discovered[sprite_name],
+            1,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result[-1], "")
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    sprite_name,
+                    sprite_name + ".png",
+                )
+            )
+        )
+        rejected = self._rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, yy_relative_path)
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "frames[].name/layers[].name",
+        )
 
 
 class TestParseCollisionData(unittest.TestCase):

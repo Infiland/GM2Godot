@@ -14,6 +14,8 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.resource_index import IndexedRoom
+from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
     GAMEMAKER_TILE_FLIP_BIT,
@@ -185,7 +187,9 @@ class TestRoomConverter(unittest.TestCase):
         shutil.rmtree(self.godot_dir)
 
     def _make_converter(
-        self, conversion_running: Callable[[], bool] = lambda: True
+        self,
+        conversion_running: Callable[[], bool] = lambda: True,
+        diagnostics: DiagnosticCollector | None = None,
     ) -> RoomConverter:
         return RoomConverter(
             self.gm_dir,
@@ -194,6 +198,7 @@ class TestRoomConverter(unittest.TestCase):
             progress_callback=lambda value: self.progress.append(value),
             conversion_running=conversion_running,
             max_workers=1,
+            diagnostics=diagnostics,
         )
 
     def _write_yyp(
@@ -1219,6 +1224,400 @@ class TestRoomConverter(unittest.TestCase):
         ]
         self.assertTrue(missing_logs)
         self.assertTrue(all(log.startswith("Info:") for log in missing_logs))
+
+    def test_rejects_unsafe_room_creation_code_paths_with_owner_diagnostics(self):
+        room_names = [
+            "r_traversal",
+            "r_absolute",
+            "r_drive_absolute",
+            "r_drive_relative",
+            "r_unc",
+            "r_nul",
+            "r_symlink",
+        ]
+        self._write_yyp(room_names)
+
+        outside_directory = os.path.dirname(self.gm_dir)
+        outside_path = os.path.join(
+            outside_directory,
+            f"{os.path.basename(self.gm_dir)}_outside_room_code.gml",
+        )
+        _write_file(outside_path, "global.outside_room_code_was_read = true;\n")
+        self.addCleanup(
+            lambda: os.path.isfile(outside_path) and os.unlink(outside_path)
+        )
+
+        traversal_room_directory = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_traversal",
+        )
+        traversal_path = os.path.relpath(outside_path, traversal_room_directory)
+        unsafe_paths = {
+            "r_traversal": traversal_path,
+            "r_absolute": outside_path,
+            "r_drive_absolute": r"C:\Games\Outside\RoomCreationCode.gml",
+            "r_drive_relative": r"C:Outside\RoomCreationCode.gml",
+            "r_unc": r"\\server\share\RoomCreationCode.gml",
+            "r_nul": "RoomCreationCode\0.gml",
+        }
+        for room_name, source_path in unsafe_paths.items():
+            self._write_room(room_name, creation_code_file=source_path)
+
+        self._write_room("r_symlink", creation_code_file="LinkedRoomCode.gml")
+        linked_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_symlink",
+            "LinkedRoomCode.gml",
+        )
+        try:
+            os.symlink(outside_path, linked_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), len(room_names), rejected)
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {
+                f"rooms/{room_name}/{room_name}.yy"
+                for room_name in room_names
+            },
+        )
+        self.assertTrue(
+            all(diagnostic.resource_type == "room" for diagnostic in rejected)
+        )
+        self.assertTrue(
+            all(
+                diagnostic.manifest_entry == "creationCodeFile"
+                for diagnostic in rejected
+            )
+        )
+        for room_name in room_names:
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(
+                        self.godot_dir,
+                        "rooms",
+                        room_name,
+                        room_name + ".gd",
+                    )
+                ),
+                room_name,
+            )
+            scene = self._read_scene(room_name)
+            self.assertIn(
+                'metadata/gamemaker_creation_code_source_path = ""',
+                scene,
+            )
+            self.assertIn(
+                "metadata/gamemaker_creation_code_file_exists = false",
+                scene,
+            )
+
+    def test_accepts_project_relative_room_creation_code_forms(self):
+        room_names = ["r_rooted", "r_placeholder", "r_backslash"]
+        self._write_yyp(room_names)
+        source_paths = {
+            "r_rooted": "rooms/r_rooted/RoomCreationCode.gml",
+            "r_placeholder": (
+                "${project_dir}/rooms/r_placeholder/RoomCreationCode.gml"
+            ),
+            "r_backslash": r"rooms\r_backslash\RoomCreationCode.gml",
+        }
+        for room_name, source_path in source_paths.items():
+            _write_file(
+                os.path.join(
+                    self.gm_dir,
+                    "rooms",
+                    room_name,
+                    "RoomCreationCode.gml",
+                ),
+                f'global.{room_name}_code = "converted";\n',
+            )
+            self._write_room(room_name, creation_code_file=source_path)
+
+        self._make_converter().convert_all()
+
+        for room_name in room_names:
+            script = self._read_room_script(room_name)
+            self.assertIn(f'"{room_name}_code"', script)
+            self.assertIn('"converted"', script)
+
+    def test_inherited_room_creation_code_stays_parent_relative(self):
+        self._write_yyp(["r_parent", "r_child"])
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "rooms",
+                "r_parent",
+                "RoomCreationCode.gml",
+            ),
+            'global.inherited_room_code = "parent";\n',
+        )
+        self._write_room(
+            "r_parent",
+            creation_code_file="RoomCreationCode.gml",
+        )
+        self._write_room(
+            "r_child",
+            inherit_code=True,
+            parent_room={
+                "name": "r_parent",
+                "path": "rooms/r_parent/r_parent.yy",
+            },
+        )
+
+        self._make_converter().convert_all()
+
+        child_script = self._read_room_script("r_child")
+        self.assertIn('"inherited_room_code"', child_script)
+        self.assertIn('"parent"', child_script)
+
+    def test_rejects_instance_name_sidecar_traversal(self):
+        self._write_yyp(["r_instance_escape"])
+        room_directory = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_instance_escape",
+        )
+        bridge_directory = os.path.join(
+            room_directory,
+            "InstanceCreationCode_bridge",
+        )
+        outside_stem = os.path.join(
+            os.path.dirname(self.gm_dir),
+            f"{os.path.basename(self.gm_dir)}_outside_instance_code",
+        )
+        outside_path = outside_stem + ".gml"
+        _write_file(outside_path, "outside_instance_code_was_read = true;\n")
+        self.addCleanup(
+            lambda: os.path.isfile(outside_path) and os.unlink(outside_path)
+        )
+        instance_name = "bridge/" + os.path.relpath(
+            outside_stem,
+            bridge_directory,
+        ).replace(os.sep, "/")
+        self._write_room(
+            "r_instance_escape",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": instance_name,
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+        os.makedirs(bridge_directory)
+
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "rooms",
+                    "r_instance_escape",
+                    "r_instance_escape.gd",
+                )
+            )
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(
+            rejected[0].source_path,
+            "rooms/r_instance_escape/r_instance_escape.yy",
+        )
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "layers[].instances[].name",
+        )
+
+    def test_rejects_instance_name_that_reaches_another_project_directory(self):
+        self._write_yyp(["r_instance_cross_owner"])
+        self._write_room(
+            "r_instance_cross_owner",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": "bridge/../../shared/Leak",
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "shared", "Leak.gml"),
+            "cross_owner_instance_code_was_read = true;\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        room_script = os.path.join(
+            self.godot_dir,
+            "rooms",
+            "r_instance_cross_owner",
+            "r_instance_cross_owner.gd",
+        )
+        self.assertFalse(os.path.exists(room_script))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(
+            rejected[0].source_path,
+            "rooms/r_instance_cross_owner/r_instance_cross_owner.yy",
+        )
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "layers[].instances[].name",
+        )
+
+    def test_instance_name_aliases_are_rejected_but_safe_name_is_transpiled(self):
+        room_name = "r_instance_components"
+        self._write_yyp([room_name])
+        instances = [
+            {"name": "bridge/../alias", "hasCreationCode": True},
+            {"name": r"bridge\..\alias", "hasCreationCode": True},
+            {"name": ".", "hasCreationCode": True},
+            {"name": "..", "hasCreationCode": True},
+            {"name": "inst_safe", "hasCreationCode": True},
+        ]
+        room_path = self._write_room(
+            room_name,
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": instances,
+                }
+            ],
+        )
+        room_directory = os.path.dirname(room_path)
+        unsafe_sources = {
+            "alias.gml": "unsafe_component_alias = 1;\n",
+            "InstanceCreationCode_..gml": "unsafe_component_dot = 1;\n",
+            "InstanceCreationCode_...gml": "unsafe_component_dotdot = 1;\n",
+        }
+        for filename, source in unsafe_sources.items():
+            _write_file(os.path.join(room_directory, filename), source)
+        _write_file(
+            os.path.join(
+                room_directory,
+                "InstanceCreationCode_inst_safe.gml",
+            ),
+            "safe_instance_component = 1;\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        script = self._read_room_script(room_name)
+        self.assertIn("safe_instance_component", script)
+        self.assertNotIn("unsafe_component_alias", script)
+        self.assertNotIn("unsafe_component_dot", script)
+        self.assertNotIn("unsafe_component_dotdot", script)
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 4, rejected)
+        self.assertTrue(
+            all(
+                diagnostic.source_path
+                == f"rooms/{room_name}/{room_name}.yy"
+                for diagnostic in rejected
+            )
+        )
+        self.assertTrue(
+            all(
+                diagnostic.manifest_entry == "layers[].instances[].name"
+                for diagnostic in rejected
+            )
+        )
+
+    def test_two_argument_instance_creation_code_infers_confined_project_root(self):
+        room_name = "r_direct_helper"
+        room_path = self._write_room(room_name)
+        source_path = os.path.join(
+            os.path.dirname(room_path),
+            "InstanceCreationCode_inst_safe.gml",
+        )
+        _write_file(source_path, "safe_direct_helper = true;\n")
+        room = IndexedRoom(
+            name=room_name,
+            yy_path=room_path,
+            yyp_path=f"rooms/{room_name}/{room_name}.yy",
+            godot_path=f"res://rooms/{room_name}/{room_name}.tscn",
+        )
+
+        metadata = resolve_instance_creation_code(
+            room,
+            {"name": "inst_safe", "hasCreationCode": True},
+        )
+
+        self.assertEqual(metadata.source_path, source_path)
+        self.assertTrue(metadata.exists)
+        self.assertFalse(metadata.path_rejected)
+
+    def test_two_argument_instance_creation_code_rejects_unsafe_root_inference(self):
+        absolute_owner = os.path.join(
+            self.gm_dir,
+            "room_resources",
+            "r_direct_helper.yy",
+        )
+        cases = (
+            ("relative", "rooms/r_direct_helper/r_direct_helper.yy"),
+            ("missing_rooms_component", absolute_owner),
+        )
+        for label, owner_path in cases:
+            with self.subTest(case=label):
+                warnings: list[str] = []
+                room = IndexedRoom(
+                    name="r_direct_helper",
+                    yy_path=owner_path,
+                    yyp_path="rooms/r_direct_helper/r_direct_helper.yy",
+                    godot_path="res://rooms/r_direct_helper/r_direct_helper.tscn",
+                )
+
+                metadata = resolve_instance_creation_code(
+                    room,
+                    {"name": "inst_safe", "hasCreationCode": True},
+                    warn_callback=warnings.append,
+                )
+
+                self.assertEqual(metadata.source_path, "")
+                self.assertFalse(metadata.exists)
+                self.assertTrue(metadata.path_rejected)
+                self.assertEqual(len(warnings), 1, warnings)
+                self.assertIn(owner_path, warnings[0])
+                self.assertIn("layers[].instances[].name", warnings[0])
 
     def test_instance_emits_creation_code_metadata(self):
         self._write_yyp(["r_instance_code"], extra_resources=[("objects", "o_player")])

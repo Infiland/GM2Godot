@@ -45,6 +45,9 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	return condition
 
             func _run():
+            \tif not _check(GMRuntime.gml_array_length([1, 2, 3]) == 3, "Current array_length failed"): return
+            \tif not _check(GMRuntime.gml_array_length("not an array") == 0, "array_length non-array parity failed"): return
+            \tif not _check(GMRuntime.gml_string_byte_length("Aé") == 3, "UTF-8 string_byte_length failed"): return
             	# --- DS Lists ---
             	var l1 = GMRuntime.gml_ds_list_create()
             	GMRuntime.gml_ds_list_add(l1, ["apple", "banana", "cherry"])
@@ -118,6 +121,18 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             	if not _check(GMRuntime.gml_ds_map_is_list(m2, "nested"), "Map read/write nested list mark failed"): return
             	var restored_nested = GMRuntime.gml_ds_map_find_value(m2, "nested")
             	if not _check(str(GMRuntime.gml_ds_list_find_value(restored_nested, 0)) == "nested", "Map read/write nested list value failed"): return
+            \tvar cyclic_struct = GMRuntime.gml_struct({"name": "cycle"})
+            \tcyclic_struct["self"] = cyclic_struct
+            \tGMRuntime.gml_ds_map_set(m2, cyclic_struct, "struct identity key")
+            \tif not _check(str(GMRuntime.gml_ds_map_find_value(m2, cyclic_struct)) == "struct identity key", "Map cyclic struct key failed"): return
+            \tif not _check(GMRuntime.is_undefined(GMRuntime.gml_ds_map_find_value(m2, GMRuntime.gml_struct({"name": "cycle"}))), "Map struct keys must use identity"): return
+            \tvar array_key = [cyclic_struct]
+            \tGMRuntime.gml_ds_map_set(m2, array_key, "array identity key")
+            \tif not _check(str(GMRuntime.gml_ds_map_find_value(m2, array_key)) == "array identity key", "Map cyclic array key failed"): return
+            \tvar map_keys = GMRuntime.gml_ds_map_keys(m2)
+            \tif not _check(map_keys.any(func(key): return is_same(key, cyclic_struct)), "Map keys did not preserve original struct reference"): return
+            \tGMRuntime.gml_ds_map_delete(m2, cyclic_struct)
+            \tif not _check(not GMRuntime.gml_ds_map_exists(m2, cyclic_struct), "Map cyclic struct key delete failed"): return
             	
             	# --- DS Grids ---
             	var g1 = GMRuntime.gml_ds_grid_create(2, 2)

@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import Iterable, Mapping
 
 from .constants import _ASSIGNMENT_OPERATORS
+from .lexical import _is_verbatim_string_start, _read_verbatim_string
 from .model import (
+    GMLTranspileError,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     _ArrayLiteral,
@@ -25,9 +27,11 @@ from .model import (
     _StructAccess,
     _StructLiteral,
     _Ternary,
+    _TemplateStringLiteral,
     _Token,
     _Unary,
 )
+from .tokens import _line_column, _read_template_string
 
 def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
     return frozenset(local_names or [])
@@ -112,6 +116,11 @@ def _expression_needs_assignment_cache(expr: _Expression) -> bool:
             _expression_needs_assignment_cache(expr.condition)
             or _expression_needs_assignment_cache(expr.true_expr)
             or _expression_needs_assignment_cache(expr.false_expr)
+        )
+    if isinstance(expr, _TemplateStringLiteral):
+        return any(
+            not isinstance(part, str) and _expression_needs_assignment_cache(part)
+            for part in expr.parts
         )
     if isinstance(expr, _ArrayLiteral):
         return any(_expression_needs_assignment_cache(element) for element in expr.elements)
@@ -227,6 +236,26 @@ def _strip_comments(source: str) -> str:
             index += 1
             continue
 
+        if _is_verbatim_string_start(source, index):
+            try:
+                verbatim = _read_verbatim_string(source, index)
+            except GMLTranspileError as exc:
+                line, column = _line_column(source, index)
+                raise exc.with_location(line, column) from exc
+            result.append(verbatim)
+            index += len(verbatim)
+            continue
+
+        if source.startswith('$"', index):
+            try:
+                template = _read_template_string(source, index)
+            except GMLTranspileError as exc:
+                line, column = _line_column(source, index)
+                raise exc.with_location(line, column) from exc
+            result.append(template)
+            index += len(template)
+            continue
+
         if char == '"' or char == "'":
             in_string = char
             result.append(char)
@@ -275,7 +304,9 @@ def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnused
     in_string: str | None = None
     escaped = False
 
-    for index, char in enumerate(source):
+    index = 0
+    while index < len(source):
+        char = source[index]
         if in_string is not None:
             if escaped:
                 escaped = False
@@ -283,20 +314,33 @@ def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnused
                 escaped = True
             elif char == in_string:
                 in_string = None
+            index += 1
+            continue
+
+        if _is_verbatim_string_start(source, index):
+            index += len(_read_verbatim_string(source, index))
+            continue
+
+        if source.startswith('$"', index):
+            index += len(_read_template_string(source, index))
             continue
 
         if char == '"' or char == "'":
             in_string = char
+            index += 1
             continue
         if char in "([{":
             depth += 1
+            index += 1
             continue
         if char in ")]}" and depth > 0:
             depth -= 1
+            index += 1
             continue
         if char == ";" and depth == 0:
             statements.append(source[start:index])
             start = index + 1
+        index += 1
 
     trailing = source[start:].strip()
     if trailing:
@@ -319,6 +363,14 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
             elif char == in_string:
                 in_string = None
             index += 1
+            continue
+
+        if _is_verbatim_string_start(statement, index):
+            index += len(_read_verbatim_string(statement, index))
+            continue
+
+        if statement.startswith('$"', index):
+            index += len(_read_template_string(statement, index))
             continue
 
         if char == '"' or char == "'":
@@ -360,7 +412,9 @@ def _split_top_level(source: str, separator: str) -> list[str]:
     in_string: str | None = None
     escaped = False
 
-    for index, char in enumerate(source):
+    index = 0
+    while index < len(source):
+        char = source[index]
         if in_string is not None:
             if escaped:
                 escaped = False
@@ -368,20 +422,33 @@ def _split_top_level(source: str, separator: str) -> list[str]:
                 escaped = True
             elif char == in_string:
                 in_string = None
+            index += 1
+            continue
+
+        if _is_verbatim_string_start(source, index):
+            index += len(_read_verbatim_string(source, index))
+            continue
+
+        if source.startswith('$"', index):
+            index += len(_read_template_string(source, index))
             continue
 
         if char == '"' or char == "'":
             in_string = char
+            index += 1
             continue
         if char in "([{":
             depth += 1
+            index += 1
             continue
         if char in ")]}" and depth > 0:
             depth -= 1
+            index += 1
             continue
         if char == separator and depth == 0:
             parts.append(source[start:index])
             start = index + 1
+        index += 1
 
     parts.append(source[start:])
     return parts

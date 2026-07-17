@@ -73,10 +73,16 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("bool(0.50001)", "GMRuntime.gml_bool(0.50001)"),
     RuntimeValueParityCase("is_bool(true)", "GMRuntime.is_bool(true)"),
     RuntimeValueParityCase('string("abc")', 'GMRuntime.gml_string("abc")'),
-    RuntimeValueParityCase('string("Grüße")', 'GMRuntime.gml_string("Grüße")'),
+    RuntimeValueParityCase(
+        'string("Grüße")',
+        r'GMRuntime.gml_string("Gr\u00fc\u00dfe")',
+    ),
     RuntimeValueParityCase('typeof("abc")', 'GMRuntime.gml_typeof("abc")'),
     RuntimeValueParityCase('is_string("abc")', 'GMRuntime.is_string("abc")'),
-    RuntimeValueParityCase('string_ord_at("é", 1)', 'GMRuntime.gml_string_ord_at("é", 1)'),
+    RuntimeValueParityCase(
+        'string_ord_at("é", 1)',
+        r'GMRuntime.gml_string_ord_at("\u00e9", 1)',
+    ),
     RuntimeValueParityCase('string_hash_to_newline("a#b")', 'GMRuntime.gml_string_hash_to_newline("a#b")'),
     RuntimeValueParityCase("real(score)", "GMRuntime.gml_real(score)"),
     RuntimeValueParityCase("int64(score)", "GMRuntime.gml_int64(score)"),
@@ -2411,9 +2417,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return gml_selector_get(instance_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_map_find_value(id_value, key):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_map.has(key)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "var stored_key = _gml_ds_map_find_internal_key(resolved_map, key)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return resolved_map[stored_key]", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ds_map_set(id_value, key, value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("ds[key] = value", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_ds_map_set_value(ds, key, value)", GML_RUNTIME_SCRIPT)
         self.assertNotIn("resolved_map.get(", GML_RUNTIME_SCRIPT)
 
     def test_runtime_ds_accessors_treat_destroyed_handles_consistently(self):
@@ -2439,8 +2449,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_ds_map_set(id_value, key, value):\n"
             "\tvar ds = _gml_resolve_ds_map(id_value)\n"
             "\tif ds is Dictionary:\n"
-            "\t\tds[key] = value\n"
-            "\t\treturn value\n"
+            "\t\treturn _gml_ds_map_set_value(ds, key, value)\n"
             "\treturn gml_undefined()",
             GML_RUNTIME_SCRIPT,
         )
@@ -2448,8 +2457,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_ds_map_find_value(id_value, key):\n"
             "\tvar resolved_map = _gml_resolve_ds_map(id_value)\n"
             "\tif resolved_map is Dictionary:\n"
-            "\t\tif resolved_map.has(key):\n"
-            "\t\t\treturn resolved_map[key]\n"
+            "\t\tvar stored_key = _gml_ds_map_find_internal_key(resolved_map, key)\n"
+            "\t\tif not is_undefined(stored_key):\n"
+            "\t\t\treturn resolved_map[stored_key]\n"
             "\t\treturn gml_undefined()\n"
             "\treturn gml_undefined()",
             GML_RUNTIME_SCRIPT,
@@ -2473,7 +2483,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if resolved_map.has(key):\n\t\t\treturn resolved_map[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if not is_undefined(stored_key):\n\t\t\treturn resolved_map[stored_key]",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_instance_variable_helpers_resolve_instances_and_invalid_ids(self):
@@ -2542,11 +2555,31 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_script_registry_helpers_lazy_load_generated_registry(self):
         self.assertIn('const GML_SCRIPT_REGISTRY_PATH = "res://gm2godot/gml_script_registry.gd"', GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_script_registry_loaded = false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static var _gml_script_registry_initializers_running = false",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static var _gml_script_registry_initializers_complete = false",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("static var _gml_script_registry = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_script_registry_ensure_loaded():", GML_RUNTIME_SCRIPT)
         self.assertIn("ResourceLoader.exists(GML_SCRIPT_REGISTRY_PATH)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_script_registry_set(registry_script.gml_script_registry_entries())", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_script_registry_entries():", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            'var initializer: Variant = entry.get("initializer", null)',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if is_method(initializer) and not initializers.has(initializer):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertLess(
+            GML_RUNTIME_SCRIPT.index("gml_script_register(\n", GML_RUNTIME_SCRIPT.index("static func gml_script_registry_set")),
+            GML_RUNTIME_SCRIPT.index("for initializer in initializers:"),
+        )
 
     def test_runtime_audio_helpers_use_sound_handles_and_asset_metadata(self):
         self.assertIn('const GML_SOUND_HANDLE_KIND = "sound"', GML_RUNTIME_SCRIPT)
@@ -2614,6 +2647,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_layer_background_get_id(layer):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_background_alpha(background, alpha):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_background_blend(background, color):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_tilemap_get_id(layer):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_layer_tilemap_create(layer, x, y, tileset, width, height):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_tilemap_set(tilemap_element_id, tiledata, xcell, ycell):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_tilemap_get(tilemap_element_id, xcell, ycell):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_tilemap_get_width(tilemap_element_id):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_tilemap_get_height(tilemap_element_id):", GML_RUNTIME_SCRIPT)
+        self.assertIn("node.set_cell(coords, int(layout[\"source_id\"]), atlas_coords, alternative_tile)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_layer_register_scene(scene)", GML_RUNTIME_SCRIPT)
         self.assertIn("var resolved_layer = _gml_layer_resolve_node(layer)", GML_RUNTIME_SCRIPT)
 

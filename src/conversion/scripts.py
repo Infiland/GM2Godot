@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from src.localization import get_localized
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
@@ -26,12 +26,21 @@ from src.conversion.gml_transpiler import (
     write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.script_functions import (
     ScriptFunctionDeclaration,
-    modern_script_function_declarations,
+    modern_script_structure,
+    render_script_top_level_source,
 )
 from src.conversion.gml_transpiler_parts.identifiers import (
     _sanitize_gdscript_identifier,
+)
+from src.conversion.gml_transpiler_parts.expression_parser import (
+    _parse_gml_expression,
+)
+from src.conversion.gml_transpiler_parts.function_helpers import (
+    _emit_constructor_inheritance_line,
 )
 from src.conversion.gml_transpiler_parts.model import _ScopeContext
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
@@ -51,6 +60,8 @@ class ScriptRegistryEntry:
     legacy_arguments: bool
     callable_method: str = "gm2godot_callable"
     scoped_callable_method: str = "gm2godot_scoped_callable"
+    is_constructor: bool = False
+    initializer_method: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,14 @@ def _script_scope_context() -> _ScopeContext:
         self_expression=_SCRIPT_SELF_PARAMETER,
         other_expression=_SCRIPT_OTHER_PARAMETER,
         instance_target=_SCRIPT_SELF_PARAMETER,
+    )
+
+
+def _constructor_scope_context() -> _ScopeContext:
+    return _ScopeContext(
+        self_expression="_gml_constructor_self",
+        other_expression="_gml_constructor_self",
+        instance_target="_gml_constructor_self",
     )
 
 
@@ -116,19 +135,65 @@ def _is_script_function_entry(entry: AssetRegistryEntry) -> bool:
 
 
 def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str:
+    entry_list = list(entries)
     lines = [
         "extends RefCounted\n\n",
         "static func gml_script_registry_entries():\n",
-        "\treturn [\n",
     ]
-    for entry in entries:
+    constructor_variables: dict[int, str] = {}
+    initializer_owner_variables: dict[int, str] = {}
+    for index, entry in enumerate(entry_list):
+        if not entry.is_constructor:
+            if entry.initializer_method is None:
+                continue
+        if entry.is_constructor:
+            variable_name = f"_gm_constructor_{index}"
+            constructor_variables[index] = variable_name
+            lines.append(
+                f"\tvar {variable_name} = "
+                f"preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}()\n"
+            )
+        if entry.initializer_method is not None:
+            owner_variable_name = f"_gm_initializer_owner_{index}"
+            initializer_owner_variables[index] = owner_variable_name
+            lines.append(
+                f"\tvar {owner_variable_name} = "
+                f"preload({json.dumps(entry.resource_path)}).new()\n"
+            )
+    lines.append("\treturn [\n")
+    for index, entry in enumerate(entry_list):
+        constructor_variable = constructor_variables.get(index)
+        callable_expression = (
+            constructor_variable
+            if constructor_variable is not None
+            else f"preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}()"
+        )
+        scoped_callable_expression = (
+            constructor_variable
+            if constructor_variable is not None
+            else (
+                f"preload({json.dumps(entry.resource_path)}).new()."
+                f"{entry.scoped_callable_method}()"
+            )
+        )
         lines.extend(
             [
                 "\t\t{\n",
                 f"\t\t\t\"id\": {json.dumps(entry.id)},\n",
                 f"\t\t\t\"name\": {json.dumps(entry.name)},\n",
-                f"\t\t\t\"callable\": preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}(),\n",
-                f"\t\t\t\"scoped_callable\": preload({json.dumps(entry.resource_path)}).new().{entry.scoped_callable_method}(),\n",
+                f"\t\t\t\"callable\": {callable_expression},\n",
+                f"\t\t\t\"scoped_callable\": {scoped_callable_expression},\n",
+            ]
+        )
+        if entry.initializer_method is not None:
+            initializer_owner = initializer_owner_variables[index]
+            lines.append(
+                f"\t\t\t\"initializer_owner\": {initializer_owner},\n"
+                f"\t\t\t\"initializer\": Callable({initializer_owner}, "
+                f"{json.dumps(entry.initializer_method)}),\n"
+            )
+        lines.extend(
+            [
                 f"\t\t\t\"legacy_arguments\": {str(entry.legacy_arguments).lower()},\n",
                 "\t\t},\n",
             ]
@@ -174,6 +239,7 @@ class ScriptConverter(BaseConverter):
             log_callback=lambda _message: None,
             progress_callback=lambda _value: None,
             conversion_running=self.conversion_running,
+            macro_configuration=self.macro_configuration,
         )
         return tuple(registry_converter.build_entries())
 
@@ -208,11 +274,17 @@ class ScriptConverter(BaseConverter):
         static_scope_prefix: str,
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+        enum_values: Mapping[str, Mapping[str, int]],
+        macro_values: Mapping[str, str],
         generated_line_offset: int = 0,
-    ) -> tuple[str, GMLSourceMap]:
+    ) -> tuple[str, GMLSourceMap, str | None]:
         local_names = {parameter.name for parameter in declaration.parameters}
-        script_scope = _script_scope_context()
-        lines: list[str] = _script_scope_lines()
+        script_scope = (
+            _constructor_scope_context()
+            if declaration.is_constructor
+            else _script_scope_context()
+        )
+        lines: list[str] = [] if declaration.is_constructor else _script_scope_lines()
         for parameter in declaration.parameters:
             parameter_name = _sanitize_gdscript_identifier(parameter.name)
             if parameter.default is None:
@@ -223,12 +295,50 @@ class ScriptConverter(BaseConverter):
                 local_names=local_names,
                 asset_names=asset_names,
                 scope_context=script_scope,
+                enum_values={
+                    name: dict(members) for name, members in enum_values.items()
+                },
+                enum_names=enum_values,
+                macro_values=macro_values,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
             lines.append(
                 f"\tif {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
                 f"{parameter_name} = {default_value}"
+            )
+        if declaration.parent_constructor is not None:
+            outer_scope = _ScopeContext(
+                self_expression="self",
+                other_expression="self",
+                instance_target="self",
+                asset_names=frozenset(asset_names),
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+            )
+            constructor_scope = _ScopeContext(
+                self_expression="_gml_constructor_self",
+                other_expression="_gml_constructor_self",
+                instance_target="_gml_constructor_self",
+                asset_names=frozenset(asset_names),
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+            )
+            parent_expression = _parse_gml_expression(
+                declaration.parent_constructor,
+                {name: dict(members) for name, members in enum_values.items()},
+                enum_values,
+                macro_values=macro_values,
+                scope_context=outer_scope,
+            )
+            lines.append(
+                "\t"
+                + _emit_constructor_inheritance_line(
+                    parent_expression,
+                    local_names,
+                    constructor_scope,
+                    outer_scope,
+                )
             )
         result = transpile_gml_code_with_source_map(
             declaration.body,
@@ -239,6 +349,8 @@ class ScriptConverter(BaseConverter):
             other_expression=script_scope.other_expression,
             instance_target=script_scope.instance_target,
             local_names=local_names,
+            enum_values=enum_values,
+            macro_values=macro_values,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
             macro_configuration=self.macro_configuration,
@@ -248,7 +360,14 @@ class ScriptConverter(BaseConverter):
             generated_line_offset=generated_line_offset + len(lines),
         )
         lines.append(result.code)
-        return "\n".join(lines), result.source_map
+        return (
+            "\n".join(lines),
+            result.source_map.with_source_offset(
+                declaration.body_line_offset,
+                declaration.body_column_offset,
+            ),
+            result.static_scope_id,
+        )
 
     def _render_script(
         self,
@@ -260,14 +379,28 @@ class ScriptConverter(BaseConverter):
         script_entries_by_name: dict[str, AssetRegistryEntry],
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+        enum_values: Mapping[str, Mapping[str, int]],
+        macro_values: Mapping[str, str],
     ) -> tuple[str, tuple[ScriptRegistryEntry, ...], tuple[GMLSourceMap, ...]]:
         header = render_gml_source_header(
             source_path=source_path,
             event=f"script:{entry.name}",
             source=source,
         )
-        modern_declarations = modern_script_function_declarations(source)
-        if modern_declarations is not None:
+        modern_structure = modern_script_structure(
+            source,
+            macro_configuration=self.macro_configuration,
+        )
+        if modern_structure is not None:
+            modern_declarations = modern_structure.declarations
+            if not modern_declarations:
+                modern_declarations = (
+                    ScriptFunctionDeclaration(
+                        name=entry.name,
+                        parameters=(),
+                        body="",
+                    ),
+                )
             chunks = [
                 "extends RefCounted\n\n",
                 f"{header}",
@@ -275,48 +408,84 @@ class ScriptConverter(BaseConverter):
             ]
             registry_entries: list[ScriptRegistryEntry] = []
             source_maps: list[GMLSourceMap] = []
-            for declaration in modern_declarations:
+            for declaration_index, declaration in enumerate(modern_declarations):
+                use_default_names = declaration.name == entry.name
                 callable_names = _script_callable_names(
                     declaration.name,
-                    use_default_names=declaration.name == entry.name,
+                    use_default_names=use_default_names,
                 )
-                params = ", ".join(
+                parameter_declarations = [
                     f"{_sanitize_gdscript_identifier(parameter.name)} = null"
                     for parameter in declaration.parameters
-                )
-                scoped_params = ", ".join(
-                    [
-                        f"{_SCRIPT_SELF_PARAMETER} = null",
-                        f"{_SCRIPT_OTHER_PARAMETER} = null",
-                        *(
-                            f"{_sanitize_gdscript_identifier(parameter.name)} = null"
-                            for parameter in declaration.parameters
-                        ),
-                    ]
-                )
-                function_prefix = (
-                    f"func {callable_names.call_method}({params}):\n"
-                    f"{_script_forward_call(declaration=declaration, scoped_call_method=callable_names.scoped_call_method)}\n"
-                    f"func {callable_names.scoped_call_method}({scoped_params}):\n"
-                )
-                body, source_map = self._modern_function_body(
+                ]
+                constructor_value: str | None = None
+                if declaration.is_constructor:
+                    constructor_suffix = _sanitize_gdscript_identifier(declaration.name)
+                    constructor_value = f"_gm_constructor_{constructor_suffix}"
+                    constructor_params = ", ".join(
+                        ["_gml_constructor_self = null", *parameter_declarations]
+                    )
+                    function_prefix = (
+                        f"func {callable_names.call_method}({constructor_params}):\n"
+                    )
+                else:
+                    params = ", ".join(parameter_declarations)
+                    scoped_params = ", ".join(
+                        [
+                            f"{_SCRIPT_SELF_PARAMETER} = null",
+                            f"{_SCRIPT_OTHER_PARAMETER} = null",
+                            *parameter_declarations,
+                        ]
+                    )
+                    function_prefix = (
+                        f"func {callable_names.call_method}({params}):\n"
+                        f"{_script_forward_call(declaration=declaration, scoped_call_method=callable_names.scoped_call_method)}\n"
+                        f"func {callable_names.scoped_call_method}({scoped_params}):\n"
+                    )
+                body, source_map, static_scope_id = self._modern_function_body(
                     declaration,
                     source_path=source_path,
                     asset_names=asset_names,
                     static_scope_prefix=f"{entry.name}.{declaration.name}",
                     extension_functions=extension_functions,
                     extension_function_mappings=extension_function_mappings,
+                    enum_values=enum_values,
+                    macro_values=macro_values,
                     generated_line_offset=("".join(chunks) + function_prefix).count("\n"),
                 )
-                chunks.append(
-                    function_prefix
-                    + f"{body}\n"
-                    + "\treturn GMRuntime.gml_undefined()\n\n"
-                    + f"func {callable_names.callable_accessor}():\n"
-                    + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
-                    + f"func {callable_names.scoped_callable_accessor}():\n"
-                    + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.scoped_call_method}"))\n\n'
-                )
+                if declaration.is_constructor:
+                    assert constructor_value is not None
+                    constructor_scope_id = (
+                        static_scope_id
+                        or f"{entry.name}.{declaration.name}:constructor"
+                    )
+                    chunks.append(
+                        function_prefix
+                        + f"{body}\n"
+                        + "\treturn GMRuntime.gml_undefined()\n\n"
+                        + f"func {callable_names.callable_accessor}():\n"
+                        + f"\tvar {constructor_value} = GMRuntime.gml_constructor(\n"
+                        + "\t\tself,\n"
+                        + "\t\tGMRuntime.gml_static_bind(\n"
+                        + f'\t\t\tCallable(self, "{callable_names.call_method}"),\n'
+                        + f"\t\t\t{json.dumps(constructor_scope_id)},\n"
+                        + f"\t\t\t{json.dumps(declaration.name)}\n"
+                        + "\t\t)\n"
+                        + "\t)\n"
+                        + f"\treturn {constructor_value}\n\n"
+                        + f"func {callable_names.scoped_callable_accessor}():\n"
+                        + f"\treturn {callable_names.callable_accessor}()\n\n"
+                    )
+                else:
+                    chunks.append(
+                        function_prefix
+                        + f"{body}\n"
+                        + "\treturn GMRuntime.gml_undefined()\n\n"
+                        + f"func {callable_names.callable_accessor}():\n"
+                        + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
+                        + f"func {callable_names.scoped_callable_accessor}():\n"
+                        + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.scoped_call_method}"))\n\n'
+                    )
                 script_entry = script_entries_by_name.get(declaration.name)
                 registry_entries.append(
                     ScriptRegistryEntry(
@@ -326,9 +495,47 @@ class ScriptConverter(BaseConverter):
                         legacy_arguments=False,
                         callable_method=callable_names.callable_accessor,
                         scoped_callable_method=callable_names.scoped_callable_accessor,
+                        is_constructor=declaration.is_constructor,
+                        initializer_method=(
+                            "gm2godot_initialize_top_level"
+                            if declaration_index == 0
+                            and modern_structure.top_level_statements
+                            else None
+                        ),
                     )
                 )
                 source_maps.append(source_map)
+            if modern_structure.top_level_statements:
+                initializer_prefix = "func gm2godot_initialize_top_level():\n"
+                initializer_result = transpile_gml_code_with_source_map(
+                    render_script_top_level_source(
+                        source,
+                        modern_structure.top_level_statements,
+                    ),
+                    indent="\t",
+                    top_level_global_scope=True,
+                    asset_names=asset_names,
+                    static_scope_prefix=f"{entry.name}.top_level",
+                    enum_values=enum_values,
+                    macro_values=macro_values,
+                    extension_functions=extension_functions,
+                    extension_function_mappings=extension_function_mappings,
+                    macro_configuration=self.macro_configuration,
+                    source_path=source_path,
+                    event=f"script:{entry.name}:top-level",
+                    self_expression="self",
+                    other_expression="self",
+                    instance_target="self",
+                    generated_line_offset=(
+                        "".join(chunks) + initializer_prefix
+                    ).count("\n"),
+                )
+                chunks.append(
+                    initializer_prefix
+                    + initializer_result.code.rstrip("\n")
+                    + "\n"
+                )
+                source_maps.append(initializer_result.source_map)
             return "".join(chunks).rstrip("\n") + "\n", tuple(registry_entries), tuple(source_maps)
 
         prefix = (
@@ -348,6 +555,8 @@ class ScriptConverter(BaseConverter):
             self_expression=script_scope.self_expression,
             other_expression=script_scope.other_expression,
             instance_target=script_scope.instance_target,
+            enum_values=enum_values,
+            macro_values=macro_values,
             extension_functions=extension_functions,
             extension_function_mappings=extension_function_mappings,
             macro_configuration=self.macro_configuration,
@@ -411,6 +620,8 @@ class ScriptConverter(BaseConverter):
         script_entries_by_name: dict[str, AssetRegistryEntry],
         extension_functions: dict[str, GMLExtensionFunction],
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+        enum_values: Mapping[str, Mapping[str, int]],
+        macro_values: Mapping[str, str],
     ) -> tuple[ScriptRegistryEntry, ...]:
         source_path = self._source_gml_path(entry)
         output_path = self._output_path(entry)
@@ -428,6 +639,8 @@ class ScriptConverter(BaseConverter):
                 script_entries_by_name=script_entries_by_name,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
+                enum_values=enum_values,
+                macro_values=macro_values,
             )
         except (OSError, GMLTranspileError) as exc:
             message = get_localized("Console_Convertor_Scripts_ParseError").format(
@@ -520,6 +733,14 @@ class ScriptConverter(BaseConverter):
         }
         extension_functions = self._extension_functions()
         extension_function_mappings = self._extension_function_mappings()
+        enum_values = collect_project_enum_values(
+            self.gm_project_path,
+            macro_configuration=self.macro_configuration,
+        )
+        macro_values = collect_project_macro_values(
+            self.gm_project_path,
+            macro_configuration=self.macro_configuration,
+        )
         registry_entries: list[ScriptRegistryEntry] = []
         total = len(entries)
 
@@ -533,6 +754,8 @@ class ScriptConverter(BaseConverter):
                 script_entries_by_name=script_entries_by_name,
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
+                enum_values=enum_values,
+                macro_values=macro_values,
             )
             if converted_registry_entries:
                 registry_entries.extend(converted_registry_entries)

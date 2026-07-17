@@ -92,6 +92,13 @@ class GMLMethod:
 		is_constructor = bool(method_is_constructor)
 
 	func gml_callv(args):
+		# Generated function literals are custom Callables with a hidden receiver
+		# parameter.  Supplying it at call time preserves GameMaker method rebinding;
+		# standard Object methods already carry their receiver in the Callable.
+		if typeof(function_value) == TYPE_CALLABLE and not function_value.is_standard():
+			var call_args = [bound_self]
+			call_args.append_array(args)
+			return function_value.callv(call_args)
 		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():
 			var method_name = function_value.get_method()
 			if str(method_name) != "" and bound_self.has_method(method_name):

@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.objects import ObjectConverter
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import JsonDict
 
@@ -491,6 +492,58 @@ class TestScriptGeneration(unittest.TestCase):
         if sprite_name:
             _create_fake_sprite_scene(self.godot_dir, sprite_name)
 
+    def _reference_object_and_scripts(
+        self,
+        object_name: str,
+        *script_names: str,
+    ) -> None:
+        resources: list[dict[str, dict[str, str]]] = []
+        for script_name in script_names:
+            script_dir = os.path.join(self.gm_dir, "scripts", script_name)
+            os.makedirs(script_dir, exist_ok=True)
+            with open(
+                os.path.join(script_dir, f"{script_name}.yy"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(
+                    {
+                        "%Name": script_name,
+                        "name": script_name,
+                        "resourceType": "GMScript",
+                    },
+                    f,
+                )
+            resources.append(
+                {
+                    "id": {
+                        "name": script_name,
+                        "path": f"scripts/{script_name}/{script_name}.yy",
+                    }
+                }
+            )
+        resources.append(
+            {
+                "id": {
+                    "name": object_name,
+                    "path": f"objects/{object_name}/{object_name}.yy",
+                }
+            }
+        )
+        with open(
+            os.path.join(self.gm_dir, "Project.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                {
+                    "resources": resources,
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                f,
+            )
+
     def test_generates_gd_file(self):
         """A .gd file should be created alongside the .tscn."""
         self._setup_object("o_test")
@@ -609,6 +662,63 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tscore = 11", content)
         self.assertNotIn("\tscore = 22", content)
 
+    def test_event_instance_members_use_selected_macro_configuration(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(
+                "#if Android\n"
+                "active_member = 11;\n"
+                "#else\n"
+                "inactive_member = 22;\n"
+                "#endif\n"
+            )
+
+        self._make_converter(macro_configuration="Android").convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("var active_member", content)
+        self.assertIn("\tactive_member = 11", content)
+        self.assertNotIn("var inactive_member", content)
+        self.assertNotIn("inactive_member = 22", content)
+
+    def test_project_macro_from_script_expands_in_object_event(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._reference_object_and_scripts("o_test", "Config")
+        macro_path = os.path.join(
+            self.gm_dir,
+            "scripts",
+            "Config",
+            "Config.gml",
+        )
+        os.makedirs(os.path.dirname(macro_path), exist_ok=True)
+        with open(macro_path, "w", encoding="utf-8") as f:
+            f.write(
+                "#macro BASE_SCORE 8\n"
+                "#macro DOUBLE_SCORE (BASE_SCORE * 2)\n"
+            )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("score = DOUBLE_SCORE;")
+
+        self._make_converter().convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("\tscore = (GMRuntime.gml_mul(8, 2))", content)
+        self.assertNotIn('"BASE_SCORE"', content)
+        self.assertNotIn('"DOUBLE_SCORE"', content)
+
     def test_script_with_create_event(self):
         """eventType 0 should produce func _ready()."""
         self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
@@ -683,6 +793,36 @@ class TestScriptGeneration(unittest.TestCase):
         )
         self.assertNotIn("\tloadending()", content)
 
+    def test_object_events_lower_project_global_enum_members(self):
+        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._reference_object_and_scripts("o_test", "Adding")
+        script_dir = os.path.join(self.gm_dir, "scripts", "Adding")
+        with open(
+            os.path.join(script_dir, "Adding.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(
+                "function Adding() constructor {\n"
+                "    enum AddingOperator { equals, add = 7, multiply = 11 }\n"
+                "}\n"
+            )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("choice = AddingOperator.add;")
+
+        self._make_converter().convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("\tchoice = 7", content)
+        self.assertNotIn('"AddingOperator"', content)
+
     def test_script_transpiles_infinity_runtime_support(self):
         """Infinity-sensitive GML should use the shared runtime support layer."""
         self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
@@ -706,7 +846,10 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn("\tvar limit = INF", content)
         self.assertIn("\tvar ratio = GMRuntime.gml_div(1, 0)", content)
-        self.assertIn("\tprint(GMRuntime.gml_string(limit))", content)
+        self.assertIn(
+            "\tGMRuntime.gml_show_debug_message(GMRuntime.gml_string(limit), [])",
+            content,
+        )
 
     def test_script_transpiles_string_runtime_support(self):
         """String conversion and concatenation should use the shared runtime."""
@@ -728,7 +871,7 @@ class TestScriptGeneration(unittest.TestCase):
             'GMRuntime.gml_string(GMRuntime.gml_variable_instance_get(self, "score")))',
             content,
         )
-        self.assertIn("\tprint(label)", content)
+        self.assertIn("\tGMRuntime.gml_show_debug_message(label, [])", content)
 
     def test_transpile_failure_records_structured_diagnostic(self):
         self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
@@ -914,6 +1057,7 @@ class TestScriptGeneration(unittest.TestCase):
 
     def test_script_assigned_instance_variables_are_declared_on_objects(self):
         self._setup_object("o_player", event_list=[{"eventType": 3, "eventNum": 0}])
+        self._reference_object_and_scripts("o_player", "scr_controls")
         scripts_dir = os.path.join(self.gm_dir, "scripts", "scr_controls")
         os.makedirs(scripts_dir, exist_ok=True)
         with open(os.path.join(scripts_dir, "scr_controls.gml"), "w", encoding="utf-8") as f:
@@ -965,6 +1109,20 @@ class TestScriptGeneration(unittest.TestCase):
             encoding="utf-8",
         ) as f:
             f.write("scr_controls(); if leftcontrols = 0 { key_left = true; }")
+        self._reference_object_and_scripts("o_child", "scr_controls")
+        project_path = os.path.join(self.gm_dir, "Project.yyp")
+        with open(project_path, "r", encoding="utf-8") as f:
+            project_data = json.load(f)
+        project_data["resources"].append(
+            {
+                "id": {
+                    "name": "o_parent",
+                    "path": "objects/o_parent/o_parent.yy",
+                }
+            }
+        )
+        with open(project_path, "w", encoding="utf-8") as f:
+            json.dump(project_data, f)
 
         converter = self._make_converter()
         converter.convert_all()
@@ -983,6 +1141,65 @@ class TestScriptGeneration(unittest.TestCase):
             'if GMRuntime.gml_eq(GMRuntime.gml_variable_instance_get(self, "leftcontrols"), 0):',
             child_content,
         )
+
+    def test_only_referenced_configured_script_assignments_are_declared_on_objects(self):
+        self._setup_object("o_player", event_list=[{"eventType": 3, "eventNum": 0}])
+        self._reference_object_and_scripts("o_player", "scr_active")
+
+        active_script_dir = os.path.join(self.gm_dir, "scripts", "scr_active")
+        with open(
+            os.path.join(active_script_dir, "scr_active.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(
+                "function scr_active() {\n"
+                "#if Android\n"
+                "    configured_member = 1;\n"
+                "#else\n"
+                "    inactive_member = 1;\n"
+                "#endif\n"
+                "}\n"
+            )
+
+        orphan_script_dir = os.path.join(self.gm_dir, "scripts", "scr_orphan")
+        os.makedirs(orphan_script_dir)
+        with open(
+            os.path.join(orphan_script_dir, "scr_orphan.yy"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                {
+                    "%Name": "scr_orphan",
+                    "name": "scr_orphan",
+                    "resourceType": "GMScript",
+                },
+                f,
+            )
+        with open(
+            os.path.join(orphan_script_dir, "scr_orphan.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("function scr_orphan() { orphan_member = 1; }\n")
+
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_player", "Step_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("scr_active();")
+
+        self._make_converter(macro_configuration="Android").convert_all()
+
+        gd_path = os.path.join(self.godot_dir, "objects", "o_player", "o_player.gd")
+        with open(gd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("var configured_member", content)
+        self.assertNotIn("var inactive_member", content)
+        self.assertNotIn("var orphan_member", content)
 
     def test_native_member_instance_variables_use_dynamic_storage(self):
         self._setup_object(
@@ -1486,6 +1703,70 @@ class TestParseObjectYYEvents(unittest.TestCase):
         assert result is not None
         self.assertEqual(len(result["event_list"]), 1)
         self.assertEqual(result["event_list"][0]["collisionObjectId"]["name"], "o_enemy")
+
+
+class TestObjectGeneratedPathCollisions(unittest.TestCase):
+    def test_emitted_objects_match_collision_safe_registry_paths(self) -> None:
+        gm_dir = tempfile.mkdtemp()
+        godot_dir = tempfile.mkdtemp()
+        try:
+            names = ("FooBar", "foo_bar")
+            resources: list[dict[str, object]] = []
+            for name in names:
+                object_dir = os.path.join(gm_dir, "objects", name)
+                os.makedirs(object_dir)
+                with open(
+                    os.path.join(object_dir, name + ".yy"),
+                    "w",
+                    encoding="utf-8",
+                ) as object_file:
+                    object_file.write(_make_object_yy_content(name))
+                resources.append(
+                    {"id": {"name": name, "path": f"objects/{name}/{name}.yy"}}
+                )
+            with open(
+                os.path.join(gm_dir, "CollisionObjects.yyp"),
+                "w",
+                encoding="utf-8",
+            ) as project_file:
+                json.dump({"resources": resources, "RoomOrderNodes": []}, project_file)
+
+            ObjectConverter(
+                gm_dir,
+                godot_dir,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=2,
+            ).convert_all()
+            entries = AssetRegistryConverter(
+                gm_dir,
+                godot_dir,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+            ).build_entries()
+            object_paths = {
+                entry.name: entry.godot_path
+                for entry in entries
+                if entry.kind == "objects"
+            }
+
+            self.assertEqual(set(object_paths), set(names))
+            self.assertEqual(len(set(object_paths.values())), len(names))
+            for name, scene_path in object_paths.items():
+                scene_file = os.path.join(
+                    godot_dir,
+                    *scene_path.removeprefix("res://").split("/"),
+                )
+                script_file = os.path.splitext(scene_file)[0] + ".gd"
+                self.assertTrue(os.path.isfile(scene_file), scene_path)
+                self.assertTrue(os.path.isfile(script_file), script_file)
+                with open(scene_file, "r", encoding="utf-8") as generated_scene:
+                    self.assertIn(f'[node name="{name}" type="Node2D"]', generated_scene.read())
+        finally:
+            shutil.rmtree(gm_dir)
+            shutil.rmtree(godot_dir)
 
 
 if __name__ == "__main__":

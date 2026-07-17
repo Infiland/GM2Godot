@@ -504,6 +504,7 @@ static func _gml_json_compatible_ds_map(handle):
 	if not (ds is Dictionary):
 		return {}
 	var result = {}
-	for key in ds.keys():
-		result[gml_string(key)] = _gml_json_compatible(ds[key])
+	for stored_key in ds.keys():
+		var key = _gml_ds_map_external_key(stored_key)
+		result[gml_string(key)] = _gml_json_compatible(ds[stored_key])
 	return result

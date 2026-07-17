@@ -155,13 +155,67 @@ static func gml_exception_unhandled_handler(user_handler):
 	return previous
 
 
-static func gml_show_debug_message_ext(value_or_format, values_array):
+static func _gml_indexed_placeholder_value_index(index_text, value_count):
+	if index_text.is_empty():
+		return -1
+	if index_text.length() > 1 and index_text.unicode_at(0) == 48:
+		return -1
+	var value_index = 0
+	for position in range(index_text.length()):
+		var code = index_text.unicode_at(position)
+		if code < 48 or code > 57:
+			return -1
+		value_index = value_index * 10 + code - 48
+		if value_index >= value_count:
+			return -1
+	return value_index
+
+
+static func _gml_format_indexed_string(value_or_format, values_array):
+	var format_text = gml_string(value_or_format)
+	var formatted = ""
+	var position = 0
+	while position < format_text.length():
+		var code = format_text.unicode_at(position)
+		if code == 123:
+			if position + 1 < format_text.length() and format_text.unicode_at(position + 1) == 123:
+				formatted += "{"
+				position += 2
+				continue
+			var closing_brace = format_text.find("}", position + 1)
+			if closing_brace != -1:
+				var index_text = format_text.substr(position + 1, closing_brace - position - 1)
+				var value_index = _gml_indexed_placeholder_value_index(index_text, values_array.size())
+				if value_index >= 0:
+					formatted += gml_string(values_array[value_index])
+				else:
+					formatted += format_text.substr(position, closing_brace - position + 1)
+				position = closing_brace + 1
+				continue
+		elif code == 125 and position + 1 < format_text.length() and format_text.unicode_at(position + 1) == 125:
+			formatted += "}"
+			position += 2
+			continue
+		formatted += format_text.substr(position, 1)
+		position += 1
+	return formatted
+
+
+static func gml_show_debug_message(value_or_format, values_array):
+	if not is_array(values_array):
+		return gml_unsupported_type_error("GML show_debug_message values", values_array)
 	var message = gml_string(value_or_format)
-	if is_array(values_array):
-		for index in range(values_array.size()):
-			message = message.replace("{" + str(index) + "}", gml_string(values_array[index]))
+	if not values_array.is_empty():
+		message = _gml_format_indexed_string(value_or_format, values_array)
 	print(message)
-	return null
+	return gml_undefined()
+
+
+static func gml_show_debug_message_ext(value_or_format, values_array):
+	if not is_array(values_array):
+		return gml_unsupported_type_error("GML show_debug_message_ext values", values_array)
+	print(_gml_format_indexed_string(value_or_format, values_array))
+	return gml_undefined()
 
 
 static func gml_show_message(message):

@@ -247,6 +247,13 @@ static func gml_string(value):
 		return "-infinity" if float(value) < 0.0 else "infinity"
 	if is_nan_value(value):
 		return "NaN"
+	if typeof(value) == TYPE_FLOAT:
+		var real_value = float(value)
+		if real_value == 0.0:
+			return "0"
+		if real_value == floor(real_value):
+			return "%.0f" % real_value
+		return "%.2f" % real_value
 	if is_ptr(value):
 		if value.invalid:
 			return "pointer_invalid"

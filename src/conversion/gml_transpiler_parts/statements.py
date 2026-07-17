@@ -220,7 +220,13 @@ def _transpile_statement(
                     f"GMRuntime.gml_throw({thrown_value})",
                 ),
             ]
-        return [*prelude_lines, f"return GMRuntime.gml_throw({thrown_value})"]
+        if return_depth > 0:
+            return [*prelude_lines, f"return GMRuntime.gml_throw({thrown_value})"]
+        return [
+            *prelude_lines,
+            f"GMRuntime.gml_throw({thrown_value})",
+            "return",
+        ]
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()
@@ -303,9 +309,9 @@ def _transpile_statement(
             macro_values=macro_values,
             scope_context=scope_context,
         )
+        _reject_enum_assignment_target(target_expr, enum_names)
         if not _is_increment_target_expression(target_expr):
             raise GMLTranspileError("Increment target must be assignable")
-        _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             _reject_asset_identifier_name(target_expr.value, scope_context)
@@ -608,11 +614,21 @@ def _transpile_statement(
     assignment = _split_assignment(statement)
     if assignment is not None:
         target, operator, value = assignment
+        target_prelude_lines, target = _lower_simple_array_index_postincrement_target(
+            target,
+            local_names,
+            instance_variables,
+            enum_values,
+            enum_names,
+            scope_context=scope_context,
+            macro_values=macro_values,
+            generated_counter=generated_counter,
+        )
         if _split_assignment(value) is not None:
             if operator not in ("=", ":="):
                 raise GMLTranspileError("Chained compound assignments are not supported")
             assignment_lines, _assigned_value = _transpile_assignment_expression_to_temp(
-                statement,
+                f"{target} {operator} {value}",
                 local_names,
                 instance_variables,
                 enum_values=enum_values,
@@ -622,7 +638,7 @@ def _transpile_statement(
                 generated_counter=generated_counter,
                 result_required=False,
             )
-            return assignment_lines
+            return [*target_prelude_lines, *assignment_lines]
         increment_value = _parse_increment_expression(value)
         if operator in ("=", ":=") and increment_value is not None:
             increment_target, increment_delta, increment_mode = increment_value
@@ -677,7 +693,12 @@ def _transpile_statement(
                 macro_values=macro_values,
                 generated_counter=generated_counter,
             )
-            return [*prelude_lines, *increment_lines, *assignment_lines]
+            return [
+                *target_prelude_lines,
+                *prelude_lines,
+                *increment_lines,
+                *assignment_lines,
+            ]
         _reject_constant_assignment_target_name(target, macro_values.keys())
         target_expr = _parse_gml_expression(
             target,
@@ -724,7 +745,10 @@ def _transpile_statement(
             scope_context=scope_context,
             macro_values=macro_values,
         )
-        prelude_lines = [] if operator == "??=" else value_prelude_lines
+        prelude_lines = [
+            *target_prelude_lines,
+            *([] if operator == "??=" else value_prelude_lines),
+        ]
         if static_target is not None:
             static_scope, member_name = static_target
             if operator in ("=", ":="):
@@ -1268,7 +1292,7 @@ def _delete_target_lines(
             scope_context=scope_context,
         )[0]
         index = _emit_expression(target_expr.index, local_names, scope_context=scope_context)[0]
-        return [f"GMRuntime.gml_array_delete({target}, {index})"]
+        return [f"GMRuntime.gml_array_delete({target}, {index}, 1)"]
     if isinstance(target_expr, _DSMapAccess):
         target = _emit_expression(
             target_expr.target,
@@ -1305,6 +1329,8 @@ def _control_flow_dispatch_lines(
     control_name: str,
     source_capture: _ControlFlowCapture,
     parent_capture: _ControlFlowCapture | None = None,
+    *,
+    return_value_allowed: bool = True,
 ) -> list[str]:
     lines: list[str] = []
     for kind in ("return", "exit", "break", "continue", "throw"):
@@ -1326,7 +1352,11 @@ def _control_flow_dispatch_lines(
             )
             continue
         if kind == "return":
-            lines.append(f'\treturn {control_name}["value"]')
+            lines.append(
+                f'\treturn {control_name}["value"]'
+                if return_value_allowed
+                else "\treturn"
+            )
         elif kind == "exit":
             lines.append("\treturn")
         elif kind == "break":
@@ -1334,7 +1364,11 @@ def _control_flow_dispatch_lines(
         elif kind == "continue":
             lines.append("\tcontinue")
         elif kind == "throw":
-            lines.append(f'\treturn {control_name}["value"]')
+            lines.append(
+                f'\treturn {control_name}["value"]'
+                if return_value_allowed
+                else "\treturn"
+            )
     return lines
 
 
@@ -1853,6 +1887,43 @@ def _lower_mutation_expressions(
         rewritten_source = (
             f"{rewritten_source[:replace_start]}{replacement}{rewritten_source[replace_end:]}"
         )
+
+
+def _lower_simple_array_index_postincrement_target(
+    target: str,
+    local_names: MutableSet[str],
+    instance_variables: MutableSet[str] | None,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    scope_context: _ScopeContext | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    generated_counter: list[int] | None = None,
+) -> tuple[list[str], str]:
+    tokens = [token for token in _expression_tokens(target) if token.kind != "EOF"]
+    if len(tokens) == 5:
+        base, opener, index, increment, closer = tokens
+    elif len(tokens) == 6 and tokens[2].value == "@":
+        base, opener, _array_reference, index, increment, closer = tokens
+    else:
+        return [], target
+    if not (
+        base.kind == "IDENT"
+        and opener.value == "["
+        and index.kind == "IDENT"
+        and increment.value == "++"
+        and closer.value == "]"
+    ):
+        return [], target
+    return _lower_mutation_expressions(
+        target,
+        local_names,
+        instance_variables,
+        enum_values,
+        enum_names,
+        scope_context=scope_context,
+        macro_values=macro_values,
+        generated_counter=generated_counter,
+    )
 
 
 def _find_next_mutation_expression(

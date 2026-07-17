@@ -1,9 +1,123 @@
 const GML_SCRIPT_REGISTRY_PATH = "res://gm2godot/gml_script_registry.gd"
 
 static var _gml_script_registry_loaded = false
+static var _gml_script_registry_initializers_running = false
+static var _gml_script_registry_initializers_complete = false
 static var _gml_script_registry = {}
 static var _gml_script_names = {}
 static var _gml_script_argument_stack = []
+
+
+static func _gml_shutdown_container_seen(container, seen_containers):
+	# Arrays and Dictionaries do not expose Object instance IDs. Compare their
+	# backing storage by identity so recursive/shared containers never invoke
+	# deep equality or get traversed more than once.
+	for seen_container in seen_containers:
+		if is_same(seen_container, container):
+			return true
+	seen_containers.append(container)
+	return false
+
+
+static func _gml_shutdown_detach_method(method, pending, seen_objects):
+	var object_id = method.get_instance_id()
+	if seen_objects.has(object_id):
+		return
+	seen_objects[object_id] = true
+	pending.append(method.bound_self)
+	pending.append(method.function_value)
+	method.bound_self = null
+	method.function_value = null
+
+
+static func _gml_shutdown_detach_methods(roots):
+	# Use an explicit worklist to remain stack-safe for deeply nested GML data.
+	# The identity list keeps cyclic Array/Dictionary graphs finite without
+	# cloning or rebuilding their shared structure. Method slots are nulled only
+	# during shutdown so the detached GMLMethod objects can also be released.
+	var pending = []
+	pending.append_array(roots)
+	var seen_containers = []
+	var seen_objects = {}
+	while not pending.is_empty():
+		var value = pending.pop_back()
+		if value is GMLMethod:
+			_gml_shutdown_detach_method(value, pending, seen_objects)
+			continue
+		if value is GMLException:
+			var exception_id = value.get_instance_id()
+			if seen_objects.has(exception_id):
+				continue
+			seen_objects[exception_id] = true
+			if value.value is GMLMethod:
+				_gml_shutdown_detach_method(value.value, pending, seen_objects)
+				value.value = null
+			else:
+				pending.append(value.value)
+			continue
+		if value is GMLHandle:
+			var handle_id = value.get_instance_id()
+			if seen_objects.has(handle_id):
+				continue
+			seen_objects[handle_id] = true
+			if value.reference is GMLMethod:
+				_gml_shutdown_detach_method(value.reference, pending, seen_objects)
+				value.reference = null
+			else:
+				pending.append(value.reference)
+			continue
+		var value_type = typeof(value)
+		if value_type != TYPE_ARRAY and value_type != TYPE_DICTIONARY:
+			continue
+		if _gml_shutdown_container_seen(value, seen_containers):
+			continue
+		if value_type == TYPE_ARRAY:
+			for index in range(value.size()):
+				var element = value[index]
+				if element is GMLMethod:
+					_gml_shutdown_detach_method(element, pending, seen_objects)
+					value[index] = null
+				else:
+					pending.append(element)
+			continue
+		for key in value.keys():
+			var element = value[key]
+			if element is GMLMethod:
+				_gml_shutdown_detach_method(element, pending, seen_objects)
+				value[key] = null
+			else:
+				pending.append(element)
+			if key is GMLMethod:
+				_gml_shutdown_detach_method(key, pending, seen_objects)
+				value.erase(key)
+			else:
+				pending.append(key)
+
+
+static func gm2godot_runtime_shutdown():
+	# Script/static registries can form RefCounted cycles through a method's
+	# bound receiver or Callable. Detach those edges before clearing the
+	# containers so Godot can release generated script instances at shutdown.
+	_gml_shutdown_detach_methods([
+		_gml_script_registry,
+		_gml_script_argument_stack,
+		_gml_static_registry,
+		_gml_static_named_scopes,
+		_gml_static_root,
+		_gml_global_scope,
+		_gml_builtin_arrays,
+		_gml_builtin_globals,
+	])
+	_gml_script_registry.clear()
+	_gml_script_names.clear()
+	_gml_script_argument_stack.clear()
+	_gml_script_registry_loaded = false
+	_gml_script_registry_initializers_running = false
+	_gml_script_registry_initializers_complete = false
+	_gml_static_registry.clear()
+	_gml_static_named_scopes.clear()
+	_gml_static_root.clear()
+	_gml_global_scope.clear()
 
 
 static func gml_method_call(method, array_args = null, offset = 0, num_args = null):
@@ -43,6 +157,13 @@ static func gml_script_call(script_or_callable, args = [], caller_self = null, c
 	var callable = script_or_callable
 	var use_legacy_arguments = false
 	var has_caller_scope = caller_self != null and not is_undefined(caller_self)
+	if not is_method(script_or_callable) and not (
+		typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable")
+	):
+		var resolved_descriptor: Variant = _gml_script_resolve(script_or_callable)
+		if resolved_descriptor != null:
+			script_or_callable = resolved_descriptor
+			callable = resolved_descriptor
 	if typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable"):
 		if has_caller_scope and script_or_callable.has("scoped_callable"):
 			callable = script_or_callable["scoped_callable"]
@@ -82,11 +203,14 @@ static func gml_script_register(script, callable, legacy_arguments = false, scop
 
 
 static func gml_script_registry_set(entries):
+	if _gml_script_registry_initializers_running:
+		return null
 	_gml_script_registry_loaded = true
 	_gml_script_registry = {}
 	_gml_script_names = {}
 	if typeof(entries) != TYPE_ARRAY:
 		return null
+	var initializers = []
 	for entry in entries:
 		if typeof(entry) != TYPE_DICTIONARY or not entry.has("callable"):
 			continue
@@ -97,6 +221,19 @@ static func gml_script_registry_set(entries):
 			bool(entry.get("legacy_arguments", false)),
 			entry.get("scoped_callable", null)
 		)
+		var initializer: Variant = entry.get("initializer", null)
+		if is_method(initializer) and not initializers.has(initializer):
+			initializers.append(initializer)
+	if _gml_script_registry_initializers_complete:
+		return null
+	_gml_script_registry_initializers_running = true
+	for initializer in initializers:
+		if initializer is GMLMethod:
+			initializer.gml_callv([])
+		else:
+			initializer.call()
+	_gml_script_registry_initializers_running = false
+	_gml_script_registry_initializers_complete = true
 	return null
 
 
@@ -162,7 +299,19 @@ static func gml_constructor(scope, func_or_method):
 	return constructor_method
 
 
+static func _gml_constructor_resolve(constructor):
+	if constructor is GMLMethod:
+		return constructor
+	var descriptor: Variant = _gml_script_resolve(constructor)
+	if typeof(descriptor) == TYPE_DICTIONARY:
+		var callable = descriptor.get("callable", null)
+		if callable is GMLMethod:
+			return callable
+	return null
+
+
 static func gml_new(constructor, args = []):
+	constructor = _gml_constructor_resolve(constructor)
 	if not (constructor is GMLMethod):
 		return gml_unsupported_type_error("GML new constructor", constructor)
 	if not constructor.is_constructor:
@@ -181,6 +330,7 @@ static func gml_new(constructor, args = []):
 
 
 static func gml_constructor_inherit(instance, constructor, args = []):
+	constructor = _gml_constructor_resolve(constructor)
 	if not (constructor is GMLMethod):
 		return gml_unsupported_type_error("GML parent constructor", constructor)
 	if not constructor.is_constructor:

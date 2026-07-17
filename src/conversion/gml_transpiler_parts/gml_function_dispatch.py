@@ -43,6 +43,8 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "method",
     "print",
     "runtime",
+    "runtime_array_foreach",
+    "runtime_array_sort",
     "runtime_audio_api",
     "runtime_append_self",
     "runtime_collision_api",
@@ -200,16 +202,18 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_push_back": (2, 2),
     "array_create": (1, 2),
     "array_length_1d": (1, 1),
+    "array_length": (1, 1),
     "array_resize": (2, 2),
     "array_pop": (1, 1),
     "array_insert": (3, 3),
-    "array_delete": (2, 2),
-    "array_sort": (1, 1),
+    "array_delete": (3, 3),
+    "array_sort": (2, 2),
     "array_shuffle": (1, 1),
     "array_copy": (5, 5),
     "array_concat": (2, 2),
     "array_contains": (2, 2),
     "array_find_index": (2, 2),
+    "array_foreach": (2, 4),
     "array_filter": (2, 2),
     "array_map": (2, 2),
     "array_reduce": (2, 3),
@@ -217,6 +221,7 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
 
 _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_length": (1, 1),
+    "string_byte_length": (1, 1),
     "string_char_at": (2, 2),
     "string_ord_at": (2, 2),
     "string_copy": (3, 3),
@@ -734,6 +739,12 @@ _LAYER_ARITY: dict[str, tuple[int, int | None]] = {
     "layer_background_get_id": (1, 1),
     "layer_background_alpha": (2, 2),
     "layer_background_blend": (2, 2),
+    "layer_tilemap_get_id": (1, 1),
+    "layer_tilemap_create": (6, 6),
+    "tilemap_set": (4, 4),
+    "tilemap_get": (3, 3),
+    "tilemap_get_width": (1, 1),
+    "tilemap_get_height": (1, 1),
 }
 
 _SEQUENCE_TIMELINE_ARITY: dict[str, tuple[int, int | None]] = {
@@ -1332,6 +1343,10 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "array_push":
             lowering_kind = "runtime_variadic_1"
+        elif name == "array_foreach":
+            lowering_kind = "runtime_array_foreach"
+        elif name == "array_sort":
+            lowering_kind = "runtime_array_sort"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _STRING_RUNTIME_FUNCTIONS.items():
@@ -1491,9 +1506,9 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     descriptors["show_debug_message"] = _descriptor(
         "show_debug_message",
         1,
-        1,
+        None,
         "print",
-        "print",
+        "gml_show_debug_message",
     )
 
     for name in (

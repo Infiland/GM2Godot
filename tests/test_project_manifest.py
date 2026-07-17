@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sys
@@ -36,6 +37,7 @@ class TestGameMakerProjectManifest(unittest.TestCase):
   "%Name": "ManifestFixture",
   "resourceType": "GMProject",
   "resourceVersion": "1.7",
+  "MetaData": {"IDEVersion": "2026.0.1.123"},
   "resources": [
     {"id": {"id": "uuid-sprite", "name": "s_player", "path": "sprites/s_player/s_player.yy"}, "resourceType": "GMSprite", "order": 2, "tags": ["hero", "combat"]},
     {"Key": "uuid-room", "Value": {"id": "uuid-room", "name": "r_main", "resourcePath": "rooms/r_main/r_main.yy", "resourceType": "GMRoom", "order": 1}}
@@ -73,6 +75,7 @@ class TestGameMakerProjectManifest(unittest.TestCase):
 
         self.assertEqual(manifest.project_name, "ManifestFixture")
         self.assertEqual(manifest.resource_version, "1.7")
+        self.assertEqual(manifest.ide_version, "2026.0.1.123")
         sprite = manifest.find_resources(uuid="uuid-sprite")[0]
         self.assertEqual(sprite.name, "s_player")
         self.assertEqual(sprite.kind, "sprites")
@@ -131,6 +134,24 @@ class TestGameMakerProjectManifest(unittest.TestCase):
         self.assertTrue(
             any(diagnostic.code == "GM2GD-PROJECT-RESOURCE-CONFLICT" for diagnostic in manifest.diagnostics)
         )
+
+    def test_ide_version_is_empty_when_metadata_is_absent_or_malformed(self) -> None:
+        yyp_path = os.path.join(self.gm_dir, "VersionFallback.yyp")
+        cases: tuple[dict[str, object], ...] = (
+            {"%Name": "MissingMetadata", "resourceType": "GMProject"},
+            {"%Name": "MalformedMetadata", "resourceType": "GMProject", "MetaData": []},
+            {
+                "%Name": "MalformedIDEVersion",
+                "resourceType": "GMProject",
+                "MetaData": {"IDEVersion": 2026},
+            },
+        )
+
+        for yyp_data in cases:
+            with self.subTest(project_name=yyp_data["%Name"]):
+                _write_file(yyp_path, json.dumps(yyp_data))
+                manifest = load_gamemaker_project_manifest(self.gm_dir)
+                self.assertEqual(manifest.ide_version, "")
 
 
 if __name__ == "__main__":

@@ -132,6 +132,10 @@ _LAYER_DOCS_PATH = (
     "General_Layer_Functions/General_Layer_Functions.htm"
 )
 _LAYER_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.11_layers"
+_TILEMAP_DOCS_PATH = (
+    "GameMaker_Language/GML_Reference/Asset_Management/Rooms/"
+    "Tile_Map_Layers/Tile_Map_Layers.htm"
+)
 _LAYER_IMPLEMENTED_APIS = frozenset(
     {
         "layer_exists",
@@ -162,15 +166,17 @@ _LAYER_IMPLEMENTED_APIS = frozenset(
         "layer_background_blend",
     }
 )
-_LAYER_UNSUPPORTED_ELEMENT_APIS = (
-    (
+_TILEMAP_IMPLEMENTED_APIS = frozenset(
+    {
         "layer_tilemap_get_id",
-        "Tilemap layer element editing is classified separately from general layer handles and remains tied to tilemap/texture API work.",
-    ),
-    (
         "layer_tilemap_create",
-        "Runtime tilemap element creation needs the texture/tilemap compatibility surface tracked by #568.",
-    ),
+        "tilemap_set",
+        "tilemap_get",
+        "tilemap_get_width",
+        "tilemap_get_height",
+    }
+)
+_LAYER_UNSUPPORTED_ELEMENT_APIS = (
     (
         "layer_background_create",
         "Runtime background elements are not created until background asset conversion has a mutable runtime representation.",
@@ -223,6 +229,22 @@ def _layer_entries() -> tuple[GMLAPIEntry, ...]:
         )
         for name in sorted(_LAYER_IMPLEMENTED_APIS)
     )
+    tilemap_entries = tuple(
+        _entry(
+            name,
+            "Rooms and Layers",
+            "implemented",
+            _LAYER_OWNER_MODULE,
+            "yes",
+            "yes",
+            "yes",
+            "yes",
+            _TILEMAP_DOCS_PATH,
+            "Creates and edits TileMapLayer elements through stable GMRuntime layer-element handles while preserving GameMaker cell bounds and tile-data transform flags.",
+            issue_number=566,
+        )
+        for name in sorted(_TILEMAP_IMPLEMENTED_APIS)
+    )
     unsupported_entries = tuple(
         _entry(
             name,
@@ -238,7 +260,7 @@ def _layer_entries() -> tuple[GMLAPIEntry, ...]:
         )
         for name, notes in _LAYER_UNSUPPORTED_ELEMENT_APIS
     )
-    return implemented_entries + unsupported_entries
+    return implemented_entries + tilemap_entries + unsupported_entries
 
 
 _SEQUENCE_DOCS_PATH = "GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequences.htm"
@@ -608,7 +630,7 @@ _OS_DEBUG_DOCS_PATH = "GameMaker_Language/GML_Reference/Debugging/Debugging.htm"
 _OS_COMPILER_DOCS_PATH = "GameMaker_Language/GML_Reference/OS_And_Compiler/OS_And_Compiler.htm"
 _GC_DOCS_PATH = "GameMaker_Language/GML_Reference/Garbage_Collection/Garbage_Collection.htm"
 _OS_DEBUG_GC_IMPLEMENTED_APIS = (
-    ("show_debug_message", _OS_DEBUG_DOCS_PATH, "src.conversion.gml_transpiler_parts.emitter", "Lowers to Godot print for baseline debug output."),
+    ("show_debug_message", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Formats values with GameMaker string semantics and prints to the Godot output log."),
     ("debug_mode", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Godot's debug-build flag through GMRuntime built-in globals."),
     ("fps", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
     ("fps_real", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
@@ -5964,6 +5986,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Returns size of 1D array via GDScript .size().",
     ),
     _entry(
+        "array_length",
+        "Arrays",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.40_arrays_structs_variables",
+        "n/a",
+        "yes",
+        "yes",
+        "no",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_length.htm",
+        "Returns the current array dimension size and zero for non-array values.",
+    ),
+    _entry(
         "array_resize",
         "Arrays",
         "implemented",
@@ -6031,9 +6065,9 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "n/a",
         "yes",
         "yes",
-        "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
-        "Sorts array in-place via GDScript .sort().",
+        "yes",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_sort.htm",
+        "Mutates in place for Boolean direction or a three-way method comparator and returns undefined.",
     ),
     _entry(
         "array_shuffle",
@@ -6096,6 +6130,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Returns index of value or -1 via GDScript .find().",
     ),
     _entry(
+        "array_foreach",
+        "Arrays",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.40_arrays_structs_variables",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_foreach.htm",
+        "Runs a bound callback with (element, index) over the requested forward or reverse range and returns undefined.",
+    ),
+    _entry(
         "array_map",
         "Arrays",
         "implemented",
@@ -6154,6 +6200,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "no",
         "GameMaker_Language/GML_Reference/Strings/Strings.htm",
         "Returns character count via GDScript .length().",
+    ),
+    _entry(
+        "string_byte_length",
+        "Strings",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.70_handle_string_helpers",
+        "n/a",
+        "yes",
+        "yes",
+        "no",
+        "GameMaker_Language/GML_Reference/Strings/string_byte_length.htm",
+        "Returns the UTF-8 encoded byte count.",
     ),
     _entry(
         "string_char_at",

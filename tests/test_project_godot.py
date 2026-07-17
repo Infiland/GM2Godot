@@ -1,8 +1,10 @@
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -109,12 +111,79 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertIn('[other]\nrun/main_scene="res://other.tscn"', content)
         self.assertIn('run/main_scene="res://rooms/r_a/r_a.tscn"', content)
 
+    def test_set_setting_replaces_whitespace_variant_and_removes_duplicates(self) -> None:
+        _write_file(self.project_path, (
+            '[application]\n'
+            'run/main_scene = "res://first.tscn"\n'
+            'run/main_scene="res://last.tscn"\n'
+            'config/name="Existing"\n'
+        ))
+
+        result = GodotProjectFile(self.project_path).set_main_scene(
+            "res://rooms/r_a/r_a.tscn"
+        )
+
+        content = self._read_project()
+        self.assertTrue(result)
+        self.assertEqual(content.count("run/main_scene"), 1)
+        self.assertIn('run/main_scene="res://rooms/r_a/r_a.tscn"', content)
+
     def test_set_main_scene_returns_false_when_project_missing(self) -> None:
         result = GodotProjectFile(self.project_path).set_main_scene(
             "res://rooms/r_a/r_a.tscn"
         )
 
         self.assertFalse(result)
+
+    def test_set_main_scene_preserves_project_file_permissions(self) -> None:
+        _write_file(
+            self.project_path,
+            '[application]\nconfig/name="Existing"\n',
+        )
+        os.chmod(self.project_path, 0o640)
+
+        result = GodotProjectFile(self.project_path).set_main_scene(
+            "res://rooms/r_a/r_a.tscn"
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(stat.S_IMODE(os.stat(self.project_path).st_mode), 0o640)
+
+    def test_set_main_scene_fsync_failure_preserves_original_bytes(self) -> None:
+        original = b'[application]\nconfig/name="Existing"\n'
+        with open(self.project_path, "wb") as project_file:
+            project_file.write(original)
+
+        with patch(
+            "src.conversion.project_godot.os.fsync",
+            side_effect=OSError("injected fsync failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "injected fsync failure"):
+                GodotProjectFile(self.project_path).set_main_scene(
+                    "res://rooms/r_a/r_a.tscn"
+                )
+
+        with open(self.project_path, "rb") as project_file:
+            self.assertEqual(project_file.read(), original)
+        self.assertEqual(os.listdir(self.godot_dir), ["project.godot"])
+
+    def test_set_main_scene_replace_failure_preserves_original_bytes(self) -> None:
+        original = b'[application]\nconfig/name="Existing"\n'
+        with open(self.project_path, "wb") as project_file:
+            project_file.write(original)
+
+        with patch(
+            "src.conversion.project_godot.os.replace",
+            side_effect=OSError("injected replace failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "injected replace failure"):
+                GodotProjectFile(self.project_path).set_main_scene(
+                    "res://rooms/r_a/r_a.tscn"
+                )
+
+        with open(self.project_path, "rb") as project_file:
+            self.assertEqual(project_file.read(), original)
+        self.assertEqual(os.listdir(self.godot_dir), ["project.godot"])
 
     def test_set_autoloads_adds_managed_entries_in_order(self) -> None:
         _write_file(self.project_path, (
@@ -159,6 +228,29 @@ class TestGodotProjectFile(unittest.TestCase):
         self.assertNotIn("old_assets", content)
         self.assertNotIn("old_runtime", content)
         self.assertIn('[application]', content)
+
+    def test_set_autoloads_removes_whitespace_variants_and_duplicates(self) -> None:
+        _write_file(self.project_path, (
+            '[autoload]\n'
+            'GMRuntime = "*res://old_first.gd"\n'
+            'Custom = "*res://custom.gd"\n'
+            'GMRuntime="*res://old_last.gd"\n'
+            'GMAssets  =  "*res://old_assets.gd"\n'
+        ))
+
+        result = GodotProjectFile(self.project_path).set_autoloads((
+            ("GMRuntime", "res://new_runtime.gd"),
+            ("GMAssets", "res://new_assets.gd"),
+        ))
+
+        content = self._read_project()
+        self.assertTrue(result)
+        self.assertEqual(content.count("GMRuntime"), 1)
+        self.assertEqual(content.count("GMAssets"), 1)
+        self.assertIn('GMRuntime="*res://new_runtime.gd"', content)
+        self.assertIn('GMAssets="*res://new_assets.gd"', content)
+        self.assertIn('Custom = "*res://custom.gd"', content)
+        self.assertNotIn("old_", content)
 
     def test_set_autoloads_returns_false_when_project_missing(self) -> None:
         result = GodotProjectFile(self.project_path).set_autoloads((

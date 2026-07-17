@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Iterable, Mapping, MutableMapping
 
 from .constants import (
@@ -12,6 +13,7 @@ from .constants import (
     _TERNARY_PRECEDENCE,
 )
 from .identifiers import _reject_asset_identifier_name, _validate_gml_identifier
+from .lexical import _decode_gml_verbatim_string_literal
 from .model import (
     GMLTranspileError,
     _ArrayLiteral,
@@ -22,6 +24,7 @@ from .model import (
     _DSListAccess,
     _DSMapAccess,
     _Expression,
+    _EnumMember,
     _FunctionLiteral,
     _FunctionParameter,
     _Grouped,
@@ -35,13 +38,19 @@ from .model import (
     _StringLiteral,
     _StructAccess,
     _StructLiteral,
+    _TemplateStringLiteral,
     _Ternary,
     _Token,
     _Unary,
 )
 from .static_declarations import _collect_static_declarations, _static_scope_id
-from .tokens import _expression_tokens, _is_float_like_number
-from .utils import _normalize_scope_context
+from .tokens import (
+    _decode_gml_string_literal,
+    _expression_tokens,
+    _is_float_like_number,
+    _split_template_string,
+)
+from .utils import _normalize_scope_context, _strip_comments
 
 class _ExpressionParser:
     def __init__(
@@ -58,7 +67,8 @@ class _ExpressionParser:
         self.enum_values: MutableMapping[str, dict[str, int]] = (
             enum_values if enum_values is not None else {}
         )
-        self.enum_names: set[str] = set(enum_names or [])
+        self.enum_names: set[str] = set(self.enum_values)
+        self.enum_names.update(enum_names or [])
         self.scope_context = _normalize_scope_context(scope_context)
         self.macro_values: MutableMapping[str, str] = dict(macro_values or {})
         self.macro_expansion_stack = macro_expansion_stack or frozenset()
@@ -157,7 +167,19 @@ class _ExpressionParser:
 
             if self._match("."):
                 member = self._consume_identifier()
-                expr = _Member(expr, member)
+                if isinstance(expr, _Name) and expr.value in self.enum_names:
+                    enum_members = self.enum_values.get(expr.value, {})
+                    if member not in enum_members:
+                        raise GMLTranspileError(
+                            f"Unknown enum member {expr.value}.{member}"
+                        )
+                    expr = _EnumMember(
+                        enum_name=expr.value,
+                        member=member,
+                        value=enum_members[member],
+                    )
+                else:
+                    expr = _Member(expr, member)
                 continue
 
             break
@@ -169,7 +191,17 @@ class _ExpressionParser:
         if token.kind == "NUMBER":
             return _NumberLiteral(token.value, _is_float_like_number(token.value))
         if token.kind == "STRING":
-            return _StringLiteral(token.value)
+            decoded = _decode_gml_string_literal(token.value)
+            emitted = json.dumps(decoded)
+            if token.value.startswith("'"):
+                emitted = "'" + emitted[1:-1].replace('\\"', '"').replace("'", "\\'") + "'"
+            return _StringLiteral(emitted)
+        if token.kind == "VERBATIM_STRING":
+            return _StringLiteral(
+                json.dumps(_decode_gml_verbatim_string_literal(token.value))
+            )
+        if token.kind == "TEMPLATE_STRING":
+            return self._parse_template_string(token.value)
         if token.kind == "IDENT" and token.value == "nameof":
             return self._parse_nameof_expression()
         if token.kind == "IDENT" and token.value == "new":
@@ -196,11 +228,32 @@ class _ExpressionParser:
             fields: list[tuple[str, _Expression]] = []
             if not self._check("}"):
                 while True:
-                    field_name = self._consume_identifier()
-                    if self._match(":"):
+                    field_token = self._peek()
+                    if field_token.kind == "STRING":
+                        self._advance()
+                        if not field_token.value.startswith('"'):
+                            raise GMLTranspileError(
+                                "Quoted struct field names must use double quotes",
+                                line=field_token.line,
+                                column=field_token.column,
+                            )
+                        field_name = _decode_gml_string_literal(field_token.value)
+                        if not field_name:
+                            raise GMLTranspileError(
+                                "Struct field names cannot be empty",
+                                line=field_token.line,
+                                column=field_token.column,
+                            )
+                        self._consume(":")
                         field_value = self._parse_expression()
                     else:
-                        field_value = _Name(_NAME_REPLACEMENTS.get(field_name, field_name))
+                        field_name = self._consume_identifier()
+                        if self._match(":"):
+                            field_value = self._parse_expression()
+                        else:
+                            field_value = _Name(
+                                _NAME_REPLACEMENTS.get(field_name, field_name)
+                            )
                     fields.append((field_name, field_value))
                     if not self._match(","):
                         break
@@ -217,6 +270,24 @@ class _ExpressionParser:
             line=token.line,
             column=token.column,
         )
+
+    def _parse_template_string(self, source: str) -> _TemplateStringLiteral:
+        parts: list[str | _Expression] = []
+        for part_kind, part_source in _split_template_string(source):
+            if part_kind == "text":
+                parts.append(part_source)
+                continue
+            parts.append(
+                _parse_gml_expression(
+                    _strip_comments(part_source),
+                    self.enum_values,
+                    self.enum_names,
+                    self.macro_values,
+                    self.macro_expansion_stack,
+                    scope_context=self.scope_context,
+                )
+            )
+        return _TemplateStringLiteral(tuple(parts))
 
     def _parse_macro_expansion(self, name: str) -> _Expression | None:
         macro_source = self.macro_values.get(name)
@@ -301,7 +372,7 @@ class _ExpressionParser:
             _reject_asset_identifier_name(parameter_name, self.scope_context)
         scope_context = self.scope_context
         static_scope_id = None
-        static_scope_name = None
+        static_scope_name = scope_context.static_scope
         static_prefix = scope_context.static_prefix
         if static_declarations:
             static_scope_id = _static_scope_id(static_prefix, name, self.position, body_tokens)
@@ -309,7 +380,11 @@ class _ExpressionParser:
                 f"_gml_static_scope_{hashlib.sha1(static_scope_id.encode('utf-8')).hexdigest()[:12]}"
             )
             static_prefix = static_scope_id
-        static_names = frozenset(declaration.name for declaration in static_declarations)
+        static_names = (
+            frozenset(declaration.name for declaration in static_declarations)
+            if static_declarations
+            else scope_context.static_names
+        )
         if is_constructor:
             scope_context = _ScopeContext(
                 self_expression="_gml_constructor_self",
@@ -327,9 +402,14 @@ class _ExpressionParser:
             )
         else:
             scope_context = _ScopeContext(
-                self_expression=scope_context.self_expression,
+                # A GML function body resolves instance/struct fields through
+                # the method's bound self, which can later be changed by
+                # method().  Keep that receiver dynamic instead of baking in
+                # the scope where the function literal was declared.
+                self_expression="_gml_method_self",
                 other_expression=scope_context.other_expression,
-                instance_target=scope_context.instance_target,
+                instance_target="_gml_method_self",
+                global_scope=scope_context.global_scope,
                 global_names=scope_context.global_names,
                 asset_names=scope_context.asset_names,
                 direct_instance_names=scope_context.direct_instance_names,

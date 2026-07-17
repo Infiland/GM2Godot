@@ -9,6 +9,12 @@ from typing import Iterable, Literal, TypeAlias
 
 from .constants import _GDSCRIPT_RESERVED_IDENTIFIERS
 from .identifiers import _sanitize_gdscript_identifier
+from .lexical import (
+    _is_verbatim_string_start,
+    _read_ordinary_string,
+    _read_verbatim_string,
+)
+from .tokens import _read_template_string
 
 SourceDiagnosticSeverity: TypeAlias = Literal["warning", "error"]
 
@@ -102,6 +108,34 @@ class GMLSourceMap:
             ),
         )
 
+    def with_source_offset(
+        self,
+        line_offset: int,
+        first_line_column_offset: int = 0,
+    ) -> "GMLSourceMap":
+        if line_offset == 0 and first_line_column_offset == 0:
+            return self
+        return GMLSourceMap(
+            source_path=self.source_path,
+            event=self.event,
+            entries=tuple(
+                GMLSourceMapEntry(
+                    generated_line=entry.generated_line,
+                    source_line=entry.source_line + line_offset,
+                    source_column=(
+                        entry.source_column + first_line_column_offset
+                        if entry.source_line == 1
+                        else entry.source_column
+                    ),
+                    generated_text=entry.generated_text,
+                    source_text=entry.source_text,
+                    source_path=entry.source_path,
+                    event=entry.event,
+                )
+                for entry in self.entries
+            ),
+        )
+
     def to_dict(self) -> dict[str, object]:
         return {
             "version": 1,
@@ -115,6 +149,7 @@ class GMLSourceMap:
 class GMLTranspileResult:
     code: str
     source_map: GMLSourceMap
+    static_scope_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -295,22 +330,97 @@ def analyze_gml_source_identifiers(source: str) -> tuple[GMLSourceDiagnostic, ..
     return tuple(diagnostics)
 
 
+def _blank_source_span(buffer: list[str], start: int, end: int) -> None:
+    for index in range(start, end):
+        if buffer[index] not in "\r\n":
+            buffer[index] = " "
+
+
+def _source_lexical_views(source: str) -> tuple[str, str, str]:
+    """Return comment-free, code-only, and string-free source views.
+
+    Every view preserves source length and line endings. This keeps source-map
+    locations exact while preventing comment markers or identifiers inside any
+    string literal from being interpreted as GML syntax.
+    """
+
+    comments_stripped = list(source)
+    code_only = list(source)
+    strings_masked = list(source)
+    index = 0
+    while index < len(source):
+        if _is_verbatim_string_start(source, index):
+            literal = _read_verbatim_string(source, index)
+            end = index + len(literal)
+            _blank_source_span(code_only, index, end)
+            _blank_source_span(strings_masked, index, end)
+            index = end
+            continue
+
+        if source.startswith('$"', index):
+            literal = _read_template_string(source, index)
+            end = index + len(literal)
+            _blank_source_span(code_only, index, end)
+            _blank_source_span(strings_masked, index, end)
+            index = end
+            continue
+
+        char = source[index]
+        if char in ("'", '"'):
+            literal = _read_ordinary_string(source, index)
+            end = index + len(literal)
+            _blank_source_span(code_only, index, end)
+            _blank_source_span(strings_masked, index, end)
+            index = end
+            continue
+
+        if source.startswith("//", index):
+            end = index + 2
+            while end < len(source) and source[end] not in "\r\n":
+                end += 1
+            _blank_source_span(comments_stripped, index, end)
+            _blank_source_span(code_only, index, end)
+            index = end
+            continue
+
+        if source.startswith("/*", index):
+            comment_end = source.find("*/", index + 2)
+            end = len(source) if comment_end == -1 else comment_end + 2
+            _blank_source_span(comments_stripped, index, end)
+            _blank_source_span(code_only, index, end)
+            index = end
+            continue
+
+        index += 1
+
+    return (
+        "".join(comments_stripped),
+        "".join(code_only),
+        "".join(strings_masked),
+    )
+
+
 def _significant_source_lines(source: str) -> tuple[_SourceLine, ...]:
     lines: list[_SourceLine] = []
-    in_block_comment = False
-    for line_number, raw_line in enumerate(source.splitlines(), start=1):
-        stripped, in_block_comment = _strip_line_comment_context(raw_line, in_block_comment)
-        if not stripped.strip():
+    comments_stripped, code_only, _strings_masked = _source_lexical_views(source)
+    for line_number, (clean_line, code_line) in enumerate(
+        zip(comments_stripped.splitlines(), code_only.splitlines(), strict=True),
+        start=1,
+    ):
+        if not code_line.strip():
             continue
-        if stripped.lstrip().startswith("#"):
+        if code_line.lstrip().startswith("#"):
             continue
-        column = len(stripped) - len(stripped.lstrip()) + 1
-        lines.append(_SourceLine(line=line_number, column=column, text=stripped.strip()))
+        column = len(code_line) - len(code_line.lstrip()) + 1
+        lines.append(
+            _SourceLine(line=line_number, column=column, text=clean_line.strip())
+        )
     return tuple(lines)
 
 
 def _source_comments(source: str) -> tuple[_SourceLine, ...]:
     comments: list[_SourceLine] = []
+    _comments_stripped, _code_only, source = _source_lexical_views(source)
     in_block_comment = False
     for line_number, line in enumerate(source.splitlines(), start=1):
         index = 0
@@ -348,76 +458,67 @@ def _source_comments(source: str) -> tuple[_SourceLine, ...]:
 
 def _declared_identifier_locations(source: str) -> tuple[tuple[str, int, int], ...]:
     locations: list[tuple[str, int, int]] = []
+    _comments_stripped, source, _strings_masked = _source_lexical_views(source)
     for line_number, line in enumerate(source.splitlines(), start=1):
-        clean_line, _in_block_comment = _strip_line_comment_context(line, False)
-        for match in _DECLARATION_RE.finditer(clean_line):
-            for identifier_match in _IDENTIFIER_RE.finditer(match.group(1)):
-                identifier = identifier_match.group(0)
-                if identifier in _GML_KEYWORDS:
+        for match in _DECLARATION_RE.finditer(line):
+            for offset, declaration in _top_level_comma_segments(match.group(1)):
+                stripped = declaration.lstrip()
+                identifier_match = _IDENTIFIER_RE.match(stripped)
+                if identifier_match is None:
                     continue
-                locations.append((identifier, line_number, match.start(1) + identifier_match.start() + 1))
-        for match in _FUNCTION_RE.finditer(clean_line):
+                leading_whitespace = len(declaration) - len(stripped)
+                locations.append(
+                    (
+                        identifier_match.group(0),
+                        line_number,
+                        match.start(1) + offset + leading_whitespace + 1,
+                    )
+                )
+        for match in _FUNCTION_RE.finditer(line):
             function_name = match.group(1)
             if function_name:
                 locations.append((function_name, line_number, match.start(1) + 1))
             params_start = match.start(2)
-            for identifier_match in _IDENTIFIER_RE.finditer(match.group(2)):
-                locations.append((identifier_match.group(0), line_number, params_start + identifier_match.start() + 1))
+            for offset, parameter in _top_level_comma_segments(match.group(2)):
+                stripped = parameter.lstrip()
+                identifier_match = _IDENTIFIER_RE.match(stripped)
+                if identifier_match is None:
+                    continue
+                leading_whitespace = len(parameter) - len(stripped)
+                locations.append(
+                    (
+                        identifier_match.group(0),
+                        line_number,
+                        params_start + offset + leading_whitespace + 1,
+                    )
+                )
     return tuple(locations)
+
+
+def _top_level_comma_segments(text: str) -> tuple[tuple[int, str], ...]:
+    """Return comma-delimited declarators without splitting nested expressions."""
+    segments: list[tuple[int, str]] = []
+    segment_start = 0
+    depth = 0
+    for index, char in enumerate(text):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}" and depth:
+            depth -= 1
+        elif char == "," and depth == 0:
+            segments.append((segment_start, text[segment_start:index]))
+            segment_start = index + 1
+    segments.append((segment_start, text[segment_start:]))
+    return tuple(segments)
 
 
 def _identifier_locations(source: str) -> tuple[tuple[str, int, int], ...]:
     locations: list[tuple[str, int, int]] = []
-    in_block_comment = False
+    _comments_stripped, source, _strings_masked = _source_lexical_views(source)
     for line_number, line in enumerate(source.splitlines(), start=1):
-        clean_line, in_block_comment = _strip_line_comment_context(line, in_block_comment)
-        for match in _IDENTIFIER_RE.finditer(_strip_string_literals(clean_line)):
+        for match in _IDENTIFIER_RE.finditer(line):
             locations.append((match.group(0), line_number, match.start() + 1))
     return tuple(locations)
-
-
-def _strip_line_comment_context(line: str, in_block_comment: bool) -> tuple[str, bool]:
-    index = 0
-    result: list[str] = []
-    quote: str | None = None
-    while index < len(line):
-        char = line[index]
-        if in_block_comment:
-            end = line.find("*/", index)
-            if end == -1:
-                return "".join(result), True
-            index = end + 2
-            in_block_comment = False
-            continue
-        if quote is not None:
-            result.append(" ")
-            if char == "\\":
-                index += 2
-                result.append(" ")
-                continue
-            if char == quote:
-                quote = None
-            index += 1
-            continue
-        if char in ("'", '"'):
-            quote = char
-            result.append(" ")
-            index += 1
-            continue
-        if line.startswith("//", index):
-            break
-        if line.startswith("/*", index):
-            in_block_comment = True
-            index += 2
-            continue
-        result.append(char)
-        index += 1
-    return "".join(result), in_block_comment
-
-
-def _strip_string_literals(line: str) -> str:
-    stripped, _in_block = _strip_line_comment_context(line, False)
-    return stripped
 
 
 def _case_collision_suggestion(name: str, names: list[str]) -> str:

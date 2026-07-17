@@ -3,7 +3,15 @@ from __future__ import annotations
 from typing import Literal
 
 
-AssetLoweringDomain = Literal["audio", "draw", "path", "room", "script", "sequence_timeline"]
+AssetLoweringDomain = Literal[
+    "audio",
+    "draw",
+    "layer",
+    "path",
+    "room",
+    "script",
+    "sequence_timeline",
+]
 
 
 _PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -82,6 +90,10 @@ _ROOM_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "room_get_info": frozenset({0}),
 }
 
+_LAYER_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "layer_tilemap_create": frozenset({3}),
+}
+
 _SEQUENCE_TIMELINE_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "timeline_exists": frozenset({0}),
     "timeline_get_name": frozenset({0}),
@@ -99,6 +111,7 @@ _SEQUENCE_TIMELINE_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
 _DOMAIN_INDICES: dict[AssetLoweringDomain, dict[str, frozenset[int]]] = {
     "audio": _AUDIO_ASSET_ARG_INDICES,
     "draw": _DRAW_ASSET_ARG_INDICES,
+    "layer": _LAYER_ASSET_ARG_INDICES,
     "path": _PATH_ASSET_ARG_INDICES,
     "room": _ROOM_ASSET_ARG_INDICES,
     "script": _SCRIPT_ASSET_ARG_INDICES,
@@ -112,4 +125,3 @@ def asset_argument_indices(function_name: str, domain: AssetLoweringDomain) -> f
 
 def first_argument_is_script_asset(function_name: str) -> bool:
     return 0 in asset_argument_indices(function_name, "script")
-

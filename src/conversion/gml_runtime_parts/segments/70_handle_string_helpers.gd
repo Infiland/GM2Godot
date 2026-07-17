@@ -404,6 +404,10 @@ static func gml_string_length(value):
 	return s.length()
 
 
+static func gml_string_byte_length(value):
+	return gml_string(value).to_utf8_buffer().size()
+
+
 static func gml_string_char_at(value, index):
 	var s = gml_string(value)
 	var pos = _gml_one_based_index(index)

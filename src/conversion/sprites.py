@@ -11,6 +11,10 @@ from typing import TypedDict, cast
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
+)
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -47,6 +51,8 @@ class SpriteConverter(BaseConverter):
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
+        self._sprite_path_suffixes: dict[str, str] = {}
+        self._yyp_sprite_yy_paths: dict[str, str] = {}
 
     def _get_valid_sprite_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of sprite name -> subfolder.
@@ -54,8 +60,9 @@ class SpriteConverter(BaseConverter):
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all sprites on disk.
         """
+        self._yyp_sprite_yy_paths = {}
         try:
-            yyp_files = [f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp')]
+            yyp_files = sorted(f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp'))
             if not yyp_files:
                 return None
 
@@ -64,15 +71,48 @@ class SpriteConverter(BaseConverter):
                 content = f.read()
 
             cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            raw_data = json.loads(cleaned)
+            if not isinstance(raw_data, dict):
+                raise TypeError("GameMaker project root must be an object")
+            data = cast(JsonDict, raw_data)
 
             valid_sprites: dict[str, str] = {}
-            for resource in cast(list[JsonDict], data.get('resources', [])):
-                res_id = cast(JsonDict, resource.get('id', {}))
-                path = str(res_id.get('path', ''))
+            raw_resources = data.get('resources', [])
+            if not isinstance(raw_resources, list):
+                raise TypeError("GameMaker project resources must be an array")
+            for raw_resource in cast(list[object], raw_resources):
+                if not isinstance(raw_resource, dict):
+                    continue
+                resource = cast(JsonDict, raw_resource)
+                raw_res_id = resource.get('id', {})
+                if not isinstance(raw_res_id, dict):
+                    continue
+                res_id = cast(JsonDict, raw_res_id)
+                raw_path = res_id.get('path', '')
+                if not isinstance(raw_path, str):
+                    continue
+                path = raw_path.replace('\\', '/')
                 if path.startswith('sprites/'):
-                    name = str(res_id.get('name', ''))
-                    yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
+                    raw_name = res_id.get('name', '')
+                    name = (
+                        raw_name
+                        if isinstance(raw_name, str) and raw_name
+                        else os.path.splitext(os.path.basename(path))[0]
+                    )
+                    if not name:
+                        continue
+                    try:
+                        resolved_path = resolve_project_source_path(
+                            self.gm_project_path,
+                            path,
+                        )
+                    except ProjectSourcePathError as exc:
+                        self._safe_log(
+                            f"Warning: Skipping GameMaker sprite {name}: {exc}"
+                        )
+                        continue
+                    yy_path = resolved_path.filesystem_path
+                    self._yyp_sprite_yy_paths[name] = yy_path
                     valid_sprites[name] = self._get_subfolder_from_yy(yy_path)
 
             return valid_sprites
@@ -80,11 +120,78 @@ class SpriteConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Sprites_YYPFilterWarning"))
             return None
 
-    @staticmethod
-    def _sprite_res_path(subfolder: str, sprite_name: str) -> str:
+    def _sprite_res_path(self, subfolder: str, sprite_name: str) -> str:
         """Build a res://sprites/... path, avoiding double slashes."""
-        scene_path = generated_nested_resource_path("sprites", subfolder, sprite_name, ".tscn")
+        scene_path = generated_nested_resource_path(
+            "sprites",
+            subfolder,
+            sprite_name,
+            ".tscn",
+            suffix=self._sprite_path_suffixes.get(sprite_name, ""),
+        )
         return scene_path.rsplit("/", 1)[0]
+
+    @staticmethod
+    def _stable_sprite_path_suffixes(
+        sprite_subfolders: dict[str, str],
+        indexed_sprite_names: set[str] | None = None,
+        source_paths: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        suffixes: dict[str, str] = {}
+        used_paths: set[str] = set()
+        indexed_names = indexed_sprite_names if indexed_sprite_names is not None else set(sprite_subfolders)
+        order_paths = source_paths or {}
+        for sprite_name in sorted(
+            sprite_subfolders,
+            key=lambda name: (
+                name not in indexed_names,
+                name.lower(),
+                order_paths.get(name, name).replace("\\", "/"),
+            ),
+        ):
+            suffix_index = 0
+            while True:
+                suffix = "" if suffix_index == 0 else f"_{suffix_index + 1}"
+                scene_path = generated_nested_resource_path(
+                    "sprites",
+                    sprite_subfolders[sprite_name],
+                    sprite_name,
+                    ".tscn",
+                    suffix=suffix,
+                )
+                folded_path = scene_path.casefold()
+                if folded_path not in used_paths:
+                    break
+                suffix_index += 1
+            used_paths.add(folded_path)
+            suffixes[sprite_name] = suffix
+        return suffixes
+
+    def _disk_sprite_yy_paths(self) -> dict[str, str]:
+        sprite_root = os.path.join(self.gm_project_path, 'sprites')
+        try:
+            sprite_names = sorted(os.listdir(sprite_root))
+        except OSError:
+            return {}
+
+        yy_paths: dict[str, str] = {}
+        for sprite_name in sprite_names:
+            sprite_dir = os.path.join(sprite_root, sprite_name)
+            yy_path = os.path.join(sprite_dir, sprite_name + '.yy')
+            if os.path.isdir(sprite_dir) and os.path.isfile(yy_path):
+                yy_paths[sprite_name] = yy_path
+        return yy_paths
+
+    def _sprite_output_stem(self, sprite_name: str) -> str:
+        return generated_resource_stem(sprite_name) + self._sprite_path_suffixes.get(sprite_name, "")
+
+    def _sprite_output_directory(self, subfolder: str, sprite_name: str) -> str:
+        return generated_resource_directory(
+            self.godot_sprites_path,
+            subfolder,
+            sprite_name,
+            suffix=self._sprite_path_suffixes.get(sprite_name, ""),
+        )
 
     def _find_all_sprite_images(self) -> defaultdict[str, list[str]]:
         sprite_folder = os.path.join(self.gm_project_path, 'sprites')
@@ -92,11 +199,13 @@ class SpriteConverter(BaseConverter):
         for root, _, files in os.walk(sprite_folder):
             if 'layers' in root.split(os.path.sep):
                 sprite_name = root.split(os.path.sep)[-3]
-                image_files[sprite_name].extend(
+                images = [
                     os.path.join(root, file)
                     for file in files
                     if file.lower().endswith(('.png', '.jpg', '.jpeg'))
-                )
+                ]
+                if images:
+                    image_files[sprite_name].extend(images)
         return image_files
 
     def _parse_collision_data(self, sprite_name: str) -> CollisionData | None:
@@ -301,7 +410,7 @@ class SpriteConverter(BaseConverter):
         has_collision = collision_sub is not None
         load_steps = 2 if has_collision else 1
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
-        sprite_stem = generated_resource_stem(sprite_name)
+        sprite_stem = self._sprite_output_stem(sprite_name)
 
         parts: list[str] = [f'[gd_scene format=3 load_steps={load_steps}]\n']
         parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_stem}.png" id="1"]\n')
@@ -319,7 +428,7 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
+        tscn_dir = self._sprite_output_directory(subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
@@ -336,7 +445,7 @@ class SpriteConverter(BaseConverter):
         # ext_resources (one per frame) + SpriteFrames sub_resource + optional collision sub_resource
         load_steps = frame_count + 1 + (1 if has_collision else 0)
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
-        sprite_stem = generated_resource_stem(sprite_name)
+        sprite_stem = self._sprite_output_stem(sprite_name)
 
         parts = [f'[gd_scene format=3 load_steps={load_steps}]\n']
 
@@ -376,7 +485,7 @@ class SpriteConverter(BaseConverter):
 
         tscn_content = ''.join(parts)
 
-        tscn_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
+        tscn_dir = self._sprite_output_directory(subfolder, sprite_name)
         os.makedirs(tscn_dir, exist_ok=True)
         tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
@@ -460,9 +569,9 @@ class SpriteConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        sprite_stem = generated_resource_stem(sprite_name)
+        sprite_stem = self._sprite_output_stem(sprite_name)
         new_filename = f"{sprite_stem}_{index}.png" if images_count > 1 else f"{sprite_stem}.png"
-        sprite_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
+        sprite_dir = self._sprite_output_directory(subfolder, sprite_name)
         godot_sprite_path = os.path.join(sprite_dir, new_filename)
 
         if len(gm_sprite_paths) == 1:
@@ -488,7 +597,16 @@ class SpriteConverter(BaseConverter):
 
         valid_names = self._get_valid_sprite_names()
         sprite_subfolders: dict[str, str] = {}
+        path_subfolders: dict[str, str]
+        indexed_sprite_names: set[str]
+        source_paths: dict[str, str]
         if valid_names is not None:
+            source_paths = dict(self._yyp_sprite_yy_paths)
+            indexed_sprite_names = {
+                name
+                for name, yy_path in source_paths.items()
+                if os.path.isfile(yy_path)
+            }
             filtered: defaultdict[str, list[str]] = defaultdict(list)
             for name, images in sprite_images.items():
                 if name in valid_names:
@@ -498,19 +616,38 @@ class SpriteConverter(BaseConverter):
                     self._safe_log(get_localized("Console_Convertor_Sprites_Skipped").format(
                         sprite_name=name))
             sprite_images = filtered
+            path_subfolders = {
+                name: subfolder
+                for name, subfolder in valid_names.items()
+                if name in indexed_sprite_names or name in sprite_images
+            }
         else:
+            source_paths = self._disk_sprite_yy_paths()
+            indexed_sprite_names = set(source_paths)
+            path_subfolders = {
+                name: self._get_subfolder_from_yy(yy_path)
+                for name, yy_path in source_paths.items()
+            }
             for name in sprite_images:
                 yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
                 sprite_subfolders[name] = self._get_subfolder_from_yy(yy_path)
+                path_subfolders.setdefault(name, sprite_subfolders[name])
+                source_paths.setdefault(name, yy_path)
 
         if not sprite_images:
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
             return
 
+        self._sprite_path_suffixes = self._stable_sprite_path_suffixes(
+            path_subfolders,
+            indexed_sprite_names,
+            source_paths,
+        )
+
         # Pre-create all sprite directories
         for sprite_name in sprite_images:
             subfolder = sprite_subfolders.get(sprite_name, "")
-            sprite_dir = generated_resource_directory(self.godot_sprites_path, subfolder, sprite_name)
+            sprite_dir = self._sprite_output_directory(subfolder, sprite_name)
             os.makedirs(sprite_dir, exist_ok=True)
 
         # Flatten all work items

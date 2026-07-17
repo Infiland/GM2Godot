@@ -165,7 +165,13 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "extends Node",
         "",
     ]
-    if definition.frame_pump or definition.input_capture or definition.draw_pump or definition.async_pump:
+    if (
+        definition.name == "GMRuntime"
+        or definition.frame_pump
+        or definition.input_capture
+        or definition.draw_pump
+        or definition.async_pump
+    ):
         lines.extend([
             'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
             "",
@@ -187,9 +193,20 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "",
         "func _ready():",
         "\tinitialize_runtime_manager()",
+    ])
+    if definition.name == "GMRuntime":
+        lines.append("\tGMRuntimeFacade.gml_script_registry_entries()")
+    lines.extend([
         "",
         "",
     ])
+    if definition.name == "GMRuntime":
+        lines.extend([
+            "func _exit_tree():",
+            "\tGMRuntimeFacade.gm2godot_runtime_shutdown()",
+            "",
+            "",
+        ])
     if definition.frame_pump:
         lines.extend([
             "func _process(delta):",

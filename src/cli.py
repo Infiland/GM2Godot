@@ -26,6 +26,7 @@ from src.conversion.platform_capabilities import (
     generate_platform_capability_report,
     render_platform_capability_markdown,
 )
+from src.conversion.project_godot import ConversionPreflightError
 from src.version import get_version
 
 
@@ -236,14 +237,32 @@ def _run_convert(args: argparse.Namespace) -> int:
         status_callback=lambda _message: None,
         conversion_running=running,
     )
-    converter.convert(
-        args.gm_project,
-        args.platform,
-        args.godot_project,
-        _settings_for_args(args),
-    )
-    _add_platform_diagnostic(converter.diagnostics, args.platform)
-    converter.diagnostics.write_reports(args.godot_project)
+    conversion_diagnostics = DiagnosticCollector()
+    _add_platform_diagnostic(conversion_diagnostics, args.platform)
+    try:
+        converter.convert(
+            args.gm_project,
+            args.platform,
+            args.godot_project,
+            _settings_for_args(args),
+            diagnostics=conversion_diagnostics,
+        )
+    except ConversionPreflightError as error:
+        diagnostic = converter.diagnostics.add(
+            "error",
+            error.code,
+            str(error),
+            source_path=error.destination_path,
+            resource_type="project",
+            workaround=error.workaround,
+        )
+        for message in logs:
+            print(message)
+        print(json.dumps(diagnostic.to_dict(), sort_keys=True), file=sys.stderr)
+        if args.report_dir:
+            _write_static_reports(args.report_dir, args.platform)
+            converter.diagnostics.write_reports(args.report_dir)
+        return 2
     for message in logs:
         print(message)
     if args.report_dir:

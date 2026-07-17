@@ -22,6 +22,12 @@ from src.gui.dialogs.about_dialog import AboutDialog
 from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
 from src.gui.dialogs.language_dialog import LanguageDialog
 from src.conversion.converter import CONVERSION_CATEGORIES
+from src.conversion.project_godot import (
+    GODOT_PROJECT_FILENAME,
+    ConversionPreflightError,
+    GodotProjectDestinationState,
+    inspect_godot_project_destination,
+)
 from src.version import get_version
 from src.localization import get_localized, get_localized_list
 from src.update_checker import UpdateChecker
@@ -55,6 +61,7 @@ class MainWindow(QMainWindow):
         self._worker: ConversionWorker | None = None
         self._update_thread: QThread | None = None
         self._update_worker: UpdateCheckWorker | None = None
+        self._close_pending = False
         self._timer_running = False
         self._start_time = 0
 
@@ -67,6 +74,10 @@ class MainWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._update_timer)
+
+        self._close_retry_timer = QTimer(self)
+        self._close_retry_timer.setInterval(100)
+        self._close_retry_timer.timeout.connect(self._retry_pending_close)
 
     def _setup_conversion_settings(self) -> None:
         all_keys = [key for keys in CONVERSION_CATEGORIES.values() for key in keys]
@@ -194,7 +205,44 @@ class MainWindow(QMainWindow):
         if key == "gamemaker":
             self._check_project_file(folder, ".yyp", "GameMaker")
         else:
-            self._check_project_file(folder, "project.godot", "Godot")
+            self._check_godot_destination(folder)
+
+    def _check_godot_destination(self, folder: str) -> None:
+        try:
+            destination_state = inspect_godot_project_destination(folder)
+        except ConversionPreflightError as error:
+            invalid_project = get_localized_list("Console_Error_InvalidProject")
+            QMessageBox.warning(
+                self,
+                invalid_project[0].format(file_name="Godot"),
+                self._godot_destination_error_message(error),
+            )
+            return
+
+        if destination_state is GodotProjectDestinationState.EXISTING_PROJECT:
+            self._console.append_log(
+                get_localized("Console_ProjectFound").format(
+                    file_name="Godot",
+                    files=GODOT_PROJECT_FILENAME,
+                )
+            )
+        elif destination_state is GodotProjectDestinationState.EMPTY:
+            self._console.append_log(get_localized("Console_GodotDestinationEmpty"))
+        else:
+            invalid_project = get_localized_list("Console_Error_InvalidProject")
+            QMessageBox.warning(
+                self,
+                invalid_project[0].format(file_name="Godot"),
+                get_localized("Console_Error_MissingGodotDirectory"),
+            )
+
+    @staticmethod
+    def _godot_destination_error_message(error: ConversionPreflightError) -> str:
+        if error.code == "GM2GD-CONVERT-DESTINATION-NOT-EMPTY":
+            return get_localized("Console_Error_GodotDestinationOccupied")
+        return get_localized("Console_Error_GodotDestinationInvalid").format(
+            error=str(error)
+        )
 
     def _check_project_file(self, folder: str, file_extension: str, file_name: str) -> None:
         try:
@@ -268,8 +316,6 @@ class MainWindow(QMainWindow):
             self._console.append_log(get_localized("Console_Error_MissingGamemakerFile"))
             return False
 
-        godot_project = os.path.join(godot_path, "project.godot")
-
         if not yyp_files:
             self._console.append_log(get_localized("Console_Error_MissingGamemakerFile"))
             return False
@@ -280,8 +326,16 @@ class MainWindow(QMainWindow):
                 )
             )
             return False
-        if not os.path.exists(godot_project):
-            self._console.append_log(get_localized("Console_Error_MissingGodotFile"))
+
+        try:
+            destination_state = inspect_godot_project_destination(godot_path)
+        except ConversionPreflightError as error:
+            self._console.append_log(self._godot_destination_error_message(error))
+            return False
+        if destination_state is GodotProjectDestinationState.MISSING:
+            self._console.append_log(
+                get_localized("Console_Error_MissingGodotDirectory")
+            )
             return False
         return True
 
@@ -300,14 +354,21 @@ class MainWindow(QMainWindow):
             self._console.append_log(get_localized("Console_ConversionStopping"))
             self._action_panel.stop_button.setEnabled(False)
 
-    def _conversion_complete(self) -> None:
-        self._progress.progress_bar.set_progress(100)
-        self._progress.status_label.setText(get_localized("Console_ConversionComplete"))
-
-        if self._conversion_running.is_set():
+    def _conversion_complete(self, succeeded: bool, error_message: str) -> None:
+        if not succeeded:
+            failure_message = get_localized("Console_ConversionFailed").format(
+                error=error_message
+            )
+            self._progress.status_label.setText(failure_message)
+            self._console.append_log(failure_message)
+        elif self._conversion_running.is_set():
+            self._progress.progress_bar.set_progress(100)
+            self._progress.status_label.setText(get_localized("Console_ConversionComplete"))
             self._console.append_log(get_localized("Console_ConversionComplete_B"), success=True)
         else:
-            self._console.append_log(get_localized("Console_ConversionStopped"))
+            stopped_message = get_localized("Console_ConversionStopped")
+            self._progress.status_label.setText(stopped_message)
+            self._console.append_log(stopped_message)
 
         self._conversion_running.clear()
         self._action_panel.convert_button.setEnabled(True)
@@ -343,11 +404,39 @@ class MainWindow(QMainWindow):
     # --- Close ---
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._conversion_thread and self._conversion_thread.isRunning():
-            self._conversion_running.clear()
-            self._conversion_thread.quit()
-            self._conversion_thread.wait(5000)
-        if self._update_thread and self._update_thread.isRunning():
-            self._update_thread.quit()
-            self._update_thread.wait(3000)
+        self._request_worker_thread_shutdown()
+        if self._worker_threads_running():
+            self._close_pending = True
+            if not self._close_retry_timer.isActive():
+                self._close_retry_timer.start()
+            event.ignore()
+            return
+
+        self._close_pending = False
+        self._close_retry_timer.stop()
         event.accept()
+
+    def _request_worker_thread_shutdown(self) -> None:
+        self._conversion_running.clear()
+        for thread in (self._conversion_thread, self._update_thread):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+
+    def _worker_threads_running(self) -> bool:
+        return any(
+            thread is not None and thread.isRunning()
+            for thread in (self._conversion_thread, self._update_thread)
+        )
+
+    def _retry_pending_close(self) -> None:
+        if not self._close_pending:
+            self._close_retry_timer.stop()
+            return
+
+        self._request_worker_thread_shutdown()
+        if self._worker_threads_running():
+            return
+
+        self._close_retry_timer.stop()
+        self._close_pending = False
+        self.close()

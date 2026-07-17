@@ -38,10 +38,8 @@ def _collect_static_declarations(tokens: Iterable[_Token]) -> tuple[_StaticDecla
 
 
 def _skip_function_literal_tokens(tokens: list[_Token], index: int) -> int:
-    body_start = index + 1
-    while body_start < len(tokens) and tokens[body_start].value != "{":
-        body_start += 1
-    if body_start >= len(tokens):
+    body_start = _function_literal_body_start(tokens, index)
+    if body_start is None:
         return index + 1
 
     depth = 1
@@ -56,6 +54,44 @@ def _skip_function_literal_tokens(tokens: list[_Token], index: int) -> int:
     return current
 
 
+def _function_literal_body_start(tokens: list[_Token], index: int) -> int | None:
+    current = index + 1
+    while current < len(tokens) and tokens[current].kind == "NEWLINE":
+        current += 1
+    if current < len(tokens) and tokens[current].kind == "IDENT":
+        current += 1
+    while current < len(tokens) and tokens[current].kind == "NEWLINE":
+        current += 1
+    if current >= len(tokens) or tokens[current].value != "(":
+        return None
+
+    parameter_depth = 0
+    while current < len(tokens):
+        value = tokens[current].value
+        if value == "(":
+            parameter_depth += 1
+        elif value == ")":
+            parameter_depth -= 1
+            if parameter_depth == 0:
+                current += 1
+                break
+        current += 1
+    if parameter_depth != 0:
+        return None
+
+    nesting_depth = 0
+    while current < len(tokens):
+        value = tokens[current].value
+        if value == "{" and nesting_depth == 0:
+            return current
+        if value in "([{":
+            nesting_depth += 1
+        elif value in ")]}" and nesting_depth > 0:
+            nesting_depth -= 1
+        current += 1
+    return None
+
+
 def _read_static_declaration_tokens(
     tokens: list[_Token],
     index: int,
@@ -67,7 +103,18 @@ def _read_static_declaration_tokens(
         token = tokens[current]
         if depth == 0 and token.value == ";":
             return statement_tokens, current + 1
-        if depth == 0 and token.kind == "NEWLINE":
+        if (
+            depth == 0
+            and statement_tokens
+            and token.line > statement_tokens[-1].line
+            and not _has_unopened_function_literal(statement_tokens)
+        ):
+            return statement_tokens, current
+        if (
+            depth == 0
+            and token.kind == "NEWLINE"
+            and not _has_unopened_function_literal(statement_tokens)
+        ):
             return statement_tokens, current + 1
         if token.value in "([{":
             depth += 1
@@ -76,6 +123,21 @@ def _read_static_declaration_tokens(
         statement_tokens.append(token)
         current += 1
     return statement_tokens, current
+
+
+def _has_unopened_function_literal(tokens: Iterable[_Token]) -> bool:
+    token_list = list(tokens)
+    index = 0
+    while index < len(token_list):
+        token = token_list[index]
+        if token.kind != "IDENT" or token.value != "function":
+            index += 1
+            continue
+        next_index = _skip_function_literal_tokens(token_list, index)
+        if next_index == index + 1:
+            return True
+        index = next_index
+    return False
 
 
 def _parse_static_declarations(source: str) -> list[_StaticDeclaration]:

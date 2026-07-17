@@ -79,6 +79,13 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn("func manager_order():", script)
         self.assertIn("func state_bucket(key = \"default\"):", script)
         self.assertIn("func manager_queued_godot_signals():", script)
+        self.assertIn(
+            'const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")',
+            script,
+        )
+        self.assertIn("func _exit_tree():", script)
+        self.assertIn("GMRuntimeFacade.gm2godot_runtime_shutdown()", script)
+        self.assertIn("GMRuntimeFacade.gml_script_registry_entries()", script)
 
     def test_events_manager_pumps_central_scheduler(self) -> None:
         definition = next(

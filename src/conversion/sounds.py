@@ -9,8 +9,11 @@ from typing import TypedDict, cast
 
 # Import localization manager
 from src.localization import get_localized
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
 from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
+from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_source_paths import ProjectSourcePathError, resolve_project_source_path
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -42,8 +45,31 @@ class SoundConverter(BaseConverter):
                          update_log_callback, compact_logging, max_workers=max_workers)
         self.godot_sounds_path = os.path.join(self.godot_project_path, 'sounds')
         self.organize_by_audio_group = bool(organize_by_audio_group)
+        self._sound_output_paths: dict[str, str] = {}
 
     def find_sound_files(self) -> list[str]:
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        if manifest.yyp_path is not None:
+            referenced_files: list[str] = []
+            for resource in manifest.resources:
+                if resource.kind.casefold() != "sounds":
+                    continue
+                try:
+                    resolved = resolve_project_source_path(
+                        self.gm_project_path,
+                        resource.path,
+                    )
+                except ProjectSourcePathError as exc:
+                    self._safe_log(
+                        f"Warning: Skipping GameMaker sound {resource.name}: {exc}"
+                    )
+                    continue
+                if resolved.source_path.casefold().endswith(".yy") and os.path.isfile(
+                    resolved.filesystem_path
+                ):
+                    referenced_files.append(resolved.filesystem_path)
+            return referenced_files
+
         sound_folder = os.path.join(self.gm_project_path, 'sounds')
         sound_files: list[str] = []
         for root, _, files in os.walk(sound_folder):
@@ -211,11 +237,19 @@ class SoundConverter(BaseConverter):
                 name=sound_name, sound_file=sound_file))
             return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
-        subfolder = self._get_subfolder_from_yy(yy_path)
-        output_dir, res_subfolder = self._build_output_paths(sound_name, subfolder, audio_group)
+        resource_path = self._sound_output_paths.get(sound_name, "")
+        if resource_path:
+            dest_path = resource_filesystem_path(self.godot_project_path, resource_path)
+            output_dir = os.path.dirname(dest_path)
+            resource_relative = resource_path.removeprefix("res://sounds/")
+            res_subfolder = os.path.dirname(resource_relative).replace("\\", "/")
+            sound_file = os.path.basename(dest_path)
+        else:
+            subfolder = self._get_subfolder_from_yy(yy_path)
+            output_dir, res_subfolder = self._build_output_paths(sound_name, subfolder, audio_group)
+            dest_path = os.path.join(output_dir, sound_file)
         os.makedirs(output_dir, exist_ok=True)
 
-        dest_path = os.path.join(output_dir, sound_file)
         shutil.copy2(audio_path, dest_path)
 
         import_content = self._generate_import_file(sound_file, res_subfolder)
@@ -255,6 +289,13 @@ class SoundConverter(BaseConverter):
         if not sound_files:
             self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
             return
+
+        self._sound_output_paths = build_asset_output_paths(
+            self.gm_project_path,
+            self.godot_project_path,
+            conversion_running=self.conversion_running,
+            organize_sounds_by_audio_group=self.organize_by_audio_group,
+        ).get("sounds", {})
 
         total_sounds = len(sound_files)
         processed_sounds = 0

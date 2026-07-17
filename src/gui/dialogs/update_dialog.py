@@ -21,15 +21,26 @@ class DownloadWorker(QObject):
     progress = Signal(int)
     finished = Signal(bool)
 
-    def __init__(self, url: str, dest_path: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        dest_path: str,
+        *,
+        expected_digest: str | None,
+        expected_size: int | None,
+    ) -> None:
         super().__init__()
         self.url = url
         self.dest_path = dest_path
+        self.expected_digest = expected_digest
+        self.expected_size = expected_size
 
     def run(self) -> None:
         success = UpdateChecker.download_update(
             self.url, self.dest_path,
-            progress_callback=self.progress.emit
+            progress_callback=self.progress.emit,
+            expected_digest=self.expected_digest,
+            expected_size=self.expected_size,
         )
         self.finished.emit(success)
 
@@ -145,7 +156,12 @@ class UpdateDialog(QDialog):
         self._status_label.setVisible(True)
         self._status_label.setText(get_localized("Update_Download_Progress").format(percent=0))
 
-        self._worker = DownloadWorker(download_url, dest_path)
+        self._worker = DownloadWorker(
+            download_url,
+            dest_path,
+            expected_digest=self._info.asset_digest,
+            expected_size=self._info.asset_size,
+        )
         self._download_thread = QThread()
         self._worker.moveToThread(self._download_thread)
 

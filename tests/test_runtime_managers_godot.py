@@ -9,6 +9,10 @@ import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
+from src.conversion.runtime_managers import (
+    register_runtime_manager_autoloads,
+    write_runtime_managers,
+)
 
 
 def _find_godot_binary() -> str | None:
@@ -32,6 +36,104 @@ def _write_text(path: Path, content: str) -> None:
 
 
 class TestRuntimeManagersGodotSmoke(unittest.TestCase):
+    def test_runtime_shutdown_releases_methods_nested_in_cyclic_containers(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        helper_script = textwrap.dedent(
+            """\
+            extends RefCounted
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            func _call():
+            \treturn 1
+
+            func gml_callable():
+            \treturn GMRuntime.gml_method(self, Callable(self, "_call"))
+            """
+        )
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const Helper = preload("res://helper.gd")
+
+            func _ready():
+            \tvar helper_method = Helper.new().gml_callable()
+            \tGMRuntime.gml_script_register("shutdown_helper", helper_method, false, helper_method)
+            \tvar nested_array = []
+            \tvar nested_struct = GMRuntime.gml_struct({
+            \t\t"method": helper_method,
+            \t\t"shared": nested_array,
+            \t})
+            \tnested_array.append(nested_struct)
+            \tnested_array.append(nested_array)
+            \tnested_struct["cycle"] = nested_struct
+            \tGMRuntime.gml_global_scope()["shutdown_cycle"] = {
+            \t\t"nested": [nested_array],
+            \t}
+            \tvar static_scope = GMRuntime.gml_static_scope("shutdown_cycle")
+            \tstatic_scope["nested"] = nested_struct
+            \tprint("RUNTIME_SHUTDOWN_CYCLE_READY")
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as godot_tmp:
+            project_dir = Path(godot_tmp)
+            _write_text(project_dir / "project.godot", "[application]\n")
+            write_gml_runtime(str(project_dir))
+            write_runtime_managers(str(project_dir))
+            self.assertTrue(register_runtime_manager_autoloads(str(project_dir)))
+            _write_text(project_dir / "helper.gd", helper_script)
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            try:
+                result = subprocess.run(
+                    [
+                        godot_binary,
+                        "--headless",
+                        "--verbose",
+                        "--path",
+                        str(project_dir),
+                        "smoke.tscn",
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired as exc:
+                output = (
+                    exc.output.decode("utf-8", errors="replace")
+                    if isinstance(exc.output, bytes)
+                    else str(exc.output or "")
+                )
+                self.fail("Godot runtime-shutdown smoke timed out\n" + output)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("RUNTIME_SHUTDOWN_CYCLE_READY", result.stdout)
+        self.assertNotIn("ObjectDB instances were leaked", result.stdout)
+        self.assertNotIn("resources still in use", result.stdout)
+        self.assertNotIn("Leaked instance:", result.stdout)
+        self.assertNotIn("recursive mutex", result.stdout.lower())
+        self.assertNotIn("mutex lock", result.stdout.lower())
+
     def test_generated_runtime_managers_autoload_in_order(self) -> None:
         godot_binary = _find_godot_binary()
         if godot_binary is None:

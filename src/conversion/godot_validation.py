@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
@@ -42,6 +46,138 @@ _GODOT_ERROR_PREFIXES = ("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")
 _GODOT_WARNING_PREFIXES = ("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 _AUDIO_IMPORTABLE_EXTENSIONS = (".mp3", ".ogg", ".wav")
+_GODOT_OUTPUT_CAPTURE_LIMIT_BYTES = 512 * 1024
+_GODOT_OUTPUT_READ_CHUNK_BYTES = 64 * 1024
+_GODOT_OUTPUT_ISSUE_PREFIX_LIMIT_BYTES = 1024
+_GODOT_OUTPUT_READER_POLL_SECONDS = 0.01
+_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS = 0.25
+_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS = 0.25
+
+
+class _BoundedGodotOutput:
+    def __init__(self, limit_bytes: int) -> None:
+        if limit_bytes < 2:
+            raise ValueError("Godot output capture limit must be at least 2 bytes.")
+        self._head_limit_bytes = limit_bytes // 2
+        self._tail_limit_bytes = limit_bytes - self._head_limit_bytes
+        self._head = bytearray()
+        self._tail: deque[bytes] = deque()
+        self._tail_bytes = 0
+        self._tail_preceding_byte: int | None = None
+        self._total_bytes = 0
+        self._line_prefix = bytearray()
+        self._line_started = False
+        self._error_count = 0
+        self._warning_count = 0
+        self._finished = False
+
+    def append(self, chunk: bytes) -> None:
+        if self._finished:
+            raise RuntimeError("Cannot append Godot output after capture is finished.")
+        self._total_bytes += len(chunk)
+        self._track_output_issues(chunk)
+        head_remaining = self._head_limit_bytes - len(self._head)
+        if head_remaining > 0:
+            self._head.extend(chunk[:head_remaining])
+            chunk = chunk[head_remaining:]
+        if not chunk:
+            return
+
+        if self._tail_preceding_byte is None and not self._tail:
+            self._tail_preceding_byte = self._head[-1] if self._head else None
+        self._tail.append(chunk)
+        self._tail_bytes += len(chunk)
+        overflow = self._tail_bytes - self._tail_limit_bytes
+        while overflow > 0:
+            oldest_chunk = self._tail[0]
+            if overflow < len(oldest_chunk):
+                self._tail_preceding_byte = oldest_chunk[overflow - 1]
+                self._tail[0] = oldest_chunk[overflow:]
+                self._tail_bytes -= overflow
+                break
+            self._tail.popleft()
+            self._tail_preceding_byte = oldest_chunk[-1]
+            self._tail_bytes -= len(oldest_chunk)
+            overflow -= len(oldest_chunk)
+
+    def text(self) -> str:
+        self._finish()
+        retained_bytes = len(self._head) + self._tail_bytes
+        tail = b"".join(self._tail)
+        if self._total_bytes <= retained_bytes:
+            return (bytes(self._head) + tail).decode("utf-8", errors="replace")
+
+        omitted_bytes = self._total_bytes - retained_bytes
+        head_output = bytes(self._head).decode("utf-8", errors="replace")
+        tail_output = tail.decode("utf-8", errors="replace")
+        tail_starts_on_line_boundary = self._tail_preceding_byte in (None, ord("\n"))
+        tail_issue_output = tail_output
+        if not tail_starts_on_line_boundary:
+            first_newline = tail_output.find("\n")
+            tail_issue_output = tail_output[first_newline + 1 :] if first_newline >= 0 else ""
+        retained_issues = detect_godot_output_issues(head_output) + detect_godot_output_issues(
+            tail_issue_output
+        )
+        retained_error_count = sum(issue.severity == "error" for issue in retained_issues)
+        retained_warning_count = sum(issue.severity == "warning" for issue in retained_issues)
+        omitted_error_count = max(0, self._error_count - retained_error_count)
+        omitted_warning_count = max(0, self._warning_count - retained_warning_count)
+
+        marker_lines = [
+            "[GM2Godot: Godot output truncated; "
+            f"omitted {omitted_bytes} byte(s); retained first {len(self._head)} "
+            f"and last {self._tail_bytes} byte(s).]"
+        ]
+        if omitted_error_count:
+            marker_lines.append(
+                "ERROR: GM2Godot output truncation omitted "
+                f"{omitted_error_count} additional Godot error diagnostic(s)."
+            )
+        if omitted_warning_count:
+            marker_lines.append(
+                "WARNING: GM2Godot output truncation omitted "
+                f"{omitted_warning_count} additional Godot warning diagnostic(s)."
+            )
+        marker = "\n" + "\n".join(marker_lines) + "\n"
+        if not tail_starts_on_line_boundary:
+            marker += "[GM2Godot: retained tail begins mid-line] "
+        return head_output + marker + tail_output
+
+    def _track_output_issues(self, chunk: bytes) -> None:
+        offset = 0
+        while offset < len(chunk):
+            newline_index = chunk.find(b"\n", offset)
+            if newline_index < 0:
+                self._append_line_prefix(chunk[offset:])
+                return
+            self._append_line_prefix(chunk[offset:newline_index])
+            self._finish_line()
+            offset = newline_index + 1
+
+    def _append_line_prefix(self, chunk: bytes) -> None:
+        if chunk:
+            self._line_started = True
+        remaining = _GODOT_OUTPUT_ISSUE_PREFIX_LIMIT_BYTES - len(self._line_prefix)
+        if remaining > 0:
+            self._line_prefix.extend(chunk[:remaining])
+
+    def _finish_line(self) -> None:
+        severity = _godot_output_issue_severity(
+            self._line_prefix.decode("utf-8", errors="replace")
+        )
+        if severity == "error":
+            self._error_count += 1
+        elif severity == "warning":
+            self._warning_count += 1
+        self._line_prefix.clear()
+        self._line_started = False
+
+    def _finish(self) -> None:
+        if self._finished:
+            return
+        if self._line_started:
+            self._finish_line()
+        self._finished = True
 
 
 @dataclass(frozen=True)
@@ -107,12 +243,9 @@ def find_godot_binary(explicit_path: str | None = None) -> str | None:
     if path_binary is not None:
         return path_binary
 
-    for candidate in (
-        "/Applications/Godot.app/Contents/MacOS/Godot",
-        "/tmp/godot-4.4.1-macos/Godot.app/Contents/MacOS/Godot",
-    ):
-        if os.path.isfile(candidate):
-            return candidate
+    macos_app_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
+    if os.path.isfile(macos_app_binary):
+        return macos_app_binary
     return None
 
 
@@ -324,7 +457,7 @@ def validate_generated_godot_project(
         with open(script_path, "w", encoding="utf-8") as script_file:
             script_file.write(script)
         try:
-            result = subprocess.run(
+            result = _run_godot_command(
                 [
                     resolved_binary,
                     "--headless",
@@ -333,10 +466,6 @@ def validate_generated_godot_project(
                     "--script",
                     script_path,
                 ],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -437,15 +566,123 @@ def detect_godot_output_issues(output: str) -> tuple[GodotOutputIssue, ...]:
         stripped = _strip_ansi_escape_sequences(line).strip()
         if not stripped:
             continue
-        if stripped.startswith(_GODOT_ERROR_PREFIXES):
-            issues.append(GodotOutputIssue(severity="error", line=stripped))
-        elif stripped.startswith(_GODOT_WARNING_PREFIXES):
-            issues.append(GodotOutputIssue(severity="warning", line=stripped))
+        severity = _godot_output_issue_severity(stripped)
+        if severity is not None:
+            issues.append(GodotOutputIssue(severity=severity, line=stripped))
     return tuple(issues)
+
+
+def _godot_output_issue_severity(line: str) -> GodotOutputIssueSeverity | None:
+    stripped = _strip_ansi_escape_sequences(line).strip()
+    if stripped.startswith(_GODOT_ERROR_PREFIXES):
+        return "error"
+    if stripped.startswith(_GODOT_WARNING_PREFIXES):
+        return "warning"
+    return None
 
 
 def _strip_ansi_escape_sequences(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _run_godot_command(
+    command: list[str],
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    output = _BoundedGodotOutput(_GODOT_OUTPUT_CAPTURE_LIMIT_BYTES)
+    process: subprocess.Popen[bytes] = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=os.name == "posix",
+    )
+    output_stream = process.stdout
+    if output_stream is None:
+        process.kill()
+        process.wait()
+        raise RuntimeError("Godot output pipe was not created.")
+
+    deadline = time.monotonic() + max(0, timeout)
+    reader_errors: list[OSError] = []
+    reader_stop = threading.Event()
+    output_fd = output_stream.fileno()
+    os.set_blocking(output_fd, False)
+
+    def read_output() -> None:
+        while not reader_stop.is_set():
+            try:
+                chunk = os.read(output_fd, _GODOT_OUTPUT_READ_CHUNK_BYTES)
+            except BlockingIOError:
+                reader_stop.wait(_GODOT_OUTPUT_READER_POLL_SECONDS)
+                continue
+            except OSError as exc:
+                reader_errors.append(exc)
+                return
+            if not chunk:
+                return
+            output.append(chunk)
+
+    output_reader = threading.Thread(
+        target=read_output,
+        name="gm2godot-godot-output-reader",
+        daemon=True,
+    )
+    output_reader.start()
+
+    try:
+        returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        _kill_godot_process(process)
+        process.wait()
+        _finish_godot_output_reader(output_reader, reader_stop)
+        output_stream.close()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout,
+            output=output.text(),
+        ) from None
+
+    if output_reader.is_alive():
+        # The direct process has exited, so an open pipe now belongs to a
+        # descendant. Clean up the validation process group instead of waiting
+        # indefinitely for that inherited descriptor to close.
+        _kill_godot_process(process)
+    _finish_godot_output_reader(output_reader, reader_stop)
+    output_stream.close()
+    if reader_errors:
+        raise RuntimeError("Failed while capturing Godot output.") from reader_errors[0]
+    return subprocess.CompletedProcess(
+        command,
+        returncode,
+        stdout=output.text(),
+        stderr=None,
+    )
+
+
+def _finish_godot_output_reader(
+    output_reader: threading.Thread,
+    reader_stop: threading.Event,
+) -> None:
+    output_reader.join(timeout=_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS)
+    if not output_reader.is_alive():
+        return
+    reader_stop.set()
+    output_reader.join(timeout=_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS)
+    if output_reader.is_alive():
+        raise RuntimeError("Godot output reader did not stop after pipe cleanup.")
+
+
+def _kill_godot_process(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        process.kill()
+    if process.poll() is None:
+        process.kill()
 
 
 def _run_godot_import(
@@ -454,7 +691,7 @@ def _run_godot_import(
     *,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return _run_godot_command(
         [
             resolved_binary,
             "--headless",
@@ -463,10 +700,6 @@ def _run_godot_import(
             godot_project_path,
             "--import",
         ],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
         timeout=timeout,
     )
 
@@ -557,7 +790,7 @@ def _run_godot_boot(
     boot_frames: int,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return _run_godot_command(
         [
             resolved_binary,
             "--headless",
@@ -569,10 +802,6 @@ def _run_godot_boot(
             "--quit-after",
             str(boot_frames),
         ],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
         timeout=timeout,
     )
 

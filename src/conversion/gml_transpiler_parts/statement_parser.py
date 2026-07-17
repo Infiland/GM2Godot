@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, MutableMapping, MutableSet
 
-from .constants import _EOF
+from .constants import _BINARY_PRECEDENCE, _EOF
 from .emitter import _emit_instance_keyword_argument
 from .enum_helpers import _evaluate_enum_value_tokens
 from .expression_parser import _parse_gml_expression
@@ -26,6 +26,7 @@ from .statements import (
     _control_flow_dispatch_lines,
     _transpile_statement,
 )
+from .static_declarations import _read_static_declaration_tokens
 from .utils import (
     _indent_lines,
     _insert_lines_before_continue,
@@ -220,7 +221,8 @@ class _StatementParser:
         return []
 
     def _parse_static_statement(self) -> list[str]:
-        self._read_simple_statement()
+        self._consume_identifier("static")
+        _, self.position = _read_static_declaration_tokens(self.tokens, self.position)
         if self.scope_context.static_scope is None:
             raise GMLTranspileError("static declarations are only supported inside functions")
         return []
@@ -393,7 +395,8 @@ class _StatementParser:
             self.loop_depth -= 1
             self.continue_depth -= 1
 
-        lines = [f"for _gml_repeat_index in range(GMRuntime.gml_repeat_count({count})):"]
+        repeat_index = self._next_generated_name("_gml_repeat_index")
+        lines = [f"for {repeat_index} in range(GMRuntime.gml_repeat_count({count})):"]
         lines.extend(_indent_lines(body_lines or ["pass"]))
         return lines
 
@@ -561,7 +564,7 @@ class _StatementParser:
                 lines.append(f"\t\t{switch_matched} = true")
 
             lines.append(f"\tif {switch_matched}:")
-            lines.extend(f"\t\t{line}" for line in (section_lines or ["pass"]))
+            lines.extend(_indent_lines(_indent_lines(section_lines or ["pass"])))
         lines.append("\tbreak")
         if switch_capture is not None:
             lines.extend(
@@ -569,6 +572,7 @@ class _StatementParser:
                     switch_control,
                     switch_capture,
                     self.control_flow_capture,
+                    return_value_allowed=self.return_depth > 0,
                 )
             )
         return lines
@@ -743,7 +747,14 @@ class _StatementParser:
         if finally_lines is not None:
             lines.extend(finally_lines or ["pass"])
 
-        lines.extend(_control_flow_dispatch_lines(control_name, try_capture, parent_capture))
+        lines.extend(
+            _control_flow_dispatch_lines(
+                control_name,
+                try_capture,
+                parent_capture,
+                return_value_allowed=self.return_depth > 0,
+            )
+        )
         return lines
 
     def _parse_catch_variable_name(self) -> str:
@@ -791,6 +802,7 @@ class _StatementParser:
         return tokens
 
     def _parse_do_until_body(self) -> list[str]:
+        self._skip_newlines()
         if self._match("{"):
             return self._parse_nested_braced_body()
 
@@ -815,6 +827,7 @@ class _StatementParser:
         )
 
     def _parse_body(self) -> list[str]:
+        self._skip_newlines()
         if self._match("{"):
             return self._parse_nested_braced_body()
         if self._at_end() or self._check("}"):
@@ -830,8 +843,29 @@ class _StatementParser:
         return self._parse_statement()
 
     def _read_condition_tokens(self) -> list[_Token]:
-        if self._match("("):
-            return self._read_balanced_tokens("(", ")")
+        if self._check("("):
+            condition_start = self.position
+            self._advance()
+            parenthesized_tokens = self._read_balanced_tokens("(", ")")
+            lookahead = self.position
+            while lookahead < len(self.tokens) and self.tokens[lookahead].value == "\n":
+                lookahead += 1
+            next_value = self.tokens[lookahead].value if lookahead < len(self.tokens) else ""
+            if next_value not in _BINARY_PRECEDENCE and next_value not in {"?", "(", "[", "."}:
+                return parenthesized_tokens
+
+            tokens = list(self.tokens[condition_start:self.position])
+            depth = 0
+            while not self._at_end():
+                token = self._peek()
+                if depth == 0 and token.value in {"{", ";"}:
+                    break
+                if token.value in "([":
+                    depth += 1
+                elif token.value in ")]" and depth > 0:
+                    depth -= 1
+                tokens.append(self._advance())
+            return tokens
 
         tokens: list[_Token] = []
         depth = 0

@@ -65,6 +65,10 @@ static func gml_array_length_1d(array_value):
 	return array_value.size()
 
 
+static func gml_array_length(array_value):
+	return array_value.size() if typeof(array_value) == TYPE_ARRAY else 0
+
+
 static func gml_array_resize(array_value, size):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_resize", array_value)
@@ -97,23 +101,97 @@ static func gml_array_insert(array_value, index, value):
 	return value
 
 
-static func gml_array_delete(array_value, index):
+static func gml_array_delete(array_value, index, number):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_delete", array_value)
-	var resolved_index = _to_array_index(index)
-	if resolved_index < 0:
+	if array_value.is_empty():
 		return gml_undefined()
-	if resolved_index >= array_value.size():
+
+	var offset_value = float(_to_real(index))
+	var number_value = float(_to_real(number))
+	if is_nan(offset_value) or is_nan(number_value):
+		return gml_error("GML array_delete index and number must be numeric")
+
+	var resolved_index = 0
+	var offset_was_clamped = false
+	if is_inf(offset_value):
+		offset_was_clamped = true
+		resolved_index = array_value.size() - 1 if offset_value > 0.0 else 0
+	else:
+		resolved_index = int(offset_value)
+		if resolved_index < 0:
+			resolved_index = array_value.size() + resolved_index
+		offset_was_clamped = resolved_index < 0 or resolved_index >= array_value.size()
+		resolved_index = clampi(resolved_index, 0, array_value.size() - 1)
+
+	var resolved_number = 0
+	if is_inf(number_value):
+		resolved_number = array_value.size() if number_value > 0.0 else -array_value.size()
+	else:
+		resolved_number = int(number_value)
+	if resolved_number == 0:
 		return gml_undefined()
-	array_value.remove_at(resolved_index)
-	return array_value
+
+	var range_was_clamped = false
+	if resolved_number > 0:
+		var available = array_value.size() - resolved_index
+		var delete_count = mini(resolved_number, available)
+		range_was_clamped = not is_inf(number_value) and resolved_number > available
+		for _item in range(delete_count):
+			array_value.remove_at(resolved_index)
+	else:
+		var available = resolved_index + 1
+		var delete_count = mini(-resolved_number, available)
+		var first_index = resolved_index - delete_count + 1
+		range_was_clamped = not is_inf(number_value) and -resolved_number > available
+		for _item in range(delete_count):
+			array_value.remove_at(first_index)
+
+	if offset_was_clamped or range_was_clamped:
+		print("array_delete: requested range exceeded array bounds and was clamped")
+	return gml_undefined()
 
 
-static func gml_array_sort(array_value):
+static func gml_array_sort(array_value, sort_type, caller_self = null, caller_other = null):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_sort", array_value)
-	array_value.sort()
-	return array_value
+	if is_bool(sort_type):
+		if sort_type:
+			array_value.sort_custom(func(current, next): return _gml_less_than(current, next))
+		else:
+			array_value.sort_custom(func(current, next): return _gml_greater_than(current, next))
+		return gml_undefined()
+
+	var comparator = sort_type
+	if not is_method(comparator) and not (
+		typeof(comparator) == TYPE_DICTIONARY and comparator.has("callable")
+	):
+		comparator = _gml_script_resolve(comparator)
+	if comparator == null:
+		return gml_unsupported_type_error("GML array_sort sortType", sort_type)
+
+	var comparison_state = {"failed": false}
+	array_value.sort_custom(func(current, next):
+		if comparison_state["failed"]:
+			return false
+		var comparison = gml_call_value(
+			comparator,
+			[current, next],
+			caller_self,
+			caller_other
+		)
+		if not is_numeric(comparison):
+			comparison_state["failed"] = true
+			gml_error("GML array_sort comparator must return a finite number")
+			return false
+		var numeric_comparison = float(_to_real(comparison))
+		if is_nan(numeric_comparison) or is_inf(numeric_comparison):
+			comparison_state["failed"] = true
+			gml_error("GML array_sort comparator must return a finite number")
+			return false
+		return int(numeric_comparison) < 0
+	)
+	return gml_undefined()
 
 
 static func gml_array_shuffle(array_value):
@@ -169,6 +247,70 @@ static func gml_array_find_index(array_value, value):
 	if typeof(array_value) != TYPE_ARRAY:
 		return -1
 	return array_value.find(value)
+
+
+static func gml_array_foreach(
+	array_value,
+	callback,
+	offset = 0,
+	length = null,
+	caller_self = null,
+	caller_other = null
+):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_foreach", array_value)
+	if array_value.is_empty():
+		return gml_undefined()
+
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
+		return gml_unsupported_type_error("GML array_foreach callback", callback)
+
+	var offset_value = float(_to_real(offset))
+	if is_nan(offset_value):
+		return gml_error("GML array_foreach offset must be numeric")
+	# LTS 2026.0.0.23 VM warns and skips traversal for an invalid offset.
+	# This is intentionally stricter than the generic array-range docs' clamp wording.
+	if is_inf(offset_value):
+		print("array_for_each :: index is not within the array bounds.")
+		return gml_undefined()
+
+	var resolved_offset = int(offset_value)
+	if resolved_offset < 0:
+		resolved_offset = array_value.size() + resolved_offset
+	if resolved_offset < 0 or resolved_offset >= array_value.size():
+		print("array_for_each :: index is not within the array bounds.")
+		return gml_undefined()
+
+	var resolved_length = array_value.size() - resolved_offset
+	if length != null:
+		var length_value = float(_to_real(length))
+		if is_nan(length_value):
+			return gml_error("GML array_foreach length must be numeric")
+		if is_inf(length_value):
+			resolved_length = array_value.size() if length_value > 0.0 else -array_value.size()
+		else:
+			resolved_length = int(length_value)
+	if resolved_length == 0:
+		return gml_undefined()
+
+	var step = 1 if resolved_length > 0 else -1
+	var remaining = abs(resolved_length)
+	var index = resolved_offset
+	while remaining > 0 and index >= 0 and index < array_value.size():
+		gml_call_value(
+			resolved_callback,
+			[array_value[index], index],
+			caller_self,
+			caller_other
+		)
+		remaining -= 1
+		index += step
+	return gml_undefined()
 
 
 static func gml_array_filter(array_value, callback):
@@ -312,6 +454,15 @@ static func gml_call_named(function_name, args = [], caller_self = null, caller_
 
 
 static func gml_selector_get(target, member_name, current_self = null, current_other = null):
+	var script_descriptor: Variant = null
+	if target is GMLMethod:
+		script_descriptor = {"callable": target}
+	elif _gml_script_entry(target) != null:
+		script_descriptor = _gml_script_resolve(target)
+	if typeof(script_descriptor) == TYPE_DICTIONARY:
+		var script_callable = script_descriptor.get("callable", null)
+		if script_callable is GMLMethod:
+			return gml_struct_get(gml_static_get(script_callable), member_name)
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
 		return gml_undefined()

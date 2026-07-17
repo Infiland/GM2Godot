@@ -7,9 +7,10 @@ on:
     branches: [main]
 
 env:
-  GODOT_VERSION: 4.4.1-stable
-  GODOT_ARCHIVE: Godot_v4.4.1-stable_linux.x86_64.zip
-  GODOT_BINARY: Godot_v4.4.1-stable_linux.x86_64
+  GODOT_VERSION: 4.7.1-stable
+  GODOT_ARCHIVE: Godot_v4.7.1-stable_linux.x86_64.zip
+  GODOT_BINARY: Godot_v4.7.1-stable_linux.x86_64
+  GODOT_ARCHIVE_SHA256: c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba
 
 jobs:
   godot-smoke:
@@ -31,7 +32,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/gm2godot/godot-${{ env.GODOT_VERSION }}
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}-${{ env.GODOT_ARCHIVE_SHA256 }}
 
       - name: Install pinned Godot
         run: |
@@ -43,6 +44,7 @@ jobs:
             curl --fail --location --retry 3 \
               "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${GODOT_ARCHIVE}" \
               --output "${RUNNER_TEMP}/${GODOT_ARCHIVE}"
+            echo "${GODOT_ARCHIVE_SHA256}  ${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict
             unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}" -d "$godot_dir"
             chmod +x "$godot_bin"
           fi
@@ -51,17 +53,8 @@ jobs:
 
       - name: Run headless Godot smoke tests
         run: |
-          python -m unittest \
-            tests.test_runtime_managers_godot \
+          python -m unittest discover -s tests -p 'test_*_godot.py' -v
+          python -m unittest -v \
             tests.test_godot_validation \
-            tests.test_room_game_flow_godot \
-            tests.test_cameras_display_godot \
-            tests.test_game_input_godot \
-            tests.test_draw_basic_godot \
-            tests.test_draw_sprite_text_godot \
-            tests.test_draw_surfaces_godot \
-            tests.test_motion_helpers_godot \
-            tests.test_collision_queries_godot \
-            tests.test_layers_runtime_godot \
-            tests.test_physics_runtime_godot \
-            tests.test_async_http_godot
+            tests.test_golden_conversion \
+            tests.test_project_settings

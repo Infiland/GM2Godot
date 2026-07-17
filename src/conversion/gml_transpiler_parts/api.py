@@ -1,13 +1,15 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
-from typing import Iterable, MutableSet
+import hashlib
+from typing import Iterable, Mapping, MutableSet
 
 from .constants import _LEGACY_GLOBAL_BUILTINS
 from .extension_functions import (
     normalize_extension_function_mappings,
     normalize_extension_functions,
 )
+from .function_helpers import _emit_static_initialization_lines
 from .model import _ScopeContext
 from .preprocessor import preprocess_gml_source
 from .source_map import (
@@ -16,6 +18,7 @@ from .source_map import (
     render_gml_source_header,
 )
 from .statement_parser import _StatementParser
+from .static_declarations import _collect_static_declarations, _static_scope_id
 from .tokens import _tokenize
 from .utils import _prefix_multiline
 
@@ -44,6 +47,8 @@ def transpile_gml_code(
     instance_target: str | None = None,
     direct_instance_names: Iterable[str] | None = None,
     dynamic_instance_names: Iterable[str] | None = None,
+    enum_values: Mapping[str, Mapping[str, int]] | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> str:
     """Transpile supported GML statements to GDScript."""
     return transpile_gml_code_with_source_map(
@@ -70,6 +75,8 @@ def transpile_gml_code(
         instance_target=instance_target,
         direct_instance_names=direct_instance_names,
         dynamic_instance_names=dynamic_instance_names,
+        enum_values=enum_values,
+        macro_values=macro_values,
     ).code
 
 
@@ -97,6 +104,8 @@ def transpile_gml_code_with_source_map(
     instance_target: str | None = None,
     direct_instance_names: Iterable[str] | None = None,
     dynamic_instance_names: Iterable[str] | None = None,
+    enum_values: Mapping[str, Mapping[str, int]] | None = None,
+    macro_values: Mapping[str, str] | None = None,
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(
@@ -104,28 +113,75 @@ def transpile_gml_code_with_source_map(
         macro_configuration=macro_configuration,
         active_symbols=active_preprocessor_symbols,
     )
+    tokens = _tokenize(preprocessed.source)
+    known_enum_values = {
+        name: dict(members)
+        for name, members in (enum_values or {}).items()
+    }
+    known_macro_values = dict(macro_values or {})
+    initial_local_names = tuple(local_names or ())
+    static_declarations = (
+        _collect_static_declarations(tokens) if static_scope_prefix is not None else ()
+    )
+    static_scope_id = None
+    static_scope_name = None
+    parser_static_prefix = static_scope_prefix
+    if static_declarations:
+        assert static_scope_prefix is not None
+        static_scope_id = _static_scope_id(static_scope_prefix, None, 0, tokens)
+        static_scope_name = (
+            f"_gml_static_scope_{hashlib.sha1(static_scope_id.encode('utf-8')).hexdigest()[:12]}"
+        )
+        parser_static_prefix = static_scope_id
+
     parser = _StatementParser(
-        _tokenize(preprocessed.source),
-        local_names=local_names,
+        tokens,
+        local_names=initial_local_names,
         instance_variables=instance_variables,
         inherited_event_call=inherited_event_call,
         return_depth=return_depth,
         macro_configuration=macro_configuration,
         top_level_global_scope=top_level_global_scope,
         global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
+        enum_values=known_enum_values,
+        enum_names=known_enum_values,
+        macro_values=known_macro_values,
+        # Project-global values have already had configuration precedence
+        # resolved. Keep source declarations from undoing that selected view
+        # when each resource is parsed independently.
+        macro_priorities={name: 2 for name in known_macro_values},
         asset_names=asset_names,
-        static_scope_prefix=static_scope_prefix,
+        static_scope_prefix=parser_static_prefix,
         scope_context=_ScopeContext(
             self_expression=self_expression,
             other_expression=other_expression,
             instance_target=instance_target,
             direct_instance_names=frozenset(direct_instance_names or ()),
             dynamic_instance_names=frozenset(dynamic_instance_names or ()),
+            static_scope=static_scope_name,
+            static_names=frozenset(
+                declaration.name for declaration in static_declarations
+            ),
+            static_prefix=parser_static_prefix or "gml_static",
         ),
         extension_functions=normalize_extension_functions(extension_functions),
         extension_function_mappings=normalize_extension_function_mappings(extension_function_mappings),
     )
     lines = parser.parse()
+    if static_declarations:
+        lines = [
+            *_emit_static_initialization_lines(
+                static_scope_name,
+                static_scope_id,
+                static_declarations,
+                initial_local_names,
+                parser.scope_context,
+                parser.enum_values,
+                parser.enum_names,
+                parser.macro_values,
+            ),
+            *lines,
+        ]
 
     if not lines:
         code = f"{indent}pass"
@@ -145,4 +201,8 @@ def transpile_gml_code_with_source_map(
         event=event,
         generated_line_offset=generated_line_offset,
     )
-    return GMLTranspileResult(code=code, source_map=source_map)
+    return GMLTranspileResult(
+        code=code,
+        source_map=source_map,
+        static_scope_id=static_scope_id,
+    )

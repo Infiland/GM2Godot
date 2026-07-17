@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-07-17
+
+- Retargeted generated projects and CI to GameMaker LTS 2026 and exact Godot 4.7.1 compatibility, with locally pinned SNAP and Adding fixture conversions and runtime boots used as release evidence.
+- Expanded current GML syntax and runtime support for constructors, preprocessors, macros, enums, strings, arrays, data structures, top-level initialization, tilemaps, and source maps.
+- Hardened deterministic asset output, project path containment, atomic manifests and project settings, update integrity, process shutdown, diagnostics, and CLI/GUI completion handling.
+- Added broad unit and Godot-backed regression coverage for the completed compatibility-hardening work tracked by issues #653, #700, #701, and #703, plus foundations for the remaining follow-ups.
+
 ## 0.6.1 - 2026-05-28
 
 - Added CLI version output, converter inventory discovery, JSON inventory output for automation, and direct `python -m src.cli` execution.

@@ -12,6 +12,7 @@ from .model import (
     _Call,
     _DSMapAccess,
     _DSListAccess,
+    _EnumMember,
     _Expression,
     _Grouped,
     _Index,
@@ -21,6 +22,7 @@ from .model import (
     _StructAccess,
     _StructLiteral,
     _Ternary,
+    _TemplateStringLiteral,
     _Token,
     _Unary,
 )
@@ -51,6 +53,8 @@ def _evaluate_enum_expression(
 ) -> int | None:
     if isinstance(expr, _NumberLiteral):
         return _parse_enum_int_literal(expr)
+    if isinstance(expr, _EnumMember):
+        return expr.value
     if isinstance(expr, _Grouped):
         return _evaluate_enum_expression(expr.expr, enum_values, current_enum_values)
     if isinstance(expr, _Name):
@@ -149,6 +153,8 @@ def _reject_enum_assignment_target(
         return
 
     unwrapped_target = _unwrap_grouped_expression(target_expr)
+    if isinstance(unwrapped_target, _EnumMember):
+        raise GMLTranspileError("Cannot assign to enum member")
     if _is_enum_reference(unwrapped_target, enum_name_set):
         raise GMLTranspileError("Cannot assign to enum")
     if _target_chain_starts_with_enum(unwrapped_target, enum_name_set):
@@ -233,6 +239,11 @@ def _reject_enum_mutation_expression(
         _reject_enum_mutation_expression(expr.condition, enum_name_set)
         _reject_enum_mutation_expression(expr.true_expr, enum_name_set)
         _reject_enum_mutation_expression(expr.false_expr, enum_name_set)
+        return
+    if isinstance(expr, _TemplateStringLiteral):
+        for part in expr.parts:
+            if not isinstance(part, str):
+                _reject_enum_mutation_expression(part, enum_name_set)
         return
     if isinstance(expr, _ArrayLiteral):
         for element in expr.elements:

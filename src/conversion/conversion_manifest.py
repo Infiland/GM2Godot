@@ -3,8 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
+import tempfile
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TypeAlias
 
 from src.conversion.architecture_policy import build_architecture_policy_report
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
@@ -20,7 +23,19 @@ from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.type_defs import JsonDict
 
 CONVERSION_MANIFEST_RELATIVE_PATH = os.path.join("gm2godot", "conversion_manifest.json")
-_GODOT_RESOURCE_EXTENSIONS = (".gd", ".gdshader", ".tscn", ".tres", ".json")
+_MANIFEST_FILENAME = os.path.basename(CONVERSION_MANIFEST_RELATIVE_PATH)
+_IMAGE_EXTENSIONS = frozenset({".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".webp"})
+_AUDIO_EXTENSIONS = frozenset({".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"})
+_FONT_EXTENSIONS = frozenset({".otf", ".ttf", ".woff", ".woff2"})
+
+FileFingerprint: TypeAlias = tuple[int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class ConversionOutputSnapshot:
+    """Destination state captured before a conversion starts."""
+
+    files: Mapping[str, FileFingerprint]
 
 
 @dataclass(frozen=True)
@@ -43,18 +58,43 @@ def write_conversion_manifest(
     *,
     target_platform: str,
     enabled_converters: Iterable[str],
+    output_snapshot: ConversionOutputSnapshot,
 ) -> str:
     manifest_path = os.path.join(godot_project_path, CONVERSION_MANIFEST_RELATIVE_PATH)
-    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
     payload = build_conversion_manifest(
         gm_project_path,
         godot_project_path,
         target_platform=target_platform,
         enabled_converters=enabled_converters,
+        output_snapshot=output_snapshot,
     )
-    with open(manifest_path, "w", encoding="utf-8") as manifest_file:
-        json.dump(payload, manifest_file, indent=2, sort_keys=True)
-        manifest_file.write("\n")
+
+    manifest_directory = os.path.dirname(manifest_path)
+    os.makedirs(manifest_directory, exist_ok=True)
+    file_descriptor, staged_path = tempfile.mkstemp(
+        dir=manifest_directory,
+        prefix=f".{_MANIFEST_FILENAME}.",
+        suffix=".tmp",
+    )
+    staged_pending = True
+    try:
+        manifest_file = os.fdopen(file_descriptor, "w", encoding="utf-8", newline="")
+        file_descriptor = -1
+        with manifest_file:
+            json.dump(payload, manifest_file, indent=2, sort_keys=True)
+            manifest_file.write("\n")
+            manifest_file.flush()
+            os.fsync(manifest_file.fileno())
+        os.replace(staged_path, manifest_path)
+        staged_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if staged_pending:
+            try:
+                os.unlink(staged_path)
+            except OSError:
+                pass
     return manifest_path
 
 
@@ -64,11 +104,16 @@ def build_conversion_manifest(
     *,
     target_platform: str,
     enabled_converters: Iterable[str],
+    output_snapshot: ConversionOutputSnapshot,
 ) -> JsonDict:
     enabled_converter_keys = tuple(sorted(set(enabled_converters)))
     project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
-    asset_entries = _asset_registry_entries(gm_project_path, godot_project_path)
-    generated_files = _generated_files(godot_project_path)
+    asset_entries = _asset_registry_entries(
+        gm_project_path,
+        godot_project_path,
+        macro_configuration=target_platform,
+    )
+    generated_files = _generated_files(godot_project_path, output_snapshot)
     return {
         "format_version": 1,
         "target_platform": target_platform,
@@ -78,6 +123,7 @@ def build_conversion_manifest(
             "yyp_path": _relative_source_path(project_manifest.yyp_path, gm_project_path),
             "resource_type": project_manifest.resource_type,
             "resource_version": project_manifest.resource_version,
+            "ide_version": project_manifest.ide_version,
         },
         "resources": [entry.to_godot_dict() for entry in asset_entries],
         "generated_files": [entry.to_dict() for entry in generated_files],
@@ -98,6 +144,8 @@ def build_conversion_manifest(
 def _asset_registry_entries(
     gm_project_path: str,
     godot_project_path: str,
+    *,
+    macro_configuration: str | None = None,
 ) -> tuple[AssetRegistryEntry, ...]:
     converter = AssetRegistryConverter(
         gm_project_path,
@@ -105,31 +153,41 @@ def _asset_registry_entries(
         log_callback=lambda _message: None,
         progress_callback=lambda _value: None,
         conversion_running=lambda: True,
+        macro_configuration=macro_configuration,
     )
     return converter.build_entries()
 
 
-def _generated_files(godot_project_path: str) -> tuple[GeneratedFileEntry, ...]:
+def capture_conversion_output_snapshot(godot_project_path: str) -> ConversionOutputSnapshot:
+    """Capture destination files before conversion so emitted outputs are identifiable."""
+    files = {
+        relative_path: fingerprint
+        for _path, relative_path, fingerprint in _destination_files(godot_project_path)
+    }
+    return ConversionOutputSnapshot(files=files)
+
+
+def _generated_files(
+    godot_project_path: str,
+    output_snapshot: ConversionOutputSnapshot,
+) -> tuple[GeneratedFileEntry, ...]:
     entries: list[GeneratedFileEntry] = []
-    for root, dirs, files in os.walk(godot_project_path):
-        dirs[:] = sorted(directory for directory in dirs if directory != ".godot")
-        for filename in sorted(files):
-            path = os.path.join(root, filename)
-            relative_path = os.path.relpath(path, godot_project_path).replace(os.sep, "/")
-            if relative_path == CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/"):
-                continue
-            if not _is_generated_manifest_file(relative_path):
-                continue
-            entries.append(
-                GeneratedFileEntry(
-                    path=relative_path,
-                    kind=_generated_file_kind(relative_path),
-                    sha256=_sha256_file(path),
-                )
+    manifest_relative_path = CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/")
+    for path, relative_path, fingerprint in _destination_files(godot_project_path):
+        if relative_path == manifest_relative_path:
+            continue
+        if output_snapshot.files.get(relative_path) == fingerprint:
+            continue
+        entries.append(
+            GeneratedFileEntry(
+                path=relative_path,
+                kind=_generated_file_kind(relative_path),
+                sha256=_sha256_file(path),
             )
+        )
     entries.append(
         GeneratedFileEntry(
-            path=CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/"),
+            path=manifest_relative_path,
             kind="manifest",
             sha256="self",
         )
@@ -137,10 +195,38 @@ def _generated_files(godot_project_path: str) -> tuple[GeneratedFileEntry, ...]:
     return tuple(sorted(entries, key=lambda entry: entry.path))
 
 
-def _is_generated_manifest_file(relative_path: str) -> bool:
-    if relative_path == "project.godot":
-        return True
-    return relative_path.endswith(_GODOT_RESOURCE_EXTENSIONS)
+def _destination_files(
+    godot_project_path: str,
+) -> Iterable[tuple[str, str, FileFingerprint]]:
+    if os.path.islink(godot_project_path) or not os.path.isdir(godot_project_path):
+        return
+    for root, dirs, files in os.walk(godot_project_path):
+        dirs[:] = sorted(
+            directory
+            for directory in dirs
+            if directory != ".godot"
+            and not os.path.islink(os.path.join(root, directory))
+        )
+        for filename in sorted(files):
+            path = os.path.join(root, filename)
+            try:
+                path_stat = os.stat(path, follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(path_stat.st_mode):
+                continue
+            relative_path = os.path.relpath(path, godot_project_path).replace(os.sep, "/")
+            yield path, relative_path, _file_fingerprint(path_stat)
+
+
+def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
+    return (
+        path_stat.st_dev,
+        path_stat.st_ino,
+        path_stat.st_size,
+        path_stat.st_mtime_ns,
+        path_stat.st_ctime_ns,
+    )
 
 
 def _generated_file_kind(relative_path: str) -> str:
@@ -158,6 +244,15 @@ def _generated_file_kind(relative_path: str) -> str:
         return "scene"
     if relative_path.endswith(".tres"):
         return "resource"
+    extension = os.path.splitext(relative_path)[1].lower()
+    if extension in _IMAGE_EXTENSIONS:
+        return "image"
+    if extension in _AUDIO_EXTENSIONS:
+        return "audio"
+    if extension in _FONT_EXTENSIONS:
+        return "font"
+    if extension == ".import":
+        return "import_metadata"
     return "file"
 
 

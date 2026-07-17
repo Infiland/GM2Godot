@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 - 2026-07-17
+
+- Added immutable GameMaker LTS 2026 SNAP and Adding fixtures to CI with exact Godot 4.7.1 conversion, generated-resource validation, short runtime boot checks, and bounded failure reports.
+
 ## 0.7.0 - 2026-07-17
 
 - Retargeted generated projects and CI to GameMaker LTS 2026 and exact Godot 4.7.1 compatibility, with locally pinned SNAP and Adding fixture conversions and runtime boots used as release evidence.

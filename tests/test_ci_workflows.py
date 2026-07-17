@@ -22,10 +22,12 @@ EXTERNAL_CONVERSION_MODULES = (
     "tests.test_simple_topdown_conversion",
     "tests.test_tcc_conversion",
     "tests.test_monophobia_conversion",
+    "tests.test_lts_2026_conversion",
 )
 CONVERSION_BOOT_MODULES = (
     "tests.test_simple_topdown_conversion",
     "tests.test_monophobia_conversion",
+    "tests.test_lts_2026_conversion",
 )
 EXTERNAL_FIXTURE_REPOSITORIES = (
     (
@@ -39,6 +41,14 @@ EXTERNAL_FIXTURE_REPOSITORIES = (
     (
         "MONOPHOBIA_REF",
         "https://github.com/Infiland/Monophobia.git",
+    ),
+    (
+        "SNAP_REF",
+        "https://github.com/JujuAdams/SNAP.git",
+    ),
+    (
+        "ADDING_REF",
+        "https://github.com/WuffMakesGames/Adding.git",
     ),
 )
 
@@ -128,6 +138,10 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertLess(install_index, content.index("- name: Run SimpleTopDown conversion and boot-log test"))
         self.assertLess(install_index, content.index("- name: Run TCC conversion test"))
         self.assertLess(install_index, content.index("- name: Run Monophobia conversion and boot-log test"))
+        self.assertLess(
+            install_index,
+            content.index("- name: Run current-LTS conversion, validation, and boot tests"),
+        )
         for module in EXTERNAL_CONVERSION_MODULES:
             with self.subTest(module=module):
                 self.assertIn(f"python -m unittest {module} -v", content)
@@ -174,6 +188,79 @@ class TestCIWorkflows(unittest.TestCase):
                     f'rev-parse HEAD)" = "${{{ref_name}}}"',
                     content,
                 )
+
+    def test_current_lts_job_verifies_exact_godot_build_and_fixture_projects(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tcc-conversion-test.yml"
+        content = workflow.read_text(encoding="utf-8")
+        job_index = content.index("  lts-2026-conversion:")
+        lts_job = content[job_index:]
+        checksum_command = (
+            'echo "${GODOT_ARCHIVE_SHA256}  '
+            '${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict'
+        )
+
+        self.assertIn('test "$godot_build" = "4.7.1.stable.official.a13da4feb"', lts_job)
+        self.assertIn(checksum_command, lts_job)
+        self.assertLess(lts_job.index(checksum_command), lts_job.index("unzip -q"))
+        self.assertIn('test -f "$repo_dir/snap.yyp"', lts_job)
+        self.assertIn('test -f "$repo_dir/Adding.yyp"', lts_job)
+        self.assertIn("GM2GODOT_REQUIRE_LTS_FIXTURES: '1'", lts_job)
+        self.assertIn("SNAP_PROJECT_PATH: ${{ runner.temp }}/SNAP", lts_job)
+        self.assertIn("ADDING_PROJECT_PATH: ${{ runner.temp }}/Adding", lts_job)
+        self.assertIn(
+            "python -m unittest tests.test_lts_2026_conversion -v",
+            lts_job,
+        )
+        test_step_index = lts_job.index(
+            "- name: Run current-LTS conversion, validation, and boot tests"
+        )
+        upload_step_index = lts_job.index(
+            "- name: Upload bounded current-LTS failure reports"
+        )
+        test_step = lts_job[test_step_index:upload_step_index]
+        job_timeout_match = re.search(
+            r"(?m)^    timeout-minutes: ([0-9]+)$",
+            lts_job,
+        )
+        step_timeout_match = re.search(
+            r"(?m)^        timeout-minutes: ([0-9]+)$",
+            test_step,
+        )
+        self.assertIsNotNone(job_timeout_match)
+        self.assertIsNotNone(step_timeout_match)
+        assert job_timeout_match is not None
+        assert step_timeout_match is not None
+        self.assertLess(
+            int(step_timeout_match.group(1)),
+            int(job_timeout_match.group(1)),
+        )
+        self.assertLess(
+            lts_job.index("- name: Install pinned Godot"),
+            test_step_index,
+        )
+
+    def test_current_lts_job_uploads_only_bounded_failure_reports(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tcc-conversion-test.yml"
+        content = workflow.read_text(encoding="utf-8")
+        upload_index = content.index("- name: Upload bounded current-LTS failure reports")
+        upload_step = content[upload_index:]
+
+        self.assertIn("if: failure()", upload_step)
+        self.assertIn("uses: actions/upload-artifact@v4", upload_step)
+        self.assertIn("if-no-files-found: ignore", upload_step)
+        self.assertIn("retention-days: 7", upload_step)
+        for report_name in (
+            "lts_fixture_report.json",
+            "unittest.log",
+            "conversion_diagnostics.json",
+            "conversion_diagnostics.md",
+            "conversion_manifest.json",
+            "godot_validation_report.json",
+        ):
+            with self.subTest(report=report_name):
+                self.assertIn(report_name, upload_step)
+        self.assertNotIn("gm2godot-lts-2026-output/*/**", upload_step)
+        self.assertNotRegex(upload_step, r"(?m)^\s+path:\s+.*gm2godot-lts-2026-output/?\s*$")
 
 
 if __name__ == "__main__":

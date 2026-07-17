@@ -20,5 +20,10 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Qt system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
+
       - name: Run unit tests
         run: python -m unittest discover tests/ -v

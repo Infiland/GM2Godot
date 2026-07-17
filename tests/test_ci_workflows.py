@@ -58,7 +58,15 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertIn("pip install -r requirements.txt", content)
         self.assertNotIn("pip install Pillow", content)
+        self.assertIn(
+            "sudo apt-get install --yes --no-install-recommends libegl1",
+            content,
+        )
         self.assertIn("python -m unittest discover tests/ -v", content)
+        self.assertLess(
+            content.index("sudo apt-get install --yes --no-install-recommends libegl1"),
+            content.index("python -m unittest discover tests/ -v"),
+        )
         self.assertTrue((PROJECT_ROOT / "tests" / "test_golden_conversion.py").is_file())
         self.assertTrue((PROJECT_ROOT / "tests" / "test_cli.py").is_file())
 

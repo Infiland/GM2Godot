@@ -14,6 +14,8 @@ env:
   SIMPLE_TOPDOWN_REF: 2413d7714b0dbd5d548058ea4c74f591f0d4e1e3
   TCC_REF: 4b6e942caca4d58af49dc006a037404d2f2a348c
   MONOPHOBIA_REF: b79cc26f2d3d01823d7e6359ee116322840f97a2
+  SNAP_REF: b4191e195c7c84359f995d568d8906c452b83e50
+  ADDING_REF: 1bf032618be258242f78505de7cd151242452776
 
 jobs:
   tcc-conversion:
@@ -98,3 +100,96 @@ jobs:
         env:
           MONOPHOBIA_PROJECT_PATH: ${{ runner.temp }}/Monophobia
         run: python -m unittest tests.test_monophobia_conversion -v
+
+  lts-2026-conversion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install Pillow
+
+      - name: Cache pinned Godot
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/gm2godot/godot-${{ env.GODOT_VERSION }}
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}-${{ env.GODOT_ARCHIVE_SHA256 }}
+
+      - name: Install pinned Godot
+        run: |
+          set -euo pipefail
+          godot_dir="$HOME/.cache/gm2godot/godot-${GODOT_VERSION}"
+          godot_bin="${godot_dir}/${GODOT_BINARY}"
+          if [ ! -x "$godot_bin" ]; then
+            mkdir -p "$godot_dir"
+            curl --fail --location --retry 3 \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${GODOT_ARCHIVE}" \
+              --output "${RUNNER_TEMP}/${GODOT_ARCHIVE}"
+            echo "${GODOT_ARCHIVE_SHA256}  ${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict
+            unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}" -d "$godot_dir"
+            chmod +x "$godot_bin"
+          fi
+          echo "GODOT_BIN=$godot_bin" >> "$GITHUB_ENV"
+          godot_build="$("$godot_bin" --version)"
+          test "$godot_build" = "4.7.1.stable.official.a13da4feb"
+
+      - name: Checkout pinned SNAP
+        run: |
+          set -euo pipefail
+          repo_dir="${{ runner.temp }}/SNAP"
+          git init --quiet "$repo_dir"
+          git -C "$repo_dir" remote add origin https://github.com/JujuAdams/SNAP.git
+          git -C "$repo_dir" fetch --quiet --depth 1 --no-tags origin "${SNAP_REF}"
+          git -C "$repo_dir" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$repo_dir" rev-parse HEAD)" = "${SNAP_REF}"
+          test -f "$repo_dir/snap.yyp"
+
+      - name: Checkout pinned Adding
+        run: |
+          set -euo pipefail
+          repo_dir="${{ runner.temp }}/Adding"
+          git init --quiet "$repo_dir"
+          git -C "$repo_dir" remote add origin https://github.com/WuffMakesGames/Adding.git
+          git -C "$repo_dir" fetch --quiet --depth 1 --no-tags origin "${ADDING_REF}"
+          git -C "$repo_dir" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$repo_dir" rev-parse HEAD)" = "${ADDING_REF}"
+          test -f "$repo_dir/Adding.yyp"
+
+      - name: Prepare bounded report directory
+        run: |
+          output_root="${RUNNER_TEMP}/gm2godot-lts-2026-output"
+          mkdir -p "$output_root"
+          echo "LTS_FIXTURE_OUTPUT_ROOT=$output_root" >> "$GITHUB_ENV"
+
+      - name: Run current-LTS conversion, validation, and boot tests
+        timeout-minutes: 15
+        env:
+          SNAP_PROJECT_PATH: ${{ runner.temp }}/SNAP
+          ADDING_PROJECT_PATH: ${{ runner.temp }}/Adding
+          GM2GODOT_REQUIRE_LTS_FIXTURES: '1'
+        run: |
+          set -o pipefail
+          python -m unittest tests.test_lts_2026_conversion -v 2>&1 \
+            | tee "$LTS_FIXTURE_OUTPUT_ROOT/unittest.log"
+
+      - name: Upload bounded current-LTS failure reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lts-2026-fixture-reports
+          path: |
+            ${{ runner.temp }}/gm2godot-lts-2026-output/lts_fixture_report.json
+            ${{ runner.temp }}/gm2godot-lts-2026-output/unittest.log
+            ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_diagnostics.json
+            ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_diagnostics.md
+            ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_manifest.json
+            ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/godot_validation_report.json
+          if-no-files-found: ignore
+          retention-days: 7

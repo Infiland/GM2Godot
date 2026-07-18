@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.6 - 2026-07-18
+
+- Pinned every GitHub Actions dependency to an immutable commit backed by a Node 24-native release, eliminating mutable tag drift and deprecated Node runtime warnings.
+- Added repository policy checks that reject unpinned or non-Node-24-native action references before workflow changes can merge.
+
 ## 0.7.5 - 2026-07-18
 
 - Added reviewable GitHub Wiki sources with installation, conversion, compatibility, diagnostics, generated-runtime, contributor, and maintainer guidance for GameMaker LTS 2026 and Godot 4.7.1.

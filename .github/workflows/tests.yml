@@ -27,3 +27,27 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover tests/ -v
+
+  windows-artifact-transactions:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Windows outcome and artifact transaction tests
+        run: >-
+          python -m unittest -v
+          tests.test_conversion_outcome
+          tests.test_conversion_manifest
+          tests.test_diagnostics
+          tests.test_architecture_policy
+          tests.test_converter
+          tests.test_cli

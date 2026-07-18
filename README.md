@@ -19,7 +19,7 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
   - Windows
   - macOS
   - Linux
-- **Diagnostics and Reports**: Writes structured warnings/errors, compatibility Markdown/JSON, conversion manifests, architecture-policy reports, and optional headless Godot validation reports
+- **Diagnostics and Reports**: Writes structured warnings/errors, compatibility Markdown/JSON, trusted conversion manifests, per-attempt outcome ledgers, architecture-policy reports, and optional headless Godot validation reports
 - **Customizable Conversion**: Choose conversion groups or specific converter keys
 - **Compatibility Roadmap**: Tracks current and missing GameMaker-to-Godot coverage in [`todo-list/`](todo-list/README.md)
 
@@ -43,7 +43,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.3`.
+Current source version: `0.7.4`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 
@@ -134,6 +134,18 @@ Every valid `convert` invocation prints exactly one terminal outcome summary aft
 - `state`: `success`, `partial`, `failed`, or `cancelled`.
 - `converters` and `resources`: `requested`, `executed`, `completed`, `skipped`, and `failed` counts.
 - `failed_step` and `failure_phase`: optional failure context when conversion could not finish.
+
+The named `steps` ledger uses conversion-plan order. `completed`, `skipped`, and `failed` partition the requested steps; completed and failed steps were executed. A step interrupted by cancellation is both executed and skipped, so `executed` and `skipped` are intentionally not disjoint. A `partial` outcome means every requested converter step completed but one or more resources were skipped or failed.
+
+After destination preflight, every terminal run writes format-v1 `conversion_attempt.json`. A trustworthy successful or partial conversion also writes format-v2 `conversion_manifest.json`. The attempt state and canonical-manifest trust are independent: a late report failure or cancellation can occur after a trustworthy canonical manifest was already committed.
+
+| `canonical_manifest.status` | `updated` | `current_output` | `sha256` meaning |
+| --- | ---: | --- | --- |
+| `updated` | `true` | `verified` | Expected digest of the canonical manifest committed last by this publication transaction |
+| `preserved` | `false` | `unverified` | Digest of an existing regular file left untouched by this publication |
+| `absent` | `false` | `unavailable` | `null`; no canonical manifest exists |
+
+Each ledger file is replaced atomically from the same directory. The pair is committed attempt-first and canonical-last rather than through one multi-file atomic operation, so consumers must verify that the canonical file matches `canonical_manifest.sha256`; a mismatch identifies an interrupted publication. `current_output=verified` applies to the digest-matching canonical. `status` describes this artifact-publication transaction, not whole-run provenance. A preserved file may come from an earlier run or an earlier phase of the same invocation; preserving it does not validate its format or prove that it describes the current destination. Inspect the latest attempt ledger before trusting it after failed or cancelled work.
 
 Conversion exit codes are stable for CI:
 

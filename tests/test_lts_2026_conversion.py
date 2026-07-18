@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -107,6 +108,7 @@ class FixtureResult:
     source_script_names: frozenset[str]
     outcome: ConversionOutcome
     manifest: dict[str, Any]
+    attempt: dict[str, Any]
     diagnostics: dict[str, Any]
     primary_script_entries: tuple[dict[str, Any], ...]
     validation: GodotValidationReport
@@ -255,6 +257,7 @@ def _convert_fixture(
         )
 
     manifest = _load_json(godot_path / "gm2godot" / "conversion_manifest.json")
+    attempt = _load_json(godot_path / "gm2godot" / "conversion_attempt.json")
     diagnostics = _load_json(godot_path / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
     validation = validate_generated_godot_project(
         str(godot_path),
@@ -273,6 +276,7 @@ def _convert_fixture(
         source_script_names=source_script_names,
         outcome=outcome,
         manifest=manifest,
+        attempt=attempt,
         diagnostics=diagnostics,
         primary_script_entries=_primary_script_entries(manifest),
         validation=validation,
@@ -347,6 +351,23 @@ class TestLTS2026Conversion(unittest.TestCase):
         spec = result.spec
         source_project = cast(dict[str, Any], result.manifest["source_project"])
         resources = cast(list[dict[str, Any]], result.manifest["resources"])
+        manifest_conversion = cast(dict[str, Any], result.manifest["conversion"])
+        attempt_conversion = cast(dict[str, Any], result.attempt["attempt"])
+        canonical_record = cast(dict[str, Any], result.attempt["canonical_manifest"])
+        manifest_path = result.godot_path / "gm2godot" / "conversion_manifest.json"
+        self.assertEqual(result.manifest["format_version"], 2)
+        self.assertEqual(manifest_conversion["state"], result.outcome.state)
+        self.assertEqual(manifest_conversion["steps"], result.outcome.steps.to_dict())
+        self.assertEqual(result.attempt["format_version"], 1)
+        self.assertEqual(attempt_conversion["state"], result.outcome.state)
+        self.assertEqual(attempt_conversion["steps"], result.outcome.steps.to_dict())
+        self.assertEqual(canonical_record["status"], "updated")
+        self.assertEqual(canonical_record["updated"], True)
+        self.assertEqual(canonical_record["current_output"], "verified")
+        self.assertEqual(
+            canonical_record["sha256"],
+            "sha256:" + hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        )
         self.assertEqual(source_project["ide_version"], spec.expected_ide_version)
         self.assertEqual(result.outcome.state, spec.expected_outcome_state)
         self.assertEqual(

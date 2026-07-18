@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
-from typing import Literal, TypeAlias
+from dataclasses import dataclass, field, replace
+from typing import Iterable, Literal, TypeAlias
 
 from src.conversion.type_defs import JsonDict
 
@@ -84,14 +84,173 @@ class ConversionStepResult:
 
 
 @dataclass(frozen=True)
+class ConversionStepLedger:
+    """Immutable, plan-ordered lifecycle ledger for converter steps."""
+
+    requested: tuple[str, ...] = field(default_factory=tuple)
+    executed: tuple[str, ...] = field(default_factory=tuple)
+    completed: tuple[str, ...] = field(default_factory=tuple)
+    failed: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        sequences = {
+            "requested": self.requested,
+            "executed": self.executed,
+            "completed": self.completed,
+            "failed": self.failed,
+        }
+        for label, names in sequences.items():
+            if type(names) is not tuple:
+                raise TypeError(f"Conversion step {label} names must be a tuple.")
+            for name in names:
+                self._validate_name(name)
+
+        if len(set(self.requested)) != len(self.requested):
+            raise ValueError("Requested conversion step names must be unique.")
+        if len(set(self.executed)) != len(self.executed):
+            raise ValueError("Executed conversion step names must be unique.")
+        if self.executed != self.requested[: len(self.executed)]:
+            raise ValueError(
+                "Executed conversion steps must be a prefix of the requested plan."
+            )
+
+        for label, names in (
+            ("Completed", self.completed),
+            ("Failed", self.failed),
+        ):
+            if len(set(names)) != len(names):
+                raise ValueError(f"{label} conversion step names must be unique.")
+            name_set = set(names)
+            if names != tuple(name for name in self.executed if name in name_set):
+                raise ValueError(
+                    f"{label} conversion steps must be a plan-ordered "
+                    "subsequence of executed steps."
+                )
+
+        completed = set(self.completed)
+        failed = set(self.failed)
+        if completed & failed:
+            raise ValueError("Completed and failed conversion steps must be disjoint.")
+        if len(self.failed) > 1 or (
+            self.failed and self.failed[0] != self.executed[-1]
+        ):
+            raise ValueError(
+                "At most the final executed conversion step may fail."
+            )
+
+        unfinished = tuple(
+            name
+            for name in self.executed
+            if name not in completed and name not in failed
+        )
+        if len(unfinished) > 1 or (
+            unfinished and unfinished[0] != self.executed[-1]
+        ):
+            raise ValueError(
+                "At most the final executed conversion step may remain active."
+            )
+
+    @classmethod
+    def from_requested(cls, step_names: Iterable[str]) -> ConversionStepLedger:
+        """Create an unstarted ledger from names in conversion-plan order."""
+        if isinstance(step_names, (str, bytes)):
+            raise TypeError("Requested conversion steps must be an iterable of names.")
+        return cls(requested=tuple(step_names))
+
+    @property
+    def skipped(self) -> tuple[str, ...]:
+        terminal = {*self.completed, *self.failed}
+        return tuple(name for name in self.requested if name not in terminal)
+
+    @property
+    def active_step(self) -> str | None:
+        if not self.executed:
+            return None
+        final_step = self.executed[-1]
+        if final_step in self.completed or final_step in self.failed:
+            return None
+        return final_step
+
+    @property
+    def counts(self) -> ConversionCounts:
+        return ConversionCounts(
+            requested=len(self.requested),
+            executed=len(self.executed),
+            completed=len(self.completed),
+            skipped=len(self.skipped),
+            failed=len(self.failed),
+        )
+
+    def start(self, step_name: str) -> ConversionStepLedger:
+        """Return a new ledger with the next requested step active."""
+        self._validate_name(step_name)
+        if self.active_step is not None:
+            raise ValueError(
+                f"Cannot start conversion step {step_name!r} while "
+                f"{self.active_step!r} is active."
+            )
+        if len(self.executed) == len(self.requested):
+            raise ValueError("All requested conversion steps have been executed.")
+        expected = self.requested[len(self.executed)]
+        if step_name != expected:
+            raise ValueError(
+                f"Expected conversion step {expected!r}, got {step_name!r}."
+            )
+        return replace(self, executed=(*self.executed, step_name))
+
+    def complete(self, step_name: str) -> ConversionStepLedger:
+        """Return a new ledger with its active step completed."""
+        self._validate_active_transition(step_name, "complete")
+        return replace(self, completed=(*self.completed, step_name))
+
+    def fail(self, step_name: str) -> ConversionStepLedger:
+        """Return a new ledger with its active step failed."""
+        self._validate_active_transition(step_name, "fail")
+        return replace(self, failed=(*self.failed, step_name))
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "requested": list(self.requested),
+            "executed": list(self.executed),
+            "completed": list(self.completed),
+            "skipped": list(self.skipped),
+            "failed": list(self.failed),
+        }
+
+    def _validate_active_transition(
+        self,
+        step_name: str,
+        transition: Literal["complete", "fail"],
+    ) -> None:
+        self._validate_name(step_name)
+        if self.active_step != step_name:
+            raise ValueError(
+                f"Only the active conversion step can {transition}; "
+                f"active step is {self.active_step!r}."
+            )
+
+    @staticmethod
+    def _validate_name(step_name: object) -> None:
+        if type(step_name) is not str:
+            raise TypeError("Conversion step names must be strings.")
+        if not step_name:
+            raise ValueError("Conversion step names cannot be empty.")
+
+
+@dataclass(frozen=True)
 class ConversionOutcome:
     """Machine-readable terminal result for one conversion invocation."""
 
     state: ConversionTerminalState
-    converters: ConversionCounts = field(default_factory=ConversionCounts)
+    steps: ConversionStepLedger = field(default_factory=ConversionStepLedger)
     resources: ConversionCounts = field(default_factory=ConversionCounts)
     failed_step: str | None = None
     failure_phase: str | None = None
+
+    @property
+    def converters(self) -> ConversionCounts:
+        """Compatibility aggregate derived from the named step ledger."""
+        return self.steps.counts
 
     def __post_init__(self) -> None:
         if self.state not in ("success", "partial", "failed", "cancelled"):
@@ -99,17 +258,20 @@ class ConversionOutcome:
                 "Conversion outcome state must be 'success', 'partial', "
                 "'failed', or 'cancelled'."
             )
-        if self.state == "partial" and not any(
-            (
-                self.converters.skipped,
-                self.converters.failed,
-                self.resources.skipped,
-                self.resources.failed,
-            )
-        ):
-            raise ValueError(
-                "Partial conversion outcomes require skipped or failed work."
-            )
+        if self.state == "partial":
+            if self.steps.active_step is not None:
+                raise ValueError(
+                    "Partial conversion outcomes cannot include an active step."
+                )
+            if self.steps.completed != self.steps.requested:
+                raise ValueError(
+                    "Partial conversion outcomes require every requested "
+                    "converter step to complete."
+                )
+            if not (self.resources.skipped or self.resources.failed):
+                raise ValueError(
+                    "Partial conversion outcomes require skipped or failed work."
+                )
         if self.state != "success":
             return
         if (
@@ -129,6 +291,7 @@ class ConversionOutcome:
         return {
             "state": self.state,
             "converters": self.converters.to_dict(),
+            "steps": self.steps.to_dict(),
             "resources": self.resources.to_dict(),
             "failed_step": self.failed_step,
             "failure_phase": self.failure_phase,

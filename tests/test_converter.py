@@ -17,9 +17,15 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.base_converter import BaseConverter
-from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.conversion_context import ConversionContext, enabled_converter_keys
+from src.conversion.converter import (
+    CONVERSION_CATEGORIES,
+    Converter,
+    _FinalizerReportCheckpoint,
+)
 from src.conversion.conversion_outcome import (
     ConversionCounts,
+    ConversionOutcome,
     ConversionStepResult,
 )
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
@@ -49,6 +55,15 @@ class TestConversionCategories(unittest.TestCase):
     def test_wip_contents(self):
         self.assertEqual(CONVERSION_CATEGORIES["wip"],
                          ["shaders", "tilesets"])
+
+    def test_enabled_converter_keys_filter_non_step_settings(self) -> None:
+        settings = {
+            "scripts": _FakeBooleanVar(True),
+            "sound_group_folders": _FakeBooleanVar(True),
+            "future_ui_toggle": _FakeBooleanVar(True),
+        }
+
+        self.assertEqual(enabled_converter_keys(settings), ("scripts",))
 
 
 class _FakeBooleanVar:
@@ -86,8 +101,30 @@ class TestConverterOutcomes(unittest.TestCase):
         architecture_error: object | None = None,
         manifest_error: object | None = None,
     ) -> Generator[dict[str, MagicMock]]:
+        def publish_diagnostics(*args: object) -> object:
+            if diagnostic_side_effect is None:
+                return MagicMock()
+            if isinstance(diagnostic_side_effect, BaseException):
+                raise diagnostic_side_effect
+            if callable(diagnostic_side_effect):
+                result = diagnostic_side_effect(*args)
+                return MagicMock() if result is None else result
+            raise TypeError("Unsupported diagnostic publication test side effect.")
+
         with (
             patch("src.conversion.converter.capture_conversion_output_snapshot") as capture,
+            patch(
+                "src.conversion.converter.capture_conversion_diagnostic_reports"
+            ) as capture_diagnostics,
+            patch(
+                "src.conversion.converter.capture_architecture_policy_snapshot"
+            ) as capture_architecture,
+            patch(
+                "src.conversion.converter.restore_conversion_diagnostic_reports"
+            ) as restore_diagnostics,
+            patch(
+                "src.conversion.converter.restore_architecture_policy_snapshot"
+            ) as restore_architecture,
             patch(
                 "src.conversion.converter.prepare_godot_project_destination",
                 side_effect=preflight_error,
@@ -99,29 +136,33 @@ class TestConverterOutcomes(unittest.TestCase):
                 side_effect=runner_build_error,
             ) as build_runners,
             patch(
-                "src.conversion.converter.write_conversion_diagnostic_reports",
-                side_effect=diagnostic_side_effect,
+                "src.conversion.converter.publish_conversion_diagnostic_reports",
+                side_effect=publish_diagnostics,
             ) as write_diagnostics,
             patch(
-                "src.conversion.converter.invalidate_conversion_diagnostic_reports",
-            ) as invalidate_diagnostics,
-            patch(
-                "src.conversion.converter.write_architecture_policy_report",
+                "src.conversion.converter.publish_architecture_policy_report",
                 side_effect=architecture_error,
             ) as write_architecture,
             patch(
-                "src.conversion.converter.write_conversion_manifest",
+                "src.conversion.converter.write_conversion_artifacts",
                 side_effect=manifest_error,
-            ) as write_manifest,
+                return_value=(
+                    "/godot/gm2godot/conversion_manifest.json",
+                    "/godot/gm2godot/conversion_attempt.json",
+                ),
+            ) as write_artifacts,
         ):
             yield {
                 "capture": capture,
+                "capture_diagnostics": capture_diagnostics,
+                "capture_architecture": capture_architecture,
+                "restore_diagnostics": restore_diagnostics,
+                "restore_architecture": restore_architecture,
                 "prepare": prepare,
                 "build_runners": build_runners,
                 "write_diagnostics": write_diagnostics,
-                "invalidate_diagnostics": invalidate_diagnostics,
                 "write_architecture": write_architecture,
-                "write_manifest": write_manifest,
+                "write_artifacts": write_artifacts,
             }
 
     def test_success_counts_requested_executed_and_completed_converters(self) -> None:
@@ -130,7 +171,7 @@ class TestConverterOutcomes(unittest.TestCase):
                 "scripts": lambda: ConversionStepResult(),
                 "objects": lambda: ConversionStepResult(),
             }
-        ):
+        ) as calls:
             outcome = self.converter.convert(
                 "/gm",
                 "windows",
@@ -144,6 +185,12 @@ class TestConverterOutcomes(unittest.TestCase):
             ConversionCounts(requested=2, executed=2, completed=2),
         )
         self.assertEqual(outcome.resources, ConversionCounts())
+        self.assertEqual(outcome.steps.requested, ("scripts", "objects"))
+        self.assertEqual(outcome.steps.executed, ("scripts", "objects"))
+        self.assertEqual(outcome.steps.completed, ("scripts", "objects"))
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIs(artifact_kwargs["manifest_outcome"], outcome)
+        self.assertIs(artifact_kwargs["attempt_outcome"], outcome)
         self.assertIs(self.converter.last_outcome, outcome)
         self.assertIs(self.converter.diagnostics.outcome(), outcome)
 
@@ -174,7 +221,9 @@ class TestConverterOutcomes(unittest.TestCase):
             return ConversionStepResult(cancelled=True)
 
         objects = MagicMock(return_value=ConversionStepResult())
-        with self._environment({"scripts": cancel, "objects": objects}):
+        with self._environment(
+            {"scripts": cancel, "objects": objects}
+        ) as calls:
             outcome = self.converter.convert(
                 "/gm",
                 "windows",
@@ -187,6 +236,12 @@ class TestConverterOutcomes(unittest.TestCase):
             outcome.converters,
             ConversionCounts(requested=2, executed=1, skipped=2),
         )
+        self.assertEqual(outcome.steps.executed, ("scripts",))
+        self.assertEqual(outcome.steps.completed, ())
+        self.assertEqual(outcome.steps.skipped, ("scripts", "objects"))
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(artifact_kwargs["manifest_outcome"])
+        self.assertIs(artifact_kwargs["attempt_outcome"], outcome)
         objects.assert_not_called()
 
     def test_cancellation_after_runner_return_keeps_converter_completed(self) -> None:
@@ -265,7 +320,7 @@ class TestConverterOutcomes(unittest.TestCase):
                 skipped=1,
             )
         )
-        with self._environment({"scripts": lambda: step_result}):
+        with self._environment({"scripts": lambda: step_result}) as calls:
             outcome = self.converter.convert(
                 "/gm",
                 "windows",
@@ -279,6 +334,9 @@ class TestConverterOutcomes(unittest.TestCase):
             ConversionCounts(requested=1, executed=1, completed=1),
         )
         self.assertEqual(outcome.resources, step_result.resources)
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIs(artifact_kwargs["manifest_outcome"], outcome)
+        self.assertIs(artifact_kwargs["attempt_outcome"], outcome)
 
     def test_preflight_failure_sets_failed_outcome_before_propagating(self) -> None:
         error = ConversionPreflightError(
@@ -324,7 +382,7 @@ class TestConverterOutcomes(unittest.TestCase):
 
         failing = FailingConverter("/gm", "/godot")
         runner = lambda: self.converter._run_base_converter(failing)
-        with self._environment({"scripts": runner}):
+        with self._environment({"scripts": runner}) as calls:
             with self.assertRaises(RuntimeError) as raised:
                 self.converter.convert(
                     "/gm",
@@ -350,6 +408,54 @@ class TestConverterOutcomes(unittest.TestCase):
                 skipped=1,
                 failed=1,
             ),
+        )
+        self.assertEqual(self.converter.last_outcome.steps.failed, ("scripts",))
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(artifact_kwargs["manifest_outcome"])
+        self.assertIs(
+            artifact_kwargs["attempt_outcome"],
+            self.converter.last_outcome,
+        )
+
+    def test_mid_plan_exception_records_completed_failed_and_skipped_step_names(
+        self,
+    ) -> None:
+        error = RuntimeError("objects exploded")
+        rooms = MagicMock(return_value=ConversionStepResult())
+
+        with self._environment(
+            {
+                "scripts": lambda: ConversionStepResult(),
+                "objects": MagicMock(side_effect=error),
+                "rooms": rooms,
+            }
+        ) as calls:
+            with self.assertRaises(RuntimeError) as raised:
+                self.converter.convert(
+                    "/gm",
+                    "windows",
+                    "/godot",
+                    self._settings("scripts", "objects", "rooms"),
+                )
+
+        self.assertIs(raised.exception, error)
+        assert self.converter.last_outcome is not None
+        self.assertEqual(
+            self.converter.last_outcome.steps.to_dict(),
+            {
+                "requested": ["scripts", "objects", "rooms"],
+                "executed": ["scripts", "objects"],
+                "completed": ["scripts"],
+                "skipped": ["rooms"],
+                "failed": ["objects"],
+            },
+        )
+        rooms.assert_not_called()
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(artifact_kwargs["manifest_outcome"])
+        self.assertIs(
+            artifact_kwargs["attempt_outcome"],
+            self.converter.last_outcome,
         )
 
     def test_runner_build_failure_publishes_failed_outcome_before_reraising(
@@ -383,7 +489,7 @@ class TestConverterOutcomes(unittest.TestCase):
         self.assertEqual(report_states, ["failed"])
         calls["write_architecture"].assert_called_once()
         calls["write_diagnostics"].assert_called_once()
-        calls["write_manifest"].assert_called_once()
+        calls["write_artifacts"].assert_called_once()
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.state, "failed")
         self.assertEqual(self.converter.last_outcome.failure_phase, "runtime")
@@ -393,7 +499,7 @@ class TestConverterOutcomes(unittest.TestCase):
             ConversionCounts(requested=1, skipped=1),
         )
 
-    def test_runner_build_error_precedes_diagnostic_failure_and_skips_manifest(
+    def test_runner_build_error_precedes_diagnostic_failure_and_is_attempt_only(
         self,
     ) -> None:
         build_error = RuntimeError("runner construction failed")
@@ -415,8 +521,10 @@ class TestConverterOutcomes(unittest.TestCase):
         self.assertIs(raised.exception, build_error)
         calls["write_architecture"].assert_called_once()
         calls["write_diagnostics"].assert_called_once()
-        calls["invalidate_diagnostics"].assert_called_once_with("/godot")
-        calls["write_manifest"].assert_not_called()
+        calls["write_artifacts"].assert_called_once()
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(artifact_kwargs["manifest_outcome"])
+        self.assertEqual(artifact_kwargs["attempt_outcome"].state, "failed")
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.state, "failed")
         self.assertEqual(self.converter.last_outcome.failure_phase, "runtime")
@@ -516,6 +624,84 @@ class TestConverterOutcomes(unittest.TestCase):
             ConversionCounts(requested=1, executed=1, completed=1),
         )
 
+    def test_failed_second_run_marks_preserved_manifest_output_unverified(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as gm_dir,
+            tempfile.TemporaryDirectory() as godot_dir,
+        ):
+            project_path = os.path.join(gm_dir, "Named.yyp")
+            with open(project_path, "w", encoding="utf-8") as project_file:
+                json.dump({"%Name": "First Name"}, project_file)
+
+            first_outcome = self.converter.convert(
+                gm_dir,
+                "windows",
+                godot_dir,
+                self._settings("project_name"),
+            )
+            manifest_path = os.path.join(
+                godot_dir,
+                "gm2godot",
+                "conversion_manifest.json",
+            )
+            with open(manifest_path, "rb") as manifest_file:
+                original_manifest = manifest_file.read()
+
+            with open(project_path, "w", encoding="utf-8") as project_file:
+                json.dump({"%Name": "Second Name"}, project_file)
+
+            runtime_error = RuntimeError("notes conversion failed")
+            real_build_step_runners = self.converter._build_step_runners
+
+            def build_failing_runners(
+                context: ConversionContext,
+            ) -> dict[str, Callable[[], object]]:
+                runners = real_build_step_runners(context)
+
+                def fail_after_project_name() -> object:
+                    raise runtime_error
+
+                runners["notes"] = fail_after_project_name
+                return runners
+
+            with patch.object(
+                self.converter,
+                "_build_step_runners",
+                side_effect=build_failing_runners,
+            ):
+                with self.assertRaises(RuntimeError) as raised:
+                    self.converter.convert(
+                        gm_dir,
+                        "windows",
+                        godot_dir,
+                        self._settings("project_name", "notes"),
+                    )
+
+            self.assertIs(raised.exception, runtime_error)
+            self.assertEqual(first_outcome.state, "success")
+            with open(manifest_path, "rb") as manifest_file:
+                self.assertEqual(manifest_file.read(), original_manifest)
+            with open(
+                os.path.join(godot_dir, "gm2godot", "conversion_attempt.json"),
+                encoding="utf-8",
+            ) as attempt_file:
+                attempt = json.load(attempt_file)
+            with open(
+                os.path.join(godot_dir, "project.godot"),
+                encoding="utf-8",
+            ) as project_file:
+                converted_project = project_file.read()
+
+        self.assertIn('config/name="Second Name"', converted_project)
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "unverified",
+        )
+
     def test_real_missing_project_options_accounts_for_skipped_resource(self) -> None:
         with (
             tempfile.TemporaryDirectory() as gm_dir,
@@ -598,6 +784,7 @@ class TestConverterOutcomes(unittest.TestCase):
     def test_runtime_error_precedes_finalizer_error(self) -> None:
         runtime_error = RuntimeError("runner failed")
         finalizer_error = OSError("report failed")
+        finalizer_error.add_note("report rollback also failed")
 
         def fail() -> object:
             raise runtime_error
@@ -615,6 +802,14 @@ class TestConverterOutcomes(unittest.TestCase):
                 )
 
         self.assertIs(raised.exception, runtime_error)
+        self.assertEqual(
+            getattr(raised.exception, "__notes__", []),
+            [
+                "Conversion finalizer also failed: report failed",
+                "Conversion finalizer failure detail: "
+                "report rollback also failed",
+            ],
+        )
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.failure_phase, "runtime")
 
@@ -680,7 +875,213 @@ class TestConverterOutcomes(unittest.TestCase):
         self.assertEqual(report_states, ["success", "cancelled"])
         self.assertEqual(calls["write_diagnostics"].call_count, 2)
 
-    def test_cancellation_during_manifest_refreshes_diagnostics_and_manifest(
+    def test_cancelled_checkpoint_restore_failure_is_failed_and_retried(
+        self,
+    ) -> None:
+        restore_error = OSError("transient diagnostic restore failure")
+
+        def cancel_during_report(_path: str, _diagnostics: object) -> None:
+            self.running.clear()
+
+        with self._environment(
+            {"scripts": lambda: ConversionStepResult()},
+            diagnostic_side_effect=cancel_during_report,
+        ) as calls:
+            calls["capture"].return_value.files = {
+                "gm2godot/conversion_manifest.json": (1, 2, 3, 4, 5),
+            }
+            calls["restore_diagnostics"].side_effect = [restore_error, None]
+
+            with self.assertRaises(OSError) as raised:
+                self.converter.convert(
+                    "/gm",
+                    "windows",
+                    "/godot",
+                    self._settings("scripts"),
+                )
+
+            assert self.converter.last_outcome is not None
+            self.converter.refresh_conversion_artifacts(
+                self.converter.last_outcome,
+            )
+
+        self.assertIs(raised.exception, restore_error)
+        self.assertEqual(calls["restore_diagnostics"].call_count, 2)
+        first_restore = calls["restore_diagnostics"].call_args_list[0].args
+        retry_restore = calls["restore_diagnostics"].call_args_list[1].args
+        self.assertIs(first_restore[1], retry_restore[1])
+        self.assertIs(first_restore[2], retry_restore[2])
+        self.assertEqual(self.converter.last_outcome.state, "failed")
+        self.assertEqual(
+            self.converter.last_outcome.failed_step,
+            "conversion_diagnostics",
+        )
+        self.assertEqual(
+            self.converter.last_outcome.failure_phase,
+            "finalizer",
+        )
+        self.assertEqual(calls["write_artifacts"].call_count, 2)
+        terminal_attempt = calls["write_artifacts"].call_args_list[0].kwargs
+        late_refresh = calls["write_artifacts"].call_args_list[1].kwargs
+        self.assertIsNone(terminal_attempt["manifest_outcome"])
+        self.assertEqual(terminal_attempt["attempt_outcome"].state, "failed")
+        self.assertIsNone(late_refresh["manifest_outcome"])
+        self.assertEqual(late_refresh["attempt_outcome"].state, "failed")
+
+    def test_architecture_checkpoint_restore_failure_revokes_canonical(
+        self,
+    ) -> None:
+        restore_error = OSError("architecture restore failed")
+        context = self.converter._create_context(
+            "/gm",
+            "windows",
+            "/godot",
+            {},
+        )
+        cancelled_outcome = ConversionOutcome(state="cancelled")
+        self.converter._set_outcome(cancelled_outcome)
+        self.converter._canonical_outcome = ConversionOutcome(state="success")
+        checkpoint = _FinalizerReportCheckpoint(
+            architecture_snapshot=MagicMock(),
+            architecture_receipt=MagicMock(),
+        )
+        errors: list[Exception] = []
+
+        with patch(
+            "src.conversion.converter.restore_architecture_policy_snapshot",
+            side_effect=restore_error,
+        ):
+            self.converter._restore_finalizer_reports(
+                context,
+                checkpoint,
+                preserve_outcome=False,
+                errors=errors,
+            )
+
+        self.assertEqual(errors, [restore_error])
+        assert self.converter.last_outcome is not None
+        self.assertEqual(self.converter.last_outcome.state, "failed")
+        self.assertEqual(
+            self.converter.last_outcome.failed_step,
+            "architecture_policy",
+        )
+        self.assertEqual(
+            self.converter.last_outcome.failure_phase,
+            "finalizer",
+        )
+        self.assertIsNone(self.converter._canonical_outcome)
+
+    def test_cancelled_architecture_restore_failure_precedes_attempt(self) -> None:
+        restore_error = OSError("architecture restore failed")
+        events: list[str] = []
+        restore_calls = 0
+
+        def cancel_runner() -> ConversionStepResult:
+            self.running.clear()
+            return ConversionStepResult()
+
+        def restore_architecture(*_args: object) -> None:
+            nonlocal restore_calls
+            restore_calls += 1
+            events.append("architecture_restore")
+            if restore_calls == 1:
+                raise restore_error
+
+        def write_artifacts(*_args: object, **_kwargs: object) -> tuple[str, str]:
+            events.append("artifacts")
+            return (
+                "/godot/gm2godot/conversion_manifest.json",
+                "/godot/gm2godot/conversion_attempt.json",
+            )
+
+        with self._environment({"scripts": cancel_runner}) as calls:
+            calls["capture"].return_value.files = {
+                "gm2godot/conversion_manifest.json": (1, 2, 3, 4, 5),
+            }
+            calls["restore_architecture"].side_effect = restore_architecture
+            calls["write_artifacts"].side_effect = write_artifacts
+
+            with self.assertRaises(OSError) as raised:
+                self.converter.convert(
+                    "/gm",
+                    "windows",
+                    "/godot",
+                    self._settings("scripts"),
+                )
+
+        self.assertIs(raised.exception, restore_error)
+        self.assertEqual(
+            events,
+            ["architecture_restore", "artifacts", "architecture_restore"],
+        )
+        assert self.converter.last_outcome is not None
+        self.assertEqual(self.converter.last_outcome.state, "failed")
+        self.assertEqual(
+            self.converter.last_outcome.failed_step,
+            "architecture_policy",
+        )
+        artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(artifact_kwargs["manifest_outcome"])
+        self.assertEqual(artifact_kwargs["attempt_outcome"].state, "failed")
+        self.assertIsNone(self.converter._canonical_outcome)
+
+    def test_secondary_exception_notes_are_propagated_once(self) -> None:
+        primary_error = OSError("primary")
+        secondary_error = OSError("secondary")
+        secondary_error.add_note("rollback detail")
+
+        for _attempt in range(2):
+            self.converter._add_secondary_exception_context(
+                primary_error,
+                secondary_error,
+                summary_prefix="Additional failure: ",
+                detail_prefix="Additional detail: ",
+            )
+
+        self.assertEqual(
+            getattr(primary_error, "__notes__", []),
+            [
+                "Additional failure: secondary",
+                "Additional detail: rollback detail",
+            ],
+        )
+
+    def test_checkpoint_restore_error_preserves_runtime_outcome(self) -> None:
+        restore_error = OSError("diagnostic restore failed")
+        context = self.converter._create_context(
+            "/gm",
+            "windows",
+            "/godot",
+            {},
+        )
+        runtime_outcome = ConversionOutcome(
+            state="failed",
+            failed_step="scripts",
+            failure_phase="runtime",
+        )
+        self.converter._set_outcome(runtime_outcome)
+        checkpoint = _FinalizerReportCheckpoint(
+            diagnostics_snapshot=MagicMock(),
+            diagnostics_receipt=MagicMock(),
+        )
+        errors: list[Exception] = []
+
+        with patch(
+            "src.conversion.converter.restore_conversion_diagnostic_reports",
+            side_effect=restore_error,
+        ):
+            restored = self.converter._restore_diagnostic_checkpoint(
+                context,
+                checkpoint,
+                preserve_outcome=True,
+                errors=errors,
+            )
+
+        self.assertFalse(restored)
+        self.assertEqual(errors, [restore_error])
+        self.assertIs(self.converter.last_outcome, runtime_outcome)
+
+    def test_cancellation_during_artifact_publish_keeps_success_canonical(
         self,
     ) -> None:
         report_states: list[str | None] = []
@@ -691,11 +1092,18 @@ class TestConverterOutcomes(unittest.TestCase):
 
         manifest_calls = 0
 
-        def cancel_during_manifest(*_args: object, **_kwargs: object) -> None:
+        def cancel_during_manifest(
+            *_args: object,
+            **_kwargs: object,
+        ) -> tuple[str, str]:
             nonlocal manifest_calls
             manifest_calls += 1
             if manifest_calls == 1:
                 self.running.clear()
+            return (
+                "/godot/gm2godot/conversion_manifest.json",
+                "/godot/gm2godot/conversion_attempt.json",
+            )
 
         with self._environment(
             {"scripts": lambda: ConversionStepResult()},
@@ -712,9 +1120,17 @@ class TestConverterOutcomes(unittest.TestCase):
         self.assertEqual(outcome.state, "cancelled")
         self.assertEqual(report_states, ["success", "cancelled"])
         self.assertEqual(calls["write_diagnostics"].call_count, 2)
-        self.assertEqual(calls["write_manifest"].call_count, 2)
+        self.assertEqual(calls["write_artifacts"].call_count, 2)
+        first_kwargs = calls["write_artifacts"].call_args_list[0].kwargs
+        second_kwargs = calls["write_artifacts"].call_args_list[1].kwargs
+        canonical_outcome = first_kwargs["manifest_outcome"]
+        self.assertEqual(canonical_outcome.state, "success")
+        self.assertIs(first_kwargs["attempt_outcome"], canonical_outcome)
+        self.assertIs(second_kwargs["manifest_outcome"], canonical_outcome)
+        self.assertIs(second_kwargs["attempt_outcome"], outcome)
+        self.assertEqual(second_kwargs["attempt_outcome"].state, "cancelled")
 
-    def test_manifest_failure_with_failed_diagnostic_rewrite_invalidates_reports(
+    def test_artifact_failure_with_failed_diagnostic_rewrite_is_attempt_only(
         self,
     ) -> None:
         manifest_error = OSError("manifest failed")
@@ -742,17 +1158,64 @@ class TestConverterOutcomes(unittest.TestCase):
 
         self.assertIs(raised.exception, manifest_error)
         self.assertEqual(report_states, ["success", "failed"])
-        calls["write_manifest"].assert_called_once()
+        self.assertEqual(calls["write_artifacts"].call_count, 2)
         self.assertEqual(calls["write_diagnostics"].call_count, 2)
-        calls["invalidate_diagnostics"].assert_called_once_with("/godot")
+        retry_kwargs = calls["write_artifacts"].call_args_list[1].kwargs
+        self.assertIsNone(retry_kwargs["manifest_outcome"])
+        self.assertEqual(retry_kwargs["attempt_outcome"].state, "failed")
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.state, "failed")
         self.assertEqual(
             self.converter.last_outcome.failed_step,
-            "conversion_manifest",
+            "conversion_artifacts",
         )
 
-    def test_manifest_failure_invalidates_pre_existing_manifest(self) -> None:
+    def test_artifact_failure_keeps_report_restore_failures_as_notes(self) -> None:
+        artifact_error = OSError("manifest failed")
+        diagnostic_restore_error = OSError("diagnostic restore failed")
+        diagnostic_restore_error.add_note("diagnostic rollback detail")
+        architecture_restore_error = OSError("architecture restore failed")
+
+        with self._environment(
+            {"scripts": lambda: ConversionStepResult()},
+            manifest_error=[
+                artifact_error,
+                (None, "/godot/gm2godot/conversion_attempt.json"),
+            ],
+        ) as calls:
+            calls["capture"].return_value.files = {
+                "gm2godot/conversion_manifest.json": (1, 2, 3, 4, 5),
+            }
+            calls["restore_diagnostics"].side_effect = [
+                None,
+                diagnostic_restore_error,
+            ]
+            calls["restore_architecture"].side_effect = architecture_restore_error
+
+            with self.assertRaises(OSError) as raised:
+                self.converter.convert(
+                    "/gm",
+                    "windows",
+                    "/godot",
+                    self._settings("scripts"),
+                )
+
+        self.assertIs(raised.exception, artifact_error)
+        self.assertEqual(
+            getattr(raised.exception, "__notes__", []),
+            [
+                "Additional conversion finalizer failure: "
+                "diagnostic restore failed",
+                "Additional conversion finalizer failure detail: "
+                "diagnostic rollback detail",
+                "Additional conversion finalizer failure: "
+                "architecture restore failed",
+            ],
+        )
+        self.assertEqual(calls["restore_diagnostics"].call_count, 2)
+        calls["restore_architecture"].assert_called_once()
+
+    def test_artifact_failure_preserves_pre_existing_manifest(self) -> None:
         manifest_error = OSError("manifest failed")
         with tempfile.TemporaryDirectory() as godot_dir:
             manifest_path = os.path.join(
@@ -766,8 +1229,11 @@ class TestConverterOutcomes(unittest.TestCase):
 
             with self._environment(
                 {"scripts": lambda: ConversionStepResult()},
-                manifest_error=manifest_error,
-            ):
+                manifest_error=[
+                    manifest_error,
+                    (None, "/godot/gm2godot/conversion_attempt.json"),
+                ],
+            ) as calls:
                 with self.assertRaises(OSError) as raised:
                     self.converter.convert(
                         "/gm",
@@ -777,9 +1243,17 @@ class TestConverterOutcomes(unittest.TestCase):
                     )
 
             self.assertIs(raised.exception, manifest_error)
-            self.assertFalse(os.path.lexists(manifest_path))
+            with open(manifest_path, encoding="utf-8") as manifest_file:
+                self.assertEqual(manifest_file.read(), '{"stale": true}\n')
 
-    def test_diagnostic_failure_invalidates_manifest_and_skips_manifest_publish(
+        self.assertEqual(calls["write_artifacts"].call_count, 2)
+        pair_kwargs = calls["write_artifacts"].call_args_list[0].kwargs
+        retry_kwargs = calls["write_artifacts"].call_args_list[1].kwargs
+        self.assertEqual(pair_kwargs["manifest_outcome"].state, "success")
+        self.assertIsNone(retry_kwargs["manifest_outcome"])
+        self.assertEqual(retry_kwargs["attempt_outcome"].state, "failed")
+
+    def test_diagnostic_failure_preserves_manifest_and_publishes_attempt_only(
         self,
     ) -> None:
         diagnostic_error = OSError("diagnostics failed")
@@ -806,10 +1280,14 @@ class TestConverterOutcomes(unittest.TestCase):
                     )
 
             self.assertIs(raised.exception, diagnostic_error)
-            self.assertFalse(os.path.lexists(manifest_path))
-            calls["write_manifest"].assert_not_called()
+            with open(manifest_path, encoding="utf-8") as manifest_file:
+                self.assertEqual(manifest_file.read(), '{"stale": true}\n')
+            calls["write_artifacts"].assert_called_once()
+            artifact_kwargs = calls["write_artifacts"].call_args.kwargs
+            self.assertIsNone(artifact_kwargs["manifest_outcome"])
+            self.assertEqual(artifact_kwargs["attempt_outcome"].state, "failed")
 
-    def test_cancelled_diagnostic_rewrite_failure_skips_manifest_refresh(
+    def test_cancelled_diagnostic_rewrite_failure_preserves_manifest(
         self,
     ) -> None:
         diagnostic_error = OSError("cancelled outcome report failed")
@@ -821,8 +1299,15 @@ class TestConverterOutcomes(unittest.TestCase):
             if len(report_states) == 2:
                 raise diagnostic_error
 
-        def cancel_during_manifest(*_args: object, **_kwargs: object) -> None:
+        def cancel_during_manifest(
+            *_args: object,
+            **_kwargs: object,
+        ) -> tuple[str, str]:
             self.running.clear()
+            return (
+                "/godot/gm2godot/conversion_manifest.json",
+                "/godot/gm2godot/conversion_attempt.json",
+            )
 
         with tempfile.TemporaryDirectory() as godot_dir:
             manifest_path = os.path.join(
@@ -847,13 +1332,16 @@ class TestConverterOutcomes(unittest.TestCase):
                         self._settings("scripts"),
                     )
 
-            self.assertFalse(os.path.lexists(manifest_path))
+            with open(manifest_path, encoding="utf-8") as manifest_file:
+                self.assertEqual(manifest_file.read(), '{"success": true}\n')
 
         self.assertIs(raised.exception, diagnostic_error)
         self.assertEqual(report_states, ["success", "cancelled"])
-        calls["write_manifest"].assert_called_once()
+        self.assertEqual(calls["write_artifacts"].call_count, 2)
         self.assertEqual(calls["write_diagnostics"].call_count, 2)
-        calls["invalidate_diagnostics"].assert_called_once_with(godot_dir)
+        retry_kwargs = calls["write_artifacts"].call_args_list[1].kwargs
+        self.assertIsNone(retry_kwargs["manifest_outcome"])
+        self.assertEqual(retry_kwargs["attempt_outcome"].state, "failed")
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.state, "failed")
         self.assertEqual(
@@ -893,13 +1381,38 @@ class TestConverterOutcomes(unittest.TestCase):
         self.assertIs(raised.exception, architecture_error)
         self.assertEqual(report_states, ["failed"])
         calls["write_diagnostics"].assert_called_once()
-        calls["write_manifest"].assert_not_called()
+        calls["write_artifacts"].assert_called_once()
         assert self.converter.last_outcome is not None
         self.assertEqual(self.converter.last_outcome.state, "failed")
         self.assertEqual(
             self.converter.last_outcome.failed_step,
             "architecture_policy",
         )
+
+    def test_finalizer_failure_revokes_late_canonical_refresh_candidate(self) -> None:
+        architecture_error = OSError("architecture failed")
+
+        with self._environment(
+            {"scripts": lambda: ConversionStepResult()},
+            architecture_error=architecture_error,
+        ) as calls:
+            with self.assertRaises(OSError) as raised:
+                self.converter.convert(
+                    "/gm",
+                    "windows",
+                    "/godot",
+                    self._settings("scripts"),
+                )
+
+            self.assertIs(raised.exception, architecture_error)
+            assert self.converter.last_outcome is not None
+            self.converter.refresh_conversion_artifacts(
+                self.converter.last_outcome,
+            )
+
+        late_refresh = calls["write_artifacts"].call_args.kwargs
+        self.assertIsNone(late_refresh["manifest_outcome"])
+        self.assertEqual(late_refresh["attempt_outcome"].state, "failed")
 
 
 class TestConverterSkipsDisabled(unittest.TestCase):

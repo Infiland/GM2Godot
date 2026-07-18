@@ -373,7 +373,20 @@
           "requested": 2,
           "skipped": 0
         },
-        "state": "success"
+        "state": "success",
+        "steps": {
+          "completed": [
+            "scripts"
+          ],
+          "executed": [
+            "scripts"
+          ],
+          "failed": [],
+          "requested": [
+            "scripts"
+          ],
+          "skipped": []
+        }
       },
       "summary": {
         "error": 0,

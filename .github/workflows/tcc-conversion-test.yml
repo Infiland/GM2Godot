@@ -189,6 +189,7 @@ jobs:
             ${{ runner.temp }}/gm2godot-lts-2026-output/unittest.log
             ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_diagnostics.json
             ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_diagnostics.md
+            ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_attempt.json
             ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/conversion_manifest.json
             ${{ runner.temp }}/gm2godot-lts-2026-output/*/gm2godot/godot_validation_report.json
           if-no-files-found: ignore

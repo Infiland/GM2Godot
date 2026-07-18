@@ -39,6 +39,6 @@ body:
     attributes:
       label: Versions
       description: GM2Godot commit or release, GameMaker version, Godot version, and target platform.
-      placeholder: "GM2Godot 0.7.9, GameMaker LTS 2026, Godot 4.7.1, Windows"
+      placeholder: "GM2Godot 0.7.10, GameMaker LTS 2026, Godot 4.7.1, Windows"
     validations:
       required: true

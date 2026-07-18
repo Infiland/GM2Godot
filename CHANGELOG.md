@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.10 - 2026-07-18
+
+- Serialized the two-run workflow publisher race across tag checks, builds, and publication without blocking pull-request validation; the surviving waiter rechecks the exact tag, same-version release state detected without that tag fails before builds with manual-recovery guidance, and asset collisions are non-overwriting.
+
 ## 0.7.9 - 2026-07-18
 
 - Made release reruns idempotent through an authoritative exact remote-tag check: existing versions skip builds and publication without changing assets, absent tags proceed, and lookup failures stop the workflow; updated maintainer guidance to match.

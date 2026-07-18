@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.9 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.10 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -8,7 +8,11 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, and publishes the GitHub release/tag. Every new release must use a new version. A rerun or manual dispatch for a version whose exact remote tag already exists is an intentional no-op: the workflow skips build and publication without changing the existing release. If the remote tag lookup fails for any reason other than an absent exact ref, the workflow stops before building.
+`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, and publishes the GitHub release/tag. Every new release must use a new version.
+
+Publication-capable push and manual-dispatch runs share one concurrency group across refs, covering the exact remote-tag check, builds, and publication. Pull-request validation remains independent. The active publisher is not cancelled and one additional publisher may remain pending; GitHub's default concurrency behavior can replace that pending run if a third publisher arrives, and it does not guarantee FIFO ordering. When the surviving waiter starts, it rechecks the exact remote tag. A present tag makes the run an intentional no-op; an absent tag after a clean prepublication failure lets it try the normal build and publication path. The release action is also configured not to overwrite same-named asset collisions.
+
+When the exact remote tag is absent, the workflow uses an authenticated, paginated release query before any platform build and repeats the negative check to reduce listing-consistency risk. Any exact-tag release object observed by those checks—including a draft, partial, or unexpectedly published release—fails closed with identifying details rather than being reused or changed automatically. An API, authentication, pagination, or response-validation failure also stops publication. Record the diagnostic and run URL, inspect the tag, release, and expected asset inventory, then have a maintainer clean up the inconsistent state explicitly before dispatching a new run. Preserve a completed release and its asset IDs and digests. If the exact remote tag already exists, the workflow remains the #722 no-op path; that path is not a complete release-integrity audit. The concurrency group serializes this workflow's publishers, not an external UI/API publisher that changes release state after the last preflight query.
 
 The release workflow is canonical at [`.github/workflows/release.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml).
 

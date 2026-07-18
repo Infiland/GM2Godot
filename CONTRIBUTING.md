@@ -38,8 +38,8 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
 
 ### UI Development
 - Maintain consistency with the existing dark theme
-- Use the modern widget classes in `src/gui/modern_widgets.py`
-- Follow the existing pattern for styling and layout
+- Follow the existing panel, dialog, icon, and theme patterns under `src/gui/`
+- Keep user-facing controls in the owning `src/gui/panels/` or `src/gui/dialogs/` module
 - Test UI changes at different window sizes
 
 ### Asset Conversion
@@ -120,7 +120,7 @@ Fixture contributions should include:
    - Go to the [GM2Godot repository](https://github.com/Infiland/GM2Godot)
    - Click "New Pull Request"
    - Select your fork and branch
-   - Fill out the PR template
+   - Describe the focused scope and validation evidence
    - Add screenshots for UI changes
 
 ## Testing
@@ -134,6 +134,18 @@ Before submitting a PR:
 - Check that existing features still work
 - Test on different platforms if possible
 
+## Maintainer Release Checklist
+
+For every versioned pull request:
+
+- Update `src/version.py`, `CHANGELOG.md`, the current source version in `README.md`, version examples in issue templates, and `tests/test_version.py`.
+- Review the version banners and user workflows under `docs/wiki/`; include any required Wiki changes in the same reviewable branch.
+- Confirm all required pull-request checks pass, including exact Godot 4.7.1 smoke and the current GameMaker LTS conversion gates.
+- After merge, confirm the new tag points to the intended `main` commit and that the Linux, macOS zip/DMG, and Windows release assets are present and non-empty.
+- If Wiki sources changed, reference the documentation issue without an auto-closing keyword, publish the exact merged `docs/wiki/` pages, and verify live navigation before closing the issue.
+
+The full Wiki publication and rollback procedure is in [`docs/WIKI_MAINTENANCE.md`](docs/WIKI_MAINTENANCE.md).
+
 ## Areas for Contribution
 
 We particularly welcome contributions in these areas:
@@ -146,22 +158,22 @@ We particularly welcome contributions in these areas:
 
 ## Localization
 
-To localize GM2Godot into other languages, create a copy of the Template.json file found in the Languages folder in GM2Godot's root directory. Rename the file to the chosen language's ISO-639 (Set 3) code (for example, eng for English). Refer to [Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-3_codes) for a list of languages and their corresponding ISO-639 codes.
-More information regarding localization can be found in the README section of the Template.json file ([GitHub copy](https://raw.githubusercontent.com/Infiland/GM2Godot/refs/heads/main/Languages/template.json))
+To localize GM2Godot into another language, copy `Languages/template/template.json` to the `Languages/` directory and rename the copy to the language's ISO 639-3 code (for example, `eng.json` for English). Refer to [Wikipedia](https://en.wikipedia.org/wiki/List_of_ISO_639-3_codes) for the code list.
+
+The template's embedded `README` field explains the required keys ([GitHub copy](https://raw.githubusercontent.com/Infiland/GM2Godot/refs/heads/main/Languages/template/template.json)).
 
 ## Questions or Issues?
 
 - Check existing [issues](https://github.com/Infiland/GM2Godot/issues)
 - Create a new issue for bugs or feature requests
-- Join our community discussions (Add community links)
 
 ## Code of Conduct
 
 - Be respectful and inclusive
 - Help others learn and grow
 - Focus on constructive feedback
-- Follow the project's code of conduct (Add link if available)
+- Follow the project's [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## License
 
-By contributing to GM2Godot, you agree that your contributions will be licensed under the same license as the project (Add license information).
+By contributing to GM2Godot, you agree that your contributions will be licensed under the project's [Apache License 2.0](LICENSE).

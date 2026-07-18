@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -58,6 +59,12 @@ EXTERNAL_FIXTURE_REPOSITORIES = (
     ),
 )
 RELEASE_PREFLIGHT_TEST_TAG = "v999.123.456"
+RELEASE_SMOKE_ARTIFACT = "release-action-smoke"
+RELEASE_SMOKE_SENTINEL = "release-action-sentinel.txt"
+RELEASE_SMOKE_PAYLOAD = b"GM2Godot release action smoke\n"
+RELEASE_SMOKE_PAYLOAD_SHA256 = (
+    "f1efea0ac477ea11ec0fe4d13d9bfdcc2908ed8a6e2c71b91952388c1aaf48e6"
+)
 
 
 def _godot_env_lines(content: str) -> tuple[str, ...]:
@@ -325,6 +332,382 @@ def _write_raw_artifact_archive(
 
 
 class TestCIWorkflows(unittest.TestCase):
+    def test_release_action_smoke_is_pr_only_and_credentialless(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "on:\n"
+            "  pull_request:\n"
+            "    branches: [main]\n"
+            "    paths:\n"
+            "      - '.github/workflows/release.yml'\n"
+            "      - '.github/workflows/release-action-smoke.yml'\n",
+            content,
+        )
+        self.assertEqual(content.count("permissions:"), 3)
+        self.assertIn("\npermissions: {}\n", content)
+        self.assertEqual(content.count("permissions: {}"), 2)
+        self.assertIn("permissions:\n      actions: read", content)
+        for forbidden in (
+            "pull_request_target:",
+            "workflow_dispatch:",
+            "schedule:",
+            "\n  push:",
+            "actions/checkout@",
+            "secrets.",
+            "contents: write",
+            "write-all",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, content)
+        self.assertNotRegex(content, r"(?im)^\s+[a-z0-9_-]+:\s+write\s*$")
+        self.assertNotRegex(content, r"\b(?:PAT|PERSONAL_ACCESS_TOKEN)\b")
+        self.assertNotRegex(content, r"(?i)\bsecrets\s*(?:\.|\[)")
+
+    def test_release_action_smoke_is_independent_of_release_state(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        for forbidden in (
+            "src/version.py",
+            "VERSION",
+            "get-version",
+            "tag_exists",
+            "needs.get-version",
+            "git ls-remote",
+            "refs/tags/",
+            "release-state-preflight",
+            "gm2godot-release-publisher",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, content)
+        self.assertIn(
+            "tag_name: gm2godot-release-smoke-"
+            "${{ github.run_id }}-${{ github.run_attempt }}",
+            content,
+        )
+
+    def test_release_action_smoke_reuses_production_action_pins(self) -> None:
+        release = (
+            PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        smoke = (
+            PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        ).read_text(encoding="utf-8")
+
+        for action in (
+            "actions/upload-artifact",
+            "actions/download-artifact",
+            "softprops/action-gh-release",
+        ):
+            pattern = re.compile(
+                rf"uses:\s*{re.escape(action)}@([0-9a-f]{{40}})\s+#\s+(v\S+)"
+            )
+            release_pins = set(pattern.findall(release))
+            smoke_pins = pattern.findall(smoke)
+            with self.subTest(action=action):
+                self.assertEqual(len(release_pins), 1)
+                self.assertEqual(len(smoke_pins), 1)
+                self.assertEqual(smoke_pins[0], next(iter(release_pins)))
+
+    def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        content = workflow.read_text(encoding="utf-8")
+        expected_archive = (
+            "raw-artifacts/release-action-smoke/release-action-smoke.zip"
+        )
+
+        for required in (
+            "id: upload_sentinel",
+            f"name: {RELEASE_SMOKE_ARTIFACT}",
+            f"path: sentinel/{RELEASE_SMOKE_SENTINEL}",
+            "if-no-files-found: error",
+            "retention-days: 1",
+            "needs: upload-sentinel",
+            "path: raw-artifacts/release-action-smoke",
+            "skip-decompress: true",
+            "digest-mismatch: error",
+            "${{ needs.upload-sentinel.outputs.artifact_digest }}",
+            expected_archive,
+            RELEASE_SMOKE_PAYLOAD_SHA256,
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, content)
+        self.assertNotIn("archive: true", content)
+
+        create_script = _workflow_run_script(content, "Create sentinel")
+        verify_script = _workflow_run_script(
+            content,
+            "Verify sentinel archive and bytes",
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            created = subprocess.run(
+                ["bash", "-c", create_script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+            self.assertEqual(
+                (root / "sentinel" / RELEASE_SMOKE_SENTINEL).read_bytes(),
+                RELEASE_SMOKE_PAYLOAD,
+            )
+
+        cases = (
+            (
+                "valid",
+                {RELEASE_SMOKE_SENTINEL: RELEASE_SMOKE_PAYLOAD},
+                None,
+                0,
+                "",
+            ),
+            (
+                "wrong archive digest",
+                {RELEASE_SMOKE_SENTINEL: RELEASE_SMOKE_PAYLOAD},
+                "0" * 64,
+                1,
+                "Downloaded archive differs from the uploaded artifact",
+            ),
+            (
+                "altered sentinel bytes",
+                {RELEASE_SMOKE_SENTINEL: b"altered\n"},
+                None,
+                1,
+                "",
+            ),
+            (
+                "nested sentinel",
+                {f"nested/{RELEASE_SMOKE_SENTINEL}": RELEASE_SMOKE_PAYLOAD},
+                None,
+                1,
+                "Unexpected sentinel archive layout",
+            ),
+        )
+        for case, members, digest_override, expected_status, expected_error in cases:
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    _write_raw_artifact_archive(
+                        root,
+                        RELEASE_SMOKE_ARTIFACT,
+                        members,
+                    )
+                    archive = root / expected_archive
+                    environment = os.environ.copy()
+                    environment["EXPECTED_ARCHIVE_SHA256"] = (
+                        digest_override
+                        or hashlib.sha256(archive.read_bytes()).hexdigest()
+                    )
+                    result = subprocess.run(
+                        ["bash", "-c", verify_script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+
+                if expected_status == 0:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                if expected_error:
+                    self.assertIn(expected_error, result.stderr)
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            direct_archive = root / "raw-artifacts" / f"{RELEASE_SMOKE_ARTIFACT}.zip"
+            direct_archive.parent.mkdir(parents=True)
+            with zipfile.ZipFile(direct_archive, "w") as archive:
+                archive.writestr(RELEASE_SMOKE_SENTINEL, RELEASE_SMOKE_PAYLOAD)
+            environment = os.environ.copy()
+            environment["EXPECTED_ARCHIVE_SHA256"] = hashlib.sha256(
+                direct_archive.read_bytes()
+            ).hexdigest()
+            result = subprocess.run(
+                ["bash", "-c", verify_script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"Missing or empty sentinel archive: {expected_archive}",
+            result.stderr,
+        )
+
+    def test_release_action_smoke_requires_local_publisher_rejection(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        content = workflow.read_text(encoding="utf-8")
+        publisher_marker = (
+            "      - name: Load publisher and reject before GitHub API access\n"
+        )
+        publisher_step = content[
+            content.index(publisher_marker):content.index(
+                "      - name: Assert the publisher rejected the probe\n"
+            )
+        ]
+
+        for required in (
+            "id: publisher_startup",
+            "continue-on-error: true",
+            "uses: softprops/action-gh-release@",
+            "GITHUB_TOKEN: gm2godot-release-smoke-invalid-token",
+            "repository: github/gm2godot-release-smoke-never-create",
+            "token: gm2godot-release-smoke-invalid-token",
+            "files: __gm2godot_release_smoke_missing__/"
+            "${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist",
+            "fail_on_unmatched_files: true",
+            "overwrite_files: false",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, publisher_step)
+        for forbidden in ("secrets.", "${{ github.token }}", "draft:"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, publisher_step)
+        self.assertEqual(content.count("continue-on-error: true"), 1)
+        self.assertIn("if: ${{ always() }}", content)
+        self.assertIn(
+            "PUBLISHER_OUTCOME: ${{ steps.publisher_startup.outcome }}",
+            content,
+        )
+        self.assertNotIn("publisher_startup.conclusion", content)
+
+        assertion_script = _workflow_run_script(
+            content,
+            "Assert the publisher rejected the probe",
+        )
+        for outcome, expected_status in (
+            ("failure", 0),
+            ("success", 1),
+            ("cancelled", 1),
+            ("", 1),
+        ):
+            with self.subTest(outcome=outcome):
+                environment = os.environ.copy()
+                environment["PUBLISHER_OUTCOME"] = outcome
+                result = subprocess.run(
+                    ["bash", "-c", assertion_script],
+                    cwd=PROJECT_ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertEqual(
+                    result.returncode == 0,
+                    expected_status == 0,
+                    result.stderr,
+                )
+
+    def test_release_action_smoke_proves_publisher_entrypoint_loaded(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
+        content = workflow.read_text(encoding="utf-8")
+        receipt_job = content[content.index("  publisher-startup-receipt:"):]
+        expected_pattern = (
+            "__gm2godot_release_smoke_missing__/12345-2/must-not-exist"
+        )
+
+        for required in (
+            "name: publisher-startup-receipt",
+            "needs: publisher-startup",
+            "permissions:\n      actions: read",
+            "GH_TOKEN: ${{ github.token }}",
+            "jobs?per_page=100",
+            "select(.name == \"publisher-startup\") | .id",
+            "for retry in 1 2 3 4 5",
+            "actions/jobs/${job_id}/logs",
+            "Pattern '$EXPECTED_PATTERN' does not match any files.",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, receipt_job)
+        for forbidden in ("contents: read", "contents: write", "actions/checkout"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, receipt_job)
+
+        script = _workflow_run_script(
+            content,
+            "Verify the action-originated publisher rejection",
+        )
+        for case, job_ids, log_text, expected_status in (
+            (
+                "action diagnostic",
+                "98765\n",
+                f"Error: Pattern '{expected_pattern}' does not match any files.\n",
+                0,
+            ),
+            (
+                "different failure",
+                "98765\n",
+                "Error: Unable to resolve action\n",
+                1,
+            ),
+            ("missing publisher job", "", "", 1),
+            ("duplicate publisher jobs", "98765\n98766\n", "", 1),
+        ):
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    tools_dir = root / "tools"
+                    tools_dir.mkdir()
+                    fake_gh = tools_dir / "gh"
+                    fake_gh.write_text(
+                        f"#!{sys.executable}\n"
+                        """import os
+import sys
+
+endpoint = next(
+    (argument for argument in sys.argv[1:] if argument.startswith("repos/")),
+    "",
+)
+if endpoint.endswith("jobs?per_page=100"):
+    print(os.environ["FAKE_JOB_IDS"], end="")
+    raise SystemExit(0)
+if endpoint.endswith("actions/jobs/98765/logs"):
+    print(os.environ["FAKE_PUBLISHER_LOG"], end="")
+    raise SystemExit(0)
+print(f"unexpected gh endpoint: {endpoint}", file=sys.stderr)
+raise SystemExit(97)
+""",
+                        encoding="utf-8",
+                    )
+                    fake_gh.chmod(0o755)
+                    environment = os.environ.copy()
+                    environment.update(
+                        {
+                            "EXPECTED_PATTERN": expected_pattern,
+                            "FAKE_JOB_IDS": job_ids,
+                            "FAKE_PUBLISHER_LOG": log_text,
+                            "GH_TOKEN": "read-only-test-token",
+                            "PATH": os.pathsep.join(
+                                (str(tools_dir), environment.get("PATH", ""))
+                            ),
+                            "REPOSITORY": "Infiland/GM2Godot",
+                            "RUN_ATTEMPT": "2",
+                            "RUN_ID": "12345",
+                            "RUNNER_TEMP": str(root),
+                        }
+                    )
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+
+                self.assertEqual(
+                    result.returncode == 0,
+                    expected_status == 0,
+                    result.stderr,
+                )
+
     def test_release_preserves_digest_checks_without_deprecated_extraction(
         self,
     ) -> None:

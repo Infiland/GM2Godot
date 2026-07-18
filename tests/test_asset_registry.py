@@ -3799,6 +3799,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
         )
         _write_file(registry_path, "previous registry\n")
         os.chmod(registry_path, 0o640)
+        previous_stat = os.stat(registry_path)
+        previous_identity = previous_stat.st_dev, previous_stat.st_ino
+        previous_mode = stat.S_IMODE(previous_stat.st_mode)
+        previous_writable = bool(previous_stat.st_mode & stat.S_IWRITE)
 
         with patch(
             "src.conversion.asset_registry.write_animation_curve_registry",
@@ -3812,7 +3816,20 @@ class TestAssetRegistryConverter(unittest.TestCase):
 
         with open(registry_path, "r", encoding="utf-8") as registry_file:
             self.assertEqual(registry_file.read(), "previous registry\n")
-        self.assertEqual(stat.S_IMODE(os.stat(registry_path).st_mode), 0o640)
+        current_stat = os.stat(registry_path)
+        self.assertEqual(
+            (current_stat.st_dev, current_stat.st_ino),
+            previous_identity,
+        )
+        self.assertEqual(
+            bool(current_stat.st_mode & stat.S_IWRITE),
+            previous_writable,
+        )
+        if os.name != "nt":
+            self.assertEqual(
+                stat.S_IMODE(current_stat.st_mode),
+                previous_mode,
+            )
         self.assertEqual(
             converter.conversion_step_result(
                 finalize_unfinished_as=None,
@@ -3972,6 +3989,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
         registry_directory = os.path.dirname(registry_path)
         _write_file(registry_path, "previous registry\n")
         os.chmod(registry_path, 0o640)
+        previous_stat = os.stat(registry_path)
+        previous_identity = previous_stat.st_dev, previous_stat.st_ino
+        previous_mode = stat.S_IMODE(previous_stat.st_mode)
+        previous_writable = bool(previous_stat.st_mode & stat.S_IWRITE)
 
         for patched_name, error_message in (
             ("os.fsync", "stage failed"),
@@ -3990,10 +4011,20 @@ class TestAssetRegistryConverter(unittest.TestCase):
 
                 with open(registry_path, "r", encoding="utf-8") as registry_file:
                     self.assertEqual(registry_file.read(), "previous registry\n")
+                current_stat = os.stat(registry_path)
                 self.assertEqual(
-                    stat.S_IMODE(os.stat(registry_path).st_mode),
-                    0o640,
+                    (current_stat.st_dev, current_stat.st_ino),
+                    previous_identity,
                 )
+                self.assertEqual(
+                    bool(current_stat.st_mode & stat.S_IWRITE),
+                    previous_writable,
+                )
+                if os.name != "nt":
+                    self.assertEqual(
+                        stat.S_IMODE(current_stat.st_mode),
+                        previous_mode,
+                    )
                 staged_prefix = f".{os.path.basename(registry_path)}."
                 self.assertFalse(
                     any(
@@ -4016,10 +4047,27 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 0o600,
             )
         os.chmod(registry_path, 0o600)
+        previous_stat = os.stat(registry_path)
+        previous_identity = previous_stat.st_dev, previous_stat.st_ino
+        previous_mode = stat.S_IMODE(previous_stat.st_mode)
+        previous_writable = bool(previous_stat.st_mode & stat.S_IWRITE)
 
         AssetRegistryConverter._atomic_write_text(registry_path, "second\n")
 
-        self.assertEqual(stat.S_IMODE(os.stat(registry_path).st_mode), 0o600)
+        current_stat = os.stat(registry_path)
+        self.assertNotEqual(
+            (current_stat.st_dev, current_stat.st_ino),
+            previous_identity,
+        )
+        self.assertEqual(
+            bool(current_stat.st_mode & stat.S_IWRITE),
+            previous_writable,
+        )
+        if os.name != "nt":
+            self.assertEqual(
+                stat.S_IMODE(current_stat.st_mode),
+                previous_mode,
+            )
         with open(registry_path, "r", encoding="utf-8") as registry_file:
             self.assertEqual(registry_file.read(), "second\n")
 

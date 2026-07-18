@@ -858,11 +858,39 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 destination_name,
             )
 
-        with patch.object(
-            included_files_module,
-            "_rename_included_transaction_entry_at",
-            side_effect=inject_unknown_destination,
-        ), self.assertRaises(OSError):
+        def inject_unknown_destination_fallback(
+            _source: str,
+            destination: str,
+        ) -> None:
+            nonlocal sentinel_name
+            destination_name = os.path.basename(destination)
+            if (
+                sentinel_name is None
+                and destination_name.startswith(
+                    ".gml_included_file_registry.gd."
+                )
+                and destination_name.endswith(".backup")
+            ):
+                with open(destination, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown sentinel")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+                sentinel_name = destination_name
+
+        rename_patcher = (
+            patch.object(
+                included_files_module,
+                "_rename_included_transaction_entry_at",
+                side_effect=inject_unknown_destination,
+            )
+            if included_files_module._included_descriptor_paths_supported()
+            else patch.object(
+                included_files_module,
+                "_before_included_transaction_rename_fallback",
+                side_effect=inject_unknown_destination_fallback,
+            )
+        )
+        with rename_patcher, self.assertRaises(OSError):
             converter.convert_all()
 
         self.assertIsNotNone(sentinel_name)
@@ -940,11 +968,32 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 )
                 swapped_backup_path = os.path.join(self.godot_dir, name)
 
-        with patch.object(
-            included_files_module,
-            "_before_included_cleanup_quarantine",
-            side_effect=swap_cleanup_root,
-        ):
+        def swap_cleanup_root_fallback(path: str) -> None:
+            nonlocal swapped_backup_path
+            name = os.path.basename(path)
+            if (
+                swapped_backup_path is None
+                and name.startswith(".included_files.")
+                and name.endswith(".backup")
+            ):
+                os.rename(path, parked_backup)
+                os.rename(victim_path, path)
+                swapped_backup_path = path
+
+        cleanup_patcher = (
+            patch.object(
+                included_files_module,
+                "_before_included_cleanup_quarantine",
+                side_effect=swap_cleanup_root,
+            )
+            if included_files_module._included_descriptor_paths_supported()
+            else patch.object(
+                included_files_module,
+                "_before_included_cleanup_quarantine_fallback",
+                side_effect=swap_cleanup_root_fallback,
+            )
+        )
+        with cleanup_patcher:
             converter.convert_all()
 
         self.assertIsNotNone(swapped_backup_path)

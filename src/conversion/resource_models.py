@@ -8,6 +8,12 @@ from typing import Literal, cast
 
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_filesystem_source_path,
+    resolve_project_source_path,
+    validate_project_resource_source_path,
+)
 from src.conversion.type_defs import JsonDict, JsonList
 
 
@@ -209,6 +215,8 @@ def parse_gamemaker_resource_models(gm_project_path: str) -> GameMakerResourceMo
             code=diagnostic.code,
             message=diagnostic.message,
             source_path=diagnostic.source.path if diagnostic.source is not None else "",
+            resource_name=diagnostic.resource or "",
+            resource_kind=diagnostic.resource_kind or "",
         )
         for diagnostic in manifest.diagnostics
     ]
@@ -297,7 +305,24 @@ def _parse_resource_model(
     gm_project_path: str,
     reference: ProjectResourceReference,
 ) -> tuple[ResourceModel | None, tuple[ResourceModelDiagnostic, ...]]:
-    yy_path = os.path.join(gm_project_path, *reference.path.replace("\\", "/").split("/"))
+    try:
+        resolved_yy = resolve_project_source_path(
+            gm_project_path,
+            reference.path,
+        )
+        validate_project_resource_source_path(
+            resolved_yy,
+            reference.kind,
+        )
+    except ProjectSourcePathError as exc:
+        return None, (
+            _source_path_diagnostic(
+                reference,
+                reference.path,
+                exc,
+            ),
+        )
+    yy_path = resolved_yy.filesystem_path
     raw_data = _read_lenient_json_file(yy_path)
     if raw_data is None:
         return None, (
@@ -311,7 +336,12 @@ def _parse_resource_model(
             ),
         )
 
-    base = _base_kwargs(reference, yy_path, raw_data)
+    base = _base_kwargs(
+        reference,
+        yy_path,
+        resolved_yy.source_path,
+        raw_data,
+    )
     kind = reference.kind
     if kind == "sprites":
         return SpriteModel(
@@ -354,16 +384,34 @@ def _parse_resource_model(
             layers=layers,
         ), ()
     if kind == "scripts":
+        gml_path, diagnostics = _first_existing_neighbor(
+            gm_project_path,
+            yy_path,
+            ".gml",
+            reference,
+        )
         return ScriptModel(
             **base,
-            gml_path=_first_existing_neighbor(yy_path, ".gml"),
-        ), ()
+            gml_path=gml_path,
+        ), diagnostics
     if kind == "shaders":
+        vertex_path, vertex_diagnostics = _first_existing_neighbor(
+            gm_project_path,
+            yy_path,
+            ".vsh",
+            reference,
+        )
+        fragment_path, fragment_diagnostics = _first_existing_neighbor(
+            gm_project_path,
+            yy_path,
+            ".fsh",
+            reference,
+        )
         return ShaderModel(
             **base,
-            vertex_path=_first_existing_neighbor(yy_path, ".vsh"),
-            fragment_path=_first_existing_neighbor(yy_path, ".fsh"),
-        ), ()
+            vertex_path=vertex_path,
+            fragment_path=fragment_path,
+        ), vertex_diagnostics + fragment_diagnostics
     if kind == "tilesets":
         return TileSetModel(
             **base,
@@ -393,6 +441,7 @@ def _parse_resource_model(
 def _base_kwargs(
     reference: ProjectResourceReference,
     yy_path: str,
+    yyp_path: str,
     raw_data: JsonDict,
 ) -> JsonDict:
     return {
@@ -400,7 +449,7 @@ def _base_kwargs(
         "kind": reference.kind,
         "resource_type": reference.resource_type,
         "yy_path": yy_path,
-        "yyp_path": reference.path,
+        "yyp_path": yyp_path,
         "order": reference.order,
         "subfolder": _subfolder_from_raw_data(raw_data),
         "raw_data": raw_data,
@@ -461,18 +510,70 @@ def _layer_resource_type(layer: JsonDict) -> str:
     return "UnknownLayer"
 
 
-def _first_existing_neighbor(yy_path: str, extension: str) -> str | None:
+def _first_existing_neighbor(
+    gm_project_path: str,
+    yy_path: str,
+    extension: str,
+    reference: ProjectResourceReference,
+) -> tuple[str | None, tuple[ResourceModelDiagnostic, ...]]:
     directory = os.path.dirname(yy_path)
     if not os.path.isdir(directory):
-        return None
+        return None, ()
     preferred = os.path.splitext(yy_path)[0] + extension
-    if os.path.isfile(preferred):
-        return preferred
-    for name in sorted(os.listdir(directory)):
-        candidate = os.path.join(directory, name)
-        if name.lower().endswith(extension) and os.path.isfile(candidate):
-            return candidate
-    return None
+    try:
+        fallback_names = sorted(os.listdir(directory))
+    except OSError:
+        return None, ()
+    candidates = [preferred]
+    candidates.extend(
+        os.path.join(directory, name)
+        for name in fallback_names
+        if name.lower().endswith(extension)
+    )
+    diagnostics: list[ResourceModelDiagnostic] = []
+    seen_candidates: set[str] = set()
+    for candidate in candidates:
+        candidate_key = os.path.normcase(os.path.abspath(candidate))
+        if candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        try:
+            resolved_candidate = resolve_project_filesystem_source_path(
+                gm_project_path,
+                candidate,
+            )
+        except ProjectSourcePathError as exc:
+            if os.path.lexists(candidate):
+                diagnostics.append(
+                    _source_path_diagnostic(reference, candidate, exc)
+                )
+            continue
+        if os.path.isfile(resolved_candidate.filesystem_path):
+            return resolved_candidate.filesystem_path, tuple(diagnostics)
+    return None, tuple(diagnostics)
+
+
+def _source_path_diagnostic(
+    reference: ProjectResourceReference,
+    rejected_path: str,
+    error: ProjectSourcePathError,
+) -> ResourceModelDiagnostic:
+    owner_path = (
+        reference.source.path
+        if reference.source is not None
+        else reference.path
+    )
+    return ResourceModelDiagnostic(
+        severity="warning",
+        code="GM2GD-SOURCE-PATH-REJECTED",
+        message=(
+            "Rejected GameMaker source path "
+            f"{rejected_path!r} declared by {owner_path}: {error}"
+        ),
+        source_path=owner_path,
+        resource_name=reference.name,
+        resource_kind=reference.kind,
+    )
 
 
 def _named_reference(value: object) -> str | None:

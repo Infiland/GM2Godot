@@ -148,6 +148,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "fonts": lambda: FontConverter(
                 context.gm_project_path,
@@ -158,6 +159,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "tilesets": lambda: TileSetConverter(
                 context.gm_project_path,
@@ -168,6 +170,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "sounds": lambda: SoundConverter(
                 context.gm_project_path,
@@ -179,6 +182,7 @@ class Converter:
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
                 organize_by_audio_group=context.group_sounds_by_audio_group,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "notes": lambda: NoteConverter(
                 context.gm_project_path,
@@ -189,6 +193,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "shaders": lambda: ShaderConverter(
                 context.gm_project_path,
@@ -199,6 +204,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "included_files": lambda: IncludedFilesConverter(
                 context.gm_project_path,
@@ -209,6 +215,7 @@ class Converter:
                 update_log_callback=context.update_log_callback,
                 compact_logging=context.compact_logging,
                 max_workers=context.max_workers,
+                diagnostics=context.diagnostics,
             ).convert_all(),
             "scripts": lambda: ScriptConverter(
                 context.gm_project_path,
@@ -256,5 +263,6 @@ class Converter:
                 max_workers=context.max_workers,
                 organize_sounds_by_audio_group=context.group_sounds_by_audio_group,
                 macro_configuration=context.target_platform,
+                diagnostics=context.diagnostics,
             ).convert_all(),
         }

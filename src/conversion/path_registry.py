@@ -5,6 +5,10 @@ import os
 from dataclasses import dataclass
 from typing import Iterable, Protocol, cast
 
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
+)
 from src.conversion.type_defs import JsonDict
 
 PATH_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_path_registry.gd")
@@ -68,8 +72,14 @@ def build_path_registry_entries(
     for asset_entry in asset_entries:
         if asset_entry.kind != "paths":
             continue
-        yy_path = os.path.join(gm_project_path, asset_entry.source_path)
-        data = _read_json_lenient(yy_path)
+        try:
+            resolved_yy = resolve_project_source_path(
+                gm_project_path,
+                asset_entry.source_path,
+            )
+        except ProjectSourcePathError:
+            continue
+        data = _read_json_lenient(resolved_yy.filesystem_path)
         if data is None:
             continue
         path_entries.append(_path_entry_from_yy(asset_entry, data))

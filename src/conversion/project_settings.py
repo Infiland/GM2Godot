@@ -38,32 +38,43 @@ class ProjectSettingsConverter(BaseConverter):
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
 
     def convert_icon(self) -> bool:
-        gm_icon_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, 'icons')
+        requested_icon_path = os.path.join(
+            self.gm_project_path,
+            'options',
+            self.gm_platform,
+            'icons',
+        )
+        gm_icon_path = self._resolve_icon_directory(
+            requested_icon_path,
+            self.gm_platform,
+        )
+        icon_platform = self.gm_platform
         godot_ico_path = os.path.join(self.godot_project_path, 'icon.ico')
         godot_png_path = os.path.join(self.godot_project_path, 'icon.png')
 
-        if not os.path.exists(gm_icon_path):
-            gm_icon_path = self._find_fallback_icon_path()
-            if gm_icon_path is None:
+        if gm_icon_path is None:
+            fallback_icon = self._find_fallback_icon_path()
+            if fallback_icon is None:
                 self.log_callback(get_localized("Console_Convertor_Icon_Error_DirectoryNotFound").format(
-                    gm_icon_path=os.path.join(self.gm_project_path, 'options', self.gm_platform, 'icons')))
+                    gm_icon_path=requested_icon_path))
                 return False
+            gm_icon_path, icon_platform = fallback_icon
 
-        icon_files = [f for f in os.listdir(gm_icon_path) if f.endswith('.ico') or f.endswith('.png')]
+        icon_files = self._contained_icon_files(gm_icon_path, icon_platform)
 
         if not (icon_files):
             self.log_callback(get_localized("Console_Convertor_Icon_Error_FileNotFound"))
             return False
 
-        source_icon = os.path.join(gm_icon_path, icon_files[0])
+        icon_name, source_icon = icon_files[0]
             
         try:
             shutil.copy2(source_icon, godot_ico_path)
-            self.log_callback(get_localized("Console_Convertor_Icon_Copied").format(icon_files=icon_files[0]))
+            self.log_callback(get_localized("Console_Convertor_Icon_Copied").format(icon_files=icon_name))
 
             with Image.open(source_icon) as img:
                 img.save(godot_png_path, 'PNG')
-            self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_files[0]))
+            self.log_callback(get_localized("Console_Convertor_Icon_Converted").format(icon_files=icon_name))
 
             project_godot_path = os.path.join(
                 self.godot_project_path,
@@ -81,23 +92,75 @@ class ProjectSettingsConverter(BaseConverter):
             self.log_callback(get_localized("Console_Convertor_Error_IconGeneric").format(error=str(e)))
             return False
 
-    def _find_fallback_icon_path(self) -> Optional[str]:
+    def _find_fallback_icon_path(self) -> tuple[str, str] | None:
         """Search other platforms for an icon directory when the selected platform has none."""
-        options_dir = os.path.join(self.gm_project_path, 'options')
-        if not os.path.isdir(options_dir):
+        resolved_options = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'options'),
+            resource_type="project_options",
+            field="options directory",
+        )
+        if (
+            resolved_options is None
+            or not os.path.isdir(resolved_options.filesystem_path)
+        ):
             return None
 
-        for platform in os.listdir(options_dir):
+        for platform in sorted(os.listdir(resolved_options.filesystem_path)):
             if platform == self.gm_platform:
                 continue
-            candidate = os.path.join(options_dir, platform, 'icons')
-            if os.path.isdir(candidate):
-                icon_files = [f for f in os.listdir(candidate) if f.endswith('.ico') or f.endswith('.png')]
-                if icon_files:
-                    self.log_callback(get_localized("Console_Convertor_Icon_Fallback").format(platform=platform))
-                    return candidate
+            candidate = self._resolve_icon_directory(
+                os.path.join(
+                    resolved_options.filesystem_path,
+                    platform,
+                    'icons',
+                ),
+                platform,
+            )
+            if candidate is not None and self._contained_icon_files(candidate, platform):
+                self.log_callback(get_localized("Console_Convertor_Icon_Fallback").format(platform=platform))
+                return candidate, platform
 
         return None
+
+    def _resolve_icon_directory(
+        self,
+        icon_path: str,
+        platform: str,
+    ) -> str | None:
+        resolved = self._resolve_discovered_project_source(
+            icon_path,
+            owner_source_path=f"options/{platform}",
+            resource=platform,
+            resource_type="project_options",
+            field="icons directory",
+        )
+        if resolved is None or not os.path.isdir(resolved.filesystem_path):
+            return None
+        return resolved.filesystem_path
+
+    def _contained_icon_files(
+        self,
+        icon_directory: str,
+        platform: str,
+    ) -> list[tuple[str, str]]:
+        try:
+            filenames = sorted(os.listdir(icon_directory))
+        except OSError:
+            return []
+        icons: list[tuple[str, str]] = []
+        for filename in filenames:
+            if not filename.casefold().endswith((".ico", ".png")):
+                continue
+            resolved = self._resolve_discovered_project_source(
+                os.path.join(icon_directory, filename),
+                owner_source_path=f"options/{platform}/icons",
+                resource=platform,
+                resource_type="project_options",
+                field="icon file",
+            )
+            if resolved is not None and os.path.isfile(resolved.filesystem_path):
+                icons.append((filename, resolved.filesystem_path))
+        return icons
 
     def get_gm_project_name(self) -> Optional[str]:
         if self.project_manifest.yyp_path is None:

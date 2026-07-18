@@ -7,6 +7,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -21,6 +22,9 @@ from src.conversion.extension_registry import (
     render_extension_stub_script,
     write_extension_compatibility_outputs,
 )
+from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.project_source_paths import ResolvedProjectSourcePath
+import src.conversion.extension_registry as extension_registry
 
 
 def _write_file(path: str, content: str) -> None:
@@ -33,10 +37,46 @@ class TestExtensionRegistry(unittest.TestCase):
     def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
         self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
 
     def tearDown(self) -> None:
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    @staticmethod
+    def _write_minimal_extension(path: str, name: str) -> None:
+        _write_file(
+            path,
+            json.dumps(
+                {
+                    "name": name,
+                    "files": [
+                        {
+                            "filename": "native.dll",
+                            "functions": [{"name": "extension_call"}],
+                        }
+                    ],
+                    "resourceType": "GMExtension",
+                }
+            ),
+        )
+
+    @staticmethod
+    def _source_path_rejections(
+        diagnostics: DiagnosticCollector,
+    ):
+        return [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+
+    def _make_symlink(self, target: str, link_path: str) -> None:
+        try:
+            os.symlink(target, link_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
 
     def _write_extension(self, folder_name: str = "AdSDK", display_name: str = "AdSDK") -> None:
         _write_file(
@@ -173,6 +213,220 @@ class TestExtensionRegistry(unittest.TestCase):
         with open(plugin_path, "r", encoding="utf-8") as f:
             plugin = f.read()
         self.assertIn('script="ad_sdk_extension.gd"', plugin)
+
+    def test_rejects_extensions_root_symlink_outside_project(self) -> None:
+        outside_extensions = os.path.join(self.outside_dir, "extensions")
+        self._write_minimal_extension(
+            os.path.join(outside_extensions, "Outside", "Outside.yy"),
+            "Outside",
+        )
+        self._make_symlink(
+            outside_extensions,
+            os.path.join(self.gm_dir, "extensions"),
+        )
+        diagnostics = DiagnosticCollector()
+        logs: list[str] = []
+
+        entries = build_extension_entries(
+            self.gm_dir,
+            diagnostics=diagnostics,
+            log_callback=logs.append,
+        )
+
+        self.assertEqual(entries, ())
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "extensions")
+        self.assertEqual(rejected[0].resource, "extensions")
+        self.assertEqual(rejected[0].manifest_entry, "extensions directory")
+        self.assertEqual(logs, [rejected[0].message])
+
+    def test_rejects_extension_directory_symlink_outside_project(self) -> None:
+        os.makedirs(os.path.join(self.gm_dir, "extensions"))
+        outside_extension = os.path.join(self.outside_dir, "ExternalSDK")
+        self._write_minimal_extension(
+            os.path.join(outside_extension, "ExternalSDK.yy"),
+            "ExternalSDK",
+        )
+        self._make_symlink(
+            outside_extension,
+            os.path.join(self.gm_dir, "extensions", "ExternalSDK"),
+        )
+        diagnostics = DiagnosticCollector()
+
+        entries = build_extension_entries(
+            self.gm_dir,
+            diagnostics=diagnostics,
+        )
+
+        self.assertEqual(entries, ())
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "extensions/ExternalSDK")
+        self.assertEqual(rejected[0].resource, "ExternalSDK")
+        self.assertEqual(rejected[0].manifest_entry, "extension directory")
+
+    def test_rejects_extension_metadata_symlink_outside_project(self) -> None:
+        extension_dir = os.path.join(self.gm_dir, "extensions", "ExternalSDK")
+        os.makedirs(extension_dir)
+        outside_yy = os.path.join(self.outside_dir, "ExternalSDK.yy")
+        self._write_minimal_extension(outside_yy, "ExternalSDK")
+        self._make_symlink(
+            outside_yy,
+            os.path.join(extension_dir, "ExternalSDK.yy"),
+        )
+        diagnostics = DiagnosticCollector()
+
+        entries = build_extension_entries(
+            self.gm_dir,
+            diagnostics=diagnostics,
+        )
+
+        self.assertEqual(entries, ())
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(
+            rejected[0].source_path,
+            "extensions/ExternalSDK/ExternalSDK.yy",
+        )
+        self.assertEqual(rejected[0].manifest_entry, "extension metadata")
+
+    def test_rejects_extension_metadata_symlink_to_contained_wrong_family(
+        self,
+    ) -> None:
+        wrong_family_target = os.path.join(
+            self.gm_dir,
+            "objects",
+            "o_extension_decoy",
+            "o_extension_decoy.yy",
+        )
+        self._write_minimal_extension(wrong_family_target, "WrongFamilySDK")
+
+        linked_name = "LinkedSDK"
+        linked_metadata = os.path.join(
+            self.gm_dir,
+            "extensions",
+            linked_name,
+            linked_name + ".yy",
+        )
+        os.makedirs(os.path.dirname(linked_metadata), exist_ok=True)
+        self._make_symlink(wrong_family_target, linked_metadata)
+
+        safe_name = "SafeSDK"
+        self._write_minimal_extension(
+            os.path.join(
+                self.gm_dir,
+                "extensions",
+                safe_name,
+                safe_name + ".yy",
+            ),
+            safe_name,
+        )
+        diagnostics = DiagnosticCollector()
+
+        with patch("builtins.open", wraps=open) as tracked_open:
+            entries = build_extension_entries(
+                self.gm_dir,
+                diagnostics=diagnostics,
+            )
+
+        self.assertEqual([entry.name for entry in entries], [safe_name])
+        opened_paths = {
+            os.path.realpath(call.args[0])
+            for call in tracked_open.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        }
+        self.assertNotIn(os.path.realpath(wrong_family_target), opened_paths)
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(
+            rejected[0].source_path,
+            f"extensions/{linked_name}/{linked_name}.yy",
+        )
+        self.assertEqual(rejected[0].resource, linked_name)
+        self.assertEqual(rejected[0].manifest_entry, "extension metadata")
+
+    def test_rejects_external_extension_mapping_symlink(self) -> None:
+        self._write_extension()
+        outside_mapping = os.path.join(
+            self.outside_dir,
+            "gm2godot_extension_functions.json",
+        )
+        _write_file(
+            outside_mapping,
+            json.dumps(
+                {"functions": {"ads_show_rewarded": "AdBridge.show"}}
+            ),
+        )
+        self._make_symlink(
+            outside_mapping,
+            os.path.join(
+                self.gm_dir,
+                "gm2godot_extension_functions.json",
+            ),
+        )
+        diagnostics = DiagnosticCollector()
+
+        report_path = write_extension_compatibility_outputs(
+            self.gm_dir,
+            self.godot_dir,
+            diagnostics=diagnostics,
+        )
+
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+        self.assertEqual(report["mapped_functions"], [])
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(
+            rejected[0].source_path,
+            "gm2godot_extension_functions.json",
+        )
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "extension function mapping",
+        )
+
+    def test_revalidates_extension_metadata_immediately_before_read(self) -> None:
+        yy_path = os.path.join(
+            self.gm_dir,
+            "extensions",
+            "SwapSDK",
+            "SwapSDK.yy",
+        )
+        self._write_minimal_extension(yy_path, "SafeSDK")
+        outside_yy = os.path.join(self.outside_dir, "SwapSDK.yy")
+        self._write_minimal_extension(outside_yy, "OutsideSDK")
+        diagnostics = DiagnosticCollector()
+        real_resolver = extension_registry.resolve_project_filesystem_source_path
+        metadata_resolutions = 0
+
+        def _swap_before_revalidation(
+            project_root: str,
+            candidate: str,
+        ) -> ResolvedProjectSourcePath:
+            nonlocal metadata_resolutions
+            if os.path.abspath(candidate) == os.path.abspath(yy_path):
+                metadata_resolutions += 1
+                if metadata_resolutions == 2:
+                    os.unlink(yy_path)
+                    self._make_symlink(outside_yy, yy_path)
+            return real_resolver(project_root, candidate)
+
+        with patch(
+            "src.conversion.extension_registry.resolve_project_filesystem_source_path",
+            side_effect=_swap_before_revalidation,
+        ):
+            entries = build_extension_entries(
+                self.gm_dir,
+                diagnostics=diagnostics,
+            )
+
+        self.assertEqual(metadata_resolutions, 2)
+        self.assertEqual(entries, ())
+        rejected = self._source_path_rejections(diagnostics)
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].manifest_entry, "extension metadata")
 
 
 if __name__ == "__main__":

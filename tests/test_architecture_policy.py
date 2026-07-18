@@ -95,6 +95,26 @@ class TestArchitecturePolicy(unittest.TestCase):
         self.assertEqual(report["room_root"]["id"], "gm_room_node2d")
         self.assertEqual(report["renderer"]["mode"], "godot_node_scene")
 
+    def test_feature_scan_ignores_gml_file_symlink_outside_project(self) -> None:
+        self._write_minimal_project()
+        outside_source = self.temp_dir / "outside.gml"
+        _write_text(outside_source, "network_create_socket(0);")
+        linked_source = self.gm_dir / "scripts" / "linked.gml"
+        linked_source.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            linked_source.symlink_to(outside_source)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+        report = build_architecture_policy_report(
+            str(self.gm_dir),
+            target_platform="windows",
+            enabled_converters=["scripts"],
+        )
+        features = cast(dict[str, object], report["project_features"])
+
+        self.assertEqual(features["has_network_code"], False)
+
     def _write_minimal_project(self) -> None:
         _write_json(
             self.gm_dir / "PolicyProject.yyp",

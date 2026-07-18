@@ -8,11 +8,13 @@ from dataclasses import dataclass
 
 from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_resource_stem, generated_subfolder_path
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    resolve_project_source_path,
+    ResolvedProjectSourcePath,
+    validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
@@ -22,6 +24,7 @@ from src.localization import get_localized
 class _ShaderAsset:
     name: str
     subfolder: str
+    owner_path: str | None = None
     vertex_path: str | None = None
     fragment_path: str | None = None
 
@@ -40,6 +43,7 @@ class _ShaderAssetBuilder:
     name: str
     subfolder: str
     source_directory: str
+    owner_path: str | None = None
     vertex_path: str | None = None
     fragment_path: str | None = None
 
@@ -47,6 +51,7 @@ class _ShaderAssetBuilder:
         return _ShaderAsset(
             name=self.name,
             subfolder=self.subfolder,
+            owner_path=self.owner_path,
             vertex_path=self.vertex_path,
             fragment_path=self.fragment_path,
         )
@@ -66,18 +71,33 @@ class ShaderConverter(BaseConverter):
                  log_callback: LogCallback = print, progress_callback: ProgressCallback | None = None,
                  conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path,
                          log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_shaders_path = os.path.join(self.godot_project_path, 'shaders')
         self._shader_output_paths: dict[str, str] = {}
 
     def convert_shader(self, input_file: str, output_file: str) -> None:
         """Convert one legacy stage and publish it as a complete shader resource."""
-        with open(input_file, 'r', encoding='utf-8') as f:
+        resolved_input = self._resolve_discovered_project_source(
+            input_file,
+            owner_source_path=input_file,
+            resource=os.path.splitext(os.path.basename(input_file))[0],
+            resource_type="shader",
+            field="shader stage",
+        )
+        if resolved_input is None or not os.path.isfile(resolved_input.filesystem_path):
+            return
+        with open(resolved_input.filesystem_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        stage = "vertex" if input_file.lower().endswith(".vsh") else "fragment"
+        stage = (
+            "vertex"
+            if resolved_input.filesystem_path.lower().endswith(".vsh")
+            else "fragment"
+        )
         translated = self._translate_shader_source(content, stage)
         self._atomic_write_text(
             output_file,
@@ -190,7 +210,22 @@ class ShaderConverter(BaseConverter):
         ):
             if source_path is None:
                 continue
-            with open(source_path, "r", encoding="utf-8") as source_file:
+            resolved_source = self._resolve_discovered_project_source(
+                source_path,
+                owner_source_path=asset.owner_path or source_path,
+                resource=asset.name,
+                resource_type="shader",
+                field=f"{stage} stage",
+            )
+            if resolved_source is None or not os.path.isfile(
+                resolved_source.filesystem_path
+            ):
+                continue
+            with open(
+                resolved_source.filesystem_path,
+                "r",
+                encoding="utf-8",
+            ) as source_file:
                 translated_sources.append(
                     self._translate_shader_source(source_file.read(), stage)
                 )
@@ -221,6 +256,10 @@ class ShaderConverter(BaseConverter):
 
     def _indexed_shader_assets(self) -> tuple[_ShaderAsset, ...] | None:
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="shader",
+        )
         if manifest.yyp_path is None:
             return None
         if not manifest.raw_data:
@@ -232,16 +271,36 @@ class ShaderConverter(BaseConverter):
         assets: list[_ShaderAsset] = []
         seen_names: set[str] = set()
         for resource in manifest.resources:
-            if resource.kind.casefold() != "shaders" or resource.name in seen_names:
+            is_shader = (
+                resource.kind.casefold() == "shaders"
+                or resource.resource_type.casefold() == "gmshader"
+            )
+            if not is_shader or resource.name in seen_names:
+                continue
+            manifest_field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            resolved = self._resolve_project_source(
+                resource.path,
+                owner_source_path=manifest.yyp_path,
+                resource=resource.name,
+                resource_type="shader",
+                field=manifest_field,
+            )
+            if resolved is None:
                 continue
             try:
-                resolved = resolve_project_source_path(
-                    self.gm_project_path,
-                    resource.path,
-                )
+                validate_project_resource_source_path(resolved, "shaders")
             except ProjectSourcePathError as exc:
-                self._safe_log(
-                    f"Warning: Skipping GameMaker shader {resource.name}: {exc}"
+                self._report_source_path_rejection(
+                    resource.path,
+                    exc,
+                    owner_source_path=manifest.yyp_path,
+                    resource=resource.name,
+                    resource_type="shader",
+                    field=manifest_field,
                 )
                 continue
             yy_path = resolved.filesystem_path
@@ -251,13 +310,38 @@ class ShaderConverter(BaseConverter):
                 )
                 continue
             base_path = os.path.splitext(yy_path)[0]
-            vertex_path = base_path + ".vsh"
-            fragment_path = base_path + ".fsh"
+            vertex_source = self._resolve_discovered_project_source(
+                base_path + ".vsh",
+                owner_source_path=resolved.source_path,
+                resource=resource.name,
+                resource_type="shader",
+                field="derived .vsh stage",
+            )
+            fragment_source = self._resolve_discovered_project_source(
+                base_path + ".fsh",
+                owner_source_path=resolved.source_path,
+                resource=resource.name,
+                resource_type="shader",
+                field="derived .fsh stage",
+            )
+            vertex_path = (
+                vertex_source.filesystem_path
+                if vertex_source is not None
+                and os.path.isfile(vertex_source.filesystem_path)
+                else None
+            )
+            fragment_path = (
+                fragment_source.filesystem_path
+                if fragment_source is not None
+                and os.path.isfile(fragment_source.filesystem_path)
+                else None
+            )
             asset = _ShaderAsset(
                 name=resource.name,
                 subfolder=self._get_subfolder_from_yy(yy_path),
-                vertex_path=vertex_path if os.path.isfile(vertex_path) else None,
-                fragment_path=fragment_path if os.path.isfile(fragment_path) else None,
+                owner_path=resolved.source_path,
+                vertex_path=vertex_path,
+                fragment_path=fragment_path,
             )
             if asset.vertex_path is None and asset.fragment_path is None:
                 self._safe_log(
@@ -268,37 +352,145 @@ class ShaderConverter(BaseConverter):
             assets.append(asset)
         return tuple(assets)
 
-    def _disk_shader_assets(self, gm_shaders_path: str) -> tuple[_ShaderAsset, ...]:
+    def _disk_shader_assets(
+        self,
+        shader_root: ResolvedProjectSourcePath,
+    ) -> tuple[_ShaderAsset, ...]:
         builders: dict[str, _ShaderAssetBuilder] = {}
-        for root, directories, files in os.walk(gm_shaders_path):
-            directories.sort()
-            for filename in sorted(files):
-                extension = os.path.splitext(filename)[1].lower()
-                if extension not in (".vsh", ".fsh"):
-                    continue
-                full_path = os.path.join(root, filename)
-                directory_name = os.path.basename(root)
-                yy_path = os.path.join(root, directory_name + ".yy")
-                yy_data = self._read_yy_file(yy_path)
+        pending_directories = [shader_root]
+        visited_directories: set[str] = set()
+        while pending_directories:
+            directory = pending_directories.pop()
+            resolved_directory = self._resolve_discovered_project_source(
+                directory.filesystem_path,
+                owner_source_path=directory.source_path,
+                resource=os.path.basename(directory.source_path),
+                resource_type="shader",
+                field="discovered shader directory",
+            )
+            if resolved_directory is None or not os.path.isdir(
+                resolved_directory.filesystem_path
+            ):
+                continue
+
+            canonical_directory = os.path.normcase(
+                os.path.realpath(resolved_directory.filesystem_path)
+            )
+            if canonical_directory in visited_directories:
+                continue
+            visited_directories.add(canonical_directory)
+
+            directory_name = os.path.basename(resolved_directory.filesystem_path)
+            expected_yy_name = directory_name + ".yy"
+            stages: list[tuple[str, str]] = []
+            resolved_yy: ResolvedProjectSourcePath | None = None
+            child_directories: list[ResolvedProjectSourcePath] = []
+            try:
+                with os.scandir(resolved_directory.filesystem_path) as entries:
+                    for entry in sorted(entries, key=lambda item: item.name):
+                        extension = os.path.splitext(entry.name)[1].casefold()
+                        is_stage = extension in (".vsh", ".fsh")
+                        is_expected_yy = entry.name == expected_yy_name
+                        try:
+                            is_unlinked_directory = entry.is_dir(
+                                follow_symlinks=False
+                            )
+                            is_symlink = entry.is_symlink()
+                        except OSError:
+                            continue
+                        if (
+                            not is_stage
+                            and not is_expected_yy
+                            and not is_unlinked_directory
+                            and not is_symlink
+                        ):
+                            continue
+
+                        if is_unlinked_directory or (
+                            is_symlink and not is_stage and not is_expected_yy
+                        ):
+                            resource_name = entry.name
+                            field = "discovered shader directory"
+                        elif is_expected_yy:
+                            resource_name = directory_name
+                            field = "discovered .yy"
+                        else:
+                            resource_name = os.path.splitext(entry.name)[0]
+                            field = f"discovered {extension} stage"
+                        resolved_entry = self._resolve_discovered_project_source(
+                            entry.path,
+                            owner_source_path=resolved_directory.source_path,
+                            resource=resource_name,
+                            resource_type="shader",
+                            field=field,
+                        )
+                        if resolved_entry is None:
+                            continue
+
+                        if os.path.isdir(resolved_entry.filesystem_path):
+                            # Validate directory links so escaping targets are
+                            # diagnosed, but never follow links during fallback.
+                            if not is_symlink:
+                                child_directories.append(resolved_entry)
+                            continue
+                        if is_expected_yy and os.path.isfile(
+                            resolved_entry.filesystem_path
+                        ):
+                            try:
+                                validate_project_resource_source_path(
+                                    resolved_entry,
+                                    "shaders",
+                                )
+                            except ProjectSourcePathError as exc:
+                                self._report_source_path_rejection(
+                                    entry.path,
+                                    exc,
+                                    owner_source_path=resolved_directory.source_path,
+                                    resource=directory_name,
+                                    resource_type="shader",
+                                    field="discovered .yy",
+                                )
+                                continue
+                            resolved_yy = resolved_entry
+                        elif is_stage and os.path.isfile(
+                            resolved_entry.filesystem_path
+                        ):
+                            stages.append((extension, resolved_entry.filesystem_path))
+            except OSError:
+                continue
+            pending_directories.extend(reversed(child_directories))
+            if not stages:
+                continue
+
+            yy_path = resolved_yy.filesystem_path if resolved_yy is not None else None
+            yy_data = self._read_yy_file(yy_path) if yy_path is not None else None
+            subfolder = (
+                self._get_subfolder_from_yy(yy_path)
+                if yy_path is not None
+                else ""
+            )
+            owner_path = (
+                resolved_yy.source_path
+                if resolved_yy is not None
+                else resolved_directory.source_path
+            )
+            for extension, full_path in stages:
                 raw_resource_name = yy_data.get("name") if yy_data is not None else None
                 resource_name = (
                     raw_resource_name
                     if isinstance(raw_resource_name, str) and raw_resource_name
-                    else os.path.splitext(filename)[0]
+                    else os.path.splitext(os.path.basename(full_path))[0]
                 )
                 builder = builders.get(resource_name)
                 if builder is None:
                     builder = _ShaderAssetBuilder(
                         name=resource_name,
-                        subfolder=(
-                            self._get_subfolder_from_yy(yy_path)
-                            if os.path.isfile(yy_path)
-                            else ""
-                        ),
-                        source_directory=root,
+                        subfolder=subfolder,
+                        source_directory=resolved_directory.filesystem_path,
+                        owner_path=owner_path,
                     )
                     builders[resource_name] = builder
-                elif builder.source_directory != root:
+                elif builder.source_directory != resolved_directory.filesystem_path:
                     continue
                 if extension == ".vsh" and builder.vertex_path is None:
                     builder.vertex_path = full_path
@@ -310,12 +502,15 @@ class ShaderConverter(BaseConverter):
         )
 
     def convert_all(self) -> None:
-        gm_shaders_path = os.path.join(self.gm_project_path, 'shaders')
+        shader_root = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'shaders'),
+            resource_type="shader",
+            field="shaders directory",
+        )
 
-        if not os.path.exists(gm_shaders_path):
+        if shader_root is None or not os.path.isdir(shader_root.filesystem_path):
             self.log_callback("No shaders directory found. Skipping shader conversion.")
             return
-
         os.makedirs(self.godot_shaders_path, exist_ok=True)
 
         self._shader_output_paths = build_asset_output_paths(
@@ -326,7 +521,7 @@ class ShaderConverter(BaseConverter):
 
         shader_assets = self._indexed_shader_assets()
         if shader_assets is None:
-            shader_assets = self._disk_shader_assets(gm_shaders_path)
+            shader_assets = self._disk_shader_assets(shader_root)
 
         if not shader_assets:
             self.log_callback("No shader files (.vsh/.fsh) found.")

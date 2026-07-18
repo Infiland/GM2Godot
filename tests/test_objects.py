@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -14,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.objects import ObjectConverter
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.events.base import EventMapping
 from src.conversion.type_defs import JsonDict
 
 
@@ -368,6 +370,701 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
                         "Object listed in .yyp should be converted")
         self.assertFalse(os.path.isfile(unlisted_path),
                          "Object not listed in .yyp should be skipped")
+
+
+class TestObjectSourceContainment(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self) -> ObjectConverter:
+        return ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=self.diagnostics,
+        )
+
+    def _write_json(self, path: str, value: object) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as output_file:
+            json.dump(value, output_file)
+
+    def _generated_object_script(self, object_name: str) -> str:
+        for directory, _subdirectories, filenames in os.walk(self.godot_dir):
+            filename = object_name + ".gd"
+            if filename in filenames:
+                with open(
+                    os.path.join(directory, filename),
+                    "r",
+                    encoding="utf-8",
+                ) as source_file:
+                    return source_file.read()
+        self.fail(f"Missing generated object script for {object_name}")
+
+    def _all_generated_text(self) -> str:
+        chunks: list[str] = []
+        for directory, _subdirectories, filenames in os.walk(self.godot_dir):
+            for filename in filenames:
+                path = os.path.join(directory, filename)
+                try:
+                    with open(path, "r", encoding="utf-8") as source_file:
+                        chunks.append(source_file.read())
+                except (OSError, UnicodeDecodeError):
+                    continue
+        return "\n".join(chunks)
+
+    def test_manifest_discovery_reads_selected_yyp_once(self) -> None:
+        yyp_path = os.path.join(self.gm_dir, "ObjectPaths.yyp")
+        self._write_json(yyp_path, {"resources": []})
+
+        with patch("builtins.open", wraps=open) as tracked_open:
+            valid_objects = self._make_converter()._get_valid_object_names()
+
+        self.assertEqual(valid_objects, {})
+        yyp_reads = [
+            call
+            for call in tracked_open.call_args_list
+            if call.args
+            and isinstance(call.args[0], (str, os.PathLike))
+            and os.path.abspath(os.fspath(call.args[0])) == yyp_path
+        ]
+        self.assertEqual(len(yyp_reads), 1, yyp_reads)
+
+    def test_event_filename_cannot_reach_another_project_directory(self) -> None:
+        owner_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "o_owner",
+            "o_owner.yy",
+        )
+        self._write_json(owner_path, {"resourceType": "GMObject"})
+        mapping = EventMapping(
+            godot_func="_gm_cross_owner",
+            params="",
+            sort_key=1,
+            gml_filename="../shared/Leak.gml",
+        )
+
+        contained = self._make_converter()._event_mapping_paths_are_contained(
+            "objects/o_owner/o_owner.yy",
+            "o_owner",
+            mapping,
+            field="eventList[0].sourceFile",
+        )
+
+        self.assertFalse(contained)
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "objects/o_owner/o_owner.yy")
+        self.assertEqual(rejected[0].manifest_entry, "eventList[0].sourceFile")
+
+    def test_yyp_declared_object_path_is_used_instead_of_name_reconstruction(self) -> None:
+        declared_dir = os.path.join(self.gm_dir, "objects", "nested", "source")
+        reconstructed_dir = os.path.join(self.gm_dir, "objects", "o_declared")
+        os.makedirs(declared_dir)
+        os.makedirs(reconstructed_dir)
+        self._write_json(
+            os.path.join(declared_dir, "custom_object.yy"),
+            {
+                "name": "o_declared",
+                "resourceType": "GMObject",
+                "eventList": [{"eventType": 0, "eventNum": 0}],
+            },
+        )
+        with open(
+            os.path.join(declared_dir, "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as source_file:
+            source_file.write("declared_source = 1;")
+        self._write_json(
+            os.path.join(reconstructed_dir, "o_declared.yy"),
+            {
+                "name": "o_declared",
+                "resourceType": "GMObject",
+                "eventList": [{"eventType": 0, "eventNum": 0}],
+            },
+        )
+        with open(
+            os.path.join(reconstructed_dir, "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as source_file:
+            source_file.write("RECONSTRUCTED_MARKER = 1;")
+        self._write_json(
+            os.path.join(self.gm_dir, "Project.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "o_declared",
+                            "path": "objects/nested/source/custom_object.yy",
+                        }
+                    }
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+
+        self._make_converter().convert_all()
+
+        script = self._generated_object_script("o_declared")
+        self.assertIn("declared_source = 1", script)
+        self.assertNotIn("RECONSTRUCTED_MARKER", script)
+
+    def test_external_first_yyp_cannot_mask_contained_declared_object_path(self) -> None:
+        declared_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "nested",
+            "custom_object.yy",
+        )
+        self._write_json(
+            declared_path,
+            {
+                "name": "o_inside",
+                "parent": {
+                    "name": "Objects",
+                    "path": "folders/Objects.yy",
+                },
+                "resourceType": "GMObject",
+                "eventList": [],
+            },
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "BInside.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "o_inside",
+                            "path": "objects/nested/custom_object.yy",
+                        }
+                    }
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yyp = os.path.join(outside_dir, "Outside.yyp")
+            self._write_json(
+                outside_yyp,
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": "o_outside",
+                                "path": "objects/o_outside/o_outside.yy",
+                            }
+                        }
+                    ]
+                },
+            )
+            try:
+                os.symlink(
+                    outside_yyp,
+                    os.path.join(self.gm_dir, "AOutside.yyp"),
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            converter = self._make_converter()
+            valid_objects = converter._get_valid_object_names()
+
+        self.assertEqual(valid_objects, {"o_inside": ""})
+        self.assertEqual(
+            converter._object_source_paths,
+            {"o_inside": "objects/nested/custom_object.yy"},
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertIsNone(rejected[0].source_path)
+        self.assertEqual(rejected[0].resource_type, "project")
+        self.assertEqual(rejected[0].manifest_entry, "AOutside.yyp")
+        self.assertIn("AOutside.yyp", rejected[0].message)
+
+    def test_non_file_first_yyp_is_rejected_with_source_link(self) -> None:
+        os.makedirs(os.path.join(self.gm_dir, "ADirectory.yyp"))
+        self._write_json(
+            os.path.join(self.gm_dir, "BInside.yyp"),
+            {"resources": [], "resourceType": "GMProject"},
+        )
+
+        valid_objects = self._make_converter()._get_valid_object_names()
+
+        self.assertEqual(valid_objects, {})
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "ADirectory.yyp")
+        self.assertEqual(rejected[0].resource_type, "project")
+        self.assertEqual(rejected[0].manifest_entry, "ADirectory.yyp")
+
+    def test_disk_fallback_rejects_object_yy_file_symlink_escape(self) -> None:
+        object_dir = os.path.join(self.gm_dir, "objects", "o_escape")
+        os.makedirs(object_dir)
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yy = os.path.join(outside_dir, "o_escape.yy")
+            self._write_json(
+                outside_yy,
+                {
+                    "name": "OUTSIDE_OBJECT_MARKER",
+                    "resourceType": "GMObject",
+                    "eventList": [],
+                },
+            )
+            try:
+                os.symlink(outside_yy, os.path.join(object_dir, "o_escape.yy"))
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            self._make_converter().convert_all()
+
+        self.assertNotIn("OUTSIDE_OBJECT_MARKER", self._all_generated_text())
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            and diagnostic.resource == "o_escape"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "objects/o_escape")
+        self.assertEqual(rejected[0].manifest_entry, "object.yy")
+
+    def test_disk_fallback_rejects_contained_cross_family_object_yy_link(
+        self,
+    ) -> None:
+        linked_name = "o_cross_family_link"
+        wrong_family_yy = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "wrong_object",
+            "target.yy",
+        )
+        self._write_json(
+            wrong_family_yy,
+            {
+                "name": "WRONG_FAMILY_OBJECT_MARKER",
+                "resourceType": "GMObject",
+                "eventList": [],
+            },
+        )
+        linked_directory = os.path.join(self.gm_dir, "objects", linked_name)
+        os.makedirs(linked_directory)
+        try:
+            os.symlink(
+                wrong_family_yy,
+                os.path.join(linked_directory, linked_name + ".yy"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        safe_name = "o_safe_sibling"
+        self._write_json(
+            os.path.join(self.gm_dir, "objects", safe_name, safe_name + ".yy"),
+            {
+                "name": safe_name,
+                "resourceType": "GMObject",
+                "eventList": [],
+            },
+        )
+
+        self._make_converter().convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    linked_name,
+                    linked_name + ".tscn",
+                )
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    safe_name,
+                    safe_name + ".tscn",
+                )
+            )
+        )
+        self.assertNotIn("WRONG_FAMILY_OBJECT_MARKER", self._all_generated_text())
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            and diagnostic.resource == linked_name
+            and diagnostic.manifest_entry == "object.yy"
+        ]
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, f"objects/{linked_name}")
+        self.assertEqual(rejected[0].resource_type, "object")
+        self.assertEqual(rejected[0].manifest_entry, "object.yy")
+
+    def test_contained_reference_paths_override_untrusted_reference_names(self) -> None:
+        for object_name in ("o_parent", "o_bullet"):
+            self._write_json(
+                os.path.join(
+                    self.gm_dir,
+                    "objects",
+                    object_name,
+                    object_name + ".yy",
+                ),
+                {
+                    "name": object_name,
+                    "resourceType": "GMObject",
+                    "eventList": [],
+                },
+            )
+        self._write_json(
+            os.path.join(self.gm_dir, "sprites", "s_real", "s_real.yy"),
+            {
+                "name": "s_real",
+                "resourceType": "GMSprite",
+                "parent": {"path": "folders/Sprites.yy"},
+            },
+        )
+        _create_fake_sprite_scene(self.godot_dir, "s_real")
+        child_dir = os.path.join(self.gm_dir, "objects", "o_child")
+        self._write_json(
+            os.path.join(child_dir, "o_child.yy"),
+            {
+                "name": "o_child",
+                "resourceType": "GMObject",
+                "spriteId": {
+                    "name": "UNTRUSTED_SPRITE_NAME",
+                    "path": "sprites/s_real/s_real.yy",
+                },
+                "parentObjectId": {
+                    "name": "UNTRUSTED_PARENT_NAME",
+                    "path": "objects/o_parent/o_parent.yy",
+                },
+                "eventList": [
+                    {
+                        "eventType": 4,
+                        "eventNum": 0,
+                        "collisionObjectId": {
+                            "name": "UNTRUSTED_COLLISION_NAME",
+                            "path": "objects/o_bullet/o_bullet.yy",
+                        },
+                    }
+                ],
+            },
+        )
+        with open(
+            os.path.join(child_dir, "Collision_o_bullet.gml"),
+            "w",
+            encoding="utf-8",
+        ) as source_file:
+            source_file.write("safe_collision = true;")
+
+        self._make_converter().convert_all()
+
+        script = self._generated_object_script("o_child")
+        self.assertTrue(script.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        self.assertIn('"target_object": "o_bullet"', script)
+        self.assertIn("func _on_collision_o_bullet():", script)
+        self.assertIn(
+            'GMRuntime.gml_variable_instance_set(self, "safe_collision", true)',
+            script,
+        )
+        generated = self._all_generated_text()
+        self.assertIn("res://sprites/s_real/s_real.tscn", generated)
+        self.assertNotIn("UNTRUSTED_", generated)
+
+    def test_custom_reference_filenames_preserve_logical_resource_names(self) -> None:
+        references = (
+            (
+                "sprites",
+                "s_logical",
+                "sprites/storage/custom_sprite.yy",
+                "GMSprite",
+            ),
+            (
+                "objects",
+                "o_parent_logical",
+                "objects/storage/custom_parent.yy",
+                "GMObject",
+            ),
+            (
+                "objects",
+                "o_collision_logical",
+                "objects/storage/custom_collision.yy",
+                "GMObject",
+            ),
+        )
+        project_resources: list[dict[str, object]] = []
+        for _kind, logical_name, source_path, resource_type in references:
+            self._write_json(
+                os.path.join(self.gm_dir, *source_path.split("/")),
+                {
+                    "%Name": logical_name,
+                    "name": logical_name,
+                    "resourceType": resource_type,
+                    "eventList": [],
+                },
+            )
+            project_resources.append(
+                {"id": {"name": logical_name, "path": source_path}}
+            )
+        child_source_path = "objects/o_child/o_child.yy"
+        self._write_json(
+            os.path.join(self.gm_dir, *child_source_path.split("/")),
+            {
+                "name": "o_child",
+                "resourceType": "GMObject",
+                "spriteId": {
+                    "name": "UNTRUSTED_SPRITE_NAME",
+                    "path": references[0][2],
+                },
+                "parentObjectId": {
+                    "name": "UNTRUSTED_PARENT_NAME",
+                    "path": references[1][2],
+                },
+                "eventList": [
+                    {
+                        "eventType": 4,
+                        "eventNum": 0,
+                        "collisionObjectId": {
+                            "name": "UNTRUSTED_COLLISION_NAME",
+                            "path": references[2][2],
+                        },
+                    }
+                ],
+            },
+        )
+        project_resources.append(
+            {"id": {"name": "o_child", "path": child_source_path}}
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "Project.yyp"),
+            {"resources": project_resources, "resourceType": "GMProject"},
+        )
+
+        parsed = self._make_converter()._parse_object_yy(
+            "o_child",
+            child_source_path,
+        )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed["sprite_name"], "s_logical")
+        self.assertEqual(parsed["sprite_source_path"], references[0][2])
+        self.assertEqual(parsed["parent_object_name"], "o_parent_logical")
+        self.assertEqual(parsed["parent_object_source_path"], references[1][2])
+        collision = parsed["event_list"][0]["collisionObjectId"]
+        self.assertIsInstance(collision, dict)
+        assert isinstance(collision, dict)
+        self.assertEqual(collision["name"], "o_collision_logical")
+        self.assertEqual(collision["path"], references[2][2])
+
+    def test_rejects_malformed_declared_paths_and_unsafe_legacy_names(self) -> None:
+        owner_source_path = "objects/o_owner/o_owner.yy"
+        self._write_json(
+            os.path.join(self.gm_dir, *owner_source_path.split("/")),
+            {"name": "o_owner", "resourceType": "GMObject"},
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "sprites", "s_safe", "s_safe.yy"),
+            {"name": "s_safe", "resourceType": "GMSprite"},
+        )
+        converter = self._make_converter()
+        malformed_paths: tuple[object, ...] = (7, None, "")
+        unsafe_names = (
+            "../safe",
+            "/tmp/safe",
+            r"C:\Games\safe",
+            r"C:safe",
+            r"\\server\share\safe",
+            "bad\0name",
+            "nested/../safe",
+        )
+
+        for index, raw_path in enumerate(malformed_paths):
+            with self.subTest(path=raw_path):
+                self.assertIsNone(
+                    converter._resolve_resource_reference(
+                        {"path": raw_path, "name": "s_safe"},
+                        owner_source_path=owner_source_path,
+                        owner_name="o_owner",
+                        field=f"badPath[{index}]",
+                        resource_kind="sprites",
+                    )
+                )
+        for index, raw_name in enumerate(unsafe_names):
+            with self.subTest(name=raw_name):
+                self.assertIsNone(
+                    converter._resolve_resource_reference(
+                        {"name": raw_name},
+                        owner_source_path=owner_source_path,
+                        owner_name="o_owner",
+                        field=f"badName[{index}]",
+                        resource_kind="sprites",
+                    )
+                )
+
+        self.assertEqual(
+            converter._resolve_resource_reference(
+                {"name": "s_safe"},
+                owner_source_path=owner_source_path,
+                owner_name="o_owner",
+                field="safeSprite",
+                resource_kind="sprites",
+            ),
+            ("s_safe", "sprites/s_safe/s_safe.yy"),
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(
+            len(rejected),
+            len(malformed_paths) + len(unsafe_names),
+            rejected,
+        )
+        self.assertTrue(
+            all(
+                diagnostic.source_path == owner_source_path
+                and diagnostic.resource == "o_owner"
+                and diagnostic.resource_type == "object"
+                for diagnostic in rejected
+            )
+        )
+
+    def test_nested_references_and_event_symlinks_never_enter_output(self) -> None:
+        object_dir = os.path.join(self.gm_dir, "objects", "o_child")
+        os.makedirs(object_dir)
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_parent = os.path.join(outside_dir, "outside_parent.yy")
+            outside_sprite = os.path.join(outside_dir, "outside_sprite.yy")
+            outside_collision = os.path.join(outside_dir, "outside_collision.yy")
+            outside_gml = os.path.join(outside_dir, "outside_event.gml")
+            self._write_json(
+                outside_parent,
+                {"name": "OUTSIDE_PARENT_MARKER", "eventList": []},
+            )
+            self._write_json(
+                outside_sprite,
+                {"name": "OUTSIDE_SPRITE_MARKER", "frames": []},
+            )
+            self._write_json(
+                outside_collision,
+                {"name": "OUTSIDE_COLLISION_MARKER", "eventList": []},
+            )
+            with open(outside_gml, "w", encoding="utf-8") as source_file:
+                source_file.write("OUTSIDE_EVENT_CODE_MARKER = 1;")
+
+            os.makedirs(os.path.join(self.gm_dir, "sprites"))
+            try:
+                os.symlink(
+                    outside_parent,
+                    os.path.join(self.gm_dir, "objects", "parent_link.yy"),
+                )
+                os.symlink(
+                    outside_sprite,
+                    os.path.join(self.gm_dir, "sprites", "sprite_link.yy"),
+                )
+                os.symlink(
+                    outside_collision,
+                    os.path.join(self.gm_dir, "objects", "collision_link.yy"),
+                )
+                os.symlink(outside_gml, os.path.join(object_dir, "Create_0.gml"))
+                os.symlink(outside_gml, os.path.join(object_dir, "Collision_0.gml"))
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            self._write_json(
+                os.path.join(object_dir, "o_child.yy"),
+                {
+                    "name": "o_child",
+                    "resourceType": "GMObject",
+                    "spriteId": {
+                        "name": "s_outside",
+                        "path": "sprites/sprite_link.yy",
+                    },
+                    "parentObjectId": {
+                        "name": "o_outside",
+                        "path": "objects/parent_link.yy",
+                    },
+                    "eventList": [
+                        {"eventType": 0, "eventNum": 0},
+                        {
+                            "eventType": 4,
+                            "eventNum": 0,
+                            "collisionObjectId": {
+                                "name": "o_collision_outside",
+                                "path": "objects/collision_link.yy",
+                            },
+                        },
+                        {
+                            "eventType": 99,
+                            "eventNum": "/../../../../OUTSIDE_EVENT_FILENAME_MARKER",
+                        },
+                    ],
+                },
+            )
+
+            self._make_converter().convert_all()
+
+        generated = self._all_generated_text()
+        for marker in (
+            "OUTSIDE_PARENT_MARKER",
+            "OUTSIDE_SPRITE_MARKER",
+            "OUTSIDE_COLLISION_MARKER",
+            "OUTSIDE_EVENT_CODE_MARKER",
+            "OUTSIDE_EVENT_FILENAME_MARKER",
+            "o_outside",
+            "s_outside",
+            "o_collision_outside",
+        ):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, generated)
+
+        rejected = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            and diagnostic.resource == "o_child"
+        ]
+        self.assertGreaterEqual(len(rejected), 5)
+        self.assertTrue(
+            all(
+                diagnostic.source_path == "objects/o_child/o_child.yy"
+                and diagnostic.resource == "o_child"
+                and diagnostic.resource_type == "object"
+                for diagnostic in rejected
+            )
+        )
+        rejected_fields = {diagnostic.manifest_entry for diagnostic in rejected}
+        self.assertIn("spriteId.path", rejected_fields)
+        self.assertIn("parentObjectId.path", rejected_fields)
+        self.assertIn("eventList[1].collisionObjectId.path", rejected_fields)
+        self.assertIn("eventList[0].sourceFile", rejected_fields)
+        self.assertIn("eventList[2].sourceFile", rejected_fields)
 
 
 class TestObjectConverterSubfolders(unittest.TestCase):

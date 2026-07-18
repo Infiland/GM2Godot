@@ -7,14 +7,16 @@ import shutil
 import tempfile
 import unittest
 from typing import cast
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
-from src.conversion.tilesets import TileSetConverter, TilesetData
 from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.tilesets import TileSetConverter, TilesetData
 
 
 def _make_tileset_yy_content(name: str, sprite_name: str, tile_width: int = 16, tile_height: int = 16,
@@ -327,6 +329,964 @@ class TestParseTilesetYY(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tileset_animation_frames = [{"frames": [0, 1], "duration": 2}]', tres)
         self.assertIn('metadata/gamemaker_tileset_auto_tile_sets = [{"name": "terrain"}]', tres)
         self.assertIn('metadata/gamemaker_tileset_collisions = [{"tileId": 1', tres)
+
+
+class TestTileSetSourceContainment(unittest.TestCase):
+    FRAME_GUID = "aaaaaaaa-0000-0000-0000-000000000001"
+    LAYER_GUID = "bbbbbbbb-0000-0000-0000-000000000001"
+
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    def _make_converter(self) -> TileSetConverter:
+        return TileSetConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=self.diagnostics,
+        )
+
+    def _write_json(self, path: str, value: object) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as output_file:
+            json.dump(value, output_file)
+
+    def _write_tileset(
+        self,
+        path: str,
+        name: str,
+        sprite_id: object,
+        *,
+        tile_width: int = 16,
+        tile_height: int = 16,
+    ) -> None:
+        self._write_json(
+            path,
+            {
+                "$GMTileSet": "v1",
+                "%Name": name,
+                "spriteId": sprite_id,
+                "tileWidth": tile_width,
+                "tileHeight": tile_height,
+                "tile_count": 4,
+                "out_columns": 2,
+                "parent": {
+                    "name": "Tilesets",
+                    "path": "folders/Tilesets.yy",
+                },
+                "resourceType": "GMTileSet",
+                "resourceVersion": "2.0",
+            },
+        )
+
+    def _write_sprite(
+        self,
+        yy_path: str,
+        *,
+        color: str,
+        width: int = 48,
+        height: int = 40,
+    ) -> str:
+        self._write_json(
+            yy_path,
+            {
+                "frames": [{"name": self.FRAME_GUID}],
+                "layers": [{"name": self.LAYER_GUID, "visible": True}],
+                "resourceType": "GMSprite",
+                "resourceVersion": "2.0",
+            },
+        )
+        image_path = os.path.join(
+            os.path.dirname(yy_path),
+            "layers",
+            self.FRAME_GUID,
+            self.LAYER_GUID + ".png",
+        )
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        Image.new("RGBA", (width, height), color).save(image_path, "PNG")
+        return image_path
+
+    def test_manifest_discovery_reads_selected_yyp_once(self) -> None:
+        yyp_path = os.path.join(self.gm_dir, "TileSetPaths.yyp")
+        self._write_json(yyp_path, {"resources": []})
+
+        with patch("builtins.open", wraps=open) as tracked_open:
+            valid_tilesets = self._make_converter()._get_valid_tileset_names()
+
+        self.assertEqual(valid_tilesets, {})
+        yyp_reads = [
+            call
+            for call in tracked_open.call_args_list
+            if call.args
+            and isinstance(call.args[0], (str, os.PathLike))
+            and os.path.abspath(os.fspath(call.args[0])) == yyp_path
+        ]
+        self.assertEqual(len(yyp_reads), 1, yyp_reads)
+
+    def _source_path_rejections(self):
+        return [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+
+    def test_declared_tileset_and_sprite_paths_override_name_reconstruction(self) -> None:
+        declared_tileset = os.path.join(
+            self.gm_dir,
+            "tilesets",
+            "declared",
+            "custom_tileset.yy",
+        )
+        declared_sprite = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "declared",
+            "custom_sprite.yy",
+        )
+        self._write_tileset(
+            declared_tileset,
+            "ts_declared",
+            {
+                "name": "s_decoy",
+                "path": "sprites/declared/custom_sprite.yy",
+            },
+            tile_width=24,
+            tile_height=20,
+        )
+        self._write_sprite(declared_sprite, color="red")
+
+        reconstructed_tileset = os.path.join(
+            self.gm_dir,
+            "tilesets",
+            "ts_declared",
+            "ts_declared.yy",
+        )
+        self._write_tileset(
+            reconstructed_tileset,
+            "ts_declared",
+            {"name": "s_decoy", "path": "sprites/s_decoy/s_decoy.yy"},
+            tile_width=8,
+            tile_height=8,
+        )
+        decoy_sprite = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_decoy",
+            "s_decoy.yy",
+        )
+        self._write_sprite(decoy_sprite, color="blue")
+        self._write_json(
+            os.path.join(self.gm_dir, "DeclaredPaths.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "ts_declared",
+                            "path": "tilesets/declared/custom_tileset.yy",
+                        }
+                    }
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+
+        self._make_converter().convert_all()
+
+        output_dir = os.path.join(self.godot_dir, "tilesets", "ts_declared")
+        with open(
+            os.path.join(output_dir, "ts_declared.tres"),
+            "r",
+            encoding="utf-8",
+        ) as tres_file:
+            tres = tres_file.read()
+        self.assertIn("texture_region_size = Vector2i(24, 20)", tres)
+        self.assertIn("tile_size = Vector2i(24, 20)", tres)
+        with Image.open(os.path.join(output_dir, "ts_declared.png")) as image:
+            self.assertEqual(image.getpixel((0, 0)), (255, 0, 0, 255))
+
+    def test_external_first_yyp_cannot_mask_contained_declared_tileset_path(self) -> None:
+        declared_path = os.path.join(
+            self.gm_dir,
+            "tilesets",
+            "nested",
+            "custom_tileset.yy",
+        )
+        self._write_tileset(
+            declared_path,
+            "ts_inside",
+            {"name": "s_inside", "path": "sprites/s_inside/s_inside.yy"},
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "BInside.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "ts_inside",
+                            "path": "tilesets/nested/custom_tileset.yy",
+                        }
+                    }
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yyp = os.path.join(outside_dir, "Outside.yyp")
+            self._write_json(
+                outside_yyp,
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": "ts_outside",
+                                "path": "tilesets/ts_outside/ts_outside.yy",
+                            }
+                        }
+                    ]
+                },
+            )
+            try:
+                os.symlink(
+                    outside_yyp,
+                    os.path.join(self.gm_dir, "AOutside.yyp"),
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            converter = self._make_converter()
+            valid_tilesets = converter._get_valid_tileset_names()
+
+        self.assertEqual(valid_tilesets, {"ts_inside": ""})
+        self.assertEqual(
+            converter._tileset_source_paths,
+            {"ts_inside": "tilesets/nested/custom_tileset.yy"},
+        )
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1)
+        self.assertIsNone(rejected[0].source_path)
+        self.assertEqual(rejected[0].resource_type, "project")
+        self.assertEqual(rejected[0].manifest_entry, "AOutside.yyp")
+        self.assertIn("AOutside.yyp", rejected[0].message)
+
+    def test_non_file_first_yyp_is_rejected_with_source_link(self) -> None:
+        os.makedirs(os.path.join(self.gm_dir, "ADirectory.yyp"))
+        self._write_json(
+            os.path.join(self.gm_dir, "BInside.yyp"),
+            {"resources": [], "resourceType": "GMProject"},
+        )
+
+        valid_tilesets = self._make_converter()._get_valid_tileset_names()
+
+        self.assertEqual(valid_tilesets, {})
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "ADirectory.yyp")
+        self.assertEqual(rejected[0].resource_type, "project")
+        self.assertEqual(rejected[0].manifest_entry, "ADirectory.yyp")
+
+    def test_validates_and_preserves_legacy_sprite_name_fallback(self) -> None:
+        tileset_path = os.path.join(
+            self.gm_dir,
+            "tilesets",
+            "ts_legacy",
+            "ts_legacy.yy",
+        )
+        self._write_tileset(
+            tileset_path,
+            "ts_legacy",
+            {"name": "s_legacy"},
+        )
+        _make_sprite_for_tileset(self.gm_dir, "s_legacy", width=32, height=16)
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "tilesets",
+                    "ts_legacy",
+                    "ts_legacy.tres",
+                )
+            )
+        )
+        self.assertEqual(self._source_path_rejections(), [])
+
+    def test_rejects_malformed_sprite_reference_forms_with_owner_diagnostics(
+        self,
+    ) -> None:
+        outside_sprite = os.path.join(self.outside_dir, "outside.yy")
+        self._write_json(outside_sprite, {"frames": [], "layers": []})
+        traversal_path = os.path.relpath(
+            outside_sprite,
+            os.path.join(self.gm_dir, "tilesets", "ts_traversal"),
+        )
+        cross_family_path = "objects/o_decoy/o_decoy.yy"
+        self._write_json(
+            os.path.join(self.gm_dir, *cross_family_path.split("/")),
+            {"resourceType": "GMObject"},
+        )
+        cases: list[tuple[str, object, str]] = [
+            ("ts_absolute", {"path": outside_sprite}, "spriteId.path"),
+            ("ts_traversal", {"path": traversal_path}, "spriteId.path"),
+            (
+                "ts_drive_absolute",
+                {"path": r"C:\Games\Outside\sprite.yy"},
+                "spriteId.path",
+            ),
+            (
+                "ts_drive_relative",
+                {"path": r"C:Outside\sprite.yy"},
+                "spriteId.path",
+            ),
+            (
+                "ts_unc",
+                {"path": r"\\server\share\sprite.yy"},
+                "spriteId.path",
+            ),
+            ("ts_nul", {"path": "bad\0sprite.yy"}, "spriteId.path"),
+            ("ts_non_string", {"path": 7}, "spriteId.path"),
+            (
+                "ts_cross_family",
+                {"path": cross_family_path},
+                "spriteId.path",
+            ),
+            ("ts_bad_legacy", {"name": "../outside"}, "spriteId.name"),
+            ("ts_not_object", ["sprites/s_safe/s_safe.yy"], "spriteId"),
+        ]
+        for name, sprite_id, _field in cases:
+            tileset_path = os.path.join(
+                self.gm_dir,
+                "tilesets",
+                name,
+                name + ".yy",
+            )
+            self._write_tileset(tileset_path, name, sprite_id)
+
+        converter = self._make_converter()
+        for name, _sprite_id, _field in cases:
+            result = converter._process_tileset(name)
+            self.assertIsNotNone(result)
+            assert result is not None
+            self.assertFalse(result["success"])
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), len(cases), rejected)
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in rejected},
+            {name for name, _sprite_id, _field in cases},
+        )
+        self.assertTrue(
+            all(
+                diagnostic.source_path
+                == f"tilesets/{diagnostic.resource}/{diagnostic.resource}.yy"
+                and diagnostic.resource_type == "tileset"
+                for diagnostic in rejected
+            )
+        )
+        expected_fields = {
+            name: field for name, _sprite_id, field in cases
+        }
+        self.assertTrue(
+            all(
+                diagnostic.manifest_entry
+                == expected_fields[cast(str, diagnostic.resource)]
+                for diagnostic in rejected
+            )
+        )
+
+    def test_rejects_referenced_sprite_metadata_symlink_escape(self) -> None:
+        outside_sprite = os.path.join(self.outside_dir, "outside_sprite.yy")
+        self._write_json(
+            outside_sprite,
+            {
+                "frames": [{"name": self.FRAME_GUID}],
+                "layers": [{"name": self.LAYER_GUID, "visible": True}],
+                "resourceType": "GMSprite",
+            },
+        )
+        sprite_name = "s_linked_metadata"
+        linked_sprite = os.path.join(
+            self.gm_dir,
+            "sprites",
+            sprite_name,
+            sprite_name + ".yy",
+        )
+        os.makedirs(os.path.dirname(linked_sprite), exist_ok=True)
+        try:
+            os.symlink(outside_sprite, linked_sprite)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        tileset_name = "ts_linked_sprite_metadata"
+        self._write_tileset(
+            os.path.join(
+                self.gm_dir,
+                "tilesets",
+                tileset_name,
+                tileset_name + ".yy",
+            ),
+            tileset_name,
+            {
+                "name": sprite_name,
+                "path": f"sprites/{sprite_name}/{sprite_name}.yy",
+            },
+        )
+
+        converter = self._make_converter()
+        with patch("builtins.open", wraps=open) as tracked_open:
+            result = converter._process_tileset(tileset_name)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertFalse(result["success"])
+        self.assertNotIn(
+            os.path.realpath(outside_sprite),
+            {
+                os.path.realpath(call.args[0])
+                for call in tracked_open.call_args_list
+                if call.args and isinstance(call.args[0], str)
+            },
+        )
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].resource, tileset_name)
+        self.assertEqual(
+            rejected[0].source_path,
+            f"tilesets/{tileset_name}/{tileset_name}.yy",
+        )
+        self.assertEqual(rejected[0].manifest_entry, "spriteId.path")
+
+    def test_rejects_normalized_cross_family_and_non_yy_sprite_paths(
+        self,
+    ) -> None:
+        rejected_targets = {
+            "ts_cross_family": os.path.join(
+                self.gm_dir,
+                "tilesets",
+                "decoy",
+                "decoy.yy",
+            ),
+            "ts_non_yy": os.path.join(
+                self.gm_dir,
+                "sprites",
+                "decoy",
+                "decoy.json",
+            ),
+        }
+        for target in rejected_targets.values():
+            self._write_json(
+                target,
+                {
+                    "frames": [{"name": self.FRAME_GUID}],
+                    "layers": [{"name": self.LAYER_GUID, "visible": True}],
+                },
+            )
+
+        sprite_paths = {
+            "ts_cross_family": (
+                "sprites/placeholder/../../tilesets/decoy/decoy.yy"
+            ),
+            "ts_non_yy": "sprites/decoy/decoy.json",
+        }
+        for tileset_name, sprite_path in sprite_paths.items():
+            self._write_tileset(
+                os.path.join(
+                    self.gm_dir,
+                    "tilesets",
+                    tileset_name,
+                    tileset_name + ".yy",
+                ),
+                tileset_name,
+                {"name": "s_decoy", "path": sprite_path},
+            )
+
+        safe_tileset = "ts_safe_reference"
+        safe_sprite = "s_safe_reference"
+        self._write_tileset(
+            os.path.join(
+                self.gm_dir,
+                "tilesets",
+                safe_tileset,
+                safe_tileset + ".yy",
+            ),
+            safe_tileset,
+            {
+                "name": safe_sprite,
+                "path": f"sprites/{safe_sprite}/{safe_sprite}.yy",
+            },
+        )
+        self._write_sprite(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                safe_sprite,
+                safe_sprite + ".yy",
+            ),
+            color="green",
+        )
+
+        converter = self._make_converter()
+        with patch("builtins.open", wraps=open) as tracked_open:
+            rejected_results = {
+                tileset_name: converter._process_tileset(tileset_name)
+                for tileset_name in sprite_paths
+            }
+            safe_result = converter._process_tileset(safe_tileset)
+
+        self.assertTrue(
+            all(
+                result is not None and not result["success"]
+                for result in rejected_results.values()
+            )
+        )
+        self.assertIsNotNone(safe_result)
+        assert safe_result is not None
+        self.assertTrue(safe_result["success"])
+
+        opened_paths = {
+            os.path.realpath(call.args[0])
+            for call in tracked_open.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        }
+        self.assertTrue(
+            opened_paths.isdisjoint(
+                os.path.realpath(path) for path in rejected_targets.values()
+            )
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in self._source_path_rejections()
+            if diagnostic.resource in sprite_paths
+        ]
+        self.assertEqual(len(rejected), len(sprite_paths), rejected)
+        self.assertTrue(
+            all(
+                diagnostic.source_path
+                == f"tilesets/{diagnostic.resource}/{diagnostic.resource}.yy"
+                and diagnostic.manifest_entry == "spriteId.path"
+                for diagnostic in rejected
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "tilesets",
+                    safe_tileset,
+                    safe_tileset + ".png",
+                )
+            )
+        )
+
+    def test_sprite_frame_and_layer_rejections_are_linked_to_sprite_metadata(
+        self,
+    ) -> None:
+        cases: list[tuple[str, str, str, object]] = [
+            ("ts_frame_slash", "s_frame_slash", "frames[0].name", "nested/frame"),
+            ("ts_frame_dot", "s_frame_dot", "frames[0].name", ".."),
+            (
+                "ts_frame_drive",
+                "s_frame_drive",
+                "frames[0].name",
+                r"C:\Outside\frame",
+            ),
+            ("ts_frame_nul", "s_frame_nul", "frames[0].name", "bad\0frame"),
+            ("ts_frame_non_string", "s_frame_non_string", "frames[0].name", 7),
+            (
+                "ts_layer_backslash",
+                "s_layer_backslash",
+                "layers[0].name",
+                r"nested\layer",
+            ),
+            ("ts_layer_dot", "s_layer_dot", "layers[0].name", "."),
+            (
+                "ts_layer_unc",
+                "s_layer_unc",
+                "layers[0].name",
+                r"\\server\share\layer",
+            ),
+            (
+                "ts_layer_non_string",
+                "s_layer_non_string",
+                "layers[0].name",
+                ["layer"],
+            ),
+        ]
+        for tileset_name, sprite_name, field, invalid_value in cases:
+            frames: list[dict[str, object]] = [{"name": self.FRAME_GUID}]
+            layers: list[dict[str, object]] = [
+                {"name": self.LAYER_GUID, "visible": True}
+            ]
+            if field == "frames[0].name":
+                frames[0]["name"] = invalid_value
+            else:
+                layers[0]["name"] = invalid_value
+            self._write_tileset(
+                os.path.join(
+                    self.gm_dir,
+                    "tilesets",
+                    tileset_name,
+                    tileset_name + ".yy",
+                ),
+                tileset_name,
+                {
+                    "name": sprite_name,
+                    "path": f"sprites/{sprite_name}/{sprite_name}.yy",
+                },
+            )
+            self._write_json(
+                os.path.join(
+                    self.gm_dir,
+                    "sprites",
+                    sprite_name,
+                    sprite_name + ".yy",
+                ),
+                {
+                    "frames": frames,
+                    "layers": layers,
+                    "resourceType": "GMSprite",
+                },
+            )
+
+        safe_tileset = "ts_safe_sidecar"
+        safe_sprite = "s_safe_sidecar"
+        self._write_tileset(
+            os.path.join(
+                self.gm_dir,
+                "tilesets",
+                safe_tileset,
+                safe_tileset + ".yy",
+            ),
+            safe_tileset,
+            {
+                "name": safe_sprite,
+                "path": f"sprites/{safe_sprite}/{safe_sprite}.yy",
+            },
+        )
+        self._write_sprite(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                safe_sprite,
+                safe_sprite + ".yy",
+            ),
+            color="green",
+        )
+
+        self._make_converter().convert_all()
+
+        expected = {
+            tileset_name: (f"sprites/{sprite_name}/{sprite_name}.yy", field)
+            for tileset_name, sprite_name, field, _invalid_value in cases
+        }
+        rejected = [
+            diagnostic
+            for diagnostic in self._source_path_rejections()
+            if diagnostic.resource in expected
+        ]
+        self.assertEqual(len(rejected), len(cases), rejected)
+        self.assertEqual(
+            {
+                diagnostic.resource: (
+                    diagnostic.source_path,
+                    diagnostic.manifest_entry,
+                )
+                for diagnostic in rejected
+            },
+            expected,
+        )
+        for tileset_name in expected:
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(
+                        self.godot_dir,
+                        "tilesets",
+                        tileset_name,
+                        tileset_name + ".png",
+                    )
+                )
+            )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "tilesets",
+                    safe_tileset,
+                    safe_tileset + ".png",
+                )
+            )
+        )
+
+    def test_disk_fallback_rejects_tileset_file_and_directory_symlink_escapes(
+        self,
+    ) -> None:
+        tilesets_root = os.path.join(self.gm_dir, "tilesets")
+        linked_file_dir = os.path.join(tilesets_root, "ts_file_link")
+        os.makedirs(linked_file_dir)
+        outside_file = os.path.join(self.outside_dir, "ts_file_link.yy")
+        self._write_tileset(
+            outside_file,
+            "ts_file_link",
+            {"name": "s_outside"},
+        )
+        outside_directory = os.path.join(self.outside_dir, "ts_directory_link")
+        self._write_tileset(
+            os.path.join(outside_directory, "ts_directory_link.yy"),
+            "ts_directory_link",
+            {"name": "s_outside"},
+        )
+        try:
+            os.symlink(
+                outside_file,
+                os.path.join(linked_file_dir, "ts_file_link.yy"),
+            )
+            os.symlink(
+                outside_directory,
+                os.path.join(tilesets_root, "ts_directory_link"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        self._make_converter().convert_all()
+
+        for name in ("ts_file_link", "ts_directory_link"):
+            self.assertFalse(
+                os.path.isfile(
+                    os.path.join(
+                        self.godot_dir,
+                        "tilesets",
+                        name,
+                        name + ".tres",
+                    )
+                )
+            )
+        rejected = self._source_path_rejections()
+        self.assertEqual(
+            {(item.resource, item.manifest_entry) for item in rejected},
+            {
+                ("ts_file_link", "tileset .yy"),
+                ("ts_directory_link", "tileset directory"),
+            },
+        )
+
+    def test_rejects_sprite_image_symlink_escapes_with_sprite_provenance(
+        self,
+    ) -> None:
+        outside_file_image = os.path.join(self.outside_dir, "outside_file.png")
+        Image.new("RGBA", (16, 16), "magenta").save(
+            outside_file_image,
+            "PNG",
+        )
+
+        for name, sprite_name in (
+            ("ts_layer_file", "s_layer_file"),
+            ("ts_layer_directory", "s_layer_directory"),
+            ("ts_frame_directory", "s_frame_directory"),
+            ("ts_layer_fallback", "s_layer_fallback"),
+            ("ts_layer_safe", "s_layer_safe"),
+        ):
+            self._write_tileset(
+                os.path.join(self.gm_dir, "tilesets", name, name + ".yy"),
+                name,
+                {
+                    "name": sprite_name,
+                    "path": f"sprites/{sprite_name}/{sprite_name}.yy",
+                },
+            )
+            self._write_sprite(
+                os.path.join(
+                    self.gm_dir,
+                    "sprites",
+                    sprite_name,
+                    sprite_name + ".yy",
+                ),
+                color="green",
+            )
+
+        file_sprite_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_layer_file",
+        )
+        file_image = os.path.join(
+            file_sprite_dir,
+            "layers",
+            self.FRAME_GUID,
+            self.LAYER_GUID + ".png",
+        )
+        os.remove(file_image)
+
+        directory_sprite_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_layer_directory",
+        )
+        shutil.rmtree(os.path.join(directory_sprite_dir, "layers"))
+        frame_sprite_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_frame_directory",
+        )
+        shutil.rmtree(
+            os.path.join(frame_sprite_dir, "layers", self.FRAME_GUID)
+        )
+        fallback_sprite_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "s_layer_fallback",
+        )
+        os.remove(
+            os.path.join(
+                fallback_sprite_dir,
+                "layers",
+                self.FRAME_GUID,
+                self.LAYER_GUID + ".png",
+            )
+        )
+        outside_layers = os.path.join(self.outside_dir, "outside_layers")
+        outside_directory_image = os.path.join(
+            outside_layers,
+            self.FRAME_GUID,
+            self.LAYER_GUID + ".png",
+        )
+        os.makedirs(os.path.dirname(outside_directory_image))
+        Image.new("RGBA", (16, 16), "cyan").save(
+            outside_directory_image,
+            "PNG",
+        )
+        outside_frame = os.path.join(self.outside_dir, "outside_frame")
+        os.makedirs(outside_frame)
+        Image.new("RGBA", (16, 16), "yellow").save(
+            os.path.join(outside_frame, self.LAYER_GUID + ".png"),
+            "PNG",
+        )
+        try:
+            os.symlink(outside_file_image, file_image)
+            os.symlink(
+                outside_layers,
+                os.path.join(directory_sprite_dir, "layers"),
+            )
+            os.symlink(
+                outside_frame,
+                os.path.join(
+                    frame_sprite_dir,
+                    "layers",
+                    self.FRAME_GUID,
+                ),
+            )
+            os.symlink(
+                outside_file_image,
+                os.path.join(fallback_sprite_dir, "layers", "fallback.png"),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        real_copy2 = shutil.copy2
+        with (
+            patch("builtins.open", wraps=open) as tracked_open,
+            patch(
+                "src.conversion.tilesets.shutil.copy2",
+                wraps=real_copy2,
+            ) as tracked_copy,
+        ):
+            self._make_converter().convert_all()
+
+        outside_root = os.path.realpath(self.outside_dir)
+        opened_paths = {
+            os.path.realpath(call.args[0])
+            for call in tracked_open.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        }
+        copied_sources = {
+            os.path.realpath(call.args[0])
+            for call in tracked_copy.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        }
+        self.assertFalse(
+            any(
+                path == outside_root or path.startswith(outside_root + os.sep)
+                for path in opened_paths | copied_sources
+            )
+        )
+
+        rejected = [
+            diagnostic
+            for diagnostic in self._source_path_rejections()
+            if diagnostic.resource
+            in {
+                "ts_layer_file",
+                "ts_layer_directory",
+                "ts_frame_directory",
+                "ts_layer_fallback",
+            }
+        ]
+        self.assertEqual(len(rejected), 4, rejected)
+        self.assertEqual(
+            {
+                diagnostic.resource: (
+                    diagnostic.source_path,
+                    diagnostic.manifest_entry,
+                )
+                for diagnostic in rejected
+            },
+            {
+                "ts_layer_file": (
+                    "sprites/s_layer_file/s_layer_file.yy",
+                    "layers[0].name",
+                ),
+                "ts_layer_directory": (
+                    "sprites/s_layer_directory/s_layer_directory.yy",
+                    "layers",
+                ),
+                "ts_frame_directory": (
+                    "sprites/s_frame_directory/s_frame_directory.yy",
+                    "frames[0].name",
+                ),
+                "ts_layer_fallback": (
+                    "sprites/s_layer_fallback/s_layer_fallback.yy",
+                    "layers",
+                ),
+            },
+        )
+        for name in (
+            "ts_layer_file",
+            "ts_layer_directory",
+            "ts_frame_directory",
+            "ts_layer_fallback",
+        ):
+            self.assertFalse(
+                os.path.isfile(
+                    os.path.join(
+                        self.godot_dir,
+                        "tilesets",
+                        name,
+                        name + ".png",
+                    )
+                )
+            )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "tilesets",
+                    "ts_layer_safe",
+                    "ts_layer_safe.png",
+                )
+            )
+        )
 
 
 class TestTileSetConverterSubfolders(unittest.TestCase):

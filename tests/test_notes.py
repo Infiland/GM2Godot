@@ -9,6 +9,28 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.notes import NoteConverter
+from src.conversion.diagnostics import DiagnosticCollector
+
+
+class TestableNoteConverter(NoteConverter):
+    def discover_notes_for_test(self):
+        notes_root = self._resolve_project_source("notes")
+        assert notes_root is not None
+        return self._discover_notes(notes_root)
+
+    def process_note_for_test(
+        self,
+        src_file: str,
+        dst_file: str,
+        note_name: str,
+        owner_source_path: str,
+    ):
+        return self._process_note(
+            src_file,
+            dst_file,
+            note_name,
+            owner_source_path,
+        )
 
 
 class TestNoteConverterBasic(unittest.TestCase):
@@ -139,6 +161,242 @@ class TestNoteConverterSubfolders(unittest.TestCase):
         expected = os.path.join(self.godot_dir, "notes", "plain_note", "plain_note.txt")
         self.assertTrue(os.path.isfile(expected),
                         "Note without .yy should remain at root level")
+
+
+class TestNoteConverterSourceContainment(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.outside_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+        os.makedirs(os.path.join(self.gm_dir, "notes"))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(self.outside_dir)
+
+    def _make_converter(self) -> TestableNoteConverter:
+        return TestableNoteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=self.diagnostics,
+        )
+
+    def _source_path_rejections(self):
+        return [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+
+    def _symlink(self, target: str, link_path: str) -> None:
+        try:
+            os.symlink(target, link_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+    @staticmethod
+    def _write_text(path: str, content: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as output_file:
+            output_file.write(content)
+
+    def test_rejects_notes_root_symlink_to_external_directory(self) -> None:
+        notes_root = os.path.join(self.gm_dir, "notes")
+        shutil.rmtree(notes_root)
+        external_note = os.path.join(self.outside_dir, "external_note.txt")
+        self._write_text(external_note, "EXTERNAL ROOT NOTE")
+        self._symlink(self.outside_dir, notes_root)
+
+        self._make_converter().convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "notes",
+                    "external_note",
+                    "external_note.txt",
+                )
+            )
+        )
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].resource_type, "note")
+        self.assertEqual(rejected[0].manifest_entry, "notes directory")
+
+    def test_skips_external_nested_directory_but_copies_safe_note(self) -> None:
+        safe_note = os.path.join(self.gm_dir, "notes", "safe.txt")
+        self._write_text(safe_note, "SAFE NOTE")
+        external_note = os.path.join(self.outside_dir, "leak.txt")
+        self._write_text(external_note, "EXTERNAL DIRECTORY NOTE")
+        self._symlink(
+            self.outside_dir,
+            os.path.join(self.gm_dir, "notes", "linked_notes"),
+        )
+
+        self._make_converter().convert_all()
+
+        safe_output = os.path.join(
+            self.godot_dir,
+            "notes",
+            "safe",
+            "safe.txt",
+        )
+        with open(safe_output, "r", encoding="utf-8") as output_file:
+            self.assertEqual(output_file.read(), "SAFE NOTE")
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "notes", "leak", "leak.txt")
+            )
+        )
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "notes")
+        self.assertEqual(rejected[0].resource, "linked_notes")
+        self.assertEqual(rejected[0].resource_type, "note")
+        self.assertEqual(rejected[0].manifest_entry, "discovered note entry")
+
+    def test_rejects_external_note_file_symlink(self) -> None:
+        external_note = os.path.join(self.outside_dir, "outside.txt")
+        self._write_text(external_note, "EXTERNAL FILE NOTE")
+        linked_note = os.path.join(self.gm_dir, "notes", "linked.txt")
+        self._symlink(external_note, linked_note)
+
+        self._make_converter().convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "notes", "linked", "linked.txt")
+            )
+        )
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "notes")
+        self.assertEqual(rejected[0].resource, "linked")
+        self.assertEqual(rejected[0].resource_type, "note")
+        self.assertEqual(rejected[0].manifest_entry, "note text file")
+
+    def test_rejects_external_companion_yy_without_reading_it(self) -> None:
+        note_directory = os.path.join(self.gm_dir, "notes", "my_note")
+        note_path = os.path.join(note_directory, "my_note.txt")
+        self._write_text(note_path, "SAFE NOTE")
+        outside_yy = os.path.join(self.outside_dir, "my_note.yy")
+        self._write_text(
+            outside_yy,
+            '{"parent":{"path":"folders/Notes/External.yy"}}',
+        )
+        self._symlink(outside_yy, os.path.join(note_directory, "my_note.yy"))
+
+        self._make_converter().convert_all()
+
+        flat_output = os.path.join(
+            self.godot_dir,
+            "notes",
+            "my_note",
+            "my_note.txt",
+        )
+        external_folder_output = os.path.join(
+            self.godot_dir,
+            "notes",
+            "external",
+            "my_note",
+            "my_note.txt",
+        )
+        self.assertTrue(os.path.isfile(flat_output))
+        self.assertFalse(os.path.exists(external_folder_output))
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "notes/my_note")
+        self.assertEqual(rejected[0].resource, "my_note")
+        self.assertEqual(rejected[0].resource_type, "note")
+        self.assertEqual(rejected[0].manifest_entry, "note metadata .yy")
+
+    def test_final_pre_copy_check_rejects_late_note_symlink_swap(self) -> None:
+        note_path = os.path.join(self.gm_dir, "notes", "late.txt")
+        self._write_text(note_path, "ORIGINAL SAFE NOTE")
+        outside_note = os.path.join(self.outside_dir, "late.txt")
+        self._write_text(outside_note, "LATE EXTERNAL NOTE")
+        converter = self._make_converter()
+        assets = converter.discover_notes_for_test()
+        self.assertEqual(len(assets), 1)
+
+        os.unlink(note_path)
+        self._symlink(outside_note, note_path)
+        destination = os.path.join(self.godot_dir, "late.txt")
+        result = converter.process_note_for_test(
+            assets[0].filesystem_path,
+            destination,
+            assets[0].name,
+            assets[0].owner_source_path,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertFalse(result.copied)
+        self.assertFalse(os.path.exists(destination))
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), 1, rejected)
+        self.assertEqual(rejected[0].source_path, "notes")
+        self.assertEqual(rejected[0].resource, "late")
+        self.assertEqual(rejected[0].resource_type, "note")
+        self.assertEqual(
+            rejected[0].manifest_entry,
+            "note text file (pre-copy)",
+        )
+
+    def test_final_pre_copy_check_rejects_malformed_source_candidates(self) -> None:
+        outside_note = os.path.join(self.outside_dir, "outside.txt")
+        self._write_text(outside_note, "OUTSIDE NOTE")
+        traversal_path = os.path.relpath(outside_note, self.gm_dir)
+        unsafe_paths = [
+            traversal_path,
+            outside_note,
+            r"C:\Games\Outside\note.txt",
+            r"C:Outside\note.txt",
+            r"\\server\share\note.txt",
+            "notes/bad\0note.txt",
+        ]
+        converter = self._make_converter()
+
+        for index, unsafe_path in enumerate(unsafe_paths):
+            with self.subTest(unsafe_path=unsafe_path):
+                result = converter.process_note_for_test(
+                    unsafe_path,
+                    os.path.join(self.godot_dir, f"unsafe_{index}.txt"),
+                    f"unsafe_{index}",
+                    "notes",
+                )
+                self.assertIsNotNone(result)
+                assert result is not None
+                self.assertFalse(result.copied)
+
+        rejected = self._source_path_rejections()
+        self.assertEqual(len(rejected), len(unsafe_paths), rejected)
+        self.assertEqual(
+            {diagnostic.source_path for diagnostic in rejected},
+            {"notes"},
+        )
+        self.assertTrue(
+            all(diagnostic.resource_type == "note" for diagnostic in rejected)
+        )
+        self.assertTrue(
+            all(
+                diagnostic.manifest_entry == "note text file (pre-copy)"
+                for diagnostic in rejected
+            )
+        )
+        self.assertFalse(
+            any(
+                filenames
+                for _root, _directories, filenames in os.walk(self.godot_dir)
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -26,6 +27,11 @@ from src.conversion.gml_transpiler import (
     write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    is_safe_project_source_component,
+)
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.script_functions import (
@@ -246,17 +252,127 @@ class ScriptConverter(BaseConverter):
     def _asset_entries(self) -> tuple[AssetRegistryEntry, ...]:
         return tuple(entry for entry in self._registry_entries() if entry.asset_type == "script")
 
-    def _source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
-        yy_path = os.path.join(self.gm_project_path, entry.source_path)
-        script_dir = os.path.dirname(yy_path)
-        preferred_path = os.path.join(script_dir, entry.name + ".gml")
-        if os.path.isfile(preferred_path):
-            return preferred_path
-        if not os.path.isdir(script_dir):
+    def _script_yy_source(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> ResolvedProjectSourcePath | None:
+        resolved = self._resolve_project_source(
+            entry.source_path,
+            resource=entry.name,
+            resource_type="script",
+            field="script .yy",
+        )
+        if resolved is None:
             return None
-        for filename in sorted(os.listdir(script_dir)):
-            if filename.endswith(".gml"):
-                return os.path.join(script_dir, filename)
+
+        normalized_source_path = resolved.source_path.casefold()
+        if not (
+            normalized_source_path.startswith("scripts/")
+            and normalized_source_path.endswith(".yy")
+        ):
+            self._report_source_path_rejection(
+                entry.source_path,
+                ProjectSourcePathError(
+                    "GameMaker script reference must name a .yy file under scripts/: "
+                    f"{entry.source_path!r}"
+                ),
+                owner_source_path=None,
+                resource=entry.name,
+                resource_type="script",
+                field="script .yy",
+            )
+            return None
+        if not os.path.isfile(resolved.filesystem_path):
+            return None
+        return resolved
+
+    def _source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
+        yy_source = self._script_yy_source(entry)
+        if yy_source is None:
+            return None
+
+        script_directory = self._resolve_discovered_project_source(
+            os.path.dirname(yy_source.filesystem_path),
+            owner_source_path=yy_source.source_path,
+            resource=entry.name,
+            resource_type="script",
+            field="script source directory",
+        )
+        if script_directory is None or not os.path.isdir(
+            script_directory.filesystem_path
+        ):
+            return None
+
+        preferred_filename = entry.name + ".gml"
+        excluded_filenames = {preferred_filename}
+        preferred_source: ResolvedProjectSourcePath | None = None
+        if is_safe_project_source_component(entry.name):
+            preferred_source = self._resolve_project_source(
+                preferred_filename,
+                owner_source_path=yy_source.source_path,
+                resource=entry.name,
+                resource_type="script",
+                field="preferred script source",
+            )
+        else:
+            normalized_preferred_filename = posixpath.basename(
+                posixpath.normpath(preferred_filename.replace("\\", "/"))
+            )
+            if normalized_preferred_filename:
+                excluded_filenames.add(normalized_preferred_filename)
+            self._report_source_path_rejection(
+                preferred_filename,
+                ProjectSourcePathError(
+                    "GameMaker script resource names used to derive source "
+                    "filenames must be exactly one safe path component: "
+                    f"{entry.name!r}"
+                ),
+                owner_source_path=yy_source.source_path,
+                resource=entry.name,
+                resource_type="script",
+                field="preferred script source",
+            )
+        if preferred_source is not None:
+            owner_directory = posixpath.dirname(yy_source.source_path)
+            preferred_directory = posixpath.dirname(preferred_source.source_path)
+            if preferred_directory != owner_directory:
+                self._report_source_path_rejection(
+                    preferred_filename,
+                    ProjectSourcePathError(
+                        "GameMaker script source derived from the resource name "
+                        "must be next to its script .yy owner: "
+                        f"{preferred_filename!r}"
+                    ),
+                    owner_source_path=yy_source.source_path,
+                    resource=entry.name,
+                    resource_type="script",
+                    field="preferred script source",
+                )
+                preferred_source = None
+            elif os.path.isfile(preferred_source.filesystem_path):
+                return preferred_source.filesystem_path
+
+        try:
+            filenames = sorted(os.listdir(script_directory.filesystem_path))
+        except OSError:
+            return None
+        for filename in filenames:
+            if not filename.endswith(".gml"):
+                continue
+            if filename in excluded_filenames:
+                continue
+            discovered_source = self._resolve_discovered_project_source(
+                os.path.join(script_directory.filesystem_path, filename),
+                owner_source_path=yy_source.source_path,
+                resource=entry.name,
+                resource_type="script",
+                field="discovered script source",
+            )
+            if discovered_source is None or not os.path.isfile(
+                discovered_source.filesystem_path
+            ):
+                continue
+            return discovered_source.filesystem_path
         return None
 
     def _output_path(self, entry: AssetRegistryEntry) -> str | None:
@@ -686,6 +802,7 @@ class ScriptConverter(BaseConverter):
             log_callback=lambda _message: None,
             progress_callback=lambda _value: None,
             conversion_running=self.conversion_running,
+            diagnostics=self.diagnostics,
         ).build()
         return {
             name: GMLExtensionFunction(
@@ -698,11 +815,15 @@ class ScriptConverter(BaseConverter):
         }
 
     def _extension_function_mappings(self) -> dict[str, GMLExtensionFunctionMapping]:
-        mapping_path = os.path.join(self.gm_project_path, EXTENSION_FUNCTION_MAPPING_FILENAME)
-        if not os.path.isfile(mapping_path):
+        mapping_source = self._resolve_project_source(
+            EXTENSION_FUNCTION_MAPPING_FILENAME,
+            resource_type="script",
+            field="extension function mapping",
+        )
+        if mapping_source is None or not os.path.isfile(mapping_source.filesystem_path):
             return {}
         try:
-            return load_gml_extension_function_mappings(mapping_path)
+            return load_gml_extension_function_mappings(mapping_source.filesystem_path)
         except (OSError, ValueError, TypeError) as exc:
             self._safe_log(
                 f"Warning: Could not load {EXTENSION_FUNCTION_MAPPING_FILENAME}: {exc}"

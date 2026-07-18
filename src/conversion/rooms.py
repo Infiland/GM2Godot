@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TypedDict, cast
@@ -16,8 +17,13 @@ from src.conversion.architecture_policy import (
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.project_godot import GodotProjectFile
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    is_safe_project_source_component,
+)
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.room_creation_code import (
+    CreationCodeSourceResolver,
     ROOM_EXECUTION_ORDER,
     instance_creation_order_names,
     resolve_instance_creation_code,
@@ -30,6 +36,9 @@ ROOM_RUNTIME_SCRIPT_RELATIVE_PATH = os.path.join("gm2godot", "gml_room_node.gd")
 ROOM_RUNTIME_SCRIPT_RESOURCE_PATH = "res://gm2godot/gml_room_node.gd"
 ROOM_RUNTIME_EXT_RESOURCE_ID = "gm_room_runtime"
 ROOM_SCRIPT_BASE_RESOURCE_PATH = "res://gm2godot/gml_room_node.gd"
+_INSTANCE_CREATION_CODE_PREFIX = "InstanceCreationCode_"
+_INSTANCE_CREATION_CODE_SUFFIX = ".gml"
+_INSTANCE_CREATION_CODE_FIELD = "layers[].instances[].name"
 
 
 def render_room_runtime_script() -> str:
@@ -91,6 +100,17 @@ def _instance_name(instance: JsonDict) -> str:
     return name if isinstance(name, str) and name else "Instance"
 
 
+def _instance_name_from_creation_code_source(source_path: str) -> str | None:
+    if not (
+        source_path.startswith(_INSTANCE_CREATION_CODE_PREFIX)
+        and source_path.endswith(_INSTANCE_CREATION_CODE_SUFFIX)
+    ):
+        return None
+    return source_path[
+        len(_INSTANCE_CREATION_CODE_PREFIX):-len(_INSTANCE_CREATION_CODE_SUFFIX)
+    ]
+
+
 def _iter_room_instances(layers: object) -> list[JsonDict]:
     instances: list[JsonDict] = []
     for layer in _dict_items(layers):
@@ -149,6 +169,7 @@ class RoomConverter(BaseConverter):
             update_log_callback=self.update_log_callback,
             compact_logging=self.compact_logging,
             max_workers=self.max_workers,
+            diagnostics=self.diagnostics,
         ).build()
 
     def _generate_room_scene(
@@ -156,6 +177,7 @@ class RoomConverter(BaseConverter):
         room: IndexedRoom,
         resource_index: GameMakerResourceIndex | None = None,
         room_script_resource_path: str | None = None,
+        source_resolver: CreationCodeSourceResolver | None = None,
     ) -> str:
         room_settings = room.room_settings
         physics_settings = room.physics_settings
@@ -163,6 +185,7 @@ class RoomConverter(BaseConverter):
             room,
             self.gm_project_path,
             warn_callback=self._safe_log,
+            source_resolver=source_resolver,
         )
         self._record_effect_layer_diagnostics(room)
         serialized_layers = serialize_room_layers(
@@ -170,6 +193,7 @@ class RoomConverter(BaseConverter):
             gm_project_path=self.gm_project_path,
             resource_index=resource_index,
             warn_callback=self._safe_log,
+            creation_code_source_resolver=source_resolver,
         )
 
         script_resource_path = room_script_resource_path or ROOM_RUNTIME_SCRIPT_RESOURCE_PATH
@@ -255,9 +279,14 @@ class RoomConverter(BaseConverter):
         self,
         room: IndexedRoom,
         resource_index: GameMakerResourceIndex | None = None,
+        source_resolver: CreationCodeSourceResolver | None = None,
     ) -> str | None:
         asset_names = self._asset_names(resource_index)
-        room_creation_code = resolve_room_creation_code(room, self.gm_project_path)
+        room_creation_code = resolve_room_creation_code(
+            room,
+            self.gm_project_path,
+            source_resolver=source_resolver,
+        )
         room_creation_body: str | None = None
         if room_creation_code.has_code and room_creation_code.exists:
             room_creation_body = self._transpile_creation_code(
@@ -271,7 +300,12 @@ class RoomConverter(BaseConverter):
         instance_methods: list[InstanceCreationCodeMethod] = []
         used_method_names: dict[str, int] = {}
         for instance in _iter_room_instances(room.layers):
-            creation_code = resolve_instance_creation_code(room, instance)
+            creation_code = resolve_instance_creation_code(
+                room,
+                instance,
+                gm_project_path=self.gm_project_path,
+                source_resolver=source_resolver,
+            )
             if not creation_code.has_code or not creation_code.exists:
                 continue
             instance_name = _instance_name(instance)
@@ -462,8 +496,67 @@ class RoomConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
+        source_cache: dict[tuple[str, str], str | None] = {}
+
+        def resolve_creation_code_source(source_path: str, field: str) -> str | None:
+            cache_key = (source_path, field)
+            if cache_key not in source_cache:
+                if field == _INSTANCE_CREATION_CODE_FIELD:
+                    instance_name = _instance_name_from_creation_code_source(source_path)
+                    if (
+                        instance_name is None
+                        or not is_safe_project_source_component(instance_name)
+                    ):
+                        self._report_source_path_rejection(
+                            source_path,
+                            ProjectSourcePathError(
+                                "GameMaker instance names used to derive "
+                                "creation-code filenames must be exactly one "
+                                "safe path component"
+                            ),
+                            owner_source_path=room.yy_path,
+                            resource=room.name,
+                            resource_type="room",
+                            field=field,
+                        )
+                        source_cache[cache_key] = None
+                        return None
+                resolved = self._resolve_project_source(
+                    source_path,
+                    owner_source_path=room.yy_path,
+                    resource=room.name,
+                    resource_type="room",
+                    field=field,
+                )
+                if (
+                    resolved is not None
+                    and field == _INSTANCE_CREATION_CODE_FIELD
+                    and posixpath.dirname(resolved.source_path)
+                    != posixpath.dirname(room.yyp_path.replace("\\", "/"))
+                ):
+                    self._report_source_path_rejection(
+                        source_path,
+                        ProjectSourcePathError(
+                            "GameMaker instance creation-code filenames must "
+                            "stay beside their declaring room .yy file"
+                        ),
+                        owner_source_path=room.yy_path,
+                        resource=room.name,
+                        resource_type="room",
+                        field=field,
+                    )
+                    resolved = None
+                source_cache[cache_key] = (
+                    resolved.filesystem_path if resolved is not None else None
+                )
+            return source_cache[cache_key]
+
         output_path = self._room_output_path(room)
-        room_script = self._generate_room_script(room, resource_index)
+        room_script = self._generate_room_script(
+            room,
+            resource_index,
+            resolve_creation_code_source,
+        )
         room_script_resource_path: str | None = None
         if room_script is not None:
             room_script_resource_path = _room_script_resource_path(room)
@@ -473,7 +566,14 @@ class RoomConverter(BaseConverter):
                 f.write(room_script)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(self._generate_room_scene(room, resource_index, room_script_resource_path))
+            f.write(
+                self._generate_room_scene(
+                    room,
+                    resource_index,
+                    room_script_resource_path,
+                    resolve_creation_code_source,
+                )
+            )
 
         width = room.room_settings.get("Width", 1024)
         height = room.room_settings.get("Height", 768)

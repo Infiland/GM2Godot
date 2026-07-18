@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
+import tempfile
 import unittest
 
 from src.conversion.conversion_plan import (
@@ -111,6 +114,160 @@ class TestResourceModels(unittest.TestCase):
         self.assertIn(("GM2GD-RESOURCE-YY-MISSING", "spr_missing"), diagnostics)
         self.assertEqual(models.project.resource_count, 1)
         self.assertEqual(models.sprites, ())
+
+    def test_resource_model_rejects_manifest_path_outside_project(self) -> None:
+        project_dir = tempfile.mkdtemp()
+        try:
+            with open(
+                os.path.join(project_dir, "Unsafe.yyp"),
+                "w",
+                encoding="utf-8",
+            ) as project_file:
+                json.dump(
+                    {
+                        "%Name": "Unsafe",
+                        "resourceType": "GMProject",
+                        "resources": [
+                            {
+                                "id": {
+                                    "name": "scr_outside",
+                                    "path": "scripts/../../../outside.yy",
+                                }
+                            }
+                        ],
+                    },
+                    project_file,
+                )
+
+            models = parse_gamemaker_resource_models(project_dir)
+
+            rejected = [
+                diagnostic
+                for diagnostic in models.diagnostics
+                if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            ]
+            self.assertEqual(models.scripts, ())
+            self.assertEqual(len(rejected), 1)
+            self.assertEqual(rejected[0].resource_name, "scr_outside")
+            self.assertEqual(rejected[0].source_path, os.path.join(project_dir, "Unsafe.yyp"))
+        finally:
+            shutil.rmtree(project_dir)
+
+    def test_resource_model_rejects_path_normalized_into_another_kind(self) -> None:
+        project_dir = tempfile.mkdtemp()
+        try:
+            resource_dir = os.path.join(project_dir, "objects", "o_cross")
+            os.makedirs(resource_dir)
+            yyp_path = os.path.join(project_dir, "CrossKind.yyp")
+            with open(yyp_path, "w", encoding="utf-8") as project_file:
+                json.dump(
+                    {
+                        "%Name": "CrossKind",
+                        "resourceType": "GMProject",
+                        "resources": [
+                            {
+                                "id": {
+                                    "name": "s_cross",
+                                    "path": "sprites/../objects/o_cross/o_cross.yy",
+                                }
+                            }
+                        ],
+                    },
+                    project_file,
+                )
+            with open(
+                os.path.join(resource_dir, "o_cross.yy"),
+                "w",
+                encoding="utf-8",
+            ) as resource_file:
+                json.dump(
+                    {
+                        "%Name": "o_cross",
+                        "resourceType": "GMObject",
+                    },
+                    resource_file,
+                )
+
+            models = parse_gamemaker_resource_models(project_dir)
+
+            rejected = [
+                diagnostic
+                for diagnostic in models.diagnostics
+                if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            ]
+            self.assertEqual(models.sprites, ())
+            self.assertEqual(len(rejected), 1)
+            self.assertEqual(rejected[0].source_path, yyp_path)
+            self.assertEqual(rejected[0].resource_name, "s_cross")
+            self.assertEqual(rejected[0].resource_kind, "sprites")
+        finally:
+            shutil.rmtree(project_dir)
+
+    def test_resource_model_rejects_script_sidecar_link_outside_project(self) -> None:
+        project_dir = tempfile.mkdtemp()
+        outside_dir = tempfile.mkdtemp()
+        try:
+            script_dir = os.path.join(project_dir, "scripts", "scr_linked")
+            os.makedirs(script_dir)
+            with open(
+                os.path.join(project_dir, "Linked.yyp"),
+                "w",
+                encoding="utf-8",
+            ) as project_file:
+                json.dump(
+                    {
+                        "%Name": "Linked",
+                        "resourceType": "GMProject",
+                        "resources": [
+                            {
+                                "id": {
+                                    "name": "scr_linked",
+                                    "path": "scripts/scr_linked/scr_linked.yy",
+                                },
+                                "resourceType": "GMScript",
+                            }
+                        ],
+                    },
+                    project_file,
+                )
+            with open(
+                os.path.join(script_dir, "scr_linked.yy"),
+                "w",
+                encoding="utf-8",
+            ) as resource_file:
+                json.dump(
+                    {
+                        "%Name": "scr_linked",
+                        "resourceType": "GMScript",
+                    },
+                    resource_file,
+                )
+            outside_source = os.path.join(outside_dir, "scr_linked.gml")
+            with open(outside_source, "w", encoding="utf-8") as source_file:
+                source_file.write("return 42;\n")
+            try:
+                os.symlink(
+                    outside_source,
+                    os.path.join(script_dir, "scr_linked.gml"),
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            models = parse_gamemaker_resource_models(project_dir)
+
+            self.assertEqual(len(models.scripts), 1)
+            self.assertIsNone(models.scripts[0].gml_path)
+            rejected = [
+                diagnostic
+                for diagnostic in models.diagnostics
+                if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+            ]
+            self.assertEqual(len(rejected), 1)
+            self.assertEqual(rejected[0].resource_name, "scr_linked")
+            self.assertEqual(rejected[0].resource_kind, "scripts")
+        finally:
+            shutil.rmtree(project_dir)
+            shutil.rmtree(outside_dir)
 
 
 class TestGMLPipelineBoundaries(unittest.TestCase):

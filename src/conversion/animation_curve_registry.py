@@ -6,6 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Protocol, cast
 
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_source_path,
+)
 from src.conversion.type_defs import JsonDict
 
 ANIMATION_CURVE_REGISTRY_RELATIVE_PATH = os.path.join(
@@ -86,8 +90,14 @@ def build_animation_curve_registry_entries(
     for asset_entry in asset_entries:
         if asset_entry.kind != "animcurves":
             continue
-        yy_path = os.path.join(gm_project_path, asset_entry.source_path)
-        data = _read_json_lenient(yy_path)
+        try:
+            resolved_yy = resolve_project_source_path(
+                gm_project_path,
+                asset_entry.source_path,
+            )
+        except ProjectSourcePathError:
+            continue
+        data = _read_json_lenient(resolved_yy.filesystem_path)
         if data is None:
             continue
         entries.append(_animation_curve_entry_from_yy(asset_entry, data))

@@ -6,11 +6,19 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, cast
 
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler_parts.extension_functions import (
     EXTENSION_FUNCTION_MAPPING_FILENAME,
     load_gml_extension_function_mappings,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    resolve_project_filesystem_source_path,
+    resolve_project_source_path,
+    validate_project_resource_source_path,
+)
+from src.conversion.type_defs import JsonDict, LogCallback
 
 EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join(
     "gm2godot", "extension_compatibility_report.json"
@@ -86,29 +94,103 @@ class ExtensionEntry:
         }
 
 
-def build_extension_entries(gm_project_path: str) -> tuple[ExtensionEntry, ...]:
-    extensions_dir = os.path.join(gm_project_path, "extensions")
-    if not os.path.isdir(extensions_dir):
+@dataclass(frozen=True)
+class _SourceContext:
+    diagnostics: DiagnosticCollector | None
+    log_callback: LogCallback | None
+    owner_source_path: str
+    resource: str
+    field: str
+
+
+def build_extension_entries(
+    gm_project_path: str,
+    *,
+    diagnostics: DiagnosticCollector | None = None,
+    log_callback: LogCallback | None = None,
+) -> tuple[ExtensionEntry, ...]:
+    extensions_context = _SourceContext(
+        diagnostics, log_callback, "extensions", "extensions", "extensions directory"
+    )
+    extensions_dir = _resolve_source(gm_project_path, "extensions", extensions_context)
+    if extensions_dir is None:
+        return ()
+
+    extension_names = _list_confined_directory(
+        gm_project_path, extensions_dir, extensions_context
+    )
+    if extension_names is None:
         return ()
 
     entries: list[ExtensionEntry] = []
-    for name in sorted(os.listdir(extensions_dir)):
-        yy_path = os.path.join(extensions_dir, name, name + ".yy")
-        if not os.path.isfile(yy_path):
+    for name in extension_names:
+        extension_context = _SourceContext(
+            diagnostics,
+            log_callback,
+            f"extensions/{name}",
+            name,
+            "extension directory",
+        )
+        extension_dir = _resolve_source(
+            gm_project_path,
+            os.path.join(extensions_dir.filesystem_path, name),
+            extension_context,
+            discovered=True,
+        )
+        if extension_dir is None or not os.path.isdir(extension_dir.filesystem_path):
             continue
-        data = _read_json_lenient(yy_path)
+
+        yy_source_path = f"{extension_dir.source_path}/{name}.yy"
+        metadata_context = _SourceContext(
+            diagnostics, log_callback, yy_source_path, name, "extension metadata"
+        )
+        yy_path = _resolve_source(
+            gm_project_path,
+            os.path.join(extension_dir.filesystem_path, name + ".yy"),
+            metadata_context,
+            discovered=True,
+        )
+        if yy_path is None:
+            continue
+        try:
+            validate_project_resource_source_path(yy_path, "extensions")
+        except ProjectSourcePathError as error:
+            _report_source_path_rejection(
+                yy_source_path,
+                error,
+                metadata_context,
+            )
+            continue
+        data = _read_json_lenient(gm_project_path, yy_path, metadata_context)
         if data is None:
             continue
-        entries.append(extension_entry_from_yy(gm_project_path, yy_path, data))
+        entries.append(
+            extension_entry_from_yy(
+                gm_project_path,
+                yy_path.filesystem_path,
+                data,
+            )
+        )
     return tuple(entries)
 
 
 def write_extension_compatibility_outputs(
     gm_project_path: str,
     godot_project_path: str,
+    *,
+    diagnostics: DiagnosticCollector | None = None,
+    log_callback: LogCallback | None = None,
 ) -> str:
-    entries = build_extension_entries(gm_project_path)
-    mappings = _load_extension_mapping_names(gm_project_path)
+    entries = build_extension_entries(
+        gm_project_path,
+        diagnostics=diagnostics,
+        log_callback=log_callback,
+    )
+    mappings = _load_extension_mapping_names(
+        gm_project_path,
+        diagnostics=diagnostics,
+        log_callback=log_callback,
+    )
     report_path = os.path.join(godot_project_path, EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH)
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as report_file:
@@ -356,12 +438,34 @@ def _extension_function_metadata(function: ExtensionFunctionEntry) -> JsonDict:
     }
 
 
-def _load_extension_mapping_names(gm_project_path: str) -> set[str]:
-    mapping_path = os.path.join(gm_project_path, EXTENSION_FUNCTION_MAPPING_FILENAME)
-    if not os.path.isfile(mapping_path):
+def _load_extension_mapping_names(
+    gm_project_path: str,
+    *,
+    diagnostics: DiagnosticCollector | None,
+    log_callback: LogCallback | None,
+) -> set[str]:
+    context = _SourceContext(
+        diagnostics,
+        log_callback,
+        EXTENSION_FUNCTION_MAPPING_FILENAME,
+        EXTENSION_FUNCTION_MAPPING_FILENAME,
+        "extension function mapping",
+    )
+    mapping_path = _resolve_source(
+        gm_project_path, EXTENSION_FUNCTION_MAPPING_FILENAME, context
+    )
+    if mapping_path is None:
+        return set()
+    refreshed = _resolve_source(
+        gm_project_path,
+        mapping_path.filesystem_path,
+        context,
+        discovered=True,
+    )
+    if refreshed is None or not os.path.isfile(refreshed.filesystem_path):
         return set()
     try:
-        return set(load_gml_extension_function_mappings(mapping_path))
+        return set(load_gml_extension_function_mappings(refreshed.filesystem_path))
     except (OSError, ValueError, TypeError):
         return set()
 
@@ -459,14 +563,92 @@ def _json_dict_list(value: object) -> list[JsonDict]:
     return items
 
 
-def _read_json_lenient(path: str) -> JsonDict | None:
+def _resolve_source(
+    gm_project_path: str,
+    source_path: str,
+    context: _SourceContext,
+    *,
+    discovered: bool = False,
+) -> ResolvedProjectSourcePath | None:
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
+        return (
+            resolve_project_filesystem_source_path(gm_project_path, source_path)
+            if discovered
+            else resolve_project_source_path(gm_project_path, source_path)
+        )
+    except ProjectSourcePathError as error:
+        _report_source_path_rejection(source_path, error, context)
+        return None
+
+
+def _list_confined_directory(
+    gm_project_path: str,
+    directory: ResolvedProjectSourcePath,
+    context: _SourceContext,
+) -> tuple[str, ...] | None:
+    refreshed = _resolve_source(
+        gm_project_path,
+        directory.filesystem_path,
+        context,
+        discovered=True,
+    )
+    if refreshed is None:
         return None
     try:
+        if not os.path.isdir(refreshed.filesystem_path):
+            return None
+        return tuple(sorted(os.listdir(refreshed.filesystem_path)))
+    except OSError:
+        return None
+
+
+def _read_json_lenient(
+    gm_project_path: str,
+    source: ResolvedProjectSourcePath,
+    context: _SourceContext,
+) -> JsonDict | None:
+    refreshed = _resolve_source(
+        gm_project_path,
+        source.filesystem_path,
+        context,
+        discovered=True,
+    )
+    if refreshed is None:
+        return None
+    try:
+        with open(refreshed.filesystem_path, "r", encoding="utf-8") as source_file:
+            content = source_file.read()
         data = json.loads(re.sub(r",\s*([}\]])", r"\1", content))
+    except OSError:
+        return None
     except json.JSONDecodeError:
         return None
     return cast(JsonDict, data) if isinstance(data, dict) else None
+
+
+def _report_source_path_rejection(
+    rejected_path: str,
+    error: ProjectSourcePathError,
+    context: _SourceContext,
+) -> None:
+    message = (
+        "Warning: Rejected GameMaker source path "
+        f"{rejected_path!r} from {context.owner_source_path} "
+        f"field {context.field}: {error}"
+    )
+    if context.diagnostics is not None:
+        context.diagnostics.add(
+            "warning",
+            "GM2GD-SOURCE-PATH-REJECTED",
+            message,
+            source_path=context.owner_source_path,
+            resource=context.resource,
+            resource_type="extension",
+            manifest_entry=context.field,
+            workaround=(
+                "Keep GameMaker extension metadata and mapping files inside "
+                "the selected project root."
+            ),
+        )
+    if context.log_callback is not None:
+        context.log_callback(message)

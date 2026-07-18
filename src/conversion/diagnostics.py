@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Callable, Literal, TypeAlias
 
@@ -55,7 +56,9 @@ class ConversionDiagnostic:
 class DiagnosticCollector:
     def __init__(self) -> None:
         self._diagnostics: list[ConversionDiagnostic] = []
+        self._recorded_diagnostics: set[ConversionDiagnostic] = set()
         self._recorded_messages: set[str] = set()
+        self._lock = threading.RLock()
 
     def add(
         self,
@@ -89,20 +92,25 @@ class DiagnosticCollector:
             issue_number=issue_number,
             workaround=workaround,
         )
-        self._diagnostics.append(diagnostic)
-        self._recorded_messages.add(message)
+        with self._lock:
+            if diagnostic in self._recorded_diagnostics:
+                return diagnostic
+            self._diagnostics.append(diagnostic)
+            self._recorded_diagnostics.add(diagnostic)
+            self._recorded_messages.add(message)
         return diagnostic
 
     def add_from_log_message(
         self, message: str, *, code: str = "GM2GD-WARNING"
     ) -> ConversionDiagnostic | None:
-        if message in self._recorded_messages:
-            return None
         stripped = message.strip()
         severity = _severity_from_log_message(stripped)
         if severity is None:
             return None
-        return self.add(severity, code, stripped)
+        with self._lock:
+            if stripped in self._recorded_messages:
+                return None
+            return self.add(severity, code, stripped)
 
     def add_transpile_failure(
         self,
@@ -144,7 +152,8 @@ class DiagnosticCollector:
         return _wrapped
 
     def diagnostics(self) -> tuple[ConversionDiagnostic, ...]:
-        return tuple(self._diagnostics)
+        with self._lock:
+            return tuple(self._diagnostics)
 
     def summary(self) -> dict[str, int]:
         counts = {"info": 0, "warning": 0, "error": 0}

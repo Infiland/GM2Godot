@@ -6,6 +6,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Literal, Mapping, cast
 
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    resolve_project_filesystem_source_path,
+    resolve_project_source_path,
+    validate_project_resource_source_path,
+)
 from src.conversion.type_defs import JsonDict, JsonList
 
 
@@ -30,6 +36,11 @@ _RESOURCE_TYPE_KIND = {
     "GMTileSet": "tilesets",
     "GMTimeline": "timelines",
 }
+_RESOURCE_TYPE_BY_KIND = {
+    kind.casefold(): resource_type
+    for resource_type, kind in _RESOURCE_TYPE_KIND.items()
+}
+_KNOWN_RESOURCE_KINDS = frozenset(_RESOURCE_TYPE_BY_KIND)
 
 _KNOWN_PROJECT_FIELDS = frozenset({
     "$GMProject",
@@ -55,6 +66,8 @@ _KNOWN_PROJECT_FIELDS = frozenset({
     "tutorialPath",
 })
 
+_MISSING_RESOURCE_PATH = object()
+
 
 def _empty_json_dict() -> JsonDict:
     return cast(JsonDict, {})
@@ -73,6 +86,9 @@ class ProjectManifestDiagnostic:
     code: str
     message: str
     source: ProjectSourceLocation | None = None
+    resource: str | None = None
+    resource_type: str | None = None
+    resource_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -207,8 +223,8 @@ def load_gamemaker_project_manifest(
     *,
     target_platform: str | None = None,
 ) -> GameMakerProjectManifest:
-    yyp_path = _find_yyp_path(gm_project_path)
     diagnostics: list[ProjectManifestDiagnostic] = []
+    yyp_path = _find_yyp_path(gm_project_path, diagnostics)
     if yyp_path is None:
         diagnostics.append(
             ProjectManifestDiagnostic(
@@ -231,9 +247,14 @@ def load_gamemaker_project_manifest(
         )
         return GameMakerProjectManifest(project_name="", yyp_path=yyp_path, diagnostics=tuple(diagnostics))
 
-    resources = _parse_resources(raw_data, yyp_path, raw_source)
+    resources = _parse_resources(
+        raw_data,
+        yyp_path,
+        raw_source,
+        diagnostics,
+    )
     configurations = _parse_configurations(raw_data, yyp_path, raw_source)
-    options = _parse_project_options(gm_project_path)
+    options = _parse_project_options(gm_project_path, diagnostics)
     texture_groups = _parse_texture_groups(raw_data, yyp_path, raw_source)
     audio_groups = _parse_audio_groups(raw_data, yyp_path, raw_source)
     included_files = _parse_included_files(raw_data, yyp_path, raw_source)
@@ -284,14 +305,40 @@ def unsupported_project_option_diagnostics(
     return tuple(diagnostics)
 
 
-def _find_yyp_path(gm_project_path: str) -> str | None:
+def _find_yyp_path(
+    gm_project_path: str,
+    diagnostics: list[ProjectManifestDiagnostic],
+) -> str | None:
     try:
         yyp_files = sorted(name for name in os.listdir(gm_project_path) if name.endswith(".yyp"))
     except OSError:
         return None
-    if not yyp_files:
-        return None
-    return os.path.join(gm_project_path, yyp_files[0])
+    for filename in yyp_files:
+        candidate_path = os.path.join(gm_project_path, filename)
+        try:
+            resolved = resolve_project_source_path(gm_project_path, filename)
+        except ProjectSourcePathError as error:
+            diagnostics.append(
+                _source_path_rejection_diagnostic(
+                    gm_project_path,
+                    candidate_path,
+                    error,
+                )
+            )
+            continue
+        if os.path.isfile(resolved.filesystem_path):
+            return resolved.filesystem_path
+        diagnostics.append(
+            _source_path_rejection_diagnostic(
+                gm_project_path,
+                candidate_path,
+                ProjectSourcePathError(
+                    "GameMaker project candidate is not a regular .yyp file: "
+                    f"{filename!r}"
+                ),
+            )
+        )
+    return None
 
 
 def _read_lenient_json_file(path: str) -> tuple[JsonDict | None, str]:
@@ -308,8 +355,10 @@ def _parse_resources(
     yyp_data: JsonDict,
     yyp_path: str,
     raw_source: str,
+    diagnostics: list[ProjectManifestDiagnostic],
 ) -> tuple[ProjectResourceReference, ...]:
     resources: list[ProjectResourceReference] = []
+    source_search_offset = 0
     raw_resources = yyp_data.get("resources")
     if not isinstance(raw_resources, list):
         return ()
@@ -317,10 +366,173 @@ def _parse_resources(
         if not isinstance(raw_entry, dict):
             continue
         entry = cast(JsonDict, raw_entry)
+        raw_path, path_field = _resource_path_value(entry)
+        field_path = f"resources[{order}].{path_field}"
+        (
+            resource_name,
+            resource_kind,
+            resource_type,
+        ) = _resource_diagnostic_identity(
+            entry,
+            raw_path,
+        )
+        source_line, source_search_offset = _resource_field_line(
+            raw_source,
+            path_field,
+            raw_path,
+            source_search_offset,
+            fallback_needle=resource_name,
+        )
+        if raw_path is _MISSING_RESOURCE_PATH:
+            error = ProjectSourcePathError(
+                "GameMaker resource path is missing"
+            )
+        elif not isinstance(raw_path, str) or not raw_path:
+            error = ProjectSourcePathError(
+                "GameMaker resource path must be a non-empty string: "
+                f"{raw_path!r}"
+            )
+        else:
+            try:
+                resolve_project_source_path(
+                    os.path.dirname(yyp_path),
+                    raw_path,
+                )
+            except ProjectSourcePathError as exc:
+                error = exc
+            else:
+                error = None
+        if error is not None:
+            path_display = (
+                "<missing>"
+                if raw_path is _MISSING_RESOURCE_PATH
+                else repr(raw_path)
+            )
+            diagnostics.append(
+                ProjectManifestDiagnostic(
+                    severity="warning",
+                    code="GM2GD-SOURCE-PATH-REJECTED",
+                    message=(
+                        "Warning: Rejected GameMaker source path "
+                        f"{path_display} from {yyp_path} field "
+                        f"{field_path}: {error}"
+                    ),
+                    source=ProjectSourceLocation(
+                        yyp_path,
+                        source_line,
+                        field_path,
+                    ),
+                    resource=resource_name or None,
+                    resource_type=resource_type or None,
+                    resource_kind=resource_kind or None,
+                )
+            )
+            continue
         reference = _resource_reference_from_entry(entry, order, yyp_path, raw_source)
         if reference is not None:
             resources.append(reference)
     return tuple(resources)
+
+
+def _resource_field_line(
+    source: str,
+    field_path: str,
+    raw_value: object,
+    search_offset: int,
+    *,
+    fallback_needle: str,
+) -> tuple[int, int]:
+    """Locate a resource field after the prior entry, including duplicates."""
+    field_name = field_path.rsplit(".", 1)[-1]
+    match: re.Match[str] | None = None
+    if raw_value is _MISSING_RESOURCE_PATH:
+        if fallback_needle:
+            fallback_index = source.find(fallback_needle, search_offset)
+            if fallback_index >= 0:
+                return (
+                    source.count("\n", 0, fallback_index) + 1,
+                    fallback_index + len(fallback_needle),
+                )
+        return 1, search_offset
+    else:
+        serialized_value = json.dumps(raw_value, ensure_ascii=False)
+        pattern = re.compile(
+            rf'"{re.escape(field_name)}"\s*:\s*{re.escape(serialized_value)}'
+        )
+        match = pattern.search(source, search_offset)
+    if match is None:
+        field_pattern = re.compile(rf'"{re.escape(field_name)}"\s*:')
+        match = field_pattern.search(source, search_offset)
+    if match is None and fallback_needle:
+        fallback_index = source.find(fallback_needle, search_offset)
+        if fallback_index >= 0:
+            return (
+                source.count("\n", 0, fallback_index) + 1,
+                fallback_index + len(fallback_needle),
+            )
+    if match is None:
+        return 1, search_offset
+    return source.count("\n", 0, match.start()) + 1, match.end()
+
+
+def _resource_path_value(entry: JsonDict) -> tuple[object, str]:
+    """Return a raw YYP resource path and its field without coercion."""
+    data = entry
+    field_prefix = ""
+    value = entry.get("Value")
+    if isinstance(value, dict):
+        data = cast(JsonDict, value)
+        field_prefix = "Value."
+    nested_id = data.get("id")
+    if isinstance(nested_id, dict):
+        nested = cast(JsonDict, nested_id)
+        return (
+            nested.get("path", _MISSING_RESOURCE_PATH),
+            f"{field_prefix}id.path",
+        )
+    for key in ("path", "resourcePath", "resource_path"):
+        if key in data:
+            return data[key], f"{field_prefix}{key}"
+    missing_field = "resourcePath" if field_prefix else "id.path"
+    return _MISSING_RESOURCE_PATH, f"{field_prefix}{missing_field}"
+
+
+def _resource_diagnostic_identity(
+    entry: JsonDict,
+    raw_path: object,
+) -> tuple[str, str, str]:
+    data = entry
+    value = entry.get("Value")
+    if isinstance(value, dict):
+        data = cast(JsonDict, value)
+    nested_id = data.get("id")
+    if isinstance(nested_id, dict):
+        nested = cast(JsonDict, nested_id)
+        name = _string_value(nested.get("name"))
+        nested_resource_type = _string_value(nested.get("resourceType"))
+    else:
+        name = _string_value(data.get("name")) or _string_value(data.get("%Name"))
+        nested_resource_type = ""
+    resource_type = (
+        _string_value(data.get("resourceType"))
+        or nested_resource_type
+    )
+    path = raw_path if isinstance(raw_path, str) else ""
+    path_kind = _kind_from_path(path).casefold()
+    if path_kind not in _KNOWN_RESOURCE_KINDS:
+        path_kind = ""
+    declared_kind = _RESOURCE_TYPE_KIND.get(resource_type, "")
+    kind = path_kind or declared_kind
+    effective_resource_type = ""
+    if path_kind:
+        effective_resource_type = _RESOURCE_TYPE_BY_KIND[path_kind]
+    elif declared_kind:
+        effective_resource_type = resource_type
+    return (
+        name or _name_from_path(path),
+        kind,
+        effective_resource_type,
+    )
 
 
 def _resource_reference_from_entry(
@@ -501,16 +713,85 @@ def _config_overrides_from_value(
     )
 
 
-def _parse_project_options(gm_project_path: str) -> tuple[ProjectOption, ...]:
-    options_root = os.path.join(gm_project_path, "options")
+def _parse_project_options(
+    gm_project_path: str,
+    diagnostics: list[ProjectManifestDiagnostic],
+) -> tuple[ProjectOption, ...]:
+    lexical_options_root = os.path.join(gm_project_path, "options")
+    try:
+        resolved_options_root = resolve_project_filesystem_source_path(
+            gm_project_path,
+            lexical_options_root,
+        )
+    except ProjectSourcePathError as error:
+        diagnostics.append(
+            _source_path_rejection_diagnostic(
+                gm_project_path,
+                lexical_options_root,
+                error,
+            )
+        )
+        return ()
+    options_root = resolved_options_root.filesystem_path
     if not os.path.isdir(options_root):
         return ()
     options: list[ProjectOption] = []
-    for root, _dirs, files in os.walk(options_root):
+    for root, dirs, files in os.walk(options_root):
+        contained_dirs: list[str] = []
+        for directory in sorted(dirs):
+            candidate_directory = os.path.join(root, directory)
+            try:
+                resolved_directory = resolve_project_filesystem_source_path(
+                    gm_project_path,
+                    candidate_directory,
+                )
+            except ProjectSourcePathError as error:
+                diagnostics.append(
+                    _source_path_rejection_diagnostic(
+                        gm_project_path,
+                        candidate_directory,
+                        error,
+                    )
+                )
+                continue
+            if os.path.isdir(resolved_directory.filesystem_path):
+                contained_dirs.append(directory)
+        dirs[:] = contained_dirs
         for filename in sorted(files):
             if not filename.endswith(".yy"):
                 continue
-            path = os.path.join(root, filename)
+            candidate_path = os.path.join(root, filename)
+            try:
+                resolved_path = resolve_project_filesystem_source_path(
+                    gm_project_path,
+                    candidate_path,
+                )
+            except ProjectSourcePathError as error:
+                diagnostics.append(
+                    _source_path_rejection_diagnostic(
+                        gm_project_path,
+                        candidate_path,
+                        error,
+                    )
+                )
+                continue
+            try:
+                validate_project_resource_source_path(
+                    resolved_path,
+                    "options",
+                )
+            except ProjectSourcePathError as error:
+                diagnostics.append(
+                    _source_path_rejection_diagnostic(
+                        gm_project_path,
+                        candidate_path,
+                        error,
+                    )
+                )
+                continue
+            path = resolved_path.filesystem_path
+            if not os.path.isfile(path):
+                continue
             data, source = _read_lenient_json_file(path)
             if data is None:
                 continue
@@ -526,6 +807,32 @@ def _parse_project_options(gm_project_path: str) -> tuple[ProjectOption, ...]:
                         )
                     )
     return tuple(options)
+
+
+def _source_path_rejection_diagnostic(
+    gm_project_path: str,
+    candidate_path: str,
+    error: ProjectSourcePathError,
+) -> ProjectManifestDiagnostic:
+    """Describe a rejected candidate without resolving its lexical source link."""
+    lexical_path = os.path.abspath(candidate_path)
+    try:
+        field_path = os.path.relpath(
+            lexical_path,
+            os.path.abspath(gm_project_path),
+        ).replace(os.sep, "/")
+    except ValueError:
+        field_path = os.path.basename(lexical_path)
+    return ProjectManifestDiagnostic(
+        severity="warning",
+        code="GM2GD-SOURCE-PATH-REJECTED",
+        message=f"Rejected GameMaker project source path {field_path!r}: {error}",
+        source=ProjectSourceLocation(
+            path=lexical_path,
+            line=1,
+            field_path=field_path,
+        ),
+    )
 
 
 def _option_platform_from_path(options_root: str, path: str) -> str:

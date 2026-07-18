@@ -13,6 +13,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.project_godot import prepare_godot_project_destination
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_settings import ProjectSettingsConverter
 
 SAMPLE_YYP = """\
@@ -421,13 +422,18 @@ class TestConvertIconFallback(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, platform: str = 'linux') -> ProjectSettingsConverter:
+    def _make_converter(
+        self,
+        platform: str = 'linux',
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> ProjectSettingsConverter:
         return ProjectSettingsConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
             gm_platform=platform,
+            diagnostics=diagnostics,
         )
 
     def _create_icon(self, platform: str) -> None:
@@ -471,6 +477,72 @@ class TestConvertIconFallback(unittest.TestCase):
         result = converter.convert_icon()
 
         self.assertFalse(result)
+
+    def test_rejects_selected_icon_file_link_outside_project(self) -> None:
+        from PIL import Image
+
+        diagnostics = DiagnosticCollector()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_icon = os.path.join(outside_dir, "outside.png")
+            Image.new("RGBA", (16, 16), "red").save(outside_icon, "PNG")
+            icons_dir = os.path.join(self.gm_dir, "options", "linux", "icons")
+            os.makedirs(icons_dir)
+            try:
+                os.symlink(outside_icon, os.path.join(icons_dir, "icon.png"))
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            result = self._make_converter(
+                platform="linux",
+                diagnostics=diagnostics,
+            ).convert_icon()
+
+        self.assertFalse(result)
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "icon.png")))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "options/linux/icons")
+        self.assertEqual(rejected[0].manifest_entry, "icon file")
+
+    def test_rejects_fallback_icon_directory_link_outside_project(self) -> None:
+        from PIL import Image
+
+        diagnostics = DiagnosticCollector()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            Image.new("RGBA", (16, 16), "red").save(
+                os.path.join(outside_dir, "icon.png"),
+                "PNG",
+            )
+            platform_dir = os.path.join(self.gm_dir, "options", "windows")
+            os.makedirs(platform_dir)
+            try:
+                os.symlink(
+                    outside_dir,
+                    os.path.join(platform_dir, "icons"),
+                    target_is_directory=True,
+                )
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            result = self._make_converter(
+                platform="linux",
+                diagnostics=diagnostics,
+            ).convert_icon()
+
+        self.assertFalse(result)
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "icon.png")))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "options/windows")
+        self.assertEqual(rejected[0].manifest_entry, "icons directory")
 
     def test_converted_icon_is_wired_into_fresh_minimal_project(self) -> None:
         self._create_yyp()

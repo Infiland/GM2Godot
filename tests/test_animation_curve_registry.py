@@ -89,6 +89,39 @@ class TestAnimationCurveRegistry(unittest.TestCase):
             "extends RefCounted\n\nstatic func entries():\n\treturn []\n",
         )
 
+    def test_skips_uncontained_animation_curve_metadata_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as gm_dir, tempfile.TemporaryDirectory() as outside_dir:
+            outside_yy = os.path.join(outside_dir, "ac_outside.yy")
+            with open(outside_yy, "w", encoding="utf-8") as source_file:
+                source_file.write('{"name":"ac_outside","channels":[]}')
+            linked_dir = os.path.join(gm_dir, "animcurves", "ac_linked")
+            os.makedirs(linked_dir)
+            linked_yy = os.path.join(linked_dir, "ac_linked.yy")
+            try:
+                os.symlink(outside_yy, linked_yy)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            entries = build_animation_curve_registry_entries(
+                gm_dir,
+                (
+                    _AssetEntry(
+                        1,
+                        "ac_parent",
+                        "animcurves",
+                        "../../../outside.yy",
+                    ),
+                    _AssetEntry(
+                        2,
+                        "ac_linked",
+                        "animcurves",
+                        "animcurves/ac_linked/ac_linked.yy",
+                    ),
+                ),
+            )
+
+        self.assertEqual(entries, ())
+
 
 if __name__ == "__main__":
     unittest.main()

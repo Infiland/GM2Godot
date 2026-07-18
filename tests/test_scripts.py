@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
 
+from src.conversion.asset_registry import AssetRegistryEntry
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
@@ -66,6 +68,11 @@ def _extension_yy(name: str) -> dict[str, object]:
     }
 
 
+class ScriptSourceProbe(ScriptConverter):
+    def source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
+        return self._source_gml_path(entry)
+
+
 class TestScriptConverter(unittest.TestCase):
     def setUp(self) -> None:
         self.gm_dir = Path(tempfile.mkdtemp())
@@ -107,7 +114,12 @@ class TestScriptConverter(unittest.TestCase):
             "function scr_modern(a, b = 4) { return a + b; }",
         )
 
-    def _converter(self, macro_configuration: str | None = None) -> ScriptConverter:
+    def _converter(
+        self,
+        macro_configuration: str | None = None,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> ScriptConverter:
         return ScriptConverter(
             self.gm_dir,
             self.godot_dir,
@@ -115,6 +127,33 @@ class TestScriptConverter(unittest.TestCase):
             progress_callback=lambda _value: None,
             conversion_running=lambda: True,
             macro_configuration=macro_configuration,
+            diagnostics=diagnostics,
+        )
+
+    def _source_probe(
+        self,
+        diagnostics: DiagnosticCollector,
+    ) -> ScriptSourceProbe:
+        return ScriptSourceProbe(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+
+    @staticmethod
+    def _script_entry(name: str, source_path: str) -> AssetRegistryEntry:
+        return AssetRegistryEntry(
+            id=1,
+            name=name,
+            kind="scripts",
+            asset_type="script",
+            type_name="Script",
+            source_path=source_path,
+            godot_path="res://scripts/probe.gd",
+            legacy_id=source_path,
         )
 
     def test_converts_scripts_and_generated_registry(self) -> None:
@@ -156,6 +195,224 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
         self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_scoped_callable()', registry)
         self.assertIn('"legacy_arguments": false', registry)
+
+    def test_declared_manifest_script_path_owns_selected_sidecar(self) -> None:
+        _write_json(
+            self.gm_dir / "ScriptTest.yyp",
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "scr_declared",
+                            "path": "scripts/nested/source/custom_script.yy",
+                        }
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        script_metadata: dict[str, object] = {
+            "%Name": "scr_declared",
+            "name": "scr_declared",
+            "parent": {
+                "name": "Declared",
+                "path": "folders/Scripts/Declared.yy",
+            },
+            "resourceType": "GMScript",
+        }
+        _write_json(
+            self.gm_dir / "scripts" / "nested" / "source" / "custom_script.yy",
+            script_metadata,
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "nested" / "source" / "scr_declared.gml",
+            "function scr_declared() { return 41; }",
+        )
+        _write_json(
+            self.gm_dir / "scripts" / "scr_declared" / "scr_declared.yy",
+            script_metadata,
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_declared" / "scr_declared.gml",
+            "function scr_declared() { return 99; }",
+        )
+
+        self._converter().convert_all()
+
+        generated = (
+            self.godot_dir / "scripts" / "declared" / "scr_declared.gd"
+        ).read_text(encoding="utf-8")
+        self.assertIn("return 41", generated)
+        self.assertNotIn("return 99", generated)
+        self.assertIn("func gm2godot_callable():", generated)
+
+    def test_unusual_script_name_cannot_move_preferred_source_from_owner(self) -> None:
+        owner_path = self.gm_dir / "scripts" / "owner" / "custom.yy"
+        _write_json(owner_path, {"resourceType": "GMScript"})
+        escaped_source = self.gm_dir / "scripts" / "escaped.gml"
+        fallback_source = self.gm_dir / "scripts" / "owner" / "safe.gml"
+        _write_text(escaped_source, "return 99;")
+        _write_text(fallback_source, "return 7;")
+        diagnostics = DiagnosticCollector()
+
+        selected = self._source_probe(diagnostics).source_gml_path(
+            self._script_entry("../escaped", "scripts/owner/custom.yy")
+        )
+
+        self.assertEqual(selected, str(fallback_source))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "scripts/owner/custom.yy")
+        self.assertEqual(rejected[0].manifest_entry, "preferred script source")
+
+    def test_script_name_aliases_do_not_select_derived_source(self) -> None:
+        aliases = (
+            ("slash", "bridge/../a_alias", "a_alias.gml"),
+            ("backslash", r"bridge\..\a_alias", "a_alias.gml"),
+            ("dot", ".", "..gml"),
+            ("dotdot", "..", "...gml"),
+        )
+        for label, script_name, aliased_filename in aliases:
+            with self.subTest(alias=label):
+                owner_relative = f"scripts/owner_{label}/custom.yy"
+                owner_directory = self.gm_dir / "scripts" / f"owner_{label}"
+                fallback_source = owner_directory / "z_fallback.gml"
+                _write_json(
+                    owner_directory / "custom.yy",
+                    {"resourceType": "GMScript"},
+                )
+                _write_text(fallback_source, "return 7;")
+                _write_text(owner_directory / aliased_filename, "return 99;")
+                diagnostics = DiagnosticCollector()
+
+                selected = self._source_probe(diagnostics).source_gml_path(
+                    self._script_entry(script_name, owner_relative)
+                )
+
+                self.assertEqual(selected, str(fallback_source))
+                rejected = [
+                    diagnostic
+                    for diagnostic in diagnostics.diagnostics()
+                    if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                ]
+                self.assertEqual(len(rejected), 1, rejected)
+                self.assertEqual(rejected[0].source_path, owner_relative)
+                self.assertEqual(
+                    rejected[0].manifest_entry,
+                    "preferred script source",
+                )
+
+    def test_safe_script_name_still_prefers_matching_source(self) -> None:
+        owner_directory = self.gm_dir / "scripts" / "owner_safe"
+        preferred_source = owner_directory / "scr_safe.gml"
+        _write_json(
+            owner_directory / "custom.yy",
+            {"resourceType": "GMScript"},
+        )
+        _write_text(owner_directory / "a_fallback.gml", "return 7;")
+        _write_text(preferred_source, "return 99;")
+        diagnostics = DiagnosticCollector()
+
+        selected = self._source_probe(diagnostics).source_gml_path(
+            self._script_entry("scr_safe", "scripts/owner_safe/custom.yy")
+        )
+
+        self.assertEqual(selected, str(preferred_source))
+        self.assertFalse(
+            any(
+                diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_fallback_discovery_skips_source_symlink_outside_project(self) -> None:
+        owner_path = self.gm_dir / "scripts" / "owner" / "custom.yy"
+        fallback_source = self.gm_dir / "scripts" / "owner" / "b_valid.gml"
+        _write_json(owner_path, {"resourceType": "GMScript"})
+        _write_text(fallback_source, "return 7;")
+        diagnostics = DiagnosticCollector()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_source = Path(outside_dir) / "a_external.gml"
+            outside_source.write_text("return 99;", encoding="utf-8")
+            linked_source = self.gm_dir / "scripts" / "owner" / "a_external.gml"
+            try:
+                os.symlink(outside_source, linked_source)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            selected = self._source_probe(diagnostics).source_gml_path(
+                self._script_entry("missing", "scripts/owner/custom.yy")
+            )
+
+        self.assertEqual(selected, str(fallback_source))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "scripts/owner/custom.yy")
+        self.assertEqual(rejected[0].manifest_entry, "discovered script source")
+
+    def test_preferred_sidecar_symlink_outside_project_uses_valid_fallback(self) -> None:
+        owner_path = self.gm_dir / "scripts" / "owner" / "custom.yy"
+        fallback_source = self.gm_dir / "scripts" / "owner" / "z_valid.gml"
+        _write_json(owner_path, {"resourceType": "GMScript"})
+        _write_text(fallback_source, "return 7;")
+        diagnostics = DiagnosticCollector()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_source = Path(outside_dir) / "outside.gml"
+            outside_source.write_text("return 99;", encoding="utf-8")
+            preferred_source = self.gm_dir / "scripts" / "owner" / "scr_owner.gml"
+            try:
+                os.symlink(outside_source, preferred_source)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            selected = self._source_probe(diagnostics).source_gml_path(
+                self._script_entry("scr_owner", "scripts/owner/custom.yy")
+            )
+
+        self.assertEqual(selected, str(fallback_source))
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "scripts/owner/custom.yy")
+        self.assertEqual(rejected[0].manifest_entry, "preferred script source")
+
+    def test_script_yy_symlink_outside_project_is_not_used_as_an_owner(self) -> None:
+        script_directory = self.gm_dir / "scripts" / "owner"
+        fallback_source = script_directory / "safe.gml"
+        _write_text(fallback_source, "return 7;")
+        diagnostics = DiagnosticCollector()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_yy = Path(outside_dir) / "custom.yy"
+            _write_json(outside_yy, {"resourceType": "GMScript"})
+            try:
+                os.symlink(outside_yy, script_directory / "custom.yy")
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            selected = self._source_probe(diagnostics).source_gml_path(
+                self._script_entry("safe", "scripts/owner/custom.yy")
+            )
+
+        self.assertIsNone(selected)
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].manifest_entry, "script .yy")
 
     def test_script_body_uses_caller_instance_scope(self) -> None:
         self._write_project()

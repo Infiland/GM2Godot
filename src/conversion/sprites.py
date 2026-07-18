@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
-import json
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from PIL import Image
 from collections import defaultdict
@@ -10,10 +8,13 @@ from typing import TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    resolve_project_source_path,
+    ResolvedProjectSourcePath,
+    validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
@@ -47,12 +48,17 @@ class SpriteConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_sprites_path = os.path.join(self.godot_project_path, 'sprites')
         self._sprite_path_suffixes: dict[str, str] = {}
         self._yyp_sprite_yy_paths: dict[str, str] = {}
+        self._sprite_yy_paths: dict[str, str] = {}
+        self._sprite_owner_yy_paths: dict[str, str] = {}
+        self._sprites_without_yy: set[str] = set()
 
     def _get_valid_sprite_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of sprite name -> subfolder.
@@ -61,26 +67,38 @@ class SpriteConverter(BaseConverter):
         the caller to fall back to converting all sprites on disk.
         """
         self._yyp_sprite_yy_paths = {}
+        self._sprite_yy_paths = {}
+        self._sprite_owner_yy_paths = {}
+        self._sprites_without_yy = set()
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="sprite",
+            include_project_sources=True,
+        )
         try:
-            yyp_files = sorted(f for f in os.listdir(self.gm_project_path) if f.endswith('.yyp'))
-            if not yyp_files:
+            if manifest.yyp_path is None:
                 return None
-
-            yyp_path = os.path.join(self.gm_project_path, yyp_files[0])
-            with open(yyp_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            raw_data = json.loads(cleaned)
-            if not isinstance(raw_data, dict):
+            resolved_yyp = self._resolve_discovered_project_source(
+                manifest.yyp_path,
+                owner_source_path=manifest.yyp_path,
+                resource_type="sprite",
+                field="project .yyp",
+            )
+            if resolved_yyp is None:
+                return None
+            if any(
+                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+                for diagnostic in manifest.diagnostics
+            ):
                 raise TypeError("GameMaker project root must be an object")
-            data = cast(JsonDict, raw_data)
+            data = manifest.raw_data
 
             valid_sprites: dict[str, str] = {}
             raw_resources = data.get('resources', [])
             if not isinstance(raw_resources, list):
                 raise TypeError("GameMaker project resources must be an array")
-            for raw_resource in cast(list[object], raw_resources):
+            for resource_index, raw_resource in enumerate(cast(list[object], raw_resources)):
                 if not isinstance(raw_resource, dict):
                     continue
                 resource = cast(JsonDict, raw_resource)
@@ -91,8 +109,18 @@ class SpriteConverter(BaseConverter):
                 raw_path = res_id.get('path', '')
                 if not isinstance(raw_path, str):
                     continue
+                manifest_field = f"resources[{resource_index}].id.path"
+                if manifest_field in manifest_rejected_fields:
+                    continue
                 path = raw_path.replace('\\', '/')
-                if path.startswith('sprites/'):
+                resource_type = resource.get('resourceType')
+                id_resource_type = res_id.get('resourceType')
+                is_sprite = (
+                    path.casefold().startswith('sprites/')
+                    or resource_type == "GMSprite"
+                    or id_resource_type == "GMSprite"
+                )
+                if is_sprite:
                     raw_name = res_id.get('name', '')
                     name = (
                         raw_name
@@ -101,22 +129,43 @@ class SpriteConverter(BaseConverter):
                     )
                     if not name:
                         continue
+                    resolved_path = self._resolve_project_source(
+                        path,
+                        owner_source_path=resolved_yyp.source_path,
+                        resource=name,
+                        resource_type="sprite",
+                        field=manifest_field,
+                    )
+                    if resolved_path is None:
+                        continue
                     try:
-                        resolved_path = resolve_project_source_path(
-                            self.gm_project_path,
-                            path,
+                        validate_project_resource_source_path(
+                            resolved_path,
+                            "sprites",
                         )
                     except ProjectSourcePathError as exc:
-                        self._safe_log(
-                            f"Warning: Skipping GameMaker sprite {name}: {exc}"
+                        self._report_source_path_rejection(
+                            path,
+                            exc,
+                            owner_source_path=resolved_yyp.source_path,
+                            resource=name,
+                            resource_type="sprite",
+                            field=manifest_field,
                         )
                         continue
                     yy_path = resolved_path.filesystem_path
                     self._yyp_sprite_yy_paths[name] = yy_path
-                    valid_sprites[name] = self._get_subfolder_from_yy(yy_path)
+                    self._sprite_yy_paths[name] = yy_path
+                    self._sprite_owner_yy_paths[name] = yy_path
+                    validated_yy_path = self._sprite_yy_path(name)
+                    valid_sprites[name] = (
+                        self._get_subfolder_from_yy(validated_yy_path)
+                        if validated_yy_path is not None
+                        else ""
+                    )
 
             return valid_sprites
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        except (OSError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Sprites_YYPFilterWarning"))
             return None
 
@@ -167,20 +216,104 @@ class SpriteConverter(BaseConverter):
             suffixes[sprite_name] = suffix
         return suffixes
 
-    def _disk_sprite_yy_paths(self) -> dict[str, str]:
-        sprite_root = os.path.join(self.gm_project_path, 'sprites')
+    def _disk_sprite_directories(self) -> dict[str, str]:
+        sprite_root = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'sprites'),
+            resource_type="sprite",
+            field="sprites directory",
+        )
+        if sprite_root is None or not os.path.isdir(sprite_root.filesystem_path):
+            return {}
         try:
-            sprite_names = sorted(os.listdir(sprite_root))
+            sprite_names = sorted(os.listdir(sprite_root.filesystem_path))
         except OSError:
             return {}
 
-        yy_paths: dict[str, str] = {}
+        sprite_directories: dict[str, str] = {}
         for sprite_name in sprite_names:
-            sprite_dir = os.path.join(sprite_root, sprite_name)
+            sprite_dir = os.path.join(sprite_root.filesystem_path, sprite_name)
+            resolved_dir = self._resolve_discovered_project_source(
+                sprite_dir,
+                owner_source_path=sprite_root.source_path,
+                resource=sprite_name,
+                resource_type="sprite",
+                field="discovered sprite directory",
+            )
+            if resolved_dir is not None and os.path.isdir(resolved_dir.filesystem_path):
+                sprite_directories[sprite_name] = resolved_dir.filesystem_path
+                # Until a real .yy has been validated, use the containing
+                # directory as provenance. A malicious .yy symlink must never
+                # become its own diagnostic owner.
+                self._sprite_owner_yy_paths.setdefault(
+                    sprite_name,
+                    resolved_dir.source_path,
+                )
+        return sprite_directories
+
+    def _disk_sprite_yy_paths(
+        self,
+        sprite_directories: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        directories = (
+            sprite_directories
+            if sprite_directories is not None
+            else self._disk_sprite_directories()
+        )
+        yy_paths: dict[str, str] = {}
+        for sprite_name, sprite_dir in directories.items():
             yy_path = os.path.join(sprite_dir, sprite_name + '.yy')
-            if os.path.isdir(sprite_dir) and os.path.isfile(yy_path):
-                yy_paths[sprite_name] = yy_path
+            resolved_yy = self._resolve_discovered_project_source(
+                yy_path,
+                owner_source_path=self._sprite_owner_yy_paths.get(
+                    sprite_name,
+                    sprite_dir,
+                ),
+                resource=sprite_name,
+                resource_type="sprite",
+                field="discovered sprite .yy",
+            )
+            if (
+                resolved_yy is not None
+                and self._source_has_resource_kind(
+                    resolved_yy,
+                    rejected_path=yy_path,
+                    owner_source_path=self._sprite_owner_yy_paths.get(
+                        sprite_name,
+                        sprite_dir,
+                    ),
+                    resource=sprite_name,
+                    field="discovered sprite .yy",
+                )
+                and os.path.isfile(resolved_yy.filesystem_path)
+            ):
+                yy_paths[sprite_name] = resolved_yy.filesystem_path
+                self._sprite_owner_yy_paths[sprite_name] = (
+                    resolved_yy.source_path
+                )
         return yy_paths
+
+    def _source_has_resource_kind(
+        self,
+        resolved: ResolvedProjectSourcePath,
+        *,
+        rejected_path: str,
+        owner_source_path: StrPath,
+        resource: str,
+        field: str,
+    ) -> bool:
+        try:
+            validate_project_resource_source_path(resolved, "sprites")
+            return True
+        except ProjectSourcePathError as error:
+            self._report_source_path_rejection(
+                rejected_path,
+                error,
+                owner_source_path=owner_source_path,
+                resource=resource,
+                resource_type="sprite",
+                field=field,
+            )
+            return False
 
     def _sprite_output_stem(self, sprite_name: str) -> str:
         return generated_resource_stem(sprite_name) + self._sprite_path_suffixes.get(sprite_name, "")
@@ -193,33 +326,159 @@ class SpriteConverter(BaseConverter):
             suffix=self._sprite_path_suffixes.get(sprite_name, ""),
         )
 
-    def _find_all_sprite_images(self) -> defaultdict[str, list[str]]:
-        sprite_folder = os.path.join(self.gm_project_path, 'sprites')
+    def _find_all_sprite_images(
+        self,
+        sprite_directories: dict[str, str] | None = None,
+        owner_yy_paths: dict[str, str] | None = None,
+    ) -> defaultdict[str, list[str]]:
+        directories = (
+            sprite_directories
+            if sprite_directories is not None
+            else self._disk_sprite_directories()
+        )
+        owners = owner_yy_paths or {}
         image_files: defaultdict[str, list[str]] = defaultdict(list)
-        for root, _, files in os.walk(sprite_folder):
-            if 'layers' in root.split(os.path.sep):
-                sprite_name = root.split(os.path.sep)[-3]
-                images = [
-                    os.path.join(root, file)
-                    for file in files
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg'))
-                ]
-                if images:
-                    image_files[sprite_name].extend(images)
+        for sprite_name, sprite_directory in directories.items():
+            owner_yy = owners.get(
+                sprite_name,
+                self._sprite_owner_yy_paths.get(
+                    sprite_name,
+                    sprite_directory,
+                ),
+            )
+            self._sprite_owner_yy_paths.setdefault(sprite_name, owner_yy)
+            image_files[sprite_name].extend(
+                self._find_sprite_images(
+                    sprite_name,
+                    sprite_directory,
+                    owner_yy,
+                )
+            )
+            if not image_files[sprite_name]:
+                del image_files[sprite_name]
         return image_files
+
+    def _find_sprite_images(
+        self,
+        sprite_name: str,
+        sprite_directory: str,
+        owner_yy_path: str,
+    ) -> list[str]:
+        resolved_sprite_directory = self._resolve_discovered_project_source(
+            sprite_directory,
+            owner_source_path=owner_yy_path,
+            resource=sprite_name,
+            resource_type="sprite",
+            field="sprite resource directory",
+        )
+        if (
+            resolved_sprite_directory is None
+            or not os.path.isdir(resolved_sprite_directory.filesystem_path)
+        ):
+            return []
+
+        layers_directory = self._resolve_discovered_project_source(
+            os.path.join(resolved_sprite_directory.filesystem_path, 'layers'),
+            owner_source_path=owner_yy_path,
+            resource=sprite_name,
+            resource_type="sprite",
+            field="layers directory",
+        )
+        if layers_directory is None or not os.path.isdir(layers_directory.filesystem_path):
+            return []
+
+        image_paths: list[str] = []
+        pending_directories = [layers_directory.filesystem_path]
+        while pending_directories:
+            root = pending_directories.pop()
+            resolved_root = self._resolve_discovered_project_source(
+                root,
+                owner_source_path=owner_yy_path,
+                resource=sprite_name,
+                resource_type="sprite",
+                field="frames[].name",
+            )
+            if resolved_root is None or not os.path.isdir(
+                resolved_root.filesystem_path
+            ):
+                continue
+            try:
+                entries = sorted(
+                    os.listdir(resolved_root.filesystem_path),
+                    reverse=True,
+                )
+            except OSError:
+                continue
+            for entry in entries:
+                candidate = os.path.join(resolved_root.filesystem_path, entry)
+                is_image = entry.lower().endswith(('.png', '.jpg', '.jpeg'))
+                resolved_candidate = self._resolve_discovered_project_source(
+                    candidate,
+                    owner_source_path=owner_yy_path,
+                    resource=sprite_name,
+                    resource_type="sprite",
+                    field=(
+                        "frames[].name/layers[].name"
+                        if is_image
+                        else "frames[].name"
+                    ),
+                )
+                if resolved_candidate is None:
+                    continue
+                if is_image and os.path.isfile(resolved_candidate.filesystem_path):
+                    image_paths.append(resolved_candidate.filesystem_path)
+                elif (
+                    not os.path.islink(candidate)
+                    and os.path.isdir(resolved_candidate.filesystem_path)
+                ):
+                    pending_directories.append(resolved_candidate.filesystem_path)
+        return image_paths
+
+    def _sprite_yy_path(self, sprite_name: str) -> str | None:
+        if sprite_name in self._sprites_without_yy:
+            return None
+        candidate = self._sprite_yy_paths.get(sprite_name)
+        if candidate is None:
+            candidate = os.path.join(
+                self.gm_project_path,
+                'sprites',
+                sprite_name,
+                sprite_name + '.yy',
+            )
+        owner_yy = self._sprite_owner_yy_paths.get(
+            sprite_name,
+            os.path.dirname(candidate),
+        )
+        resolved_yy = self._resolve_discovered_project_source(
+            candidate,
+            owner_source_path=owner_yy,
+            resource=sprite_name,
+            resource_type="sprite",
+            field="sprite .yy",
+        )
+        if resolved_yy is None or not self._source_has_resource_kind(
+            resolved_yy,
+            rejected_path=candidate,
+            owner_source_path=owner_yy,
+            resource=sprite_name,
+            field="sprite .yy",
+        ):
+            return None
+        self._sprite_owner_yy_paths[sprite_name] = resolved_yy.source_path
+        return resolved_yy.filesystem_path
 
     def _parse_collision_data(self, sprite_name: str) -> CollisionData | None:
         """Parse collision mask properties from a sprite .yy file.
 
         Returns a dict with collision fields or None if parsing fails.
         """
-        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
+        yy_path = self._sprite_yy_path(sprite_name)
+        if yy_path is None:
+            return None
+        data = self._read_yy_file(yy_path)
+        if data is None:
+            return None
         try:
-            with open(yy_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
-
             return {
                 "collisionKind": int(data.get("collisionKind", 1)),
                 "bboxMode": int(data.get("bboxMode", 0)),
@@ -233,7 +492,7 @@ class SpriteConverter(BaseConverter):
                 "xorigin": int(data.get("xorigin", 0)),
                 "yorigin": int(data.get("yorigin", 0)),
             }
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError):
             return None
 
     def _parse_animation_data(self, sprite_name: str) -> AnimationData | None:
@@ -241,13 +500,13 @@ class SpriteConverter(BaseConverter):
 
         Returns a dict with animation fields or None if parsing fails.
         """
-        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
+        yy_path = self._sprite_yy_path(sprite_name)
+        if yy_path is None:
+            return None
+        data = self._read_yy_file(yy_path)
+        if data is None:
+            return None
         try:
-            with open(yy_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
-
             sequence = data.get("sequence")
             if not isinstance(sequence, dict):
                 return None
@@ -271,7 +530,7 @@ class SpriteConverter(BaseConverter):
                 "loop": loop,
                 "frame_durations": frame_durations,
             }
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, IndexError):
+        except (KeyError, TypeError, ValueError, IndexError):
             return None
 
     @staticmethod
@@ -508,12 +767,11 @@ class SpriteConverter(BaseConverter):
             self._write_static_scene(sprite_name, collision_data, collision_sub, collision_node, subfolder)
 
     def _parse_sprite_yy(self, sprite_name: str) -> SpriteParseResult | None:
-        yy_path = os.path.join(self.gm_project_path, 'sprites', sprite_name, sprite_name + '.yy')
+        yy_path = self._sprite_yy_path(sprite_name)
+        data = self._read_yy_file(yy_path) if yy_path is not None else None
         try:
-            with open(yy_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            if data is None:
+                raise TypeError("Sprite metadata must be an object")
 
             frames = cast(list[JsonDict], data['frames'])
             frame_guids = [str(frame['name']) for frame in frames]
@@ -528,9 +786,18 @@ class SpriteConverter(BaseConverter):
                 visible_layer_guids = [str(layers[0]['name'])]
 
             return (frame_guids, visible_layer_guids)
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, IndexError):
+        except (KeyError, TypeError, IndexError):
+            diagnostic_path = yy_path or self._sprite_owner_yy_paths.get(
+                sprite_name,
+                os.path.join(
+                    self.gm_project_path,
+                    'sprites',
+                    sprite_name,
+                    sprite_name + '.yy',
+                ),
+            )
             self._safe_log(get_localized("Console_Convertor_Sprites_YYParseFailed").format(
-                yy_path=yy_path, sprite_name=sprite_name))
+                yy_path=diagnostic_path, sprite_name=sprite_name))
             return None
 
     def _build_ordered_frame_list(self, sprite_name: str, all_image_paths: list[str]) -> list[list[str]]:
@@ -569,17 +836,41 @@ class SpriteConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
+        owner_yy_path = self._sprite_owner_yy_paths.get(
+            sprite_name,
+            os.path.join(
+                self.gm_project_path,
+                'sprites',
+                sprite_name,
+                sprite_name + '.yy',
+            ),
+        )
+        resolved_sprite_paths: list[str] = []
+        for gm_sprite_path in gm_sprite_paths:
+            resolved_image = self._resolve_discovered_project_source(
+                gm_sprite_path,
+                owner_source_path=owner_yy_path,
+                resource=sprite_name,
+                resource_type="sprite",
+                field="frames[].name/layers[].name",
+            )
+            if resolved_image is None or not os.path.isfile(
+                resolved_image.filesystem_path
+            ):
+                return (sprite_name, index, images_count, gm_sprite_paths[0], "")
+            resolved_sprite_paths.append(resolved_image.filesystem_path)
+
         sprite_stem = self._sprite_output_stem(sprite_name)
         new_filename = f"{sprite_stem}_{index}.png" if images_count > 1 else f"{sprite_stem}.png"
         sprite_dir = self._sprite_output_directory(subfolder, sprite_name)
         godot_sprite_path = os.path.join(sprite_dir, new_filename)
 
-        if len(gm_sprite_paths) == 1:
-            with Image.open(gm_sprite_paths[0]) as img:
+        if len(resolved_sprite_paths) == 1:
+            with Image.open(resolved_sprite_paths[0]) as img:
                 img.save(godot_sprite_path, 'PNG')
         else:
             composed = None
-            for gm_sprite_path in gm_sprite_paths:
+            for gm_sprite_path in resolved_sprite_paths:
                 with Image.open(gm_sprite_path) as img:
                     layer = img.convert('RGBA')
                 if composed is None:
@@ -588,12 +879,10 @@ class SpriteConverter(BaseConverter):
             assert composed is not None
             composed.save(godot_sprite_path, 'PNG')
 
-        return (sprite_name, index, images_count, gm_sprite_paths[0], new_filename)
+        return (sprite_name, index, images_count, resolved_sprite_paths[0], new_filename)
 
     def convert_sprites(self) -> None:
         os.makedirs(self.godot_sprites_path, exist_ok=True)
-
-        sprite_images = self._find_all_sprite_images()
 
         valid_names = self._get_valid_sprite_names()
         sprite_subfolders: dict[str, str] = {}
@@ -602,37 +891,82 @@ class SpriteConverter(BaseConverter):
         source_paths: dict[str, str]
         if valid_names is not None:
             source_paths = dict(self._yyp_sprite_yy_paths)
-            indexed_sprite_names = {
-                name
+            declared_directories = {
+                name: os.path.dirname(yy_path)
                 for name, yy_path in source_paths.items()
-                if os.path.isfile(yy_path)
             }
-            filtered: defaultdict[str, list[str]] = defaultdict(list)
-            for name, images in sprite_images.items():
-                if name in valid_names:
-                    filtered[name] = images
-                    sprite_subfolders[name] = valid_names[name]
-                else:
-                    self._safe_log(get_localized("Console_Convertor_Sprites_Skipped").format(
-                        sprite_name=name))
-            sprite_images = filtered
+            sprite_images = self._find_all_sprite_images(
+                declared_directories,
+                source_paths,
+            )
+            indexed_sprite_names = set()
+            for name in source_paths:
+                validated_yy_path = self._sprite_yy_path(name)
+                if validated_yy_path is not None and os.path.isfile(
+                    validated_yy_path
+                ):
+                    indexed_sprite_names.add(name)
+            sprite_subfolders = {
+                name: valid_names[name]
+                for name in sprite_images
+            }
+
+            declared_directory_keys = {
+                os.path.normcase(os.path.realpath(directory))
+                for directory in declared_directories.values()
+            }
+            disk_directories = self._disk_sprite_directories()
+            orphan_directories = {
+                name: directory
+                for name, directory in disk_directories.items()
+                if os.path.normcase(os.path.realpath(directory))
+                not in declared_directory_keys
+            }
+            orphan_images = self._find_all_sprite_images(orphan_directories)
+            for name in orphan_images:
+                self._safe_log(get_localized("Console_Convertor_Sprites_Skipped").format(
+                    sprite_name=name))
+
             path_subfolders = {
                 name: subfolder
                 for name, subfolder in valid_names.items()
                 if name in indexed_sprite_names or name in sprite_images
             }
         else:
-            source_paths = self._disk_sprite_yy_paths()
-            indexed_sprite_names = set(source_paths)
-            path_subfolders = {
-                name: self._get_subfolder_from_yy(yy_path)
-                for name, yy_path in source_paths.items()
+            disk_directories = self._disk_sprite_directories()
+            discovered_yy_paths = self._disk_sprite_yy_paths(disk_directories)
+            self._sprite_yy_paths = dict(discovered_yy_paths)
+            self._sprites_without_yy = set(disk_directories) - set(
+                discovered_yy_paths
+            )
+            owner_yy_paths = {
+                name: self._sprite_owner_yy_paths.get(
+                    name,
+                    discovered_yy_paths.get(name, directory),
+                )
+                for name, directory in disk_directories.items()
             }
+            self._sprite_owner_yy_paths.update(owner_yy_paths)
+            sprite_images = self._find_all_sprite_images(
+                disk_directories,
+                owner_yy_paths,
+            )
+            indexed_sprite_names = set(discovered_yy_paths)
+            path_subfolders = {}
+            for name in discovered_yy_paths:
+                validated_yy_path = self._sprite_yy_path(name)
+                path_subfolders[name] = (
+                    self._get_subfolder_from_yy(validated_yy_path)
+                    if validated_yy_path is not None
+                    else ""
+                )
             for name in sprite_images:
-                yy_path = os.path.join(self.gm_project_path, 'sprites', name, name + '.yy')
-                sprite_subfolders[name] = self._get_subfolder_from_yy(yy_path)
+                sprite_subfolders[name] = path_subfolders.get(name, "")
                 path_subfolders.setdefault(name, sprite_subfolders[name])
-                source_paths.setdefault(name, yy_path)
+            source_paths = {
+                name: owner_yy_paths[name]
+                for name in path_subfolders
+            }
 
         if not sprite_images:
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
@@ -674,6 +1008,10 @@ class SpriteConverter(BaseConverter):
 
                 sprite_name, _index, _images_count, gm_sprite_path, new_filename = result
                 processed_images += 1
+
+                if not new_filename:
+                    self._safe_progress(int(processed_images / total_images * 100))
+                    continue
 
                 if self.compact_logging:
                     self._safe_log_progress(sprite_name, processed_images, total_images)

@@ -11,6 +11,7 @@ from typing import Literal, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_resource_stem,
@@ -18,7 +19,7 @@ from src.conversion.generated_paths import (
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    resolve_project_source_path,
+    validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
@@ -148,14 +149,20 @@ class FontConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 diagnostics: DiagnosticCollector | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback, progress_callback, conversion_running,
-                         update_log_callback, compact_logging, max_workers=max_workers)
+                         update_log_callback, compact_logging, max_workers=max_workers,
+                         diagnostics=diagnostics)
         self.godot_fonts_path = os.path.join(self.godot_project_path, 'fonts')
         self._font_output_paths: dict[str, str] = {}
 
     def find_font_files(self) -> list[str]:
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="font",
+        )
         if manifest.yyp_path is not None:
             font_files: list[str] = []
             seen_paths: set[str] = set()
@@ -165,12 +172,34 @@ class FontConverter(BaseConverter):
                 source_path = resource.path.casefold()
                 if not source_path.endswith(".yy") or source_path.endswith(".old.yy"):
                     continue
+                manifest_field = (
+                    f"{resource.source.field_path}.id.path"
+                    if resource.source is not None and resource.source.field_path
+                    else "resources[].id.path"
+                )
+                resolved = self._resolve_project_source(
+                    resource.path,
+                    owner_source_path=manifest.yyp_path,
+                    resource=resource.name,
+                    resource_type="font",
+                    field=manifest_field,
+                )
+                if resolved is None:
+                    continue
                 try:
-                    resolved = resolve_project_source_path(
-                        self.gm_project_path,
-                        resource.path,
+                    validate_project_resource_source_path(
+                        resolved,
+                        "fonts",
                     )
-                except ProjectSourcePathError:
+                except ProjectSourcePathError as exc:
+                    self._report_source_path_rejection(
+                        resource.path,
+                        exc,
+                        owner_source_path=manifest.yyp_path,
+                        resource=resource.name,
+                        resource_type="font",
+                        field=manifest_field,
+                    )
                     continue
                 if not os.path.isfile(resolved.filesystem_path):
                     continue
@@ -183,15 +212,114 @@ class FontConverter(BaseConverter):
                 font_files.append(resolved.filesystem_path)
             return font_files
 
-        font_folder = os.path.join(self.gm_project_path, 'fonts')
+        font_folder = self._resolve_discovered_project_source(
+            os.path.join(self.gm_project_path, 'fonts'),
+            resource_type="font",
+            field="fonts directory",
+        )
+        if font_folder is None or not os.path.isdir(font_folder.filesystem_path):
+            return []
+
         font_files: list[str] = []
-        for root, dirs, files in os.walk(font_folder):
-            dirs.sort()
-            font_files.extend(
-                os.path.join(root, file)
-                for file in sorted(files)
-                if file.lower().endswith('.yy') and not file.lower().endswith('.old.yy')
-            )
+        pending_directories = [
+            (font_folder.filesystem_path, font_folder.source_path)
+        ]
+        visited_directories: set[str] = set()
+        while pending_directories:
+            directory_path, directory_source_path = pending_directories.pop()
+            canonical_directory = os.path.normcase(os.path.realpath(directory_path))
+            if canonical_directory in visited_directories:
+                continue
+            visited_directories.add(canonical_directory)
+
+            try:
+                entries = sorted(
+                    os.scandir(directory_path),
+                    key=lambda entry: entry.name,
+                )
+            except OSError:
+                continue
+
+            child_directories: list[tuple[str, str]] = []
+            for entry in entries:
+                filename = entry.name
+                lower_filename = filename.casefold()
+                is_font_yy = (
+                    lower_filename.endswith('.yy')
+                    and not lower_filename.endswith('.old.yy')
+                )
+                try:
+                    is_unlinked_directory = entry.is_dir(
+                        follow_symlinks=False
+                    )
+                    is_symlink = entry.is_symlink()
+                except OSError:
+                    continue
+
+                # Bundled font sidecars are validated against their owning .yy
+                # when referenced. They are not discovery inputs by themselves.
+                if (
+                    is_symlink
+                    and not is_font_yy
+                    and lower_filename.endswith(FONT_EXTENSIONS)
+                ):
+                    continue
+                if not is_unlinked_directory and not is_symlink and not is_font_yy:
+                    continue
+
+                resolved_entry = self._resolve_discovered_project_source(
+                    entry.path,
+                    owner_source_path=directory_source_path,
+                    resource=(
+                        os.path.splitext(filename)[0]
+                        if is_font_yy
+                        else filename
+                    ),
+                    resource_type="font",
+                    field=(
+                        "discovered font .yy"
+                        if is_font_yy
+                        else "discovered font directory"
+                    ),
+                )
+                if resolved_entry is None:
+                    continue
+
+                # Resolve containment before following a possible directory
+                # symlink to classify the canonical target.
+                if os.path.isdir(resolved_entry.filesystem_path):
+                    if is_font_yy:
+                        continue
+                    if not is_symlink:
+                        child_directories.append(
+                            (
+                                resolved_entry.filesystem_path,
+                                resolved_entry.source_path,
+                            )
+                        )
+                    continue
+
+                if not is_font_yy:
+                    continue
+                if os.path.isfile(resolved_entry.filesystem_path):
+                    try:
+                        validate_project_resource_source_path(
+                            resolved_entry,
+                            "fonts",
+                        )
+                    except ProjectSourcePathError as exc:
+                        self._report_source_path_rejection(
+                            entry.path,
+                            exc,
+                            owner_source_path=directory_source_path,
+                            resource=os.path.splitext(filename)[0],
+                            resource_type="font",
+                            field="discovered font .yy",
+                        )
+                        continue
+                    font_files.append(resolved_entry.filesystem_path)
+
+            pending_directories.extend(reversed(child_directories))
         return font_files
 
     def _parse_font_yy(self, yy_path: str) -> FontData | None:
@@ -234,7 +362,30 @@ class FontConverter(BaseConverter):
         if not self.conversion_running():
             return None
 
-        font_data = self._parse_font_yy(yy_path)
+        discovered_name = os.path.splitext(os.path.basename(yy_path))[0]
+        resolved_yy = self._resolve_discovered_project_source(
+            yy_path,
+            owner_source_path=os.path.dirname(yy_path),
+            resource=discovered_name,
+            resource_type="font",
+            field="font .yy",
+        )
+        if resolved_yy is None:
+            return False
+        try:
+            validate_project_resource_source_path(resolved_yy, "fonts")
+        except ProjectSourcePathError as exc:
+            self._report_source_path_rejection(
+                yy_path,
+                exc,
+                owner_source_path=os.path.dirname(yy_path),
+                resource=discovered_name,
+                resource_type="font",
+                field="font .yy",
+            )
+            return False
+
+        font_data = self._parse_font_yy(resolved_yy.filesystem_path)
         if font_data is None:
             return False
 
@@ -247,16 +398,40 @@ class FontConverter(BaseConverter):
 
         # 1. Try bundled TTF from GameMaker project
         if font_data['includeTTF'] and font_data['TTFName']:
-            ttf_path = resolve_bundled_font_source(yy_path, font_data['TTFName'])
-            bundled_output_file = bundled_font_output_filename(font_data['TTFName'])
-            if ttf_path is not None and bundled_output_file is not None:
-                font_source_path = ttf_path
+            ttf_name = font_data['TTFName']
+            resolved_ttf = self._resolve_project_source(
+                ttf_name,
+                owner_source_path=resolved_yy.source_path,
+                resource=font_name,
+                resource_type="font",
+                field="TTFName",
+            )
+            bundled_output_file = bundled_font_output_filename(ttf_name)
+            if resolved_ttf is not None and bundled_output_file is None:
+                self._report_source_path_rejection(
+                    ttf_name,
+                    ProjectSourcePathError(
+                        "Bundled font paths must use non-empty relative path "
+                        "segments and a supported font extension: "
+                        f"{ttf_name!r}"
+                    ),
+                    owner_source_path=resolved_yy.source_path,
+                    resource=font_name,
+                    resource_type="font",
+                    field="TTFName",
+                )
+            if (
+                resolved_ttf is not None
+                and bundled_output_file is not None
+                and os.path.isfile(resolved_ttf.filesystem_path)
+            ):
+                font_source_path = os.path.realpath(resolved_ttf.filesystem_path)
                 output_filename = bundled_output_file
                 preserve_metadata = True
                 bundled_font = True
             else:
                 self._safe_log(get_localized("Console_Convertor_Fonts_TTFMissing").format(
-                    name=font_name, ttf_name=font_data['TTFName']))
+                    name=font_name, ttf_name=ttf_name))
 
         # 2. Try finding the font on the system
         if font_source_path is None:
@@ -273,13 +448,36 @@ class FontConverter(BaseConverter):
             output_filename = generated_resource_stem(font_name) + '.tres'
 
         output_path = self._font_output_destination(
-            yy_path,
+            resolved_yy.filesystem_path,
             font_name,
             output_filename,
         )
         output_file = os.path.basename(output_path)
 
         if font_source_path is not None:
+            if bundled_font:
+                refreshed_ttf = self._resolve_project_source(
+                    font_data['TTFName'],
+                    owner_source_path=resolved_yy.source_path,
+                    resource=font_name,
+                    resource_type="font",
+                    field="TTFName",
+                )
+                if refreshed_ttf is None or not os.path.isfile(
+                    refreshed_ttf.filesystem_path
+                ):
+                    self._safe_log(
+                        get_localized(
+                            "Console_Convertor_Fonts_TTFMissing"
+                        ).format(
+                            name=font_name,
+                            ttf_name=font_data['TTFName'],
+                        )
+                    )
+                    return False
+                font_source_path = os.path.realpath(
+                    refreshed_ttf.filesystem_path
+                )
             _copy_font_file_atomically(
                 font_source_path,
                 output_path,
@@ -344,12 +542,6 @@ class FontConverter(BaseConverter):
     def convert_fonts(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_fonts_path, exist_ok=True)
-
-        gm_fonts_path = os.path.join(self.gm_project_path, 'fonts')
-
-        if not os.path.exists(gm_fonts_path):
-            self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
-            return
 
         font_files = self.find_font_files()
 

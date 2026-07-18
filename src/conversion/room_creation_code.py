@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Protocol, cast
+from pathlib import Path
+from typing import Callable, Protocol, cast
 
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    is_safe_project_source_component,
+    resolve_project_sidecar_source_path,
+)
 from src.conversion.type_defs import JsonDict, JsonList, LogCallback
+
+
+CreationCodeSourceResolver = Callable[[str, str], str | None]
+
+_INSTANCE_CREATION_CODE_PREFIX = "InstanceCreationCode_"
+_INSTANCE_CREATION_CODE_SUFFIX = ".gml"
+_INSTANCE_CREATION_CODE_FIELD = "layers[].instances[].name"
 
 
 class RoomCreationCodeRoom(Protocol):
@@ -42,16 +55,26 @@ class CreationCodeMetadata:
     exists: bool
     execution_phase: str
     execution_phase_index: int
+    path_rejected: bool = False
 
 
 def resolve_room_creation_code(
     room: RoomCreationCodeRoom,
     gm_project_path: str,
     warn_callback: LogCallback | None = None,
+    *,
+    source_resolver: CreationCodeSourceResolver | None = None,
 ) -> CreationCodeMetadata:
     """Resolve room creation-code metadata without transpiling GML."""
     source_file = room.creation_code_file or ""
-    source_path = _resolve_room_creation_code_path(room, gm_project_path, source_file)
+    source_path, path_rejected = _resolve_creation_code_path(
+        room,
+        gm_project_path,
+        source_file,
+        field="creationCodeFile",
+        source_resolver=source_resolver,
+        warn_callback=warn_callback,
+    )
     metadata = CreationCodeMetadata(
         has_code=bool(source_file),
         inherit_code=bool(room.inherit_code),
@@ -60,9 +83,15 @@ def resolve_room_creation_code(
         exists=bool(source_path and os.path.isfile(source_path)),
         execution_phase="room_creation_code",
         execution_phase_index=ROOM_EXECUTION_ORDER.index("room_creation_code"),
+        path_rejected=path_rejected,
     )
 
-    if metadata.has_code and not metadata.exists and warn_callback is not None:
+    if (
+        metadata.has_code
+        and not metadata.exists
+        and not metadata.path_rejected
+        and warn_callback is not None
+    ):
         warn_callback(
             "Info: Missing GameMaker room creation code file for room {room}: {path}".format(
                 room=room.name,
@@ -77,16 +106,49 @@ def resolve_instance_creation_code(
     room: RoomCreationCodeRoom,
     instance: JsonDict,
     warn_callback: LogCallback | None = None,
+    *,
+    gm_project_path: str | None = None,
+    source_resolver: CreationCodeSourceResolver | None = None,
 ) -> CreationCodeMetadata:
     """Resolve per-instance creation-code metadata without transpiling GML."""
     instance_name = _instance_name(instance)
     has_code = bool(instance.get("hasCreationCode", False))
     source_path = ""
+    path_rejected = False
     if has_code:
-        source_path = os.path.join(
-            os.path.dirname(room.yy_path),
-            f"InstanceCreationCode_{instance_name}.gml",
+        source_file = (
+            f"{_INSTANCE_CREATION_CODE_PREFIX}{instance_name}"
+            f"{_INSTANCE_CREATION_CODE_SUFFIX}"
         )
+        if not is_safe_project_source_component(instance_name):
+            error = ProjectSourcePathError(
+                "GameMaker instance names used to derive creation-code "
+                "filenames must be exactly one safe path component: "
+                f"{instance_name!r}"
+            )
+            if source_resolver is not None:
+                # Let converter-owned resolvers attach the rejection to the
+                # declaring room and metadata field. The result is deliberately
+                # ignored: an unsafe derived component can never be accepted.
+                source_resolver(source_file, _INSTANCE_CREATION_CODE_FIELD)
+            else:
+                _warn_source_path_rejection(
+                    room,
+                    source_file,
+                    field=_INSTANCE_CREATION_CODE_FIELD,
+                    error=error,
+                    warn_callback=warn_callback,
+                )
+            path_rejected = True
+        else:
+            source_path, path_rejected = _resolve_creation_code_path(
+                room,
+                gm_project_path,
+                source_file,
+                field=_INSTANCE_CREATION_CODE_FIELD,
+                source_resolver=source_resolver,
+                warn_callback=warn_callback,
+            )
 
     metadata = CreationCodeMetadata(
         has_code=has_code,
@@ -96,9 +158,15 @@ def resolve_instance_creation_code(
         exists=bool(source_path and os.path.isfile(source_path)),
         execution_phase="instance_creation_code",
         execution_phase_index=ROOM_EXECUTION_ORDER.index("instance_creation_code"),
+        path_rejected=path_rejected,
     )
 
-    if metadata.has_code and not metadata.exists and warn_callback is not None:
+    if (
+        metadata.has_code
+        and not metadata.exists
+        and not metadata.path_rejected
+        and warn_callback is not None
+    ):
         warn_callback(
             "Info: Missing GameMaker instance creation code file for room {room}, "
             "instance {instance}: {path}".format(
@@ -122,25 +190,97 @@ def instance_creation_order_names(room: RoomCreationCodeRoom) -> list[str]:
     return names
 
 
-def _resolve_room_creation_code_path(
+def _resolve_creation_code_path(
     room: RoomCreationCodeRoom,
-    gm_project_path: str,
+    gm_project_path: str | None,
     source_file: str,
-) -> str:
+    *,
+    field: str,
+    source_resolver: CreationCodeSourceResolver | None,
+    warn_callback: LogCallback | None,
+) -> tuple[str, bool]:
     if not source_file:
-        return ""
+        return "", False
 
-    normalized = source_file.replace("\\", "/")
-    if normalized.startswith("${project_dir}/"):
-        normalized = normalized[len("${project_dir}/"):]
+    if source_resolver is not None:
+        source_path = source_resolver(source_file, field)
+        return (source_path or ""), source_path is None
 
-    if os.path.isabs(normalized):
-        return os.path.normpath(normalized)
+    if gm_project_path is None:
+        gm_project_path = _infer_project_root_from_room_yy_path(room.yy_path)
+        if gm_project_path is None:
+            _warn_source_path_rejection(
+                room,
+                source_file,
+                field=field,
+                error=ProjectSourcePathError(
+                    "GameMaker project root cannot be safely inferred from "
+                    "the room .yy path; provide an absolute .yy path with one "
+                    "unambiguous rooms path component or pass gm_project_path"
+                ),
+                warn_callback=warn_callback,
+            )
+            return "", True
 
-    if normalized.startswith("rooms/"):
-        return os.path.normpath(os.path.join(gm_project_path, normalized))
+    try:
+        resolved = resolve_project_sidecar_source_path(
+            gm_project_path,
+            room.yy_path,
+            source_file,
+        )
+    except ProjectSourcePathError as error:
+        _warn_source_path_rejection(
+            room,
+            source_file,
+            field=field,
+            error=error,
+            warn_callback=warn_callback,
+        )
+        return "", True
+    return resolved.filesystem_path, False
 
-    return os.path.normpath(os.path.join(os.path.dirname(room.yy_path), normalized))
+
+def _infer_project_root_from_room_yy_path(room_yy_path: str) -> str | None:
+    """Infer a project root only from an unambiguous absolute room owner."""
+    normalized_path = Path(os.path.normpath(room_yy_path))
+    if (
+        not normalized_path.is_absolute()
+        or normalized_path.suffix.casefold() != ".yy"
+    ):
+        return None
+
+    room_component_indexes = [
+        index
+        for index, component in enumerate(normalized_path.parts[:-1])
+        if component.casefold() == "rooms"
+    ]
+    if len(room_component_indexes) != 1:
+        return None
+    project_root = Path(*normalized_path.parts[:room_component_indexes[0]])
+    if project_root == Path(normalized_path.anchor):
+        return None
+    return str(project_root)
+
+
+def _warn_source_path_rejection(
+    room: RoomCreationCodeRoom,
+    source_file: str,
+    *,
+    field: str,
+    error: ProjectSourcePathError,
+    warn_callback: LogCallback | None,
+) -> None:
+    if warn_callback is None:
+        return
+    warn_callback(
+        "Warning: Rejected GameMaker source path {path!r} from {owner} "
+        "field {field}: {error}".format(
+            path=source_file,
+            owner=room.yy_path,
+            field=field,
+            error=error,
+        )
+    )
 
 
 def _instance_name(instance: JsonDict) -> str:

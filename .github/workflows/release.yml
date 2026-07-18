@@ -279,16 +279,175 @@ jobs:
           digest-mismatch: error
 
       - name: Extract verified artifact archives
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts
+          if [[ -e artifacts || -L artifacts ]]; then
+            echo "::error::Release extraction root already exists: artifacts" >&2
+            exit 1
+          fi
           for name in GM2Godot-windows GM2Godot-macos GM2Godot-linux; do
             archive="raw-artifacts/$name/$name.zip"
-            if [[ ! -s "$archive" ]]; then
-              echo "::error::Missing or empty verified archive: $archive" >&2
+            if [[ ! -f "$archive" || -L "$archive" || ! -s "$archive" ]]; then
+              echo "::error::Missing, non-regular, symlinked, or empty verified archive: $archive" >&2
               exit 1
             fi
-            mkdir -p "artifacts/$name"
+          done
+
+          python3 - <<'PY'
+          from collections import Counter
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          import stat
+          import struct
+          import sys
+          import zipfile
+
+          local_header_struct = struct.Struct("<IHHHHHIIIHH")
+          local_header_signature = 0x04034B50
+          expected_by_artifact = {
+              "GM2Godot-windows": ("GM2Godot-windows.zip",),
+              "GM2Godot-macos": (
+                  "GM2Godot-macos.zip",
+                  "GM2Godot-macos.dmg",
+              ),
+              "GM2Godot-linux": ("GM2Godot-linux.zip",),
+          }
+
+
+          def fail(message: str) -> None:
+              print(f"::error::{message}", file=sys.stderr)
+              raise SystemExit(1)
+
+
+          for artifact_name, expected_members in expected_by_artifact.items():
+              archive_path = (
+                  Path("raw-artifacts")
+                  / artifact_name
+                  / f"{artifact_name}.zip"
+              )
+              try:
+                  with zipfile.ZipFile(archive_path) as archive:
+                      members = archive.infolist()
+                      for member in members:
+                          member_name = member.orig_filename
+                          if member.extra:
+                              fail(
+                                  "Unsupported archive member metadata in "
+                                  f"{archive_path}: {member_name!r} has "
+                                  "ZIP extra fields"
+                              )
+
+                          posix_path = PurePosixPath(member_name)
+                          windows_path = PureWindowsPath(member_name)
+                          if (
+                              member_name != member.filename
+                              or not member_name
+                              or "\\" in member_name
+                              or posix_path.is_absolute()
+                              or windows_path.is_absolute()
+                              or bool(windows_path.drive)
+                              or member_name != posix_path.name
+                              or member_name in {".", ".."}
+                          ):
+                              fail(
+                                  f"Unsafe archive member in {archive_path}: "
+                                  f"{member_name!r}"
+                              )
+
+                          unix_mode = (member.external_attr >> 16) & 0xFFFF
+                          if (
+                              member.create_system != 3
+                              or member.is_dir()
+                              or bool(member.external_attr & 0x10)
+                              or not stat.S_ISREG(unix_mode)
+                          ):
+                              fail(
+                                  "Non-regular archive member in "
+                                  f"{archive_path}: {member_name!r} "
+                                  f"(create_system={member.create_system}, "
+                                  f"mode={unix_mode:#o})"
+                              )
+
+                      actual_counts = Counter(
+                          member.orig_filename for member in members
+                      )
+                      expected_counts = Counter(expected_members)
+                      if actual_counts != expected_counts:
+                          fail(
+                              f"Unexpected archive members in {archive_path}: "
+                              f"expected {list(expected_members)!r}, "
+                              "found "
+                              f"{[member.orig_filename for member in members]!r}"
+                          )
+
+                      for member in members:
+                          archive_file = archive.fp
+                          if archive_file is None:
+                              fail(f"Verified archive closed unexpectedly: {archive_path}")
+                          archive_file.seek(member.header_offset)
+                          local_header = archive_file.read(local_header_struct.size)
+                          if len(local_header) != local_header_struct.size:
+                              fail(
+                                  "Cannot read local member metadata in "
+                                  f"{archive_path}: {member.orig_filename!r}"
+                              )
+                          local_fields = local_header_struct.unpack(local_header)
+                          local_signature = local_fields[0]
+                          local_flags = local_fields[2]
+                          local_compression = local_fields[3]
+                          local_name_length = local_fields[-2]
+                          local_extra_length = local_fields[-1]
+                          local_name = archive_file.read(local_name_length)
+                          local_extra = archive_file.read(local_extra_length)
+                          encoding = (
+                              "utf-8" if member.flag_bits & 0x800 else "cp437"
+                          )
+                          expected_local_name = member.orig_filename.encode(encoding)
+                          if (
+                              local_signature != local_header_signature
+                              or len(local_name) != local_name_length
+                              or len(local_extra) != local_extra_length
+                              or local_flags != member.flag_bits
+                              or local_compression != member.compress_type
+                              or local_name != expected_local_name
+                          ):
+                              fail(
+                                  "Inconsistent local member metadata in "
+                                  f"{archive_path}: {member.orig_filename!r}"
+                              )
+                          if local_extra:
+                              fail(
+                                  "Unsupported archive member metadata in "
+                                  f"{archive_path}: {member.orig_filename!r} has "
+                                  "local ZIP extra fields"
+                              )
+                          with archive.open(member):
+                              pass
+              except (
+                  OSError,
+                  RuntimeError,
+                  UnicodeError,
+                  NotImplementedError,
+                  zipfile.BadZipFile,
+              ) as error:
+                  fail(
+                      "Cannot read verified archive metadata for "
+                      f"{archive_path}: {error}"
+                  )
+          PY
+
+          mkdir -- artifacts
+          for name in GM2Godot-windows GM2Godot-macos GM2Godot-linux; do
+            destination="artifacts/$name"
+            mkdir -- "$destination"
+            if [[ ! -d "$destination" || -L "$destination" ]]; then
+              echo "::error::Unsafe release extraction directory: $destination" >&2
+              exit 1
+            fi
+          done
+
+          for name in GM2Godot-windows GM2Godot-macos GM2Godot-linux; do
+            archive="raw-artifacts/$name/$name.zip"
             unzip -q "$archive" -d "artifacts/$name"
           done
 

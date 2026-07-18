@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.16 - 2026-07-18
+
+- Added an operationally read-only audit for existing-tag release reruns: it requires one exact published release, verifies the exact five uploaded assets through independent paginated API state, downloads by asset ID into a private temporary directory, and checks sizes plus GitHub SHA-256 digests.
+- Made the rerun audit enforce the canonical four-payload `SHA256SUMS` bytes, recheck the exact tag/release/asset receipt after downloads, fail closed on API/schema/download/concurrent-state errors, and leave builds and publication skipped.
+
 ## 0.7.15 - 2026-07-18
 
 - Validated every release artifact ZIP member table against exact flat regular-file allowlists before extraction, rejecting unsafe or alternate-path metadata, duplicate, extra, symlink, directory, and special-file entries while preserving the verified payload bytes.

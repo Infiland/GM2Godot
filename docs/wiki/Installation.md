@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.15 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.16 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -34,7 +34,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.15`.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.16`.
 
 ## Run from source
 
@@ -84,6 +84,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.15`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.7.16`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

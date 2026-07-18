@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import copy
 import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -14,6 +16,7 @@ import warnings
 import zipfile
 import zlib
 from pathlib import Path
+from typing import cast
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +66,7 @@ EXTERNAL_FIXTURE_REPOSITORIES = (
     ),
 )
 RELEASE_PREFLIGHT_TEST_TAG = "v999.123.456"
+EXISTING_RELEASE_TEST_TAG = "v999.123.457"
 RELEASE_SMOKE_ARTIFACT = "release-action-smoke"
 RELEASE_SMOKE_SENTINEL = "release-action-sentinel.txt"
 RELEASE_SMOKE_PAYLOAD = b"GM2Godot release action smoke\n"
@@ -82,6 +86,19 @@ RELEASE_ARCHIVE_MEMBERS = {
         ("GM2Godot-macos.zip", b"macos-zip"),
     ),
     "GM2Godot-linux": (("GM2Godot-linux.zip", b"linux"),),
+}
+EXISTING_RELEASE_PAYLOAD_NAMES = (
+    "GM2Godot-linux.zip",
+    "GM2Godot-macos.dmg",
+    "GM2Godot-macos.zip",
+    "GM2Godot-windows.zip",
+)
+EXISTING_RELEASE_ASSET_NAMES = EXISTING_RELEASE_PAYLOAD_NAMES + ("SHA256SUMS",)
+EXISTING_RELEASE_BASE_PAYLOADS = {
+    "GM2Godot-linux.zip": b"existing Linux payload\n",
+    "GM2Godot-macos.dmg": b"existing macOS DMG payload\n",
+    "GM2Godot-macos.zip": b"existing macOS ZIP payload\n",
+    "GM2Godot-windows.zip": b"existing Windows payload\n",
 }
 
 
@@ -331,6 +348,366 @@ raise SystemExit(int(os.environ["FAKE_GH_EXIT"]))
         text=True,
         env=environment,
     )
+
+
+def _existing_release_fixture() -> tuple[
+    list[list[dict[str, object]]],
+    list[list[dict[str, object]]],
+    dict[str, object],
+    dict[int, bytes],
+]:
+    payloads = dict(EXISTING_RELEASE_BASE_PAYLOADS)
+    manifest = "".join(
+        f"{hashlib.sha256(payloads[name]).hexdigest()}  {name}\n"
+        for name in EXISTING_RELEASE_PAYLOAD_NAMES
+    ).encode("ascii")
+    payloads["SHA256SUMS"] = manifest
+
+    assets: list[dict[str, object]] = []
+    payloads_by_id: dict[int, bytes] = {}
+    for offset, name in enumerate(EXISTING_RELEASE_ASSET_NAMES, start=1):
+        asset_id = 740_000 + offset
+        payload = payloads[name]
+        assets.append(
+            {
+                "digest": f"sha256:{hashlib.sha256(payload).hexdigest()}",
+                "download_count": offset,
+                "id": asset_id,
+                "name": name,
+                "size": len(payload),
+                "state": "uploaded",
+            }
+        )
+        payloads_by_id[asset_id] = payload
+
+    exact_release: dict[str, object] = {
+        "assets": [],
+        "draft": False,
+        "html_url": "https://github.com/Infiland/GM2Godot/releases/tag/"
+        f"{EXISTING_RELEASE_TEST_TAG}",
+        "id": 740,
+        "prerelease": False,
+        "published_at": "2026-07-18T21:00:41Z",
+        "tag_name": EXISTING_RELEASE_TEST_TAG,
+    }
+    prefix_release: dict[str, object] = {
+        "draft": False,
+        "html_url": "https://example.invalid/prefix",
+        "id": 741,
+        "prerelease": False,
+        "published_at": "2026-07-18T20:00:00Z",
+        "tag_name": f"{EXISTING_RELEASE_TEST_TAG}0",
+    }
+    release_pages = [[prefix_release], [exact_release]]
+    asset_pages = [[assets[2], assets[0]], [assets[4], assets[1], assets[3]]]
+    tag_response: dict[str, object] = {
+        "object": {
+            "sha": "9" * 40,
+            "type": "commit",
+            "url": "https://api.github.com/repos/Infiland/GM2Godot/git/commits/"
+            + "9" * 40,
+        },
+        "ref": f"refs/tags/{EXISTING_RELEASE_TEST_TAG}",
+    }
+    return release_pages, asset_pages, tag_response, payloads_by_id
+
+
+def _run_existing_release_integrity(
+    content: str,
+    root: Path,
+    release_responses: str | tuple[str, ...],
+    asset_responses: str | tuple[str, ...],
+    tag_responses: str | tuple[str, ...],
+    payloads_by_id: dict[int, bytes],
+    *,
+    gh_failures: dict[str, int] | None = None,
+    token: str | None = "test-token",
+    repository: str | None = "Infiland/GM2Godot",
+    release_tag: str | None = EXISTING_RELEASE_TEST_TAG,
+    missing_tool: str | None = None,
+    sha256sum_exit: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    script = _workflow_run_script(content, "Verify existing tagged release")
+    tools_dir = root / "tools"
+    tools_dir.mkdir()
+    response_dir = root / "responses"
+    response_dir.mkdir()
+    payload_dir = root / "payloads"
+    payload_dir.mkdir()
+    call_log = root / "existing-release-gh-calls.jsonl"
+    state_path = root / "existing-release-gh-state.json"
+    sha_log = root / "existing-release-sha256sum-calls.jsonl"
+
+    def write_responses(
+        name: str,
+        responses: str | tuple[str, ...],
+    ) -> list[Path]:
+        response_values = (responses,) if isinstance(responses, str) else responses
+        if not response_values:
+            raise ValueError(f"{name} response sequence cannot be empty")
+        paths: list[Path] = []
+        for index, response in enumerate(response_values):
+            path = response_dir / f"{name}-{index}.json"
+            path.write_text(response, encoding="utf-8")
+            paths.append(path)
+        return paths
+
+    release_paths = write_responses("releases", release_responses)
+    asset_paths = write_responses("assets", asset_responses)
+    tag_paths = write_responses("tag", tag_responses)
+    expected_asset_release_ids: list[str] = []
+    for release_path in release_paths:
+        try:
+            pages: object = json.loads(release_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            expected_asset_release_ids.append("")
+            continue
+        matches: list[dict[str, object]] = []
+        if isinstance(pages, list):
+            for page_value in cast(list[object], pages):
+                if not isinstance(page_value, list):
+                    continue
+                for release_value in cast(list[object], page_value):
+                    if not isinstance(release_value, dict):
+                        continue
+                    release = cast(dict[str, object], release_value)
+                    if release.get("tag_name") == (release_tag or ""):
+                        matches.append(release)
+        release_id = matches[0].get("id") if len(matches) == 1 else None
+        expected_asset_release_ids.append(
+            str(release_id)
+            if type(release_id) is int and release_id > 0
+            else ""
+        )
+    payload_paths: dict[str, str] = {}
+    for asset_id, payload in payloads_by_id.items():
+        path = payload_dir / str(asset_id)
+        path.write_bytes(payload)
+        payload_paths[str(asset_id)] = str(path)
+
+    fake_gh = tools_dir / "gh"
+    fake_gh.write_text(
+        f"#!{sys.executable}\n"
+        + r'''from pathlib import Path
+import json
+import os
+import re
+import sys
+
+arguments = sys.argv[1:]
+call_log = Path(os.environ["FAKE_GH_CALL_LOG"])
+with call_log.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(arguments, separators=(",", ":")) + "\n")
+
+if os.environ.get("GH_TOKEN") != "test-token":
+    print("fake gh did not receive the expected GH_TOKEN", file=sys.stderr)
+    raise SystemExit(98)
+if not arguments or arguments[0:3] != ["api", "--method", "GET"]:
+    print(f"fake gh rejected non-GET arguments: {arguments!r}", file=sys.stderr)
+    raise SystemExit(97)
+
+endpoint = arguments[-1]
+json_headers = [
+    "-H",
+    "Accept: application/vnd.github+json",
+    "-H",
+    "X-GitHub-Api-Version: 2026-03-10",
+]
+binary_headers = [
+    "-H",
+    "Accept: application/octet-stream",
+    "-H",
+    "X-GitHub-Api-Version: 2026-03-10",
+]
+release_endpoint = "repos/Infiland/GM2Godot/releases?per_page=100"
+asset_list_pattern = re.compile(
+    r"repos/Infiland/GM2Godot/releases/([1-9][0-9]*)/assets\?per_page=100\Z"
+)
+tag_endpoint = (
+    "repos/Infiland/GM2Godot/git/ref/tags/" + os.environ["FAKE_RELEASE_TAG"]
+)
+download_pattern = re.compile(
+    r"repos/Infiland/GM2Godot/releases/assets/([1-9][0-9]*)\Z"
+)
+
+state_path = Path(os.environ["FAKE_GH_STATE"])
+if state_path.exists():
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+else:
+    state = {}
+
+asset_list_match = asset_list_pattern.fullmatch(endpoint)
+if endpoint == release_endpoint:
+    if arguments[3:-1] != ["--paginate", "--slurp", *json_headers]:
+        print(f"unexpected release-list arguments: {arguments!r}", file=sys.stderr)
+        raise SystemExit(96)
+    kind = "release"
+elif asset_list_match is not None:
+    if arguments[3:-1] != ["--paginate", "--slurp", *json_headers]:
+        print(f"unexpected asset-list arguments: {arguments!r}", file=sys.stderr)
+        raise SystemExit(95)
+    kind = "assets"
+elif endpoint == tag_endpoint:
+    if arguments[3:-1] != json_headers:
+        print(f"unexpected tag-ref arguments: {arguments!r}", file=sys.stderr)
+        raise SystemExit(94)
+    kind = "tag"
+else:
+    download_match = download_pattern.fullmatch(endpoint)
+    if download_match is None:
+        print(f"unexpected endpoint: {endpoint!r}", file=sys.stderr)
+        raise SystemExit(93)
+    if arguments[3:-1] != binary_headers:
+        print(f"unexpected download arguments: {arguments!r}", file=sys.stderr)
+        raise SystemExit(92)
+    asset_id = download_match.group(1)
+    kind = f"download:{asset_id}"
+
+index = int(state.get(kind, 0))
+state[kind] = index + 1
+state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+if kind == "assets":
+    expected_ids = json.loads(os.environ["FAKE_ASSET_RELEASE_IDS"])
+    expected_id = expected_ids[min(index, len(expected_ids) - 1)]
+    requested_id = asset_list_match.group(1)
+    if requested_id != expected_id:
+        print(
+            f"asset-list release id mismatch: requested={requested_id} "
+            f"expected={expected_id}",
+            file=sys.stderr,
+        )
+        raise SystemExit(90)
+failures = json.loads(os.environ["FAKE_GH_FAILURES"])
+exit_status = int(failures.get(f"{kind}:{index}", failures.get(kind, 0)))
+
+if kind.startswith("download:"):
+    asset_id = kind.partition(":")[2]
+    payload_paths = json.loads(os.environ["FAKE_ASSET_PAYLOADS"])
+    payload_path = payload_paths.get(asset_id)
+    if payload_path is None:
+        print(f"missing fake asset payload for id {asset_id}", file=sys.stderr)
+        raise SystemExit(91)
+    sys.stdout.buffer.write(Path(payload_path).read_bytes())
+else:
+    response_key = {
+        "release": "FAKE_RELEASE_RESPONSES",
+        "assets": "FAKE_ASSET_RESPONSES",
+        "tag": "FAKE_TAG_RESPONSES",
+    }[kind]
+    response_paths = json.loads(os.environ[response_key])
+    response_path = response_paths[min(index, len(response_paths) - 1)]
+    sys.stdout.write(Path(response_path).read_text(encoding="utf-8"))
+
+raise SystemExit(exit_status)
+''',
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o755)
+
+    fake_sha256sum = tools_dir / "sha256sum"
+    fake_sha256sum.write_text(
+        f"#!{sys.executable}\n"
+        + r'''from pathlib import Path
+import hashlib
+import json
+import os
+import re
+import sys
+
+arguments = sys.argv[1:]
+call_log = Path(sys.argv[0]).resolve().parent.parent / (
+    "existing-release-sha256sum-calls.jsonl"
+)
+with call_log.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(arguments, separators=(",", ":")) + "\n")
+if arguments != ["--check", "--strict", "SHA256SUMS"]:
+    print(f"unexpected sha256sum arguments: {arguments!r}", file=sys.stderr)
+    raise SystemExit(89)
+manifest = Path("SHA256SUMS").read_text(encoding="ascii")
+pattern = re.compile(r"([0-9a-f]{64})  ([^/\\\n]+)\n")
+offset = 0
+for match in pattern.finditer(manifest):
+    if match.start() != offset:
+        raise SystemExit(1)
+    expected, name = match.groups()
+    actual = hashlib.sha256(Path(name).read_bytes()).hexdigest()
+    if actual != expected:
+        print(f"{name}: FAILED")
+        raise SystemExit(1)
+    print(f"{name}: OK")
+    offset = match.end()
+if offset != len(manifest):
+    raise SystemExit(1)
+raise SystemExit(int(os.environ["FAKE_SHA256SUM_EXIT"]))
+''',
+        encoding="utf-8",
+    )
+    fake_sha256sum.chmod(0o755)
+
+    required_external_tools = (
+        "cmp",
+        "find",
+        "mkdir",
+        "mktemp",
+        "python",
+        "sed",
+    )
+    for tool in required_external_tools:
+        if tool == missing_tool:
+            continue
+        source = Path(sys.executable) if tool == "python" else Path(
+            shutil.which(tool) or f"/__missing__/{tool}"
+        )
+        if not source.exists():
+            raise AssertionError(f"Test host is missing required tool: {tool}")
+        (tools_dir / tool).symlink_to(source)
+    if missing_tool == "gh":
+        fake_gh.unlink()
+    if missing_tool == "sha256sum":
+        fake_sha256sum.unlink()
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "FAKE_ASSET_PAYLOADS": json.dumps(payload_paths, sort_keys=True),
+            "FAKE_ASSET_RELEASE_IDS": json.dumps(expected_asset_release_ids),
+            "FAKE_ASSET_RESPONSES": json.dumps([str(path) for path in asset_paths]),
+            "FAKE_GH_CALL_LOG": str(call_log),
+            "FAKE_GH_FAILURES": json.dumps(gh_failures or {}, sort_keys=True),
+            "FAKE_GH_STATE": str(state_path),
+            "FAKE_RELEASE_RESPONSES": json.dumps(
+                [str(path) for path in release_paths]
+            ),
+            "FAKE_RELEASE_TAG": release_tag or "",
+            "FAKE_SHA256SUM_EXIT": str(sha256sum_exit),
+            "FAKE_TAG_RESPONSES": json.dumps([str(path) for path in tag_paths]),
+            "PATH": str(tools_dir),
+        }
+    )
+    if token is None:
+        environment.pop("GH_TOKEN", None)
+    else:
+        environment["GH_TOKEN"] = token
+    if repository is None:
+        environment.pop("GITHUB_REPOSITORY", None)
+    else:
+        environment["GITHUB_REPOSITORY"] = repository
+    if release_tag is None:
+        environment.pop("RELEASE_TAG", None)
+    else:
+        environment["RELEASE_TAG"] = release_tag
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", script],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    if sha_log.exists() and sha_log != root / "existing-release-sha256sum-calls.jsonl":
+        raise AssertionError("Fake sha256sum wrote its call log to an unexpected path")
+    return result
 
 
 def _write_raw_artifact_archive(
@@ -1866,6 +2243,784 @@ raise SystemExit(97)
             missing_python.stderr,
         )
 
+    def test_existing_release_integrity_accepts_canonical_reordered_state(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        final_release_pages = copy.deepcopy(release_pages)
+        final_release_pages.reverse()
+        for page in final_release_pages:
+            for release in page:
+                release["volatile_field"] = "changed"
+        final_asset_pages = copy.deepcopy(asset_pages)
+        flattened_assets = [asset for page in final_asset_pages for asset in page]
+        for asset in flattened_assets:
+            asset["download_count"] = 999_999
+        final_asset_pages = [list(reversed(flattened_assets))]
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_existing_release_integrity(
+                content,
+                root,
+                (
+                    json.dumps(release_pages),
+                    json.dumps(final_release_pages),
+                ),
+                (
+                    json.dumps(asset_pages),
+                    json.dumps(final_asset_pages),
+                ),
+                (json.dumps(tag_response), json.dumps(tag_response)),
+                payloads_by_id,
+            )
+            calls = [
+                json.loads(line)
+                for line in (
+                    root / "existing-release-gh-calls.jsonl"
+                ).read_text(encoding="utf-8").splitlines()
+            ]
+            sha_calls = [
+                json.loads(line)
+                for line in (
+                    root / "existing-release-sha256sum-calls.jsonl"
+                ).read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 11)
+        self.assertTrue(all(call[:3] == ["api", "--method", "GET"] for call in calls))
+        self.assertEqual(
+            [call[-1] for call in calls],
+            [
+                "repos/Infiland/GM2Godot/releases?per_page=100",
+                "repos/Infiland/GM2Godot/releases/740/assets?per_page=100",
+                f"repos/Infiland/GM2Godot/git/ref/tags/{EXISTING_RELEASE_TEST_TAG}",
+                *[
+                    f"repos/Infiland/GM2Godot/releases/assets/{740_000 + index}"
+                    for index in range(1, 6)
+                ],
+                "repos/Infiland/GM2Godot/releases?per_page=100",
+                "repos/Infiland/GM2Godot/releases/740/assets?per_page=100",
+                f"repos/Infiland/GM2Godot/git/ref/tags/{EXISTING_RELEASE_TEST_TAG}",
+            ],
+        )
+        forbidden_arguments = {
+            "DELETE",
+            "PATCH",
+            "POST",
+            "PUT",
+            "--field",
+            "--input",
+            "--raw-field",
+        }
+        self.assertFalse(
+            forbidden_arguments.intersection(argument for call in calls for argument in call)
+        )
+        download_endpoints = [
+            call[-1]
+            for call in calls
+            if "/releases/assets/" in call[-1]
+        ]
+        self.assertEqual(
+            download_endpoints,
+            [
+                f"repos/Infiland/GM2Godot/releases/assets/{740_000 + index}"
+                for index in range(1, 6)
+            ],
+        )
+        asset_list_endpoints = [
+            call[-1]
+            for call in calls
+            if "/releases/740/assets?per_page=100" in call[-1]
+        ]
+        self.assertEqual(
+            asset_list_endpoints,
+            ["repos/Infiland/GM2Godot/releases/740/assets?per_page=100"] * 2,
+        )
+        self.assertEqual(sha_calls, [["--check", "--strict", "SHA256SUMS"]])
+        self.assertEqual(result.stdout.count("Existing release snapshot:"), 2)
+        self.assertIn(
+            f"Existing release integrity verified for {EXISTING_RELEASE_TEST_TAG}",
+            result.stdout,
+        )
+
+    def test_existing_release_integrity_rejects_release_identity_and_state(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        exact_release = release_pages[1][0]
+        cases: dict[str, tuple[list[list[dict[str, object]]], str]] = {}
+
+        prefix_only = copy.deepcopy(release_pages)
+        prefix_only.pop()
+        cases["prefix only"] = (prefix_only, "found 0")
+
+        duplicate = copy.deepcopy(release_pages)
+        duplicate[0].append(copy.deepcopy(exact_release))
+        cases["duplicate exact"] = (duplicate, "found 2")
+
+        mutations: tuple[tuple[str, str, object], ...] = (
+            ("draft", "draft", True),
+            ("prerelease", "prerelease", True),
+            ("unpublished", "not published", None),
+            ("malformed published timestamp", "malformed published_at", "not-a-time"),
+            ("timezone-free published timestamp", "timezone-free", "2026-07-18T21:00:41"),
+            ("boolean release id", "invalid id", True),
+            ("invalid URL", "invalid URL", "javascript:invalid"),
+        )
+        for case, expected_error, value in mutations:
+            mutated = copy.deepcopy(release_pages)
+            release = mutated[1][0]
+            if case == "prerelease":
+                release["prerelease"] = value
+            elif case in {
+                "unpublished",
+                "malformed published timestamp",
+                "timezone-free published timestamp",
+            }:
+                release["published_at"] = value
+            elif case == "boolean release id":
+                release["id"] = value
+            elif case == "invalid URL":
+                release["html_url"] = value
+            else:
+                release["draft"] = value
+            cases[case] = (mutated, expected_error)
+
+        for case, (current_release_pages, expected_error) in cases.items():
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    result = _run_existing_release_integrity(
+                        content,
+                        root,
+                        json.dumps(current_release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                    )
+                    calls = (
+                        root / "existing-release-gh-calls.jsonl"
+                    ).read_text(encoding="utf-8")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertNotIn("/releases/assets/740001", calls)
+
+    def test_existing_release_harness_binds_assets_to_selected_release_id(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        expected_endpoint = (
+            '"repos/${GITHUB_REPOSITORY}/releases/'
+            '${release_id}/assets?per_page=100"'
+        )
+        wrong_endpoint = (
+            '"repos/${GITHUB_REPOSITORY}/releases/741/assets?per_page=100"'
+        )
+        self.assertEqual(content.count(expected_endpoint), 1)
+        mutated_content = content.replace(expected_endpoint, wrong_endpoint, 1)
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            result = _run_existing_release_integrity(
+                mutated_content,
+                Path(temp_directory),
+                json.dumps(release_pages),
+                json.dumps(asset_pages),
+                json.dumps(tag_response),
+                payloads_by_id,
+            )
+
+        self.assertEqual(result.returncode, 90)
+        self.assertIn(
+            "asset-list release id mismatch: requested=741 expected=740",
+            result.stderr,
+        )
+
+    def test_existing_release_integrity_rejects_asset_inventory_and_metadata(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        base_assets = [asset for page in asset_pages for asset in page]
+        cases: dict[str, tuple[Sequence[object], str]] = {}
+
+        cases["missing asset"] = (base_assets[:-1], "invalid asset inventory")
+        cases["missing checksum asset"] = (
+            [asset for asset in base_assets if asset.get("name") != "SHA256SUMS"],
+            "invalid asset inventory",
+        )
+        extra_assets = copy.deepcopy(base_assets)
+        extra_assets.append(
+            {
+                "digest": "sha256:" + "1" * 64,
+                "id": 999_001,
+                "name": "unexpected.zip",
+                "size": 1,
+                "state": "uploaded",
+            }
+        )
+        cases["extra asset"] = (extra_assets, "invalid asset inventory")
+        duplicate_name = copy.deepcopy(base_assets)
+        duplicate_name[-1]["name"] = duplicate_name[0]["name"]
+        cases["duplicate name"] = (duplicate_name, "invalid asset inventory")
+        duplicate_checksum = copy.deepcopy(base_assets)
+        duplicate_checksum[-1]["name"] = "SHA256SUMS"
+        cases["duplicate checksum asset"] = (
+            duplicate_checksum,
+            "invalid asset inventory",
+        )
+
+        metadata_mutations: tuple[tuple[str, str, object], ...] = (
+            ("duplicate id", "Duplicate asset id", base_assets[0]["id"]),
+            ("starter state", "not uploaded", "starter"),
+            ("empty size", "empty or has invalid size", 0),
+            ("boolean size", "empty or has invalid size", True),
+            ("string size", "empty or has invalid size", "1"),
+            ("boolean id", "Invalid asset id", True),
+            ("string id", "Invalid asset id", "740002"),
+            ("missing state", "not uploaded", None),
+            ("uppercase digest", "invalid SHA-256 digest", "sha256:" + "A" * 64),
+            ("missing digest", "invalid SHA-256 digest", None),
+            ("wrong digest algorithm", "invalid SHA-256 digest", "sha512:" + "a" * 64),
+            ("short digest", "invalid SHA-256 digest", "sha256:" + "a" * 63),
+            ("missing digest prefix", "invalid SHA-256 digest", "a" * 64),
+        )
+        for case, expected_error, value in metadata_mutations:
+            mutated = copy.deepcopy(base_assets)
+            target = mutated[1]
+            if case == "duplicate id":
+                target["id"] = value
+            elif case in {"empty size", "boolean size", "string size"}:
+                target["size"] = value
+            elif case in {"boolean id", "string id"}:
+                target["id"] = value
+            elif case in {"starter state", "missing state"}:
+                target["state"] = value
+            else:
+                target["digest"] = value
+            cases[case] = (mutated, expected_error)
+        cases["non-object asset"] = ([*copy.deepcopy(base_assets[:-1]), 42], "non-object")
+
+        for case, (assets, expected_error) in cases.items():
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    result = _run_existing_release_integrity(
+                        content,
+                        root,
+                        json.dumps(release_pages),
+                        json.dumps([assets]),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                    )
+                    calls = (
+                        root / "existing-release-gh-calls.jsonl"
+                    ).read_text(encoding="utf-8")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertIn("id=740", result.stderr)
+                self.assertIn(
+                    "https://github.com/Infiland/GM2Godot/releases/tag/"
+                    f"{EXISTING_RELEASE_TEST_TAG}",
+                    result.stderr,
+                )
+                self.assertNotIn("/releases/assets/740001", calls)
+
+    def test_existing_release_integrity_fails_closed_on_every_api_boundary(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        cases = (
+            ("initial release list", "release:0", 41, "release-list query failed"),
+            ("initial asset list", "assets:0", 42, "release-asset query failed"),
+            ("initial tag", "tag:0", 43, "tag-ref query failed"),
+            ("final release list", "release:1", 44, "release-list query failed"),
+            ("final asset list", "assets:1", 45, "release-asset query failed"),
+            ("final tag", "tag:1", 46, "tag-ref query failed"),
+        )
+
+        for case, failure_key, exit_status, expected_error in cases:
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        gh_failures={failure_key: exit_status},
+                    )
+
+                self.assertEqual(result.returncode, exit_status)
+                self.assertIn(expected_error, result.stderr)
+                self.assertIn(f"gh exit {exit_status}", result.stderr)
+                if failure_key.startswith(("assets:", "tag:")):
+                    self.assertIn("Existing release candidate: id=740 url=", result.stderr)
+
+    def test_existing_release_integrity_rejects_malformed_api_responses(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        malformed_release_cases = {
+            "invalid JSON": "{not-json",
+            "top-level object": "{}",
+            "page object": "[{}]",
+            "non-object release": "[[42]]",
+            "missing tag name": "[[{}]]",
+            "empty tag name": '[[{"tag_name": ""}]]',
+        }
+        for case, response in malformed_release_cases.items():
+            with self.subTest(scope="release", case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        response,
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+
+        malformed_asset_cases = {
+            "invalid JSON": "{not-json",
+            "top-level object": "{}",
+            "page object": "[{}]",
+            "non-object asset": "[[42]]",
+        }
+        for case, response in malformed_asset_cases.items():
+            with self.subTest(scope="assets", case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        response,
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("release asset", result.stderr.lower())
+
+        malformed_tag_cases: dict[str, object] = {
+            "array": [],
+            "wrong ref": {
+                **tag_response,
+                "ref": f"refs/tags/{EXISTING_RELEASE_TEST_TAG}0",
+            },
+            "missing object": {
+                "ref": f"refs/tags/{EXISTING_RELEASE_TEST_TAG}",
+            },
+            "wrong object type": {
+                **tag_response,
+                "object": {"sha": "9" * 40, "type": "blob"},
+            },
+            "malformed SHA": {
+                **tag_response,
+                "object": {"sha": "not-a-sha", "type": "commit"},
+            },
+        }
+        for case, response in malformed_tag_cases.items():
+            with self.subTest(scope="tag", case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(response),
+                        payloads_by_id,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("tag", result.stderr.lower())
+
+    def test_existing_release_integrity_rejects_each_failed_asset_download(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+
+        for asset_id in sorted(payloads_by_id):
+            with self.subTest(asset_id=asset_id):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        gh_failures={f"download:{asset_id}": 52},
+                    )
+
+                self.assertEqual(result.returncode, 52)
+                self.assertIn("Failed to download existing release asset", result.stderr)
+                self.assertIn(f"id={asset_id}", result.stderr)
+                self.assertIn("release_id=740", result.stderr)
+                self.assertIn(
+                    "https://github.com/Infiland/GM2Godot/releases/tag/"
+                    f"{EXISTING_RELEASE_TEST_TAG}",
+                    result.stderr,
+                )
+
+    def test_existing_release_integrity_rejects_download_size_and_digest_mismatch(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        asset_id = 740_001
+        cases = {
+            "empty": (b"", "size mismatch"),
+            "truncated": (payloads_by_id[asset_id][:-1], "size mismatch"),
+            "oversized": (payloads_by_id[asset_id] + b"X", "size mismatch"),
+            "same-size wrong bytes": (
+                b"X" * len(payloads_by_id[asset_id]),
+                "digest mismatch",
+            ),
+        }
+
+        for case, (replacement, expected_error) in cases.items():
+            with self.subTest(case=case):
+                mutated_payloads = dict(payloads_by_id)
+                mutated_payloads[asset_id] = replacement
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        mutated_payloads,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertIn("release_id=740", result.stderr)
+                self.assertIn(
+                    "https://github.com/Infiland/GM2Godot/releases/tag/"
+                    f"{EXISTING_RELEASE_TEST_TAG}",
+                    result.stderr,
+                )
+
+    def test_existing_release_integrity_rejects_noncanonical_manifests(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        manifest_id = 740_005
+        canonical = payloads_by_id[manifest_id]
+        lines = canonical.splitlines(keepends=True)
+        variants = {
+            "CRLF": canonical.replace(b"\n", b"\r\n"),
+            "missing final newline": canonical[:-1],
+            "missing entry": b"".join(lines[:-1]),
+            "duplicate entry": canonical + lines[-1],
+            "reordered": b"".join(reversed(lines)),
+            "extra blank line": canonical + b"\n",
+            "extra valid entry": canonical
+            + b"0" * 64
+            + b"  GM2Godot-linux.dmg\n",
+            "star marker": canonical.replace(b"  GM2Godot", b" *GM2Godot", 1),
+            "wrong payload digest": b"0" * 64 + lines[0][64:] + b"".join(lines[1:]),
+        }
+
+        for case, manifest in variants.items():
+            with self.subTest(case=case):
+                mutated_payloads = dict(payloads_by_id)
+                mutated_payloads[manifest_id] = manifest
+                mutated_assets = copy.deepcopy(asset_pages)
+                manifest_asset = next(
+                    asset
+                    for page in mutated_assets
+                    for asset in page
+                    if asset.get("id") == manifest_id
+                )
+                manifest_asset["size"] = len(manifest)
+                manifest_asset["digest"] = (
+                    f"sha256:{hashlib.sha256(manifest).hexdigest()}"
+                )
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(mutated_assets),
+                        json.dumps(tag_response),
+                        mutated_payloads,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(
+                    "SHA256SUMS is not canonical" in result.stderr
+                    or "SHA256SUMS must contain exactly" in result.stderr
+                    or "SHA256SUMS digest mismatch" in result.stderr,
+                    result.stderr,
+                )
+                self.assertIn("release_id=740", result.stderr)
+                self.assertIn(
+                    "https://github.com/Infiland/GM2Godot/releases/tag/"
+                    f"{EXISTING_RELEASE_TEST_TAG}",
+                    result.stderr,
+                )
+
+    def test_existing_release_integrity_rejects_metadata_and_manifest_triangle(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+        mutated_assets = copy.deepcopy(asset_pages)
+        linux_asset = next(
+            asset
+            for page in mutated_assets
+            for asset in page
+            if asset.get("name") == "GM2Godot-linux.zip"
+        )
+        linux_asset["digest"] = "sha256:" + "0" * 64
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            result = _run_existing_release_integrity(
+                content,
+                Path(temp_directory),
+                json.dumps(release_pages),
+                json.dumps(mutated_assets),
+                json.dumps(tag_response),
+                payloads_by_id,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Downloaded asset digest mismatch", result.stderr)
+        self.assertIn("release_id=740", result.stderr)
+        self.assertIn(
+            "https://github.com/Infiland/GM2Godot/releases/tag/"
+            f"{EXISTING_RELEASE_TEST_TAG}",
+            result.stderr,
+        )
+
+    def test_existing_release_integrity_propagates_strict_checksum_failure(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            result = _run_existing_release_integrity(
+                content,
+                Path(temp_directory),
+                json.dumps(release_pages),
+                json.dumps(asset_pages),
+                json.dumps(tag_response),
+                payloads_by_id,
+                sha256sum_exit=63,
+            )
+
+        self.assertEqual(result.returncode, 63)
+        self.assertIn("Strict SHA256SUMS verification failed", result.stderr)
+        self.assertIn("release_id=740", result.stderr)
+        self.assertIn(f"release_url=https://github.com/Infiland/GM2Godot/releases/tag/{EXISTING_RELEASE_TEST_TAG}", result.stderr)
+
+    def test_existing_release_integrity_rejects_snapshot_mutation(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+
+        changed_release = copy.deepcopy(release_pages)
+        changed_release[1][0]["published_at"] = "2026-07-18T21:00:42Z"
+        changed_release_id = copy.deepcopy(release_pages)
+        changed_release_id[1][0]["id"] = 742
+        changed_assets = copy.deepcopy(asset_pages)
+        changed_assets[0][0]["id"] = 999_999
+        changed_asset_size = copy.deepcopy(asset_pages)
+        changed_asset_size[0][0]["size"] = 999_999
+        changed_asset_digest = copy.deepcopy(asset_pages)
+        changed_asset_digest[0][0]["digest"] = "sha256:" + "7" * 64
+        changed_tag = copy.deepcopy(tag_response)
+        tag_object = changed_tag["object"]
+        if not isinstance(tag_object, dict):
+            raise AssertionError("Tag fixture object must be a dictionary")
+        tag_object["sha"] = "8" * 40
+        changed_tag_type = copy.deepcopy(tag_response)
+        changed_type_object = changed_tag_type["object"]
+        if not isinstance(changed_type_object, dict):
+            raise AssertionError("Tag fixture object must be a dictionary")
+        changed_type_object["type"] = "tag"
+        cases = (
+            (
+                "release",
+                (json.dumps(release_pages), json.dumps(changed_release)),
+                json.dumps(asset_pages),
+                json.dumps(tag_response),
+            ),
+            (
+                "release id",
+                (json.dumps(release_pages), json.dumps(changed_release_id)),
+                json.dumps(asset_pages),
+                json.dumps(tag_response),
+            ),
+            (
+                "asset",
+                json.dumps(release_pages),
+                (json.dumps(asset_pages), json.dumps(changed_assets)),
+                json.dumps(tag_response),
+            ),
+            (
+                "asset size",
+                json.dumps(release_pages),
+                (json.dumps(asset_pages), json.dumps(changed_asset_size)),
+                json.dumps(tag_response),
+            ),
+            (
+                "asset digest",
+                json.dumps(release_pages),
+                (json.dumps(asset_pages), json.dumps(changed_asset_digest)),
+                json.dumps(tag_response),
+            ),
+            (
+                "tag",
+                json.dumps(release_pages),
+                json.dumps(asset_pages),
+                (json.dumps(tag_response), json.dumps(changed_tag)),
+            ),
+            (
+                "tag type",
+                json.dumps(release_pages),
+                json.dumps(asset_pages),
+                (json.dumps(tag_response), json.dumps(changed_tag_type)),
+            ),
+        )
+        for case, current_releases, current_assets, current_tags in cases:
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        current_releases,
+                        current_assets,
+                        current_tags,
+                        payloads_by_id,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("state changed during the read-only audit", result.stderr)
+
+    def test_existing_release_integrity_requires_environment_and_tools(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages, asset_pages, tag_response, payloads_by_id = (
+            _existing_release_fixture()
+        )
+
+        missing_environment_results: list[
+            tuple[str, subprocess.CompletedProcess[str]]
+        ] = []
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_environment_results.append(
+                (
+                    "GH_TOKEN",
+                    _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        token=None,
+                    ),
+                )
+            )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_environment_results.append(
+                (
+                    "GITHUB_REPOSITORY",
+                    _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        repository=None,
+                    ),
+                )
+            )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_environment_results.append(
+                (
+                    "RELEASE_TAG",
+                    _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        release_tag=None,
+                    ),
+                )
+            )
+        for variable, result in missing_environment_results:
+            with self.subTest(missing_variable=variable):
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Existing-release audit is missing", result.stderr)
+
+        for tool in ("gh", "python", "sha256sum", "cmp"):
+            with self.subTest(missing_tool=tool):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    result = _run_existing_release_integrity(
+                        content,
+                        Path(temp_directory),
+                        json.dumps(release_pages),
+                        json.dumps(asset_pages),
+                        json.dumps(tag_response),
+                        payloads_by_id,
+                        missing_tool=tool,
+                    )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f"Required existing-release audit tool is unavailable: {tool}",
+                    result.stderr,
+                )
+
     def test_release_jobs_require_authoritative_remote_tag_absence(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
         content = workflow.read_text(encoding="utf-8")
@@ -1909,15 +3064,27 @@ raise SystemExit(97)
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
         content = workflow.read_text(encoding="utf-8")
         tag_check_marker = "      - name: Check if tag already exists\n"
+        integrity_marker = "      - name: Verify existing tagged release\n"
         preflight_marker = "      - name: Check for incomplete release state\n"
         build_marker = "\n  build:\n"
         get_version_job = content[
             content.index("  get-version:"):content.index(
+                "  existing-release-integrity:"
+            )
+        ]
+        integrity_job = content[
+            content.index("  existing-release-integrity:"):content.index(
                 "  release-state-preflight:"
             )
         ]
         preflight_job = content[
             content.index("  release-state-preflight:"):content.index(build_marker)
+        ]
+        integrity_metadata = content[
+            content.index(integrity_marker):content.index(
+                "        run: |\n",
+                content.index(integrity_marker),
+            )
         ]
         preflight_metadata = content[
             content.index(preflight_marker):content.index(
@@ -1931,6 +3098,15 @@ raise SystemExit(97)
             content,
             "Check for incomplete release state",
         )
+        integrity_script = _workflow_run_script(
+            content,
+            "Verify existing tagged release",
+        )
+        integrity_job_conditions = [
+            line.strip()
+            for line in integrity_job.splitlines()
+            if line.startswith("    if: ")
+        ]
         preflight_job_conditions = [
             line.strip()
             for line in preflight_job.splitlines()
@@ -1955,16 +3131,70 @@ raise SystemExit(97)
             content,
         )
         self.assertNotIn("\n  queue:", content)
+        self.assertLess(content.index(tag_check_marker), content.index(integrity_marker))
+        self.assertLess(content.index(integrity_marker), content.index(preflight_marker))
         self.assertLess(content.index(tag_check_marker), content.index(preflight_marker))
         self.assertLess(content.index(preflight_marker), content.index(build_marker))
         self.assertNotIn("    permissions:", get_version_job)
         self.assertNotIn("write-all", get_version_job)
         self.assertNotIn("gh api", get_version_job)
+        self.assertIn("permissions:\n      contents: write", integrity_job)
+        self.assertNotIn("actions/checkout", integrity_job)
+        self.assertNotIn("      - uses:", integrity_job)
+        self.assertNotIn("pip install", integrity_job)
+        self.assertNotIn("continue-on-error:", integrity_job)
+        self.assertEqual(
+            integrity_job_conditions,
+            [
+                "if: github.event_name != 'pull_request' && "
+                "needs.get-version.outputs.tag_exists == 'true'"
+            ],
+        )
+        self.assertIn("GH_TOKEN: ${{ github.token }}", integrity_metadata)
+        self.assertIn(
+            "RELEASE_TAG: v${{ needs.get-version.outputs.version }}",
+            integrity_metadata,
+        )
+        self.assertEqual(integrity_script.count("gh api --method GET"), 3)
+        self.assertEqual(integrity_script.count("gh api"), 3)
+        self.assertEqual(
+            len(re.findall(r"(?m)^\s*gh\s+api\b", integrity_script)),
+            3,
+        )
+        for mutation in (
+            "--method DELETE",
+            "--method PATCH",
+            "--method POST",
+            "--method PUT",
+            "gh release",
+            "git push",
+            "gh api -X",
+            "gh api --method=",
+            "gh graphql",
+            "curl ",
+            "wget ",
+            "urllib.request",
+            "http.client",
+            "requests.",
+        ):
+            self.assertNotIn(mutation, integrity_script)
+        self.assertIn("Accept: application/octet-stream", integrity_script)
+        self.assertIn("sha256sum --check --strict SHA256SUMS", integrity_script)
+        self.assertIn("capture_snapshot initial", integrity_script)
+        self.assertIn("capture_snapshot final", integrity_script)
+        self.assertEqual(
+            [
+                line.strip()
+                for line in integrity_metadata.splitlines()
+                if line.strip().startswith("if: ")
+            ],
+            [],
+        )
         self.assertIn("permissions:\n      contents: write", preflight_job)
         self.assertNotIn("actions/checkout", preflight_job)
         self.assertNotIn("      - uses:", preflight_job)
         self.assertNotIn("pip install", preflight_job)
-        self.assertEqual(content.count("contents: write"), 2)
+        self.assertEqual(content.count("contents: write"), 3)
         self.assertEqual(
             preflight_job_conditions,
             [
@@ -1980,11 +3210,13 @@ raise SystemExit(97)
             "needs: [get-version, release-state-preflight]",
             build_job,
         )
+        self.assertNotIn("existing-release-integrity", build_job)
         self.assertNotIn("always()", build_job)
         self.assertIn(
             "needs: [get-version, release-state-preflight, build]",
             release_job,
         )
+        self.assertNotIn("existing-release-integrity", release_job)
         self.assertNotIn("always()", release_job)
         self.assertIn("GH_TOKEN: ${{ github.token }}", preflight_metadata)
         self.assertIn(

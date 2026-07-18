@@ -292,6 +292,49 @@ jobs:
             unzip -q "$archive" -d "artifacts/$name"
           done
 
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+
+          payloads=(
+            "artifacts/GM2Godot-linux/GM2Godot-linux.zip"
+            "artifacts/GM2Godot-macos/GM2Godot-macos.dmg"
+            "artifacts/GM2Godot-macos/GM2Godot-macos.zip"
+            "artifacts/GM2Godot-windows/GM2Godot-windows.zip"
+          )
+          if ! command -v sha256sum >/dev/null 2>&1; then
+            echo "::error::Required checksum tool is unavailable: sha256sum" >&2
+            exit 1
+          fi
+          for payload in "${payloads[@]}"; do
+            if [[ ! -f "$payload" || -L "$payload" || ! -s "$payload" ]]; then
+              echo "::error::Missing, non-regular, symlinked, or empty release payload: $payload" >&2
+              exit 1
+            fi
+          done
+
+          manifest_path="artifacts/SHA256SUMS"
+          if [[ -e "$manifest_path" || -L "$manifest_path" ]]; then
+            echo "::error::Checksum manifest path already exists: $manifest_path" >&2
+            exit 1
+          fi
+          manifest_tmp="$(mktemp "artifacts/.SHA256SUMS.XXXXXX")"
+          trap '[[ -z "$manifest_tmp" ]] || rm -f -- "$manifest_tmp"' EXIT
+          for payload in "${payloads[@]}"; do
+            digest_line="$(sha256sum -- "$payload")"
+            digest="${digest_line%% *}"
+            if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::sha256sum returned an invalid digest for $payload" >&2
+              exit 1
+            fi
+            printf '%s  %s\n' "$digest" "${payload##*/}" >> "$manifest_tmp"
+          done
+          mv -- "$manifest_tmp" "$manifest_path"
+          manifest_tmp=""
+          trap - EXIT
+
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
@@ -304,3 +347,4 @@ jobs:
             artifacts/GM2Godot-macos/GM2Godot-macos.zip
             artifacts/GM2Godot-macos/GM2Godot-macos.dmg
             artifacts/GM2Godot-linux/GM2Godot-linux.zip
+            artifacts/SHA256SUMS

@@ -143,6 +143,12 @@ class TestDocumentationHealth(unittest.TestCase):
         contributing = (PROJECT_ROOT / "CONTRIBUTING.md").read_text(
             encoding="utf-8"
         )
+        installation = (WIKI_SOURCE_DIR / "Installation.md").read_text(
+            encoding="utf-8"
+        )
+        release_maintenance = (
+            WIKI_SOURCE_DIR / "Maintainer-Release-and-Wiki.md"
+        ).read_text(encoding="utf-8")
         maintenance = (PROJECT_ROOT / "docs" / "WIKI_MAINTENANCE.md").read_text(
             encoding="utf-8"
         )
@@ -157,6 +163,20 @@ class TestDocumentationHealth(unittest.TestCase):
         self.assertNotIn("modern_widgets.py", contributing)
         self.assertNotIn("Add community links", readme + contributing)
         self.assertNotIn("Add link if available", readme + contributing)
+        self.assertIn(
+            "Releases starting with 0.7.14 include `SHA256SUMS`",
+            readme,
+        )
+        self.assertIn(
+            "sha256sum --check --strict SHA256SUMS",
+            installation,
+        )
+        self.assertIn("not a signature or proof of publisher identity", installation)
+        self.assertIn("exactly five unique, non-empty assets", release_maintenance)
+        self.assertIn(
+            "after the `sha256:` prefix in GitHub's `assets[].digest` field",
+            release_maintenance,
+        )
         self.assertIn("docs/wiki/", maintenance)
         self.assertIn("merged main-repository SHA", maintenance)
         self.assertIn("must not auto-close", maintenance)

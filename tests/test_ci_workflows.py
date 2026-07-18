@@ -65,6 +65,12 @@ RELEASE_SMOKE_PAYLOAD = b"GM2Godot release action smoke\n"
 RELEASE_SMOKE_PAYLOAD_SHA256 = (
     "f1efea0ac477ea11ec0fe4d13d9bfdcc2908ed8a6e2c71b91952388c1aaf48e6"
 )
+RELEASE_PAYLOADS = (
+    ("artifacts/GM2Godot-linux/GM2Godot-linux.zip", b"linux payload\n"),
+    ("artifacts/GM2Godot-macos/GM2Godot-macos.dmg", b"macOS DMG payload\n"),
+    ("artifacts/GM2Godot-macos/GM2Godot-macos.zip", b"macOS ZIP payload\n"),
+    ("artifacts/GM2Godot-windows/GM2Godot-windows.zip", b"windows payload\n"),
+)
 
 
 def _godot_env_lines(content: str) -> tuple[str, ...]:
@@ -329,6 +335,13 @@ def _write_raw_artifact_archive(
     ) as archive:
         for member_name, payload in members.items():
             archive.writestr(member_name, payload)
+
+
+def _write_release_payloads(root: Path) -> None:
+    for relative_path, payload in RELEASE_PAYLOADS:
+        destination = root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
 
 
 class TestCIWorkflows(unittest.TestCase):
@@ -874,6 +887,264 @@ raise SystemExit(97)
             "raw-artifacts/GM2Godot-macos/GM2Godot-macos.zip",
             result.stderr,
         )
+
+    def test_release_generates_portable_sha256_manifest(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Generate SHA256SUMS")
+        create_release_step = content[
+            content.index("      - name: Create release\n"):
+        ]
+
+        expected_lines = [
+            f"{hashlib.sha256(payload).hexdigest()}  {Path(relative_path).name}\n"
+            for relative_path, payload in RELEASE_PAYLOADS
+        ]
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            _write_release_payloads(root)
+
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = root / "artifacts" / "SHA256SUMS"
+            self.assertEqual(
+                manifest.read_bytes(),
+                "".join(expected_lines).encode("ascii"),
+            )
+
+            verification_root = root / "downloaded-release"
+            verification_root.mkdir()
+            for relative_path, _ in RELEASE_PAYLOADS:
+                source = root / relative_path
+                (verification_root / source.name).write_bytes(source.read_bytes())
+            (verification_root / manifest.name).write_bytes(manifest.read_bytes())
+            verification_commands = {
+                "linux": [
+                    "sha256sum",
+                    "--check",
+                    "--strict",
+                    manifest.name,
+                ],
+                "darwin": [
+                    "shasum",
+                    "-a",
+                    "256",
+                    "-c",
+                    manifest.name,
+                ],
+            }
+            verification_command = verification_commands.get(sys.platform)
+            if verification_command is not None:
+                verification = subprocess.run(
+                    verification_command,
+                    cwd=verification_root,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(verification.returncode, 0, verification.stderr)
+
+        self.assertLess(
+            content.index("      - name: Generate SHA256SUMS\n"),
+            content.index("      - name: Create release\n"),
+        )
+        files_marker = "          files: |\n"
+        _, separator, files_remainder = create_release_step.partition(files_marker)
+        self.assertTrue(separator)
+        release_files: list[str] = []
+        for line in files_remainder.splitlines():
+            if not line.startswith("            "):
+                break
+            release_files.append(line.strip())
+        self.assertEqual(
+            release_files,
+            [
+                "artifacts/GM2Godot-windows/GM2Godot-windows.zip",
+                "artifacts/GM2Godot-macos/GM2Godot-macos.zip",
+                "artifacts/GM2Godot-macos/GM2Godot-macos.dmg",
+                "artifacts/GM2Godot-linux/GM2Godot-linux.zip",
+                "artifacts/SHA256SUMS",
+            ],
+        )
+
+    def test_release_checksum_manifest_rejects_invalid_payloads(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Generate SHA256SUMS")
+        invalid_cases = [
+            (Path(relative_path), invalid_kind)
+            for relative_path, _ in RELEASE_PAYLOADS
+            for invalid_kind in ("missing", "empty")
+        ]
+        invalid_cases.extend(
+            (
+                (Path(RELEASE_PAYLOADS[1][0]), "directory"),
+                (Path(RELEASE_PAYLOADS[1][0]), "symlink"),
+            )
+        )
+
+        for invalid_path, invalid_kind in invalid_cases:
+            if invalid_kind == "symlink" and os.name == "nt":
+                continue
+            with self.subTest(
+                invalid_path=invalid_path.as_posix(),
+                invalid_kind=invalid_kind,
+            ):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    _write_release_payloads(root)
+                    target = root / invalid_path
+                    target.unlink()
+                    if invalid_kind == "empty":
+                        target.touch()
+                    elif invalid_kind == "directory":
+                        target.mkdir()
+                    elif invalid_kind == "symlink":
+                        referent = root / "symlink-referent"
+                        referent.write_bytes(b"not an accepted direct payload\n")
+                        target.symlink_to(referent)
+
+                    result = subprocess.run(
+                        ["/bin/bash", "-c", script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(
+                        "Missing, non-regular, symlinked, or empty release "
+                        f"payload: {invalid_path.as_posix()}",
+                        result.stderr,
+                    )
+                    self.assertFalse((root / "artifacts" / "SHA256SUMS").exists())
+
+    def test_release_checksum_manifest_rejects_existing_destination(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Generate SHA256SUMS")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            _write_release_payloads(root)
+            manifest = root / "artifacts" / "SHA256SUMS"
+            manifest.write_bytes(b"preserve this unexpected file\n")
+
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Checksum manifest path already exists: artifacts/SHA256SUMS",
+                result.stderr,
+            )
+            self.assertEqual(
+                manifest.read_bytes(),
+                b"preserve this unexpected file\n",
+            )
+
+    def test_release_checksum_manifest_rejects_malformed_digest_output(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Generate SHA256SUMS")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            _write_release_payloads(root)
+            tools_dir = root / "tools"
+            tools_dir.mkdir()
+            fake_sha256sum = tools_dir / "sha256sum"
+            fake_sha256sum.write_text(
+                "#!/bin/sh\nprintf 'not-a-digest  %s\\n' \"$2\"\n",
+                encoding="utf-8",
+            )
+            fake_sha256sum.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = os.pathsep.join(
+                (str(tools_dir), environment.get("PATH", ""))
+            )
+
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "sha256sum returned an invalid digest for "
+                "artifacts/GM2Godot-linux/GM2Godot-linux.zip",
+                result.stderr,
+            )
+            self.assertFalse((root / "artifacts" / "SHA256SUMS").exists())
+
+    def test_release_checksum_manifest_cleans_up_after_hash_failure(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Generate SHA256SUMS")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            _write_release_payloads(root)
+            tools_dir = root / "tools"
+            tools_dir.mkdir()
+            fake_sha256sum = tools_dir / "sha256sum"
+            fake_sha256sum.write_text(
+                "#!/bin/sh\n"
+                "count=0\n"
+                "if [ -f \"$FAKE_SHA256SUM_CALLS\" ]; then\n"
+                "  read -r count < \"$FAKE_SHA256SUM_CALLS\" || true\n"
+                "fi\n"
+                "count=$((count + 1))\n"
+                "printf '%s\\n' \"$count\" > \"$FAKE_SHA256SUM_CALLS\"\n"
+                "printf '%064d  %s\\n' 0 \"$2\"\n"
+                "if [ \"$count\" -eq 2 ]; then\n"
+                "  exit 73\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake_sha256sum.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "FAKE_SHA256SUM_CALLS": str(root / "sha256sum-calls"),
+                    "PATH": os.pathsep.join(
+                        (str(tools_dir), environment.get("PATH", ""))
+                    ),
+                }
+            )
+
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 73, result.stderr)
+            self.assertFalse((root / "artifacts" / "SHA256SUMS").exists())
+            self.assertEqual(
+                list((root / "artifacts").glob(".SHA256SUMS.*")),
+                [],
+            )
 
     def test_release_tag_check_finds_exact_remote_tag_without_local_tags(
         self,

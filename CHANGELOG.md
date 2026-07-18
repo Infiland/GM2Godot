@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.14 - 2026-07-18
+
+- Added a deterministic `SHA256SUMS` release asset for the four final platform payloads, with fail-closed file validation and executable manifest regression coverage.
+
 ## 0.7.13 - 2026-07-18
 
 - Upgraded archived GitHub Actions artifact transport to immutable `actions/upload-artifact` v7.0.1 across release builds, release smoke, and bounded LTS failure reports, preserving the verified nested archive layout consumed by the v8 downloader.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.9 - 2026-07-18
+
+- Made release reruns idempotent through an authoritative exact remote-tag check: existing versions skip builds and publication without changing assets, absent tags proceed, and lookup failures stop the workflow; updated maintainer guidance to match.
+
 ## 0.7.8 - 2026-07-18
 
 - Aligned Included File emission, asset registry and conversion-manifest paths, and generated GML file APIs on `res://included_files/`, using GameMaker packaged-name normalization (ASCII `A`–`Z` to lowercase and spaces to underscores) with deterministic collision-safe suffixes and diagnostics.

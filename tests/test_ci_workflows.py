@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
-import textwrap
 import unittest
 import zipfile
 from pathlib import Path
@@ -66,17 +66,139 @@ def _godot_env_lines(content: str) -> tuple[str, ...]:
 
 
 def _workflow_run_script(content: str, step_name: str) -> str:
-    marker = f"      - name: {step_name}\n        run: |\n"
+    marker = f"      - name: {step_name}\n"
     _, separator, remainder = content.partition(marker)
     if not separator:
         raise AssertionError(f"Workflow step not found: {step_name}")
 
+    metadata, separator, remainder = remainder.partition("        run: |\n")
+    if not separator or "\n      - " in metadata:
+        raise AssertionError(f"Workflow run script not found: {step_name}")
+
     script_lines: list[str] = []
     for line in remainder.splitlines():
-        if line.startswith("      - name: "):
+        if line and not line.startswith("          "):
             break
-        script_lines.append(line)
-    return textwrap.dedent("\n".join(script_lines)).strip() + "\n"
+        script_lines.append(line[10:] if line else "")
+    return "\n".join(script_lines).strip() + "\n"
+
+
+def _run_git(
+    cwd: Path,
+    *arguments: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    environment = _isolated_git_environment()
+    return subprocess.run(
+        ["git", *arguments],
+        cwd=cwd,
+        check=check,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def _isolated_git_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in tuple(environment):
+        if name.startswith("GIT_"):
+            del environment[name]
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GIT_ALLOW_PROTOCOL"] = "file"
+    return environment
+
+
+def _make_shallow_no_tags_checkout(
+    root: Path,
+    tags: tuple[str, ...],
+) -> Path:
+    source = root / "source"
+    remote = root / "remote.git"
+    checkout = root / "checkout"
+
+    _run_git(root, "init", "--initial-branch=main", str(source))
+    _run_git(
+        source,
+        "-c",
+        "user.name=GM2Godot CI",
+        "-c",
+        "user.email=ci@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "tagged commit",
+    )
+    for tag in tags:
+        _run_git(source, "tag", tag)
+    _run_git(
+        source,
+        "-c",
+        "user.name=GM2Godot CI",
+        "-c",
+        "user.email=ci@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "current main",
+    )
+    _run_git(root, "clone", "--bare", str(source), str(remote))
+    _run_git(
+        root,
+        "clone",
+        "--depth=1",
+        "--no-tags",
+        "--branch",
+        "main",
+        remote.resolve().as_uri(),
+        str(checkout),
+    )
+
+    shallow = _run_git(
+        checkout,
+        "rev-parse",
+        "--is-shallow-repository",
+    ).stdout.strip()
+    if shallow != "true":
+        raise AssertionError("Tag-check fixture must be a shallow checkout")
+    if _run_git(checkout, "tag", "--list").stdout:
+        raise AssertionError("Tag-check fixture unexpectedly fetched local tags")
+    tag_option = _run_git(
+        checkout,
+        "config",
+        "--get",
+        "remote.origin.tagOpt",
+    ).stdout.strip()
+    if tag_option != "--no-tags":
+        raise AssertionError("Tag-check fixture must keep remote tag fetching disabled")
+    return checkout
+
+
+def _run_release_tag_check(
+    content: str,
+    checkout: Path,
+    version: str,
+    output_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    version_expression = "${{ steps.version.outputs.version }}"
+    script = _workflow_run_script(content, "Check if tag already exists")
+    if version_expression not in script:
+        raise AssertionError("Release tag-check script lost its version expression")
+    script = script.replace(version_expression, version)
+
+    output_path.write_text("", encoding="utf-8")
+    environment = _isolated_git_environment()
+    environment["GITHUB_OUTPUT"] = str(output_path)
+    return subprocess.run(
+        ["bash", "-c", script],
+        cwd=checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
 
 
 def _write_raw_artifact_archive(
@@ -177,6 +299,146 @@ class TestCIWorkflows(unittest.TestCase):
             "Missing or empty verified archive: "
             "raw-artifacts/GM2Godot-macos/GM2Godot-macos.zip",
             result.stderr,
+        )
+
+    def test_release_tag_check_finds_exact_remote_tag_without_local_tags(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        tag_ref = "refs/tags/v0.7.9"
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            checkout = _make_shallow_no_tags_checkout(
+                root,
+                ("v0.7.9", "v0.7.90", "v0.7.9-rc1"),
+            )
+            local_tag = _run_git(
+                checkout,
+                "rev-parse",
+                "--verify",
+                tag_ref,
+                check=False,
+            )
+            remote_tag = _run_git(
+                checkout,
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "origin",
+                tag_ref,
+                check=False,
+            )
+            output_path = root / "github-output.txt"
+            result = _run_release_tag_check(
+                content,
+                checkout,
+                "0.7.9",
+                output_path,
+            )
+
+            self.assertNotEqual(local_tag.returncode, 0)
+            self.assertEqual(remote_tag.returncode, 0, remote_tag.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "exists=true\n")
+
+    def test_release_tag_check_rejects_similarly_prefixed_remote_tags(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        tag_ref = "refs/tags/v0.7.9"
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            checkout = _make_shallow_no_tags_checkout(
+                root,
+                ("v0.7.90", "v0.7.9-rc1"),
+            )
+            remote_tag = _run_git(
+                checkout,
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "origin",
+                tag_ref,
+                check=False,
+            )
+            output_path = root / "github-output.txt"
+            result = _run_release_tag_check(
+                content,
+                checkout,
+                "0.7.9",
+                output_path,
+            )
+
+            self.assertEqual(remote_tag.returncode, 2, remote_tag.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "exists=false\n")
+
+    def test_release_tag_check_fails_closed_for_broken_origin(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        tag_ref = "refs/tags/v0.7.9"
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            checkout = _make_shallow_no_tags_checkout(root, ("v0.7.9",))
+            missing_remote = (root / "missing.git").resolve().as_uri()
+            _run_git(checkout, "remote", "set-url", "origin", missing_remote)
+            remote_tag = _run_git(
+                checkout,
+                "ls-remote",
+                "--exit-code",
+                "--refs",
+                "origin",
+                tag_ref,
+                check=False,
+            )
+            output_path = root / "github-output.txt"
+            result = _run_release_tag_check(
+                content,
+                checkout,
+                "0.7.9",
+                output_path,
+            )
+
+            self.assertNotIn(remote_tag.returncode, (0, 2))
+            self.assertEqual(result.returncode, remote_tag.returncode)
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "")
+            self.assertIn("::error::Failed to query exact remote tag", result.stderr)
+            self.assertIn(tag_ref, result.stderr)
+            self.assertIn(
+                f"git ls-remote exit {remote_tag.returncode}",
+                result.stderr,
+            )
+
+    def test_release_jobs_require_authoritative_remote_tag_absence(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Check if tag already exists")
+        build_job = content[content.index("  build:"):content.index("  release:")]
+        release_job = content[content.index("  release:"):]
+        absence_guard = "needs.get-version.outputs.tag_exists == 'false'"
+        build_job_conditions = [
+            line for line in build_job.splitlines() if line.startswith("    if: ")
+        ]
+        release_job_conditions = [
+            line for line in release_job.splitlines() if line.startswith("    if: ")
+        ]
+
+        self.assertIn("set -euo pipefail", script)
+        self.assertIn(
+            'git ls-remote --exit-code --refs origin "$tag_ref"',
+            script,
+        )
+        self.assertIn('tag_ref="refs/tags/v${{ steps.version.outputs.version }}"', script)
+        self.assertNotIn("git rev-parse", script)
+        self.assertEqual(build_job_conditions, [f"    if: {absence_guard}"])
+        self.assertEqual(
+            release_job_conditions,
+            [f"    if: github.event_name != 'pull_request' && {absence_guard}"],
         )
 
     def test_unit_workflow_runs_discovery_for_golden_and_threshold_gates(self) -> None:

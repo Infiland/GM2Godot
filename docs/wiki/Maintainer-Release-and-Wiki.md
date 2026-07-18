@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.8 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.9 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -8,7 +8,7 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, and publishes the GitHub release/tag. Every release must use a new version: do not reuse a tag or treat a workflow rerun as a no-op.
+`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, and publishes the GitHub release/tag. Every new release must use a new version. A rerun or manual dispatch for a version whose exact remote tag already exists is an intentional no-op: the workflow skips build and publication without changing the existing release. If the remote tag lookup fails for any reason other than an absent exact ref, the workflow stops before building.
 
 The release workflow is canonical at [`.github/workflows/release.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml).
 

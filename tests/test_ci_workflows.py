@@ -798,19 +798,23 @@ class TestCIWorkflows(unittest.TestCase):
             "    branches: [main]\n"
             "    paths:\n"
             "      - '.github/workflows/release.yml'\n"
-            "      - '.github/workflows/release-action-smoke.yml'\n",
+            "      - '.github/workflows/release-action-smoke.yml'\n"
+            "      - 'scripts/release_publisher.py'\n",
             content,
         )
-        self.assertEqual(content.count("permissions:"), 3)
+        self.assertEqual(content.count("permissions:"), 2)
         self.assertIn("\npermissions: {}\n", content)
-        self.assertEqual(content.count("permissions: {}"), 2)
-        self.assertIn("permissions:\n      actions: read", content)
+        self.assertEqual(content.count("permissions: {}"), 1)
+        self.assertIn("permissions:\n      contents: read", content)
+        self.assertEqual(content.count("actions/checkout@"), 1)
+        self.assertEqual(content.count("actions/setup-python@"), 1)
+        self.assertIn("persist-credentials: false", content)
+        self.assertIn("python-version: '3.12'", content)
         for forbidden in (
             "pull_request_target:",
             "workflow_dispatch:",
             "schedule:",
             "\n  push:",
-            "actions/checkout@",
             "secrets.",
             "contents: write",
             "write-all",
@@ -835,14 +839,16 @@ class TestCIWorkflows(unittest.TestCase):
             "refs/tags/",
             "release-state-preflight",
             "gm2godot-release-publisher",
+            "softprops/action-gh-release",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, content)
         self.assertIn(
-            "tag_name: gm2godot-release-smoke-"
+            "SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/"
             "${{ github.run_id }}-${{ github.run_attempt }}",
             content,
         )
+        self.assertIn('"RELEASE_TAG": "v0.0.0"', content)
 
     def test_release_action_smoke_reuses_production_action_pins(self) -> None:
         release = (
@@ -855,7 +861,8 @@ class TestCIWorkflows(unittest.TestCase):
         for action in (
             "actions/upload-artifact",
             "actions/download-artifact",
-            "softprops/action-gh-release",
+            "actions/checkout",
+            "actions/setup-python",
         ):
             pattern = re.compile(
                 rf"uses:\s*{re.escape(action)}@([0-9a-f]{{40}})\s+#\s+(v\S+)"
@@ -950,7 +957,7 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 4, locations)
+        self.assertEqual(len(locations), 5, locations)
 
     def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
@@ -1084,169 +1091,103 @@ class TestCIWorkflows(unittest.TestCase):
     def test_release_action_smoke_requires_local_publisher_rejection(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
         content = workflow.read_text(encoding="utf-8")
-        publisher_marker = (
-            "      - name: Load publisher and reject before GitHub API access\n"
-        )
         publisher_step = content[
-            content.index(publisher_marker):content.index(
-                "      - name: Assert the publisher rejected the probe\n"
-            )
+            content.index(
+                "      - name: Reject invalid local assets before GitHub API access\n"
+            ):
         ]
 
         for required in (
-            "id: publisher_startup",
-            "continue-on-error: true",
-            "uses: softprops/action-gh-release@",
-            "GITHUB_TOKEN: gm2godot-release-smoke-invalid-token",
-            "repository: github/gm2godot-release-smoke-never-create",
-            "token: gm2godot-release-smoke-invalid-token",
-            "files: __gm2godot_release_smoke_missing__/"
-            "${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist",
-            "fail_on_unmatched_files: true",
-            "overwrite_files: false",
+            "SMOKE_TARGET_SHA: ${{ github.sha }}",
+            "SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/",
+            "from scripts import release_publisher",
+            '"GITHUB_REF": "refs/heads/main"',
+            '"GITHUB_REF_TYPE": "branch"',
+            '"GITHUB_EVENT_NAME": "push"',
+            '"GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token"',
+            '"RELEASE_TARGET_SHA": os.environ["SMOKE_TARGET_SHA"]',
+            '"RELEASE_ASSET_ROOT": os.environ["SMOKE_ASSET_ROOT"]',
+            "release_publisher.main(synthetic_environment)",
+            'publisher_output" != *"Cannot open regular release asset"*',
+            'receipt.get("stage") != "failed"',
+            'failure.get("phase") != "seal-assets"',
+            'receipt.get("mutation_intents") != []',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, publisher_step)
-        for forbidden in ("secrets.", "${{ github.token }}", "draft:"):
+        for forbidden in (
+            "secrets.",
+            "${{ github.token }}",
+            "softprops/action-gh-release",
+            "continue-on-error:",
+            "gh api",
+            "python3 scripts/release_publisher.py",
+            "\n          GITHUB_TOKEN:",
+            "\n          GITHUB_REF:",
+            "\n          GITHUB_REF_TYPE:",
+            "\n          GITHUB_EVENT_NAME:",
+        ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, publisher_step)
-        self.assertEqual(content.count("continue-on-error: true"), 1)
-        self.assertIn("if: ${{ always() }}", content)
-        self.assertIn(
-            "PUBLISHER_OUTCOME: ${{ steps.publisher_startup.outcome }}",
-            content,
-        )
-        self.assertNotIn("publisher_startup.conclusion", content)
 
-        assertion_script = _workflow_run_script(
-            content,
-            "Assert the publisher rejected the probe",
-        )
-        for outcome, expected_status in (
-            ("failure", 0),
-            ("success", 1),
-            ("cancelled", 1),
-            ("", 1),
-        ):
-            with self.subTest(outcome=outcome):
-                environment = os.environ.copy()
-                environment["PUBLISHER_OUTCOME"] = outcome
-                result = subprocess.run(
-                    ["bash", "-c", assertion_script],
-                    cwd=PROJECT_ROOT,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=environment,
-                )
-                self.assertEqual(
-                    result.returncode == 0,
-                    expected_status == 0,
-                    result.stderr,
-                )
-
-    def test_release_action_smoke_proves_publisher_entrypoint_loaded(self) -> None:
+    def test_release_action_smoke_executes_publisher_local_boundary(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
         content = workflow.read_text(encoding="utf-8")
-        receipt_job = content[content.index("  publisher-startup-receipt:"):]
-        expected_pattern = (
-            "__gm2godot_release_smoke_missing__/12345-2/must-not-exist"
-        )
-
-        for required in (
-            "name: publisher-startup-receipt",
-            "needs: publisher-startup",
-            "permissions:\n      actions: read",
-            "GH_TOKEN: ${{ github.token }}",
-            "jobs?per_page=100",
-            "select(.name == \"publisher-startup\") | .id",
-            "for retry in 1 2 3 4 5",
-            "actions/jobs/${job_id}/logs",
-            "Pattern '$EXPECTED_PATTERN' does not match any files.",
-        ):
-            with self.subTest(required=required):
-                self.assertIn(required, receipt_job)
-        for forbidden in ("contents: read", "contents: write", "actions/checkout"):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, receipt_job)
-
         script = _workflow_run_script(
             content,
-            "Verify the action-originated publisher rejection",
+            "Reject invalid local assets before GitHub API access",
         )
-        for case, job_ids, log_text, expected_status in (
-            (
-                "action diagnostic",
-                "98765\n",
-                f"Error: Pattern '{expected_pattern}' does not match any files.\n",
-                0,
-            ),
-            (
-                "different failure",
-                "98765\n",
-                "Error: Unable to resolve action\n",
-                1,
-            ),
-            ("missing publisher job", "", "", 1),
-            ("duplicate publisher jobs", "98765\n98766\n", "", 1),
-        ):
-            with self.subTest(case=case):
-                with tempfile.TemporaryDirectory() as temp_directory:
-                    root = Path(temp_directory)
-                    tools_dir = root / "tools"
-                    tools_dir.mkdir()
-                    fake_gh = tools_dir / "gh"
-                    fake_gh.write_text(
-                        f"#!{sys.executable}\n"
-                        """import os
-import sys
-
-endpoint = next(
-    (argument for argument in sys.argv[1:] if argument.startswith("repos/")),
-    "",
-)
-if endpoint.endswith("jobs?per_page=100"):
-    print(os.environ["FAKE_JOB_IDS"], end="")
-    raise SystemExit(0)
-if endpoint.endswith("actions/jobs/98765/logs"):
-    print(os.environ["FAKE_PUBLISHER_LOG"], end="")
-    raise SystemExit(0)
-print(f"unexpected gh endpoint: {endpoint}", file=sys.stderr)
-raise SystemExit(97)
-""",
-                        encoding="utf-8",
-                    )
-                    fake_gh.chmod(0o755)
-                    environment = os.environ.copy()
-                    environment.update(
-                        {
-                            "EXPECTED_PATTERN": expected_pattern,
-                            "FAKE_JOB_IDS": job_ids,
-                            "FAKE_PUBLISHER_LOG": log_text,
-                            "GH_TOKEN": "read-only-test-token",
-                            "PATH": os.pathsep.join(
-                                (str(tools_dir), environment.get("PATH", ""))
-                            ),
-                            "REPOSITORY": "Infiland/GM2Godot",
-                            "RUN_ATTEMPT": "2",
-                            "RUN_ID": "12345",
-                            "RUNNER_TEMP": str(root),
-                        }
-                    )
-                    result = subprocess.run(
-                        ["bash", "-c", script],
-                        cwd=root,
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        env=environment,
-                    )
-
-                self.assertEqual(
-                    result.returncode == 0,
-                    expected_status == 0,
-                    result.stderr,
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            script_directory = root / "scripts"
+            script_directory.mkdir()
+            shutil.copy2(
+                PROJECT_ROOT / "scripts" / "release_publisher.py",
+                script_directory / "release_publisher.py",
+            )
+            environment = os.environ.copy()
+            for variable in (
+                "GITHUB_TOKEN",
+                "RELEASE_ASSET_ROOT",
+                "RELEASE_NAME",
+                "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS",
+                "RELEASE_RECEIPT_PATH",
+                "RELEASE_TAG",
+                "RELEASE_TARGET_SHA",
+            ):
+                environment.pop(variable, None)
+            environment.update(
+                {
+                    "GITHUB_API_URL": "https://api.github.com",
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_REF": "refs/pull/756/merge",
+                    "GITHUB_REF_TYPE": "branch",
+                    "GITHUB_REPOSITORY": "Infiland/GM2Godot",
+                    "GITHUB_RUN_ATTEMPT": "2",
+                    "GITHUB_RUN_ID": "12345",
+                    "GITHUB_SERVER_URL": "https://github.com",
+                    "GITHUB_SHA": "a" * 40,
+                    "SMOKE_ASSET_ROOT": "missing-assets",
+                    "SMOKE_TARGET_SHA": "a" * 40,
+                }
+            )
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(
+                (root / "release-receipt" / "release-publisher.json").read_text(
+                    encoding="utf-8"
                 )
+            )
+        self.assertEqual(receipt["stage"], "failed")
+        self.assertEqual(receipt["failure"]["phase"], "seal-assets")
+        self.assertEqual(receipt["mutation_intents"], [])
 
     def test_release_preserves_digest_checks_without_deprecated_extraction(
         self,
@@ -1638,9 +1579,9 @@ raise SystemExit(97)
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
         content = workflow.read_text(encoding="utf-8")
         script = _workflow_run_script(content, "Generate SHA256SUMS")
-        create_release_step = content[
-            content.index("      - name: Create release\n"):
-        ]
+        publisher_source = (
+            PROJECT_ROOT / "scripts" / "release_publisher.py"
+        ).read_text(encoding="utf-8")
 
         expected_lines = [
             f"{hashlib.sha256(payload).hexdigest()}  {Path(relative_path).name}\n"
@@ -1699,26 +1640,17 @@ raise SystemExit(97)
 
         self.assertLess(
             content.index("      - name: Generate SHA256SUMS\n"),
-            content.index("      - name: Create release\n"),
+            content.index("      - name: Publish run-owned release\n"),
         )
-        files_marker = "          files: |\n"
-        _, separator, files_remainder = create_release_step.partition(files_marker)
-        self.assertTrue(separator)
-        release_files: list[str] = []
-        for line in files_remainder.splitlines():
-            if not line.startswith("            "):
-                break
-            release_files.append(line.strip())
-        self.assertEqual(
-            release_files,
-            [
-                "artifacts/GM2Godot-windows/GM2Godot-windows.zip",
-                "artifacts/GM2Godot-macos/GM2Godot-macos.zip",
-                "artifacts/GM2Godot-macos/GM2Godot-macos.dmg",
-                "artifacts/GM2Godot-linux/GM2Godot-linux.zip",
-                "artifacts/SHA256SUMS",
-            ],
-        )
+        for relative_path in (
+            "GM2Godot-windows/GM2Godot-windows.zip",
+            "GM2Godot-macos/GM2Godot-macos.zip",
+            "GM2Godot-macos/GM2Godot-macos.dmg",
+            "GM2Godot-linux/GM2Godot-linux.zip",
+            "SHA256SUMS",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assertIn(f'"{relative_path}"', publisher_source)
 
     def test_release_checksum_manifest_rejects_invalid_payloads(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
@@ -3041,6 +2973,7 @@ raise SystemExit(97)
         )
         release_guard = (
             "${{ !cancelled() && github.event_name != 'pull_request' && "
+            "github.ref == 'refs/heads/main' && "
             "needs.get-version.result == 'success' && "
             f"{absence_guard} && "
             "needs.release-state-preflight.result == 'success' && "
@@ -3117,8 +3050,8 @@ raise SystemExit(97)
             for line in preflight_metadata.splitlines()
             if line.strip().startswith("if: ")
         ]
-        create_release_step = release_job[
-            release_job.index("      - name: Create release\n"):
+        publish_release_step = release_job[
+            release_job.index("      - name: Publish run-owned release\n"):
         ]
 
         self.assertIn("permissions:\n  contents: read", content)
@@ -3217,7 +3150,29 @@ raise SystemExit(97)
             release_job,
         )
         self.assertNotIn("existing-release-integrity", release_job)
-        self.assertNotIn("always()", release_job)
+        self.assertEqual(release_job.count("if: ${{ always() }}"), 1)
+        self.assertEqual(release_job.count("actions/checkout@"), 1)
+        self.assertIn(
+            "      - uses: actions/checkout@"
+            "93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1\n"
+            "        with:\n"
+            "          ref: ${{ github.sha }}\n"
+            "          fetch-depth: 1\n"
+            "          persist-credentials: false\n",
+            release_job,
+        )
+        self.assertEqual(release_job.count("actions/setup-python@"), 1)
+        self.assertIn(
+            "      - uses: actions/setup-python@"
+            "ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n"
+            "        with:\n"
+            "          python-version: '3.12'\n",
+            release_job,
+        )
+        self.assertLess(
+            release_job.index("actions/setup-python@"),
+            release_job.index("      - name: Publish run-owned release\n"),
+        )
         self.assertIn("GH_TOKEN: ${{ github.token }}", preflight_metadata)
         self.assertIn(
             "RELEASE_TAG: v${{ needs.get-version.outputs.version }}",
@@ -3230,19 +3185,31 @@ raise SystemExit(97)
         self.assertIn("gh api --paginate --slurp", preflight_script)
         self.assertNotIn("jq", preflight_script)
         self.assertIn("permissions:\n      contents: write", release_job)
-        self.assertIn(
-            "uses: softprops/action-gh-release@"
-            "3d0d9888cb7fd7b750713d6e236d1fcb99157228",
-            create_release_step,
+        for required in (
+            "GITHUB_TOKEN: ${{ github.token }}",
+            "RELEASE_TARGET_SHA: ${{ github.sha }}",
+            "RELEASE_RECEIPT_PATH: release-receipt/release-publisher.json",
+            "run: python3 scripts/release_publisher.py",
+            "name: Preserve release ownership receipt",
+            "if-no-files-found: ignore",
+            "retention-days: 30",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, publish_release_step)
+        for forbidden in (
+            "softprops/action-gh-release",
+            "overwrite_files:",
+            "gh release",
+            "git push",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, release_job)
+
+    def test_pyright_targets_supported_python_3_12(self) -> None:
+        config = json.loads(
+            (PROJECT_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(
-            [
-                line.strip()
-                for line in create_release_step.splitlines()
-                if "overwrite_files:" in line
-            ],
-            ["overwrite_files: false"],
-        )
+        self.assertEqual(config["pythonVersion"], "3.12")
 
     def test_unit_workflow_runs_discovery_for_golden_and_threshold_gates(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"

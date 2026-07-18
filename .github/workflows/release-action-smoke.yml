@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-action-smoke.yml'
+      - 'scripts/release_publisher.py'
 
 permissions: {}
 
@@ -92,90 +93,78 @@ jobs:
     name: publisher-startup
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Load publisher and reject before GitHub API access
-        id: publisher_startup
-        continue-on-error: true
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        env:
-          GITHUB_TOKEN: gm2godot-release-smoke-invalid-token
-        with:
-          repository: github/gm2godot-release-smoke-never-create
-          token: gm2godot-release-smoke-invalid-token
-          tag_name: gm2godot-release-smoke-${{ github.run_id }}-${{ github.run_attempt }}
-          files: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist
-          fail_on_unmatched_files: true
-          overwrite_files: false
-
-      - name: Assert the publisher rejected the probe
-        if: ${{ always() }}
-        env:
-          PUBLISHER_OUTCOME: ${{ steps.publisher_startup.outcome }}
-        run: |
-          set -euo pipefail
-          if [[ "$PUBLISHER_OUTCOME" != "failure" ]]; then
-            echo "::error::Publisher unexpectedly crossed its local rejection boundary (outcome: $PUBLISHER_OUTCOME)." >&2
-            exit 1
-          fi
-
-  publisher-startup-receipt:
-    name: publisher-startup-receipt
-    if: ${{ always() }}
-    needs: publisher-startup
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
     permissions:
-      actions: read
+      contents: read
     steps:
-      - name: Verify the action-originated publisher rejection
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Reject invalid local assets before GitHub API access
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          EXPECTED_PATTERN: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist
+          SMOKE_TARGET_SHA: ${{ github.sha }}
+          SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
 
-          jobs_endpoint="repos/${REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100"
-          job_ids="$(
-            gh api \
-              --method GET \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "$jobs_endpoint" \
-              --jq '.jobs[] | select(.name == "publisher-startup") | .id'
+          set +e
+          publisher_output="$(
+            python3 - <<'PY' 2>&1
+          import os
+          from scripts import release_publisher
+
+          synthetic_environment = dict(os.environ)
+          synthetic_environment.update(
+              {
+                  "GITHUB_API_URL": "https://api.github.com",
+                  "GITHUB_EVENT_NAME": "push",
+                  "GITHUB_REF": "refs/heads/main",
+                  "GITHUB_REF_TYPE": "branch",
+                  "GITHUB_REPOSITORY": os.environ["GITHUB_REPOSITORY"],
+                  "GITHUB_RUN_ATTEMPT": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "GITHUB_RUN_ID": os.environ["GITHUB_RUN_ID"],
+                  "GITHUB_SERVER_URL": "https://github.com",
+                  "GITHUB_SHA": os.environ["SMOKE_TARGET_SHA"],
+                  "GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token",
+                  "RELEASE_ASSET_ROOT": os.environ["SMOKE_ASSET_ROOT"],
+                  "RELEASE_NAME": "GM2Godot v0.0.0",
+                  "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
+                  "RELEASE_RECEIPT_PATH": "release-receipt/release-publisher.json",
+                  "RELEASE_TAG": "v0.0.0",
+                  "RELEASE_TARGET_SHA": os.environ["SMOKE_TARGET_SHA"],
+              }
+          )
+          raise SystemExit(release_publisher.main(synthetic_environment))
+          PY
           )"
-          job_count="$(printf '%s\n' "$job_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
-          if [[ "$job_count" -ne 1 ]]; then
-            echo "::error::Expected exactly one publisher-startup job; found $job_count." >&2
+          publisher_status=$?
+          set -e
+          if (( publisher_status == 0 )); then
+            echo "::error::Publisher unexpectedly crossed its local rejection boundary." >&2
             exit 1
           fi
-          job_id="$(printf '%s\n' "$job_ids" | sed -n '1p')"
-
-          log_file="$RUNNER_TEMP/publisher-startup.log"
-          downloaded=false
-          for retry in 1 2 3 4 5; do
-            if gh api \
-              --method GET \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "repos/${REPOSITORY}/actions/jobs/${job_id}/logs" \
-              > "$log_file"; then
-              downloaded=true
-              break
-            fi
-            sleep 2
-          done
-          if [[ "$downloaded" != "true" ]]; then
-            echo "::error::Publisher job log was unavailable after bounded retries." >&2
+          if [[ "$publisher_output" != *"Cannot open regular release asset"* ]]; then
+            echo "::error::Publisher did not emit the expected local asset diagnostic." >&2
+            printf '%s\n' "$publisher_output" >&2
             exit 1
           fi
 
-          if ! grep -Fq \
-            "Pattern '$EXPECTED_PATTERN' does not match any files." \
-            "$log_file"; then
-            echo "::error::The pinned action did not emit its expected startup diagnostic." >&2
-            exit 1
-          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          receipt = json.loads(
+              Path("release-receipt/release-publisher.json").read_text(encoding="utf-8")
+          )
+          if receipt.get("stage") != "failed":
+              raise SystemExit("publisher startup receipt did not record failure")
+          failure = receipt.get("failure")
+          if not isinstance(failure, dict) or failure.get("phase") != "seal-assets":
+              raise SystemExit("publisher startup receipt recorded the wrong phase")
+          if receipt.get("mutation_intents") != []:
+              raise SystemExit("publisher attempted a mutation before local rejection")
+          PY

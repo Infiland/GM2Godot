@@ -1,6 +1,7 @@
 {
   "include": [
     "main.py",
+    "scripts",
     "src",
     "tests"
   ],
@@ -8,5 +9,6 @@
     "venv",
     "**/__pycache__"
   ],
+  "pythonVersion": "3.12",
   "typeCheckingMode": "strict"
 }

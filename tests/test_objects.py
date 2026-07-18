@@ -4,18 +4,22 @@ import json
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import DEFAULT, MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.objects import ObjectConverter
+from src.conversion.objects import ObjectConverter, ObjectProcessResult
 from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
+from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.type_defs import JsonDict
 
 
@@ -50,10 +54,11 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
             col = cast(JsonDict, evt["collisionObjectId"])
             collision_id = '{{"name": "{name}", "path": "objects/{name}/{name}.yy",}}'.format(name=col["name"])
         entry = (
-            '{{"isDnD":false,"eventNum":{eventNum},"eventType":{eventType},'
+            '{{"isDnD":{isDnD},"eventNum":{eventNum},"eventType":{eventType},'
             '"collisionObjectId":{collisionObjectId},'
             '"resourceVersion":"2.0","name":"","resourceType":"GMEvent",}}'
         ).format(
+            isDnD=str(evt.get("isDnD") is True).lower(),
             eventNum=evt.get("eventNum", 0),
             eventType=evt.get("eventType", 0),
             collisionObjectId=collision_id,
@@ -156,11 +161,122 @@ class TestObjectConverterBasic(unittest.TestCase):
 
     def test_converts_object_to_godot_dir(self):
         converter = self._make_converter()
-        converter.convert_all()
+        result = converter.convert_all()
 
         godot_obj_dir = os.path.join(self.godot_dir, "objects", "o_player")
+        self.assertIsNone(result)
         self.assertTrue(os.path.isdir(godot_obj_dir),
                         "Expected objects/o_player directory in Godot project")
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=2,
+            ),
+        )
+
+    def test_failed_object_does_not_hide_safe_sibling_completion(self):
+        converter = self._make_converter()
+
+        def process_object(
+            object_name: str,
+            *_args: object,
+        ) -> ObjectProcessResult:
+            return {
+                "status": (
+                    "completed" if object_name == "o_player" else "failed"
+                ),
+                "name": object_name,
+                "has_sprite": False,
+                "sprite_name": None,
+                "event_count": 0,
+            }
+
+        with patch.object(converter, "_process_object", side_effect=process_object):
+            converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
+
+    def test_cancellation_leaves_objects_for_inherited_finalization(self):
+        running = threading.Event()
+        running.set()
+        converter = ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=running.is_set,
+            max_workers=1,
+        )
+
+        def cancel_object(
+            _object_name: str,
+            *_args: object,
+        ) -> None:
+            running.clear()
+
+        with patch.object(converter, "_process_object", side_effect=cancel_object):
+            converter.convert_all()
+
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                skipped=2,
+            ),
+        )
+
+    def test_worker_exception_marks_object_failed_after_safe_sibling_settles(self):
+        converter = self._make_converter()
+
+        def process_object(
+            object_name: str,
+            *_args: object,
+        ) -> ObjectProcessResult:
+            if object_name == "o_controller":
+                raise RuntimeError("object worker failed")
+            return {
+                "status": "completed",
+                "name": object_name,
+                "has_sprite": False,
+                "sprite_name": None,
+                "event_count": 0,
+            }
+
+        with patch.object(converter, "_process_object", side_effect=process_object):
+            with self.assertRaisesRegex(RuntimeError, "object worker failed"):
+                converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
 
     def test_generates_tscn_file(self):
         converter = self._make_converter()
@@ -354,6 +470,34 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
+    def _write_yyp_resources(self, resources: list[JsonDict]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "%Name": "Test",
+                    "resources": resources,
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                project_file,
+            )
+
+    @staticmethod
+    def _object_resource(name: str, path: str | None = None) -> JsonDict:
+        return cast(
+            JsonDict,
+            {
+                "id": {
+                    "name": name,
+                    "path": path or f"objects/{name}/{name}.yy",
+                }
+            },
+        )
+
     def test_only_listed_objects_converted(self):
         converter = ObjectConverter(
             self.gm_dir, self.godot_dir,
@@ -370,6 +514,165 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
                         "Object listed in .yyp should be converted")
         self.assertFalse(os.path.isfile(unlisted_path),
                          "Object not listed in .yyp should be skipped")
+
+    def test_missing_only_declared_object_makes_conversion_partial(self):
+        self._write_yyp_resources([self._object_resource("o_missing")])
+        shutil.rmtree(os.path.join(self.gm_dir, "objects"))
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"objects": objects_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "objects", "o_listed"))
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "objects", "o_unlisted"))
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-OBJECT-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == "o_missing"
+                for diagnostic in converter.diagnostics.diagnostics()
+            )
+        )
+
+    def test_safe_and_missing_declared_objects_have_strict_counts(self):
+        self._write_yyp_resources(
+            [
+                self._object_resource("o_listed"),
+                self._object_resource("o_missing"),
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_listed",
+                    "o_listed.tscn",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "objects", "o_missing"))
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "objects", "o_unlisted"))
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "o_missing")
+        self.assertEqual(unavailable[0].source_path, "Test.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[1].id.path",
+        )
+
+    def test_rejected_declared_object_is_requested_and_skipped(self):
+        rejected_name = "o_rejected"
+        rejected_dir = os.path.join(self.gm_dir, "objects", rejected_name)
+        os.makedirs(rejected_dir)
+        with open(
+            os.path.join(rejected_dir, rejected_name + ".yy"),
+            "w",
+            encoding="utf-8",
+        ) as object_file:
+            object_file.write(_make_object_yy_content(rejected_name))
+        self._write_yyp_resources(
+            [
+                self._object_resource(
+                    rejected_name,
+                    f"objects/../../outside/{rejected_name}.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = ObjectConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "objects", rejected_name)
+            )
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                and diagnostic.resource == rejected_name
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-OBJECT-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == rejected_name
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
 
 
 class TestObjectSourceContainment(unittest.TestCase):
@@ -1162,19 +1465,25 @@ class TestScriptGeneration(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _make_converter(self, macro_configuration: str | None = None) -> ObjectConverter:
+    def _make_converter(
+        self,
+        macro_configuration: str | None = None,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> ObjectConverter:
         return ObjectConverter(
             self.gm_dir, self.godot_dir,
             log_callback=lambda msg: self.logs.append(msg),
             progress_callback=lambda v: None,
             conversion_running=lambda: True,
             macro_configuration=macro_configuration,
+            diagnostics=diagnostics,
         )
 
     def _setup_object(self, name: str, sprite_name: str | None = None,
                       event_list: list[JsonDict] | None = None,
                       parent_object_name: str | None = None,
-                      persistent: bool = False) -> None:
+                      persistent: bool = False,
+                      create_empty_event_sources: bool = True) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
         yy_content = _make_object_yy_content(
@@ -1186,6 +1495,23 @@ class TestScriptGeneration(unittest.TestCase):
         )
         with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
             f.write(yy_content)
+        if create_empty_event_sources:
+            for event in event_list or []:
+                if event.get("isDnD") is True:
+                    continue
+                mapping = (
+                    map_input_event(event)
+                    if is_input_event(event)
+                    else map_event(event)
+                )
+                if mapping is None or not mapping.gml_filename:
+                    continue
+                with open(
+                    os.path.join(obj_dir, mapping.gml_filename),
+                    "w",
+                    encoding="utf-8",
+                ):
+                    pass
         if sprite_name:
             _create_fake_sprite_scene(self.godot_dir, sprite_name)
 
@@ -1239,6 +1565,32 @@ class TestScriptGeneration(unittest.TestCase):
                     "resourceType": "GMProject",
                 },
                 f,
+            )
+
+    def _write_object_manifest(self, *object_names: str) -> None:
+        with open(
+            os.path.join(self.gm_dir, "Project.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "%Name": "Project",
+                    "resources": [
+                        {
+                            "id": {
+                                "name": object_name,
+                                "path": (
+                                    f"objects/{object_name}/{object_name}.yy"
+                                ),
+                            }
+                        }
+                        for object_name in object_names
+                    ],
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                project_file,
             )
 
     def test_generates_gd_file(self):
@@ -1570,31 +1922,352 @@ class TestScriptGeneration(unittest.TestCase):
         )
         self.assertIn("\tGMRuntime.gml_show_debug_message(label, [])", content)
 
-    def test_transpile_failure_records_structured_diagnostic(self):
-        self._setup_object("o_test", event_list=[{"eventType": 0, "eventNum": 0}])
-        source_path = os.path.join(self.gm_dir, "objects", "o_test", "Create_0.gml")
+    def test_transpile_blocker_skips_object_and_makes_conversion_partial(self):
+        self._setup_object(
+            "o_blocked",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        self._setup_object(
+            "o_safe",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        source_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "o_blocked",
+            "Create_0.gml",
+        )
         with open(source_path, "w", encoding="utf-8") as f:
             f.write('show_message_async("Hello");')
+        with open(
+            os.path.join(
+                self.gm_dir,
+                "objects",
+                "o_safe",
+                "Create_0.gml",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("score = 1;")
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                {
+                    "%Name": "Test",
+                    "resources": [
+                        {
+                            "id": {
+                                "name": object_name,
+                                "path": f"objects/{object_name}/{object_name}.yy",
+                            }
+                        }
+                        for object_name in ("o_blocked", "o_safe")
+                    ],
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                f,
+            )
 
-        diagnostics = DiagnosticCollector()
-        converter = ObjectConverter(
-            self.gm_dir,
-            self.godot_dir,
+        running = threading.Event()
+        running.set()
+        converter = Converter(
             log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-            diagnostics=diagnostics,
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
         )
-        converter.convert_all()
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"objects": objects_enabled},
+        )
 
-        recorded = diagnostics.diagnostics()
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_safe",
+                    "o_safe.gd",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_blocked",
+                    "o_blocked.gd",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_blocked",
+                    "o_blocked.tscn",
+                )
+            )
+        )
+
+        recorded = converter.diagnostics.diagnostics()
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0].code, "GM2GD-GML-TRANSPILE")
         self.assertEqual(recorded[0].api, "show_message_async")
         self.assertEqual(recorded[0].issue_number, 507)
-        self.assertEqual(recorded[0].resource, "o_test")
+        self.assertEqual(recorded[0].resource, "o_blocked")
         self.assertEqual(recorded[0].resource_type, "object")
         self.assertEqual(recorded[0].event, "_ready")
+
+    def test_missing_event_source_skips_object_and_makes_conversion_partial(self):
+        self._setup_object(
+            "o_missing",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            create_empty_event_sources=False,
+        )
+        self._setup_object(
+            "o_safe",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        self._write_object_manifest("o_missing", "o_safe")
+
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"objects": objects_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_safe",
+                    "o_safe.gd",
+                )
+            )
+        )
+        for extension in (".gd", ".tscn"):
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(
+                        self.godot_dir,
+                        "objects",
+                        "o_missing",
+                        "o_missing" + extension,
+                    )
+                )
+            )
+
+        missing = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-EVENT-SOURCE-MISSING"
+        ]
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0].source_path, "objects/o_missing/Create_0.gml")
+        self.assertEqual(missing[0].resource, "o_missing")
+        self.assertEqual(missing[0].resource_type, "object")
+        self.assertEqual(missing[0].event, "_ready")
+        self.assertEqual(missing[0].manifest_entry, "eventList[0].sourceFile")
+
+    def test_event_source_read_race_skips_object_without_partial_output(self):
+        self._setup_object(
+            "o_racy",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        source_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "o_racy",
+            "Create_0.gml",
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
+        real_open = open
+
+        def open_with_disappearing_event(
+            path: object,
+            mode: str = "r",
+            *_args: object,
+            **_kwargs: object,
+        ) -> object:
+            if (
+                isinstance(path, str)
+                and os.path.abspath(path) == source_path
+                and "r" in mode
+            ):
+                raise FileNotFoundError("event source disappeared before read")
+            return DEFAULT
+
+        with patch(
+            "builtins.open",
+            wraps=real_open,
+            side_effect=open_with_disappearing_event,
+        ):
+            converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, skipped=1),
+        )
+        for extension in (".gd", ".tscn"):
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(
+                        self.godot_dir,
+                        "objects",
+                        "o_racy",
+                        "o_racy" + extension,
+                    )
+                )
+            )
+        read_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-EVENT-SOURCE-READ"
+        ]
+        self.assertEqual(len(read_diagnostics), 1)
+        self.assertEqual(
+            read_diagnostics[0].source_path,
+            "objects/o_racy/Create_0.gml",
+        )
+        self.assertEqual(read_diagnostics[0].resource, "o_racy")
+        self.assertEqual(read_diagnostics[0].event, "_ready")
+
+    def test_rejected_event_source_skips_object(self):
+        self._setup_object(
+            "o_rejected",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            create_empty_event_sources=False,
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_source = os.path.join(outside_dir, "Create_0.gml")
+            with open(outside_source, "w", encoding="utf-8") as source_file:
+                source_file.write("outside_marker = true;")
+            event_source = os.path.join(
+                self.gm_dir,
+                "objects",
+                "o_rejected",
+                "Create_0.gml",
+            )
+            try:
+                os.symlink(outside_source, event_source)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            diagnostics = DiagnosticCollector()
+            converter = self._make_converter(diagnostics=diagnostics)
+            converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, skipped=1),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_rejected",
+                    "o_rejected.gd",
+                )
+            )
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-EVENT-SOURCE-REJECTED"
+        ]
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].source_path, "objects/o_rejected/o_rejected.yy")
+        self.assertEqual(rejected[0].resource, "o_rejected")
+        self.assertEqual(rejected[0].event, "_ready")
+
+    def test_zero_byte_and_dnd_events_do_not_block_object(self):
+        self._setup_object(
+            "o_empty_code",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        self._setup_object(
+            "o_dnd",
+            event_list=[{"eventType": 3, "eventNum": 0, "isDnD": True}],
+        )
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=2, executed=2, completed=2),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_empty_code",
+                    "o_empty_code.gd",
+                )
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "objects",
+                    "o_dnd",
+                    "o_dnd.gd",
+                )
+            )
+        )
 
     def test_child_event_inherited_preserves_parent_exit_boundary(self):
         """exit in an inherited parent event should not abort the child event."""
@@ -1926,7 +2599,7 @@ class TestScriptGeneration(unittest.TestCase):
             content,
         )
 
-    def test_failed_event_assignments_still_seed_instance_variable_declarations(self):
+    def test_failed_event_prevents_partial_object_output(self):
         self._setup_object(
             "o_stats",
             event_list=[
@@ -1944,11 +2617,19 @@ class TestScriptGeneration(unittest.TestCase):
         converter.convert_all()
 
         gd_path = os.path.join(self.godot_dir, "objects", "o_stats", "o_stats.gd")
-        with open(gd_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        tscn_path = os.path.join(
+            self.godot_dir,
+            "objects",
+            "o_stats",
+            "o_stats.tscn",
+        )
 
-        self.assertIn("\n\nvar stats_rank_label\n", content)
-        self.assertIn("GMRuntime.gml_draw_text(0, 0, stats_rank_label)", content)
+        self.assertFalse(os.path.exists(gd_path))
+        self.assertFalse(os.path.exists(tscn_path))
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, skipped=1),
+        )
         self.assertIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
 
     def test_script_supports_sprite_and_image_index(self):
@@ -2087,7 +2768,7 @@ class TestScriptGeneration(unittest.TestCase):
     def test_collision_event_source_falls_back_to_numeric_filename(self):
         self._setup_object("o_test", event_list=[
             {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
-        ])
+        ], create_empty_event_sources=False)
         with open(
             os.path.join(self.gm_dir, "objects", "o_test", "Collision_0.gml"),
             "w",
@@ -2108,7 +2789,7 @@ class TestScriptGeneration(unittest.TestCase):
     def test_missing_collision_event_source_records_diagnostic(self):
         self._setup_object("o_test", event_list=[
             {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "o_bullet"}}
-        ])
+        ], create_empty_event_sources=False)
         diagnostics = DiagnosticCollector()
         converter = ObjectConverter(
             self.gm_dir,

@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import TypedDict, cast
 
 # Import localization manager
@@ -13,7 +14,10 @@ from src.conversion.asset_output_paths import build_asset_output_paths, resource
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
-from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_godot import format_godot_string
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -42,6 +46,16 @@ class SoundResult(TypedDict):
     name: str
     audio_group: str
 
+
+@dataclass(frozen=True)
+class _DeclaredSoundResource:
+    outcome_key: str
+    name: str
+    source_path: str | None
+    owner_source_path: str
+    manifest_field: str | None
+
+
 class SoundConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
@@ -55,46 +69,164 @@ class SoundConverter(BaseConverter):
         self.organize_by_audio_group = bool(organize_by_audio_group)
         self._sound_output_paths: dict[str, str] = {}
 
-    def find_sound_files(self) -> list[str]:
+    def _declared_sound_resources(
+        self,
+    ) -> tuple[_DeclaredSoundResource, ...] | None:
+        """Return sounds selected by a valid YYP, including rejected paths."""
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="sound",
         )
-        if manifest.yyp_path is not None:
-            referenced_files: list[str] = []
-            for resource in manifest.resources:
-                if resource.kind.casefold() != "sounds":
-                    continue
-                manifest_field = (
-                    f"{resource.source.field_path}.id.path"
-                    if resource.source is not None and resource.source.field_path
-                    else "resources[].id.path"
-                )
-                resolved = self._resolve_project_source(
-                    resource.path,
+        if manifest.yyp_path is None or any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        ):
+            return None
+
+        declared: dict[tuple[str, str], _DeclaredSoundResource] = {}
+        for resource in manifest.find_resources(kind="sounds"):
+            if not resource.name:
+                continue
+            manifest_field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            # A single GameMaker sound can appear more than once in a YYP. The
+            # normalized source path is its stable base-resource identity.
+            identity = ("path", resource.path)
+            declared.setdefault(
+                identity,
+                _DeclaredSoundResource(
+                    outcome_key=resource.path,
+                    name=resource.name,
+                    source_path=resource.path,
                     owner_source_path=manifest.yyp_path,
-                    resource=resource.name,
-                    resource_type="sound",
-                    field=manifest_field,
-                )
-                if resolved is None:
-                    continue
-                try:
-                    validate_project_resource_source_path(resolved, "sounds")
-                except ProjectSourcePathError as exc:
-                    self._report_source_path_rejection(
-                        resource.path,
-                        exc,
-                        owner_source_path=manifest.yyp_path,
-                        resource=resource.name,
-                        resource_type="sound",
-                        field=manifest_field,
-                    )
-                    continue
-                if os.path.isfile(resolved.filesystem_path):
-                    referenced_files.append(resolved.filesystem_path)
-            return referenced_files
+                    manifest_field=manifest_field,
+                ),
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_sound(diagnostic)
+            ):
+                continue
+            identity = ("rejected", diagnostic.resource)
+            declared.setdefault(
+                identity,
+                _DeclaredSoundResource(
+                    outcome_key=diagnostic.resource,
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                ),
+            )
+
+        return tuple(declared.values())
+
+    @staticmethod
+    def _manifest_diagnostic_is_sound(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "sounds"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold() in {"sound", "gmsound"}
+        )
+
+    def _report_unavailable_declared_sound(
+        self,
+        resource: _DeclaredSoundResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker sound "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-SOUND-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="sound",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker sound .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
+
+    def _resolve_declared_sound_resource(
+        self,
+        resource: _DeclaredSoundResource,
+    ) -> str | None:
+        if resource.source_path is None:
+            self._report_unavailable_declared_sound(
+                resource,
+                reason="its manifest source path was rejected",
+            )
+            return None
+
+        resolved = self._resolve_project_source(
+            resource.source_path,
+            owner_source_path=resource.owner_source_path,
+            resource=resource.name,
+            resource_type="sound",
+            field=resource.manifest_field,
+        )
+        if resolved is None:
+            self._report_unavailable_declared_sound(
+                resource,
+                reason="its manifest source path is unavailable",
+            )
+            return None
+        try:
+            validate_project_resource_source_path(resolved, "sounds")
+        except ProjectSourcePathError as exc:
+            self._report_source_path_rejection(
+                resource.source_path,
+                exc,
+                owner_source_path=resource.owner_source_path,
+                resource=resource.name,
+                resource_type="sound",
+                field=resource.manifest_field,
+            )
+            self._report_unavailable_declared_sound(
+                resource,
+                reason="its manifest source path is outside the sounds resource family",
+            )
+            return None
+        if not os.path.isfile(resolved.filesystem_path):
+            self._report_unavailable_declared_sound(
+                resource,
+                reason=f"metadata is missing at {resolved.source_path!r}",
+            )
+            return None
+        return resolved.filesystem_path
+
+    def _find_disk_sound_files(self) -> list[str]:
 
         sound_folder = self._resolve_discovered_project_source(
             os.path.join(self.gm_project_path, 'sounds'),
@@ -195,6 +327,17 @@ class SoundConverter(BaseConverter):
                 continue
             pending_directories.extend(reversed(child_directories))
         return sorted(sound_files)
+
+    def find_sound_files(self) -> list[str]:
+        declared_resources = self._declared_sound_resources()
+        if declared_resources is None:
+            return self._find_disk_sound_files()
+        return [
+            yy_path
+            for resource in declared_resources
+            if (yy_path := self._resolve_declared_sound_resource(resource))
+            is not None
+        ]
 
     def _parse_sound_yy(self, yy_path: str) -> SoundData | None:
         data = self._read_yy_file(yy_path)
@@ -461,11 +604,50 @@ class SoundConverter(BaseConverter):
 
         return {'success': True, 'name': sound_name, 'audio_group': audio_group}
 
+    def _process_sound_with_outcome(
+        self,
+        yy_path: str,
+        outcome_key: str,
+    ) -> SoundResult | None:
+        """Run one logical sound conversion while preserving the legacy result."""
+        if not self.conversion_running():
+            return None
+        self._resource_started(outcome_key)
+        try:
+            result = self._process_sound(yy_path)
+        except Exception:
+            self._resource_failed(outcome_key)
+            raise
+        if result is None:
+            self._resource_skipped(outcome_key)
+        elif not result["success"]:
+            self._resource_failed(outcome_key)
+        return result
+
     def convert_sounds(self) -> None:
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_sounds_path, exist_ok=True)
 
-        sound_files = sorted(self.find_sound_files())
+        declared_resources = self._declared_sound_resources()
+        if declared_resources is None:
+            sound_files = list(dict.fromkeys(self._find_disk_sound_files()))
+            sound_work = [(sound_file, sound_file) for sound_file in sound_files]
+            for sound_file in sound_files:
+                self._resource_requested(sound_file)
+        else:
+            for resource in declared_resources:
+                self._resource_requested(resource.outcome_key)
+            if not self.conversion_running():
+                self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
+                return
+            sound_work: list[tuple[str, str]] = []
+            for resource in declared_resources:
+                yy_path = self._resolve_declared_sound_resource(resource)
+                if yy_path is None:
+                    self._resource_skipped(resource.outcome_key)
+                    continue
+                sound_work.append((yy_path, resource.outcome_key))
+            sound_files = [yy_path for yy_path, _outcome_key in sound_work]
 
         if not sound_files:
             self.log_callback(get_localized("Console_Convertor_Sounds_Error_NotFound"))
@@ -481,10 +663,19 @@ class SoundConverter(BaseConverter):
         total_sounds = len(sound_files)
         processed_sounds = 0
         audio_group_map: dict[str, str] = {}
+        successful_outcome_keys: set[str] = set()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map: dict[Future[SoundResult | None], str] = {executor.submit(self._process_sound, sf): sf for sf in sound_files}
+            futures_map: dict[Future[SoundResult | None], tuple[str, str]] = {
+                executor.submit(
+                    self._process_sound_with_outcome,
+                    sound_file,
+                    outcome_key,
+                ): (sound_file, outcome_key)
+                for sound_file, outcome_key in sound_work
+            }
             for future in as_completed(futures_map):
+                _sound_file, outcome_key = futures_map[future]
                 result = future.result()
                 if result is None:
                     self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
@@ -493,15 +684,23 @@ class SoundConverter(BaseConverter):
                 processed_sounds += 1
 
                 if result['success']:
+                    successful_outcome_keys.add(outcome_key)
                     audio_group_map[result['name']] = result['audio_group']
                     if self.compact_logging:
                         self._safe_log_progress(result['name'], processed_sounds, total_sounds)
 
                 self._safe_progress(int(processed_sounds / total_sounds * 100))
 
+        if not self.conversion_running():
+            self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))
+            return
+
         self._write_audio_group_map(audio_group_map)
+        for outcome_key in sorted(successful_outcome_keys):
+            self._resource_completed(outcome_key)
 
         self.log_callback(get_localized("Console_Convertor_Sounds_Complete"))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_sounds()

@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
+from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.project_godot import GodotProjectFile
 
 
@@ -38,6 +40,7 @@ class ProjectPreflightGodotTests(unittest.TestCase):
                     os.fspath(gm_directory),
                     "--godot-project",
                     os.fspath(destination),
+                    "--allow-partial",
                 ],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
@@ -49,6 +52,29 @@ class ProjectPreflightGodotTests(unittest.TestCase):
                 conversion_result.returncode,
                 0,
                 conversion_result.stdout + conversion_result.stderr,
+            )
+            expected_outcome = ConversionOutcome(
+                state="partial",
+                converters=ConversionCounts(
+                    requested=15,
+                    executed=15,
+                    completed=15,
+                ),
+                resources=ConversionCounts(
+                    requested=4,
+                    executed=4,
+                    completed=1,
+                    skipped=3,
+                ),
+            )
+            diagnostics_report = json.loads(
+                (destination / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                diagnostics_report["outcome"],
+                expected_outcome.to_dict(),
             )
             project_content = (destination / "project.godot").read_text(
                 encoding="utf-8"

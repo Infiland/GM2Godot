@@ -43,7 +43,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.2`.
+Current source version: `0.7.3`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 
@@ -129,10 +129,33 @@ You can also invoke the same headless interface directly with `python -m src.cli
 
 CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md` and `gml_api_compatibility.md`.
 
+Every valid `convert` invocation prints exactly one terminal outcome summary after its buffered conversion logs. The diagnostic JSON report also includes a top-level `outcome` object with:
+
+- `state`: `success`, `partial`, `failed`, or `cancelled`.
+- `converters` and `resources`: `requested`, `executed`, `completed`, `skipped`, and `failed` counts.
+- `failed_step` and `failure_phase`: optional failure context when conversion could not finish.
+
+Conversion exit codes are stable for CI:
+
+| Result | Exit code |
+| --- | ---: |
+| Success, with diagnostic thresholds passing | `0` |
+| Partial output | `2` |
+| Partial output with `--allow-partial`, with diagnostic thresholds passing | `0` |
+| Any diagnostic threshold violation, including with `--allow-partial` | `2` |
+| Preflight rejection | `2` |
+| Failed conversion or runtime exception | `1` |
+| Cancelled conversion or first `SIGINT` received before the terminal outcome line begins committing | `130` |
+
+`--allow-partial` applies only to the `convert` command. It accepts usable partial output for exit-code purposes, but does not override `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, or `--max-unsupported`.
+
+The single terminal outcome line is the CLI commit point. A `SIGINT` received before that commit rewrites reports to `cancelled` and exits `130`; once stdout publication has begun, the completed outcome is not retroactively changed or printed a second time.
+
 Useful conversion and validation filters:
 - `--groups assets,project,wip` selects conversion groups.
 - `--only asset_registry,scripts,objects` runs specific converter keys instead of groups.
 - `list-converters --format json` prints the exact converter keys accepted by `--only`.
+- `--allow-partial` lets a partial conversion exit successfully when every diagnostic threshold also passes.
 - `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, and `--max-unsupported` turn diagnostics into non-zero exit codes for CI.
 - `--godot-bin` points validation at a specific Godot executable when `GODOT_BIN` is not set.
 

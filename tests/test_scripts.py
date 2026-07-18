@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import json
@@ -6,9 +7,15 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+from unittest.mock import patch
 
-from src.conversion.asset_registry import AssetRegistryEntry
+from src.conversion.asset_registry import (
+    AssetRegistryConverter,
+    AssetRegistryEntry,
+    _ProjectResource,
+)
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
@@ -18,6 +25,7 @@ from src.conversion.script_functions import (
     modern_script_function_declarations,
     modern_script_structure,
 )
+from src.conversion.type_defs import JsonDict
 
 
 SNAP_BUFFER_READ_YAML_FIXTURE = (
@@ -195,6 +203,241 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
         self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_scoped_callable()', registry)
         self.assertIn('"legacy_arguments": false', registry)
+
+    def test_resource_outcome_counts_safe_and_blocked_scripts(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "return @;",
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+        result = converter.conversion_step_result()
+
+        self.assertEqual(
+            registry_path,
+            str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH),
+        )
+        self.assertTrue(
+            (self.godot_dir / "scripts" / "game" / "scr_add.gd").is_file()
+        )
+        self.assertFalse(
+            (self.godot_dir / "scripts" / "game" / "scr_modern.gd").exists()
+        )
+        self.assertEqual(result.resources.requested, 2)
+        self.assertEqual(result.resources.executed, 2)
+        self.assertEqual(result.resources.completed, 1)
+        self.assertEqual(result.resources.skipped, 1)
+        self.assertEqual(result.resources.failed, 0)
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-GML-TRANSPILE"
+                and diagnostic.resource == "scr_modern"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_missing_only_declared_script_is_requested_and_skipped(self) -> None:
+        _write_json(
+            self.gm_dir / "ScriptTest.yyp",
+            {
+                "resources": [_resource_entry("scripts", "scr_missing")],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        converter = self._converter()
+
+        self.assertIsNone(converter.convert_all())
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            any(
+                "Skipping missing GameMaker asset scr_missing" in log
+                for log in self.logs
+            )
+        )
+        self.assertFalse(
+            (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).exists()
+        )
+
+    def test_safe_and_missing_declared_scripts_have_strict_counts(self) -> None:
+        self._write_project()
+        shutil.rmtree(self.gm_dir / "scripts" / "scr_modern")
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            registry_path,
+            str(self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH),
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            (self.godot_dir / "scripts" / "game" / "scr_add.gd").is_file()
+        )
+        self.assertFalse(
+            (self.godot_dir / "scripts" / "game" / "scr_modern.gd").exists()
+        )
+        assert registry_path is not None
+        registry = Path(registry_path).read_text(encoding="utf-8")
+        self.assertIn('"name": "scr_add"', registry)
+        self.assertNotIn('"name": "scr_modern"', registry)
+
+    def test_cancellation_during_planning_requests_every_script(self) -> None:
+        self._write_project()
+        running = True
+        original_metadata = AssetRegistryConverter._metadata
+
+        def metadata_then_cancel(
+            registry_converter: AssetRegistryConverter,
+            resource: _ProjectResource,
+            room_order_indices: dict[str, int] | None = None,
+            *,
+            timeline_script_stem: str | None = None,
+            godot_path: str = "",
+        ) -> JsonDict:
+            nonlocal running
+            result = original_metadata(
+                registry_converter,
+                resource,
+                room_order_indices,
+                timeline_script_stem=timeline_script_stem,
+                godot_path=godot_path,
+            )
+            running = False
+            return result
+
+        converter = ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: running,
+        )
+
+        with patch.object(
+            AssetRegistryConverter,
+            "_metadata",
+            new=metadata_then_cancel,
+        ):
+            self.assertIsNone(converter.convert_all())
+
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                skipped=2,
+            ),
+        )
+        self.assertFalse(
+            (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).exists()
+        )
+
+    def test_cancellation_after_script_write_defers_completion(self) -> None:
+        self._write_project()
+        running = True
+        converter = ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: running,
+        )
+        original_write_script = converter._write_script
+
+        def write_then_cancel(*args: Any, **kwargs: Any) -> Any:
+            nonlocal running
+            result = original_write_script(*args, **kwargs)
+            running = False
+            return result
+
+        with patch.object(
+            converter,
+            "_write_script",
+            side_effect=write_then_cancel,
+        ):
+            self.assertIsNone(converter.convert_all())
+
+        self.assertTrue(
+            (self.godot_dir / "scripts" / "game" / "scr_add.gd").is_file()
+        )
+        self.assertFalse(
+            (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).exists()
+        )
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                skipped=2,
+            ),
+        )
+
+    def test_later_script_exception_fails_prior_unpublished_script(self) -> None:
+        self._write_project()
+        converter = self._converter()
+        original_write_script = converter._write_script
+
+        def write_or_raise(
+            entry: AssetRegistryEntry,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            if entry.name == "scr_modern":
+                raise RuntimeError("script worker failed")
+            return original_write_script(entry, *args, **kwargs)
+
+        with patch.object(
+            converter,
+            "_write_script",
+            side_effect=write_or_raise,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "script worker failed"):
+                converter.convert_all()
+
+        self.assertTrue(
+            (self.godot_dir / "scripts" / "game" / "scr_add.gd").is_file()
+        )
+        self.assertFalse(
+            (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).exists()
+        )
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as="failed",
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                failed=2,
+            ),
+        )
 
     def test_declared_manifest_script_path_owns_selected_sidecar(self) -> None:
         _write_json(

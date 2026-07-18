@@ -5,14 +5,18 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
-from typing import Any, Callable
+from typing import IO, Any, Callable, cast
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.resource_index import IndexedRoom
 from src.conversion.room_creation_code import resolve_instance_creation_code
@@ -222,6 +226,157 @@ class TestRoomConverter(unittest.TestCase):
         _write_file(room_path, _make_room_yy(name, **kwargs))
         return room_path
 
+    def test_missing_only_declared_room_makes_conversion_partial(self) -> None:
+        self._write_yyp(["r_missing", "r_missing"])
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        rooms_enabled = MagicMock()
+        rooms_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"rooms": rooms_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-ROOM-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "r_missing")
+        self.assertEqual(unavailable[0].source_path, "TestProject.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    def test_rejected_and_cross_family_rooms_are_requested_and_skipped(self) -> None:
+        cross_family_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "r_cross_family",
+            "r_cross_family.yy",
+        )
+        _write_file(cross_family_path, _make_room_yy("r_cross_family"))
+        self._write_room("r_orphan")
+        _write_file(
+            os.path.join(self.gm_dir, "RejectedRooms.yyp"),
+            json.dumps(
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": "r_rejected",
+                                "path": "rooms/../../outside/r_rejected.yy",
+                                "resourceType": "GMRoom",
+                            },
+                            "resourceType": "GMRoom",
+                        },
+                        {
+                            "id": {
+                                "name": "r_cross_family",
+                                "path": (
+                                    "objects/r_cross_family/"
+                                    "r_cross_family.yy"
+                                ),
+                                "resourceType": "GMRoom",
+                            },
+                            "resourceType": "GMRoom",
+                        },
+                    ],
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                }
+            ),
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=2, skipped=2),
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_orphan"))
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-ROOM-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in unavailable},
+            {"r_rejected", "r_cross_family"},
+        )
+
+    def test_safe_missing_and_disk_orphan_rooms_have_strict_counts(self) -> None:
+        self._write_yyp(["r_safe", "r_missing"])
+        self._write_room("r_safe")
+        self._write_room("r_orphan")
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        rooms_enabled = MagicMock()
+        rooms_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"rooms": rooms_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "rooms",
+                    "r_safe",
+                    "r_safe.tscn",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_orphan"))
+        )
+
     def _write_object(self, name: str, parent_path: str = "folders/Objects.yy") -> str:
         object_path = os.path.join(self.gm_dir, "objects", name, name + ".yy")
         _write_file(object_path, _make_object_yy(name, parent_path))
@@ -337,10 +492,17 @@ class TestRoomConverter(unittest.TestCase):
             physics_world=True,
         )
 
-        self._make_converter().convert_all()
+        converter = self._make_converter()
+        converter.convert_all()
 
         tscn_path = os.path.join(self.godot_dir, "rooms", "r_test", "r_test.tscn")
         self.assertTrue(os.path.isfile(tscn_path))
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
 
         with open(tscn_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -868,6 +1030,15 @@ class TestRoomConverter(unittest.TestCase):
         self._write_yyp(["r_instances"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player")
         self._write_object_scene("o_player")
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "rooms",
+                "r_instances",
+                "InstanceCreationCode_inst_player.gml",
+            ),
+            "// Instance metadata fixture.\n",
+        )
         self._write_room("r_instances", layers=[
             {
                 "%Name": "Instances",
@@ -896,7 +1067,7 @@ class TestRoomConverter(unittest.TestCase):
 
         self.assertIn('[gd_scene format=3 load_steps=3]', content)
         self.assertIn(
-            '[ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="gm_room_runtime"]',
+            '[ext_resource type="Script" path="res://rooms/r_instances/r_instances.gd" id="gm_room_runtime"]',
             content,
         )
         self.assertIn(
@@ -1195,7 +1366,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('extends "res://gm2godot/gml_room_node.gd"', script)
         self.assertIn("func _gm2godot_room_creation_code():", script)
 
-    def test_room_creation_code_missing_logs_info_and_marks_missing(self):
+    def test_missing_room_creation_code_skips_room_with_structured_diagnostic(self):
         self._write_yyp(["r_missing_code"])
         missing_path = os.path.join(
             self.gm_dir, "rooms", "r_missing_code", "MissingCreationCode.gml"
@@ -1205,14 +1376,20 @@ class TestRoomConverter(unittest.TestCase):
             creation_code_file="MissingCreationCode.gml",
         )
 
-        self._make_converter().convert_all()
-        content = self._read_scene("r_missing_code")
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
 
-        self.assertIn(
-            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(missing_path),
-            content,
+        converter.convert_all()
+
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 0)
+        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.failed, 0)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_missing_code"))
         )
-        self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
         missing_logs = [
             log
             for log in self.logs
@@ -1223,7 +1400,80 @@ class TestRoomConverter(unittest.TestCase):
             )
         ]
         self.assertTrue(missing_logs)
-        self.assertTrue(all(log.startswith("Info:") for log in missing_logs))
+        self.assertTrue(all(log.startswith("Warning:") for log in missing_logs))
+        missing_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-ROOM-CREATION-MISSING"
+        ]
+        self.assertEqual(len(missing_diagnostics), 1, missing_diagnostics)
+        self.assertEqual(missing_diagnostics[0].source_path, missing_path)
+        self.assertEqual(missing_diagnostics[0].resource, "r_missing_code")
+        self.assertEqual(missing_diagnostics[0].resource_type, "room")
+        self.assertEqual(missing_diagnostics[0].event, "room creation code")
+
+    def test_room_creation_code_read_failure_skips_room_without_artifacts(self):
+        self._write_yyp(["r_unreadable"])
+        creation_code_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_unreadable",
+            "RoomCreationCode.gml",
+        )
+        _write_file(creation_code_path, "global.room_creation_ran = true;\n")
+        self._write_room(
+            "r_unreadable",
+            creation_code_file="RoomCreationCode.gml",
+        )
+        self._write_project_godot(
+            '[application]\nrun/main_scene="res://keep.tscn"\n'
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
+        real_open = cast(Callable[..., IO[Any]], open)
+
+        def open_with_creation_code_failure(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            *args: Any,
+            **kwargs: Any,
+        ) -> IO[Any]:
+            if os.path.abspath(os.fsdecode(path)) == creation_code_path:
+                raise OSError("simulated creation-code read failure")
+            return real_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=open_with_creation_code_failure):
+            converter.convert_all()
+
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 0)
+        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.failed, 0)
+        room_directory = os.path.join(self.godot_dir, "rooms", "r_unreadable")
+        self.assertFalse(os.path.exists(room_directory))
+        with open(
+            os.path.join(self.godot_dir, "project.godot"),
+            "r",
+            encoding="utf-8",
+        ) as project_file:
+            self.assertIn('run/main_scene="res://keep.tscn"', project_file.read())
+
+        read_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-ROOM-CREATION-READ"
+        ]
+        self.assertEqual(
+            {diagnostic.code for diagnostic in diagnostics.diagnostics()},
+            {"GM2GD-ROOM-CREATION-READ"},
+        )
+        self.assertEqual(len(read_diagnostics), 1, read_diagnostics)
+        diagnostic = read_diagnostics[0]
+        self.assertEqual(diagnostic.source_path, creation_code_path)
+        self.assertEqual(diagnostic.resource, "r_unreadable")
+        self.assertEqual(diagnostic.resource_type, "room")
+        self.assertEqual(diagnostic.event, "room creation code")
 
     def test_rejects_unsafe_room_creation_code_paths_with_owner_diagnostics(self):
         room_names = [
@@ -1277,7 +1527,8 @@ class TestRoomConverter(unittest.TestCase):
             self.skipTest(f"Symbolic links are unavailable: {error}")
 
         diagnostics = DiagnosticCollector()
-        self._make_converter(diagnostics=diagnostics).convert_all()
+        converter = self._make_converter(diagnostics=diagnostics)
+        converter.convert_all()
 
         rejected = [
             diagnostic
@@ -1301,26 +1552,18 @@ class TestRoomConverter(unittest.TestCase):
                 for diagnostic in rejected
             )
         )
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, len(room_names))
+        self.assertEqual(counts.executed, len(room_names))
+        self.assertEqual(counts.completed, 0)
+        self.assertEqual(counts.skipped, len(room_names))
+        self.assertEqual(counts.failed, 0)
         for room_name in room_names:
             self.assertFalse(
                 os.path.exists(
-                    os.path.join(
-                        self.godot_dir,
-                        "rooms",
-                        room_name,
-                        room_name + ".gd",
-                    )
+                    os.path.join(self.godot_dir, "rooms", room_name)
                 ),
                 room_name,
-            )
-            scene = self._read_scene(room_name)
-            self.assertIn(
-                'metadata/gamemaker_creation_code_source_path = ""',
-                scene,
-            )
-            self.assertIn(
-                "metadata/gamemaker_creation_code_file_exists = false",
-                scene,
             )
 
     def test_accepts_project_relative_room_creation_code_forms(self):
@@ -1498,7 +1741,7 @@ class TestRoomConverter(unittest.TestCase):
             "layers[].instances[].name",
         )
 
-    def test_instance_name_aliases_are_rejected_but_safe_name_is_transpiled(self):
+    def test_rejected_instance_alias_blocks_room_without_partial_safe_script(self):
         room_name = "r_instance_components"
         self._write_yyp([room_name])
         instances = [
@@ -1535,13 +1778,18 @@ class TestRoomConverter(unittest.TestCase):
         )
         diagnostics = DiagnosticCollector()
 
-        self._make_converter(diagnostics=diagnostics).convert_all()
+        converter = self._make_converter(diagnostics=diagnostics)
+        converter.convert_all()
 
-        script = self._read_room_script(room_name)
-        self.assertIn("safe_instance_component", script)
-        self.assertNotIn("unsafe_component_alias", script)
-        self.assertNotIn("unsafe_component_dot", script)
-        self.assertNotIn("unsafe_component_dotdot", script)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "rooms", room_name))
+        )
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 0)
+        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.failed, 0)
         rejected = [
             diagnostic
             for diagnostic in diagnostics.diagnostics()
@@ -1728,7 +1976,92 @@ class TestRoomConverter(unittest.TestCase):
             script,
         )
 
-    def test_instance_creation_code_missing_logs_info_and_marks_missing(self):
+    def test_instance_creation_code_blocker_skips_room_and_completes_safe_sibling(self):
+        self._write_yyp(
+            ["r_blocked", "r_safe"],
+            room_order=["r_blocked", "r_safe"],
+            extra_resources=[("objects", "o_player")],
+        )
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        blocked_code_path = os.path.join(
+            self.gm_dir,
+            "rooms",
+            "r_blocked",
+            "InstanceCreationCode_inst_player.gml",
+        )
+        _write_file(blocked_code_path, "instance_value = @;\n")
+        self._write_room(
+            "r_blocked",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": "inst_player",
+                            "objectId": {"name": "o_player"},
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+        self._write_room("r_safe")
+        self._write_project_godot(
+            '[application]\nrun/main_scene="res://keep.tscn"\n'
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 2)
+        self.assertEqual(counts.executed, 2)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.failed, 0)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_blocked"))
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "rooms",
+                    "r_safe",
+                    "r_safe.tscn",
+                )
+            )
+        )
+        with open(
+            os.path.join(self.godot_dir, "project.godot"),
+            "r",
+            encoding="utf-8",
+        ) as project_file:
+            self.assertIn('run/main_scene="res://keep.tscn"', project_file.read())
+
+        transpile_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-TRANSPILE"
+        ]
+        self.assertEqual(
+            {diagnostic.code for diagnostic in diagnostics.diagnostics()},
+            {"GM2GD-GML-TRANSPILE"},
+        )
+        self.assertEqual(len(transpile_diagnostics), 1, transpile_diagnostics)
+        diagnostic = transpile_diagnostics[0]
+        self.assertEqual(diagnostic.source_path, blocked_code_path)
+        self.assertEqual(diagnostic.resource, "r_blocked")
+        self.assertEqual(diagnostic.resource_type, "room")
+        self.assertEqual(
+            diagnostic.event,
+            "instance creation code for inst_player",
+        )
+
+    def test_missing_instance_creation_code_skips_room_with_structured_diagnostic(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player")
         self._write_object_scene("o_player")
@@ -1752,14 +2085,22 @@ class TestRoomConverter(unittest.TestCase):
             }
         ])
 
-        self._make_converter().convert_all()
-        content = self._read_scene("r_missing_instance_code")
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics=diagnostics)
 
-        self.assertIn(
-            'metadata/gamemaker_creation_code_source_path = ' + json.dumps(missing_path),
-            content,
+        converter.convert_all()
+
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 0)
+        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.failed, 0)
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "rooms", "r_missing_instance_code")
+            )
         )
-        self.assertIn('metadata/gamemaker_creation_code_file_exists = false', content)
         missing_logs = [
             log
             for log in self.logs
@@ -1771,7 +2112,20 @@ class TestRoomConverter(unittest.TestCase):
             )
         ]
         self.assertTrue(missing_logs)
-        self.assertTrue(all(log.startswith("Info:") for log in missing_logs))
+        self.assertTrue(all(log.startswith("Warning:") for log in missing_logs))
+        missing_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-ROOM-CREATION-MISSING"
+        ]
+        self.assertEqual(len(missing_diagnostics), 1, missing_diagnostics)
+        self.assertEqual(missing_diagnostics[0].source_path, missing_path)
+        self.assertEqual(missing_diagnostics[0].resource, "r_missing_instance_code")
+        self.assertEqual(missing_diagnostics[0].resource_type, "room")
+        self.assertEqual(
+            missing_diagnostics[0].event,
+            "instance creation code for inst_player",
+        )
 
     def test_execution_metadata_preserves_lifecycle_order(self):
         self._write_yyp(["r_lifecycle"], extra_resources=[("objects", "o_enemy")])

@@ -10,7 +10,11 @@ from src.conversion.asset_output_paths import build_asset_output_paths, resource
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_resource_stem, generated_subfolder_path
-from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
@@ -55,6 +59,21 @@ class _ShaderAssetBuilder:
             vertex_path=self.vertex_path,
             fragment_path=self.fragment_path,
         )
+
+
+@dataclass(frozen=True)
+class _DeclaredShaderResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _ShaderConversionPlan:
+    requested_names: tuple[str, ...]
+    available_assets: tuple[_ShaderAsset, ...]
+    skipped_names: tuple[str, ...]
 
 
 _FUNCTION_START_RE = re.compile(
@@ -202,7 +221,7 @@ class ShaderConverter(BaseConverter):
                 except FileNotFoundError:
                     pass
 
-    def _render_shader_asset(self, asset: _ShaderAsset) -> str:
+    def _render_shader_asset(self, asset: _ShaderAsset) -> str | None:
         translated_sources: list[str] = []
         for stage, source_path in (
             ("vertex", asset.vertex_path),
@@ -220,15 +239,24 @@ class ShaderConverter(BaseConverter):
             if resolved_source is None or not os.path.isfile(
                 resolved_source.filesystem_path
             ):
-                continue
-            with open(
-                resolved_source.filesystem_path,
-                "r",
-                encoding="utf-8",
-            ) as source_file:
-                translated_sources.append(
-                    self._translate_shader_source(source_file.read(), stage)
-                )
+                return None
+            try:
+                with open(
+                    resolved_source.filesystem_path,
+                    "r",
+                    encoding="utf-8",
+                ) as source_file:
+                    source = source_file.read()
+            except OSError:
+                return None
+            if not source.strip():
+                return None
+            translated_source = self._translate_shader_source(source, stage)
+            if not translated_source.strip():
+                return None
+            translated_sources.append(translated_source)
+        if not translated_sources:
+            return None
         return self._merge_shader_sources(tuple(translated_sources))
 
     def _process_shader(
@@ -251,106 +279,274 @@ class ShaderConverter(BaseConverter):
             )
             output_path = os.path.join(output_dir, output_name)
         shader_source = self._render_shader_asset(asset)
+        if shader_source is None:
+            self._safe_log(
+                f"Warning: GameMaker shader {asset.name} does not have a "
+                "complete, non-empty readable stage set during conversion."
+            )
+            return None
         self._atomic_write_text(output_path, shader_source)
         return (asset.source_label, output_name)
 
-    def _indexed_shader_assets(self) -> tuple[_ShaderAsset, ...] | None:
+    def _process_shader_with_outcome(
+        self,
+        asset: _ShaderAsset,
+    ) -> tuple[str, str] | None:
+        if not self.conversion_running():
+            return None
+        self._resource_started(asset.name)
+        try:
+            result = self._process_shader(asset)
+        except Exception:
+            self._resource_failed(asset.name)
+            raise
+        if result is None:
+            if self.conversion_running():
+                self._resource_failed(asset.name)
+            else:
+                self._resource_skipped(asset.name)
+        else:
+            self._resource_completed(asset.name)
+        return result
+
+    def _indexed_shader_plan(self) -> _ShaderConversionPlan | None:
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="shader",
         )
-        if manifest.yyp_path is None:
+        if manifest.yyp_path is None or any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        ):
             return None
-        if not manifest.raw_data:
-            self._safe_log(
-                "Warning: Could not parse GameMaker project .yyp; skipping unowned shader files."
-            )
-            return ()
+        return self._plan_manifest_shaders(manifest)
 
-        assets: list[_ShaderAsset] = []
-        seen_names: set[str] = set()
+    def _declared_shader_resources(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> tuple[tuple[_DeclaredShaderResource, ...], ...]:
+        """Return every logical shader declaration, including rejected paths."""
+        declared_by_name: dict[str, list[_DeclaredShaderResource]] = {}
+        seen_declarations: set[tuple[str, str | None]] = set()
+
+        def add(resource: _DeclaredShaderResource) -> None:
+            declaration_key = (resource.name, resource.source_path)
+            if not resource.name or declaration_key in seen_declarations:
+                return
+            seen_declarations.add(declaration_key)
+            declared_by_name.setdefault(resource.name, []).append(resource)
+
         for resource in manifest.resources:
             is_shader = (
                 resource.kind.casefold() == "shaders"
                 or resource.resource_type.casefold() == "gmshader"
             )
-            if not is_shader or resource.name in seen_names:
+            if not is_shader:
                 continue
             manifest_field = (
                 f"{resource.source.field_path}.id.path"
                 if resource.source is not None and resource.source.field_path
                 else "resources[].id.path"
             )
-            resolved = self._resolve_project_source(
-                resource.path,
-                owner_source_path=manifest.yyp_path,
-                resource=resource.name,
-                resource_type="shader",
-                field=manifest_field,
-            )
-            if resolved is None:
-                continue
-            try:
-                validate_project_resource_source_path(resolved, "shaders")
-            except ProjectSourcePathError as exc:
-                self._report_source_path_rejection(
-                    resource.path,
-                    exc,
+            add(
+                _DeclaredShaderResource(
+                    name=resource.name,
+                    source_path=resource.path,
                     owner_source_path=manifest.yyp_path,
-                    resource=resource.name,
+                    manifest_field=manifest_field,
+                )
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_shader(diagnostic)
+            ):
+                continue
+            add(
+                _DeclaredShaderResource(
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                )
+            )
+
+        return tuple(
+            tuple(resources)
+            for resources in declared_by_name.values()
+        )
+
+    @staticmethod
+    def _manifest_diagnostic_is_shader(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "shaders"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold() in {"shader", "gmshader"}
+        )
+
+    def _plan_manifest_shaders(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> _ShaderConversionPlan:
+        """Resolve one available stage set for each declared base shader."""
+        requested_names: list[str] = []
+        available_assets: list[_ShaderAsset] = []
+        skipped_names: list[str] = []
+
+        for declarations in self._declared_shader_resources(manifest):
+            shader_name = declarations[0].name
+            selected_asset: _ShaderAsset | None = None
+            unavailable_reason = (
+                "all of its manifest source paths are unavailable"
+            )
+
+            for declaration in declarations:
+                if declaration.source_path is None:
+                    unavailable_reason = "its manifest source path was rejected"
+                    continue
+                resolved = self._resolve_project_source(
+                    declaration.source_path,
+                    owner_source_path=declaration.owner_source_path,
+                    resource=shader_name,
                     resource_type="shader",
-                    field=manifest_field,
+                    field=declaration.manifest_field,
                 )
-                continue
-            yy_path = resolved.filesystem_path
-            if not os.path.isfile(yy_path):
-                self._safe_log(
-                    f"Warning: Skipping missing GameMaker shader {resource.name}: {yy_path}"
+                if resolved is None:
+                    unavailable_reason = (
+                        "its manifest source path is unavailable"
+                    )
+                    continue
+                try:
+                    validate_project_resource_source_path(
+                        resolved,
+                        "shaders",
+                    )
+                except ProjectSourcePathError as exc:
+                    self._report_source_path_rejection(
+                        declaration.source_path,
+                        exc,
+                        owner_source_path=declaration.owner_source_path,
+                        resource=shader_name,
+                        resource_type="shader",
+                        field=declaration.manifest_field,
+                    )
+                    unavailable_reason = (
+                        "its manifest source path is outside the shaders "
+                        "resource family or is not .yy metadata"
+                    )
+                    continue
+
+                yy_path = resolved.filesystem_path
+                if not os.path.isfile(yy_path):
+                    unavailable_reason = (
+                        f"metadata is missing at {resolved.source_path!r}"
+                    )
+                    continue
+
+                base_path = os.path.splitext(yy_path)[0]
+                vertex_source = self._resolve_discovered_project_source(
+                    base_path + ".vsh",
+                    owner_source_path=resolved.source_path,
+                    resource=shader_name,
+                    resource_type="shader",
+                    field="derived .vsh stage",
                 )
-                continue
-            base_path = os.path.splitext(yy_path)[0]
-            vertex_source = self._resolve_discovered_project_source(
-                base_path + ".vsh",
-                owner_source_path=resolved.source_path,
+                fragment_source = self._resolve_discovered_project_source(
+                    base_path + ".fsh",
+                    owner_source_path=resolved.source_path,
+                    resource=shader_name,
+                    resource_type="shader",
+                    field="derived .fsh stage",
+                )
+                vertex_path = (
+                    vertex_source.filesystem_path
+                    if vertex_source is not None
+                    and os.path.isfile(vertex_source.filesystem_path)
+                    else None
+                )
+                fragment_path = (
+                    fragment_source.filesystem_path
+                    if fragment_source is not None
+                    and os.path.isfile(fragment_source.filesystem_path)
+                    else None
+                )
+                if vertex_path is None and fragment_path is None:
+                    unavailable_reason = (
+                        "it has no readable .vsh or .fsh stage beside its "
+                        "metadata"
+                    )
+                    continue
+
+                selected_asset = _ShaderAsset(
+                    name=shader_name,
+                    subfolder=self._get_subfolder_from_yy(yy_path),
+                    owner_path=resolved.source_path,
+                    vertex_path=vertex_path,
+                    fragment_path=fragment_path,
+                )
+                break
+
+            requested_names.append(shader_name)
+            if selected_asset is None:
+                skipped_names.append(shader_name)
+                self._report_unavailable_declared_shader(
+                    declarations[0],
+                    reason=unavailable_reason,
+                )
+            else:
+                available_assets.append(selected_asset)
+
+        return _ShaderConversionPlan(
+            requested_names=tuple(requested_names),
+            available_assets=tuple(available_assets),
+            skipped_names=tuple(skipped_names),
+        )
+
+    def _report_unavailable_declared_shader(
+        self,
+        resource: _DeclaredShaderResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker shader "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-SHADER-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
                 resource=resource.name,
                 resource_type="shader",
-                field="derived .vsh stage",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker shader .yy metadata and "
+                    "at least one .vsh or .fsh stage inside the project root, "
+                    "or remove the stale YYP declaration."
+                ),
             )
-            fragment_source = self._resolve_discovered_project_source(
-                base_path + ".fsh",
-                owner_source_path=resolved.source_path,
-                resource=resource.name,
-                resource_type="shader",
-                field="derived .fsh stage",
-            )
-            vertex_path = (
-                vertex_source.filesystem_path
-                if vertex_source is not None
-                and os.path.isfile(vertex_source.filesystem_path)
-                else None
-            )
-            fragment_path = (
-                fragment_source.filesystem_path
-                if fragment_source is not None
-                and os.path.isfile(fragment_source.filesystem_path)
-                else None
-            )
-            asset = _ShaderAsset(
-                name=resource.name,
-                subfolder=self._get_subfolder_from_yy(yy_path),
-                owner_path=resolved.source_path,
-                vertex_path=vertex_path,
-                fragment_path=fragment_path,
-            )
-            if asset.vertex_path is None and asset.fragment_path is None:
-                self._safe_log(
-                    f"Warning: GameMaker shader {resource.name} has no .vsh or .fsh stage."
-                )
-                continue
-            seen_names.add(resource.name)
-            assets.append(asset)
-        return tuple(assets)
+        self._safe_log(message)
 
     def _disk_shader_assets(
         self,
@@ -502,44 +698,64 @@ class ShaderConverter(BaseConverter):
         )
 
     def convert_all(self) -> None:
-        shader_root = self._resolve_discovered_project_source(
-            os.path.join(self.gm_project_path, 'shaders'),
-            resource_type="shader",
-            field="shaders directory",
-        )
+        self._reset_resource_outcomes()
+        shader_plan = self._indexed_shader_plan()
+        if shader_plan is None:
+            shader_root = self._resolve_discovered_project_source(
+                os.path.join(self.gm_project_path, 'shaders'),
+                resource_type="shader",
+                field="shaders directory",
+            )
+            if shader_root is None or not os.path.isdir(
+                shader_root.filesystem_path
+            ):
+                self.log_callback(
+                    "No shaders directory found. Skipping shader conversion."
+                )
+                return
+            disk_assets = self._disk_shader_assets(shader_root)
+            shader_plan = _ShaderConversionPlan(
+                requested_names=tuple(asset.name for asset in disk_assets),
+                available_assets=disk_assets,
+                skipped_names=(),
+            )
 
-        if shader_root is None or not os.path.isdir(shader_root.filesystem_path):
-            self.log_callback("No shaders directory found. Skipping shader conversion.")
+        for shader_name in shader_plan.requested_names:
+            self._resource_requested(shader_name)
+        for shader_name in shader_plan.skipped_names:
+            self._resource_skipped(shader_name)
+
+        shader_assets = shader_plan.available_assets
+        if not shader_assets:
+            self.log_callback("No shader files (.vsh/.fsh) found.")
             return
-        os.makedirs(self.godot_shaders_path, exist_ok=True)
 
+        os.makedirs(self.godot_shaders_path, exist_ok=True)
         self._shader_output_paths = build_asset_output_paths(
             self.gm_project_path,
             self.godot_project_path,
             conversion_running=self.conversion_running,
         ).get("shaders", {})
 
-        shader_assets = self._indexed_shader_assets()
-        if shader_assets is None:
-            shader_assets = self._disk_shader_assets(shader_root)
-
-        if not shader_assets:
-            self.log_callback("No shader files (.vsh/.fsh) found.")
-            return
-
-        total = len(shader_assets)
-        processed = 0
+        total = len(shader_plan.requested_names)
+        processed = len(shader_plan.skipped_names)
+        if processed:
+            self._safe_progress(int((processed / total) * 100))
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map: dict[Future[tuple[str, str] | None], _ShaderAsset] = {
-                executor.submit(self._process_shader, asset): asset
+                executor.submit(self._process_shader_with_outcome, asset): asset
                 for asset in shader_assets
             }
             for future in as_completed(futures_map):
                 result = future.result()
                 if result is None:
-                    self.log_callback("Shader conversion stopped.")
-                    return
+                    if not self.conversion_running():
+                        self.log_callback("Shader conversion stopped.")
+                        return
+                    processed += 1
+                    self._safe_progress(int((processed / total) * 100))
+                    continue
 
                 filename, output_name = result
                 processed += 1

@@ -4,6 +4,7 @@ import os
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from PIL import Image
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import TypedDict, cast
 
 from src.localization import get_localized
@@ -44,6 +45,14 @@ SpriteParseResult = tuple[list[str], list[str]]
 SpriteProcessResult = tuple[str, int, int, str, str]
 
 
+@dataclass(frozen=True)
+class _DeclaredSpriteResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
 class SpriteConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
@@ -59,17 +68,24 @@ class SpriteConverter(BaseConverter):
         self._sprite_yy_paths: dict[str, str] = {}
         self._sprite_owner_yy_paths: dict[str, str] = {}
         self._sprites_without_yy: set[str] = set()
+        self._yyp_declared_sprites: dict[str, _DeclaredSpriteResource] = {}
 
-    def _get_valid_sprite_names(self) -> dict[str, str] | None:
+    def _get_valid_sprite_names(
+        self,
+        *,
+        request_declared_resources: bool = False,
+    ) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of sprite name -> subfolder.
 
         Returns None if the .yyp file cannot be found or parsed, allowing
-        the caller to fall back to converting all sprites on disk.
+        the caller to fall back to converting all sprites on disk. Conversion
+        planning can request each declaration before its metadata is filtered.
         """
         self._yyp_sprite_yy_paths = {}
         self._sprite_yy_paths = {}
         self._sprite_owner_yy_paths = {}
         self._sprites_without_yy = set()
+        self._yyp_declared_sprites = {}
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
             manifest,
@@ -106,17 +122,14 @@ class SpriteConverter(BaseConverter):
                 if not isinstance(raw_res_id, dict):
                     continue
                 res_id = cast(JsonDict, raw_res_id)
-                raw_path = res_id.get('path', '')
-                if not isinstance(raw_path, str):
-                    continue
-                manifest_field = f"resources[{resource_index}].id.path"
-                if manifest_field in manifest_rejected_fields:
-                    continue
-                path = raw_path.replace('\\', '/')
+                raw_path_value = res_id.get('path', '')
                 resource_type = resource.get('resourceType')
                 id_resource_type = res_id.get('resourceType')
                 is_sprite = (
-                    path.casefold().startswith('sprites/')
+                    (
+                        isinstance(raw_path_value, str)
+                        and raw_path_value.replace('\\', '/').casefold().startswith('sprites/')
+                    )
                     or resource_type == "GMSprite"
                     or id_resource_type == "GMSprite"
                 )
@@ -125,10 +138,35 @@ class SpriteConverter(BaseConverter):
                     name = (
                         raw_name
                         if isinstance(raw_name, str) and raw_name
-                        else os.path.splitext(os.path.basename(path))[0]
+                        else (
+                            os.path.splitext(os.path.basename(raw_path_value))[0]
+                            if isinstance(raw_path_value, str)
+                            else ""
+                        )
                     )
                     if not name:
                         continue
+                    manifest_field = f"resources[{resource_index}].id.path"
+                    self._yyp_declared_sprites.setdefault(
+                        name,
+                        _DeclaredSpriteResource(
+                            name=name,
+                            source_path=(
+                                raw_path_value
+                                if isinstance(raw_path_value, str)
+                                else None
+                            ),
+                            owner_source_path=resolved_yyp.source_path,
+                            manifest_field=manifest_field,
+                        ),
+                    )
+                    if request_declared_resources:
+                        self._resource_requested(name)
+                    if not isinstance(raw_path_value, str):
+                        continue
+                    if manifest_field in manifest_rejected_fields:
+                        continue
+                    path = raw_path_value.replace('\\', '/')
                     resolved_path = self._resolve_project_source(
                         path,
                         owner_source_path=resolved_yyp.source_path,
@@ -166,8 +204,37 @@ class SpriteConverter(BaseConverter):
 
             return valid_sprites
         except (OSError, KeyError, TypeError, ValueError):
+            self._yyp_declared_sprites = {}
             self._safe_log(get_localized("Console_Convertor_Sprites_YYPFilterWarning"))
             return None
+
+    def _report_unavailable_declared_sprite(
+        self,
+        resource: _DeclaredSpriteResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker sprite "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-SPRITE-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="sprite",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker sprite .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
 
     def _sprite_res_path(self, subfolder: str, sprite_name: str) -> str:
         """Build a res://sprites/... path, avoiding double slashes."""
@@ -545,6 +612,16 @@ class SpriteConverter(BaseConverter):
             return speed * 60.0
         return speed
 
+    @staticmethod
+    def _fallback_animation_data(frame_count: int) -> AnimationData:
+        """Keep every discovered frame usable when sequence metadata is absent."""
+        return {
+            "playbackSpeed": 30.0,
+            "playbackSpeedType": 0,
+            "loop": True,
+            "frame_durations": [1.0] * frame_count,
+        }
+
     def _compute_origin_offset(self, collision_data: CollisionData) -> tuple[float, float] | tuple[int, int]:
         """Compute the sprite origin position in pixels.
 
@@ -754,15 +831,22 @@ class SpriteConverter(BaseConverter):
                                animation_data: AnimationData | None = None, subfolder: str = "") -> None:
         """Generate a .tscn scene file for a sprite.
 
-        Creates either an AnimatedSprite2D scene (multi-frame with animation data)
-        or a Sprite2D scene (single-frame or no animation data).
+        Creates an AnimatedSprite2D scene for every multi-frame sprite and a
+        Sprite2D scene for a single frame. Missing animation metadata uses a
+        deterministic fallback so the scene never references a nonexistent
+        unnumbered texture.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
         collision_sub, _, collision_node = self._build_collision_block(collision_data)
 
-        if frame_count > 1 and animation_data is not None:
-            self._write_animated_scene(sprite_name, frame_count, animation_data, collision_data, collision_sub, collision_node, subfolder)
+        if frame_count > 1:
+            effective_animation = (
+                animation_data
+                if animation_data is not None
+                else self._fallback_animation_data(frame_count)
+            )
+            self._write_animated_scene(sprite_name, frame_count, effective_animation, collision_data, collision_sub, collision_node, subfolder)
         else:
             self._write_static_scene(sprite_name, collision_data, collision_sub, collision_node, subfolder)
 
@@ -881,16 +965,48 @@ class SpriteConverter(BaseConverter):
 
         return (sprite_name, index, images_count, resolved_sprite_paths[0], new_filename)
 
+    def _process_requested_sprite(
+        self,
+        sprite_name: str,
+        index: int,
+        gm_sprite_paths: list[str],
+        images_count: int,
+        subfolder: str = "",
+    ) -> SpriteProcessResult | None:
+        """Process one frame while tracking its logical parent sprite once."""
+        if not self.conversion_running():
+            return None
+        self._resource_started(sprite_name)
+        return self._process_sprite(
+            sprite_name,
+            index,
+            gm_sprite_paths,
+            images_count,
+            subfolder,
+        )
+
     def convert_sprites(self) -> None:
         os.makedirs(self.godot_sprites_path, exist_ok=True)
 
-        valid_names = self._get_valid_sprite_names()
+        valid_names = self._get_valid_sprite_names(
+            request_declared_resources=True,
+        )
         sprite_subfolders: dict[str, str] = {}
         path_subfolders: dict[str, str]
         indexed_sprite_names: set[str]
         source_paths: dict[str, str]
         if valid_names is not None:
-            source_paths = dict(self._yyp_sprite_yy_paths)
+            declared_sprite_names = set(self._yyp_declared_sprites) | set(
+                valid_names
+            )
+
+            source_paths = {}
+            for name in self._yyp_sprite_yy_paths:
+                validated_yy_path = self._sprite_yy_path(name)
+                if validated_yy_path is not None and os.path.isfile(
+                    validated_yy_path
+                ):
+                    source_paths[name] = validated_yy_path
             declared_directories = {
                 name: os.path.dirname(yy_path)
                 for name, yy_path in source_paths.items()
@@ -899,21 +1015,17 @@ class SpriteConverter(BaseConverter):
                 declared_directories,
                 source_paths,
             )
-            indexed_sprite_names = set()
-            for name in source_paths:
-                validated_yy_path = self._sprite_yy_path(name)
-                if validated_yy_path is not None and os.path.isfile(
-                    validated_yy_path
-                ):
-                    indexed_sprite_names.add(name)
+            indexed_sprite_names = set(source_paths)
             sprite_subfolders = {
                 name: valid_names[name]
                 for name in sprite_images
             }
 
             declared_directory_keys = {
-                os.path.normcase(os.path.realpath(directory))
-                for directory in declared_directories.values()
+                os.path.normcase(
+                    os.path.realpath(os.path.dirname(yy_path))
+                )
+                for yy_path in self._yyp_sprite_yy_paths.values()
             }
             disk_directories = self._disk_sprite_directories()
             orphan_directories = {
@@ -932,6 +1044,32 @@ class SpriteConverter(BaseConverter):
                 for name, subfolder in valid_names.items()
                 if name in indexed_sprite_names or name in sprite_images
             }
+
+            unavailable_sprite_names = declared_sprite_names - indexed_sprite_names
+            for sprite_name in sorted(unavailable_sprite_names):
+                resource = self._yyp_declared_sprites.get(
+                    sprite_name,
+                    _DeclaredSpriteResource(
+                        name=sprite_name,
+                        source_path=None,
+                        owner_source_path=None,
+                        manifest_field=None,
+                    ),
+                )
+                candidate = self._yyp_sprite_yy_paths.get(sprite_name)
+                reason = (
+                    f"metadata is missing at {candidate!r}"
+                    if candidate is not None
+                    else (
+                        "its manifest source path was rejected or is unavailable: "
+                        f"{resource.source_path!r}"
+                    )
+                )
+                self._report_unavailable_declared_sprite(
+                    resource,
+                    reason=reason,
+                )
+                self._resource_skipped(sprite_name)
         else:
             disk_directories = self._disk_sprite_directories()
             discovered_yy_paths = self._disk_sprite_yy_paths(disk_directories)
@@ -968,6 +1106,18 @@ class SpriteConverter(BaseConverter):
                 for name in path_subfolders
             }
 
+        logical_sprite_names = set(sprite_images) | indexed_sprite_names
+        if valid_names is None:
+            for sprite_name in sorted(logical_sprite_names):
+                self._resource_requested(sprite_name)
+
+        empty_sprite_names = indexed_sprite_names - set(sprite_images)
+        for sprite_name in sorted(empty_sprite_names):
+            self._safe_log(
+                f"Warning: Sprite {sprite_name} has no discoverable frame images and was skipped."
+            )
+            self._resource_skipped(sprite_name)
+
         if not sprite_images:
             self.log_callback(get_localized("Console_Convertor_Sprites_Error_NotFound"))
             return
@@ -994,22 +1144,33 @@ class SpriteConverter(BaseConverter):
 
         total_images = len(work_items)
         processed_images = 0
+        cancelled = False
+        failed_sprites: set[str] = set()
+        first_error: Exception | None = None
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map: dict[Future[SpriteProcessResult | None], tuple[str, int, list[str], int, str]] = {
-                executor.submit(self._process_sprite, name, idx, path, count, sub): (name, idx, path, count, sub)
+                executor.submit(self._process_requested_sprite, name, idx, path, count, sub):
+                    (name, idx, path, count, sub)
                 for name, idx, path, count, sub in work_items
             }
             for future in as_completed(futures_map):
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as error:
+                    failed_sprites.add(futures_map[future][0])
+                    if first_error is None:
+                        first_error = error
+                    continue
                 if result is None:
-                    self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
-                    return
+                    cancelled = True
+                    continue
 
                 sprite_name, _index, _images_count, gm_sprite_path, new_filename = result
                 processed_images += 1
 
                 if not new_filename:
+                    failed_sprites.add(sprite_name)
                     self._safe_progress(int(processed_images / total_images * 100))
                     continue
 
@@ -1022,28 +1183,64 @@ class SpriteConverter(BaseConverter):
 
                 self._safe_progress(int(processed_images / total_images * 100))
 
+        for sprite_name in sorted(failed_sprites):
+            self._resource_failed(sprite_name)
+
+        if cancelled:
+            self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
+            if first_error is not None:
+                raise first_error
+            return
+
         # Second pass: generate scenes for all sprites
         for sprite_name, images in sprite_images.items():
             if not self.conversion_running():
-                return
-            frame_count = len(self._build_ordered_frame_list(sprite_name, images))
-            collision_data = self._parse_collision_data(sprite_name)
-            animation_data = self._parse_animation_data(sprite_name)
-            subfolder = sprite_subfolders.get(sprite_name, "")
+                cancelled = True
+                break
+            if sprite_name in failed_sprites:
+                continue
+            try:
+                frame_count = len(self._build_ordered_frame_list(sprite_name, images))
+                collision_data = self._parse_collision_data(sprite_name)
+                animation_data = self._parse_animation_data(sprite_name)
+                if frame_count > 1 and animation_data is None:
+                    animation_data = self._fallback_animation_data(frame_count)
+                    self._safe_log(
+                        f"Warning: Sprite {sprite_name} has multiple frames but no "
+                        "readable animation metadata; using a looping 30 FPS fallback."
+                    )
+                subfolder = sprite_subfolders.get(sprite_name, "")
 
-            self._generate_sprite_scene(sprite_name, collision_data, frame_count, animation_data, subfolder)
+                self._generate_sprite_scene(sprite_name, collision_data, frame_count, animation_data, subfolder)
 
-            self._safe_log(get_localized("Console_Convertor_Sprites_SceneGenerated").format(name=sprite_name))
-            if frame_count > 1 and animation_data is not None:
-                godot_fps = self._compute_godot_fps(animation_data)
-                self._safe_log(get_localized("Console_Convertor_Sprites_SceneAnimated").format(
-                    frame_count=frame_count, fps=godot_fps, loop=animation_data["loop"]))
-                if animation_data["playbackSpeedType"] == 1:
-                    self._safe_log(get_localized("Console_Convertor_Sprites_SpeedTypeWarning").format(name=sprite_name))
-            if collision_data is not None and collision_data["collisionKind"] in (0, 4):
-                self._safe_log(get_localized("Console_Convertor_Sprites_CollisionPreciseWarning").format(name=sprite_name))
+                self._safe_log(get_localized("Console_Convertor_Sprites_SceneGenerated").format(name=sprite_name))
+                if frame_count > 1 and animation_data is not None:
+                    godot_fps = self._compute_godot_fps(animation_data)
+                    self._safe_log(get_localized("Console_Convertor_Sprites_SceneAnimated").format(
+                        frame_count=frame_count, fps=godot_fps, loop=animation_data["loop"]))
+                    if animation_data["playbackSpeedType"] == 1:
+                        self._safe_log(
+                            get_localized("Console_Convertor_Sprites_SpeedTypeWarning").format(name=sprite_name)
+                        )
+                if collision_data is not None and collision_data["collisionKind"] in (0, 4):
+                    self._safe_log(
+                        get_localized("Console_Convertor_Sprites_CollisionPreciseWarning").format(name=sprite_name)
+                    )
+            except Exception as error:
+                self._resource_failed(sprite_name)
+                if first_error is None:
+                    first_error = error
+                continue
+            self._resource_completed(sprite_name)
+
+        if first_error is not None:
+            raise first_error
+        if cancelled:
+            self.log_callback(get_localized("Console_Convertor_Sprites_Stopped"))
+            return
 
         self.log_callback(get_localized("Console_Convertor_Sprites_Complete"))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_sprites()

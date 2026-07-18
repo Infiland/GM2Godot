@@ -356,6 +356,25 @@
           "workaround": null
         }
       ],
+      "outcome": {
+        "converters": {
+          "completed": 1,
+          "executed": 1,
+          "failed": 0,
+          "requested": 1,
+          "skipped": 0
+        },
+        "failed_step": null,
+        "failure_phase": null,
+        "resources": {
+          "completed": 2,
+          "executed": 2,
+          "failed": 0,
+          "requested": 2,
+          "skipped": 0
+        },
+        "state": "success"
+      },
       "summary": {
         "error": 0,
         "info": 1,

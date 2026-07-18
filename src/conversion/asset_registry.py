@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import os
 import posixpath
+import secrets
+import stat
+import tempfile
 from dataclasses import dataclass, field
-from typing import ClassVar, Iterable, cast
+from typing import Callable, ClassVar, Iterable, cast
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
     ProjectTextureGroup,
     load_gamemaker_project_manifest,
 )
@@ -40,6 +44,7 @@ from src.conversion.type_defs import (
 from src.conversion.path_registry import write_path_registry
 from src.conversion.animation_curve_registry import write_animation_curve_registry
 from src.conversion.extension_registry import (
+    collision_safe_extension_stub_resource_paths,
     extension_entry_from_yy,
     extension_entry_metadata,
     extension_stub_resource_path,
@@ -58,6 +63,389 @@ def _empty_int_list() -> list[int]:
 
 def _empty_str_list() -> list[str]:
     return []
+
+
+def _path_is_redirected(path: str, path_stat: os.stat_result) -> bool:
+    """Return whether a path is a symbolic link or Windows junction."""
+    if stat.S_ISLNK(path_stat.st_mode):
+        return True
+    junction_candidate: object = getattr(os.path, "isjunction", None)
+    if not callable(junction_candidate):
+        return False
+    junction_checker = cast(Callable[[str], bool], junction_candidate)
+    return junction_checker(path)
+
+
+def _asset_output_components(root: str, output_path: str) -> tuple[str, ...]:
+    try:
+        contained = os.path.commonpath((root, output_path)) == root
+    except ValueError:
+        contained = False
+    relative_path = os.path.relpath(output_path, root) if contained else os.pardir
+    components = tuple(relative_path.split(os.sep))
+    if (
+        not contained
+        or os.path.isabs(relative_path)
+        or any(component in {"", ".", ".."} for component in components)
+    ):
+        raise ValueError(
+            f"Generated asset output escapes its confinement root: {output_path}"
+        )
+    return components
+
+
+def _ensure_asset_output_root(root: str) -> tuple[int, int]:
+    os.makedirs(root, exist_ok=True)
+    root_stat = os.lstat(root)
+    if _path_is_redirected(root, root_stat) or not stat.S_ISDIR(root_stat.st_mode):
+        raise OSError(
+            f"Refusing redirected asset-registry output directory: {root}"
+        )
+    return (root_stat.st_dev, root_stat.st_ino)
+
+
+def _confined_asset_output_supported() -> bool:
+    return (
+        os.name != "nt"
+        and os.chmod in os.supports_fd
+        and all(
+            operation in os.supports_dir_fd
+            for operation in (os.open, os.mkdir, os.stat, os.rename, os.unlink)
+        )
+    )
+
+
+def _atomic_write_asset_text_at(
+    root: str,
+    components: tuple[str, ...],
+    content: str,
+) -> None:
+    directory_flags = os.O_RDONLY
+    directory_flags |= getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    root_fd = os.open(root, directory_flags)
+    current_fd = root_fd
+    try:
+        _verify_open_asset_output_directory(root, root, root_fd)
+        for component in components[:-1]:
+            child_fd = _open_or_create_asset_output_directory(
+                current_fd,
+                component,
+                directory_flags,
+            )
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = child_fd
+
+        output_directory = os.path.join(root, *components[:-1])
+        _verify_open_asset_output_directory(root, output_directory, current_fd)
+        _atomic_write_asset_text_in_directory(
+            current_fd,
+            components[-1],
+            content,
+        )
+        _verify_open_asset_output_directory(root, output_directory, current_fd)
+    finally:
+        if current_fd != root_fd:
+            os.close(current_fd)
+        os.close(root_fd)
+
+
+def _open_or_create_asset_output_directory(
+    parent_fd: int,
+    component: str,
+    flags: int,
+) -> int:
+    try:
+        return os.open(component, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        try:
+            os.mkdir(component, 0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        return os.open(component, flags, dir_fd=parent_fd)
+    except OSError as error:
+        raise OSError(
+            f"Refusing redirected asset-registry output directory: {component}"
+        ) from error
+
+
+def _verify_open_asset_output_directory(
+    root: str,
+    directory_path: str,
+    directory_fd: int,
+) -> None:
+    try:
+        path_stat = os.lstat(directory_path)
+        open_stat = os.fstat(directory_fd)
+    except OSError as error:
+        raise OSError(
+            f"Asset-registry output directory changed: {directory_path}"
+        ) from error
+    root_real = os.path.realpath(root)
+    directory_real = os.path.realpath(directory_path)
+    try:
+        contained = os.path.commonpath((directory_real, root_real)) == root_real
+    except ValueError:
+        contained = False
+    if (
+        _path_is_redirected(directory_path, path_stat)
+        or not stat.S_ISDIR(path_stat.st_mode)
+        or (path_stat.st_dev, path_stat.st_ino)
+        != (open_stat.st_dev, open_stat.st_ino)
+        or not contained
+    ):
+        raise OSError(
+            f"Refusing redirected asset-registry output directory: {directory_path}"
+        )
+
+
+def _asset_output_state_at(
+    directory_fd: int,
+    filename: str,
+) -> tuple[tuple[int, int] | None, int | None]:
+    try:
+        output_stat = os.stat(
+            filename,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return None, None
+    if not stat.S_ISREG(output_stat.st_mode):
+        raise OSError(f"Refusing to replace non-regular asset registry: {filename}")
+    return (
+        (output_stat.st_dev, output_stat.st_ino),
+        stat.S_IMODE(output_stat.st_mode),
+    )
+
+
+def _verify_asset_output_state_at(
+    directory_fd: int,
+    filename: str,
+    expected_identity: tuple[int, int] | None,
+) -> None:
+    current_identity, _mode = _asset_output_state_at(directory_fd, filename)
+    if current_identity != expected_identity:
+        raise OSError(f"Asset registry changed during publication: {filename}")
+
+
+def _atomic_write_asset_text_in_directory(
+    directory_fd: int,
+    filename: str,
+    content: str,
+) -> None:
+    output_identity, output_mode = _asset_output_state_at(directory_fd, filename)
+    temporary_name = ""
+    file_descriptor = -1
+    for _attempt in range(100):
+        temporary_name = f".{filename}.{secrets.token_hex(8)}.tmp"
+        try:
+            file_descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=directory_fd,
+            )
+            break
+        except FileExistsError:
+            continue
+    if file_descriptor < 0:
+        raise OSError(f"Could not stage generated asset output: {filename}")
+
+    temporary_stat = os.fstat(file_descriptor)
+    temporary_identity = (temporary_stat.st_dev, temporary_stat.st_ino)
+    temporary_pending = True
+    try:
+        if output_mode is not None:
+            os.chmod(file_descriptor, output_mode)
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as temporary_file:
+            file_descriptor = -1
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        staged_stat = os.stat(
+            temporary_name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(staged_stat.st_mode)
+            or (staged_stat.st_dev, staged_stat.st_ino) != temporary_identity
+        ):
+            raise OSError(f"Generated asset staging file changed: {filename}")
+        _verify_asset_output_state_at(directory_fd, filename, output_identity)
+        os.replace(
+            temporary_name,
+            filename,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        temporary_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_pending:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+
+
+def _atomic_write_asset_text_fallback(
+    root: str,
+    components: tuple[str, ...],
+    content: str,
+) -> None:
+    directory_identities = _prepare_asset_output_directories_fallback(
+        root,
+        components[:-1],
+    )
+    output_directory = os.path.join(root, *components[:-1])
+    output_path = os.path.join(output_directory, components[-1])
+    output_identity, output_mode = _asset_output_state(output_path)
+    file_descriptor, staged_path = tempfile.mkstemp(
+        dir=output_directory,
+        prefix=f".{components[-1]}.",
+        suffix=".tmp",
+    )
+    temporary_stat = os.fstat(file_descriptor)
+    temporary_identity = (temporary_stat.st_dev, temporary_stat.st_ino)
+    staged_pending = True
+    try:
+        if output_mode is not None:
+            os.chmod(staged_path, output_mode)
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as staged_file:
+            file_descriptor = -1
+            staged_file.write(content)
+            staged_file.flush()
+            os.fsync(staged_file.fileno())
+        _verify_asset_output_directories_fallback(directory_identities)
+        staged_stat = os.lstat(staged_path)
+        if (
+            not stat.S_ISREG(staged_stat.st_mode)
+            or (staged_stat.st_dev, staged_stat.st_ino) != temporary_identity
+        ):
+            raise OSError(
+                f"Generated asset staging file changed: {components[-1]}"
+            )
+        _verify_asset_output_state(output_path, output_identity)
+        os.replace(staged_path, output_path)
+        staged_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if staged_pending:
+            try:
+                _verify_asset_output_directories_fallback(directory_identities)
+                current_stage_stat = os.lstat(staged_path)
+                if (
+                    current_stage_stat.st_dev,
+                    current_stage_stat.st_ino,
+                ) == temporary_identity:
+                    os.unlink(staged_path)
+            except OSError:
+                pass
+
+
+def _prepare_asset_output_directories_fallback(
+    root: str,
+    directory_components: tuple[str, ...],
+) -> tuple[tuple[str, tuple[int, int]], ...]:
+    root_real = os.path.realpath(root)
+    directory_path = root
+    identities: list[tuple[str, tuple[int, int]]] = []
+    for component in (None, *directory_components):
+        if component is not None:
+            directory_path = os.path.join(directory_path, component)
+            try:
+                directory_stat = os.lstat(directory_path)
+            except FileNotFoundError:
+                os.mkdir(directory_path)
+                directory_stat = os.lstat(directory_path)
+        else:
+            directory_stat = os.lstat(directory_path)
+        directory_real = os.path.realpath(directory_path)
+        try:
+            contained = os.path.commonpath((directory_real, root_real)) == root_real
+        except ValueError:
+            contained = False
+        if (
+            _path_is_redirected(directory_path, directory_stat)
+            or not stat.S_ISDIR(directory_stat.st_mode)
+            or not contained
+        ):
+            raise OSError(
+                "Refusing redirected asset-registry output directory: "
+                f"{directory_path}"
+            )
+        identities.append(
+            (
+                directory_path,
+                (directory_stat.st_dev, directory_stat.st_ino),
+            )
+        )
+    return tuple(identities)
+
+
+def _verify_asset_output_directories_fallback(
+    identities: tuple[tuple[str, tuple[int, int]], ...],
+) -> None:
+    for directory_path, expected_identity in identities:
+        try:
+            directory_stat = os.lstat(directory_path)
+        except OSError as error:
+            raise OSError(
+                f"Asset-registry output directory changed: {directory_path}"
+            ) from error
+        if (
+            _path_is_redirected(directory_path, directory_stat)
+            or not stat.S_ISDIR(directory_stat.st_mode)
+            or (directory_stat.st_dev, directory_stat.st_ino)
+            != expected_identity
+        ):
+            raise OSError(
+                f"Asset-registry output directory changed: {directory_path}"
+            )
+
+
+def _asset_output_state(
+    output_path: str,
+) -> tuple[tuple[int, int] | None, int | None]:
+    try:
+        output_stat = os.lstat(output_path)
+    except FileNotFoundError:
+        return None, None
+    if not stat.S_ISREG(output_stat.st_mode):
+        raise OSError(
+            f"Refusing to replace non-regular asset registry: {output_path}"
+        )
+    return (
+        (output_stat.st_dev, output_stat.st_ino),
+        stat.S_IMODE(output_stat.st_mode),
+    )
+
+
+def _verify_asset_output_state(
+    output_path: str,
+    expected_identity: tuple[int, int] | None,
+) -> None:
+    current_identity, _mode = _asset_output_state(output_path)
+    if current_identity != expected_identity:
+        raise OSError(f"Asset registry changed during publication: {output_path}")
 
 
 @dataclass(frozen=True)
@@ -97,6 +485,30 @@ class _ProjectResource:
     yy_path: str
     source_path: str
     raw_data: JsonDict
+
+
+@dataclass(frozen=True)
+class _DeclaredRegistryResource:
+    kind: str
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _UnavailableRegistryResource:
+    declaration: _DeclaredRegistryResource
+    outcome_key: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class _AssetRegistryConversionPlan:
+    resources: tuple[_ProjectResource, ...]
+    resource_keys: tuple[str, ...]
+    requested_keys: tuple[str, ...]
+    unavailable: tuple[_UnavailableRegistryResource, ...]
 
 
 @dataclass
@@ -194,6 +606,23 @@ class AssetRegistryConverter(BaseConverter):
         **{kind: kind for kind in RESOURCE_TYPE_BY_KIND if kind != "included_files"},
         "included_files": "datafiles",
     }
+    MANIFEST_KIND_BY_RESOURCE_TYPE: ClassVar[dict[str, str]] = {
+        "gmanimationcurve": "animcurves",
+        "gmextension": "extensions",
+        "gmfont": "fonts",
+        "gmincludedfile": "included_files",
+        "gmobject": "objects",
+        "gmparticlesystem": "particlesystems",
+        "gmpath": "paths",
+        "gmroom": "rooms",
+        "gmscript": "scripts",
+        "gmsequence": "sequences",
+        "gmshader": "shaders",
+        "gmsound": "sounds",
+        "gmsprite": "sprites",
+        "gmtileset": "tilesets",
+        "gmtimeline": "timelines",
+    }
 
     def __init__(
         self,
@@ -226,24 +655,414 @@ class AssetRegistryConverter(BaseConverter):
             self.gm_project_path
         )
         self._system_font_paths: dict[str, str | None] = {}
+        self._timeline_action_source_failures: set[tuple[str, str]] = set()
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
-        resources = sorted(
-            self._load_project_resources(),
-            key=lambda resource: (
-                self.KIND_ORDER.get(resource.kind, len(self.KIND_ORDER)),
-                resource.name.lower(),
-                resource.source_path,
-            ),
+        resources = self._ordered_project_resources()
+        entries, _processed_count = self._build_entries_from_resources(resources)
+        return entries
+
+    def _ordered_project_resources(self) -> tuple[_ProjectResource, ...]:
+        """Return every discoverable base resource in stable registry order."""
+        return tuple(
+            sorted(
+                self._load_project_resources(),
+                key=lambda resource: (
+                    self.KIND_ORDER.get(resource.kind, len(self.KIND_ORDER)),
+                    resource.name.lower(),
+                    resource.source_path,
+                ),
+            )
         )
+
+    def _conversion_plan(self) -> _AssetRegistryConversionPlan:
+        """Plan logical registry resources before filtering unavailable input."""
+        resources = self._ordered_project_resources()
+        manifest_is_valid = (
+            self.project_manifest.yyp_path is not None
+            and not any(
+                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+                for diagnostic in self.project_manifest.diagnostics
+            )
+        )
+        if not manifest_is_valid:
+            resource_keys = tuple(
+                self._outcome_resource_key(resource)
+                for resource in resources
+            )
+            return _AssetRegistryConversionPlan(
+                resources=resources,
+                resource_keys=resource_keys,
+                requested_keys=resource_keys,
+                unavailable=(),
+            )
+
+        declaration_groups = self._declared_registry_resources()
+        available_by_identity = {
+            self._resource_identity(resource.kind, resource.name): resource
+            for resource in resources
+        }
+        selected_by_identity: dict[tuple[str, str], _ProjectResource] = {}
+        declared_identities: set[tuple[str, str]] = set()
+        requested_keys: list[str] = []
+        unavailable: list[_UnavailableRegistryResource] = []
+
+        for declarations in declaration_groups:
+            declaration = declarations[0]
+            identity = self._resource_identity(
+                declaration.kind,
+                declaration.name,
+            )
+            declared_identities.add(identity)
+            available = available_by_identity.get(identity)
+            unavailable_reason = (
+                "its manifest source path was rejected"
+                if all(item.source_path is None for item in declarations)
+                else "none of its declared source paths could be validated and read"
+            )
+
+            if declaration.kind == "included_files":
+                allowed_sources: set[str] = set()
+                reasons: list[str] = []
+                for item in declarations:
+                    source_path, reason = self._declared_included_file_source(
+                        item
+                    )
+                    if source_path is not None:
+                        allowed_sources.add(source_path)
+                    elif reason:
+                        reasons.append(reason)
+                if (
+                    available is None
+                    or available.source_path not in allowed_sources
+                ):
+                    available = None
+                if reasons:
+                    unavailable_reason = reasons[-1]
+
+            if available is not None:
+                resource_key = self._outcome_resource_key(available)
+                selected_by_identity[identity] = available
+                requested_keys.append(resource_key)
+                continue
+
+            outcome_key = self._unavailable_outcome_resource_key(declaration)
+            requested_keys.append(outcome_key)
+            unavailable.append(
+                _UnavailableRegistryResource(
+                    declaration=declaration,
+                    outcome_key=outcome_key,
+                    reason=unavailable_reason,
+                )
+            )
+
+        # GameMaker's Included Files surface mirrors the physical datafiles
+        # tree. Keep contained disk files in the registry even when an older
+        # YYP does not list them, while still accounting for stale declarations.
+        for resource in resources:
+            identity = self._resource_identity(resource.kind, resource.name)
+            if (
+                resource.kind != "included_files"
+                or identity in declared_identities
+            ):
+                continue
+            selected_by_identity[identity] = resource
+            requested_keys.append(self._outcome_resource_key(resource))
+
+        selected_resources = tuple(
+            resource
+            for resource in resources
+            if self._resource_identity(resource.kind, resource.name)
+            in selected_by_identity
+        )
+        resource_keys = tuple(
+            self._outcome_resource_key(resource)
+            for resource in selected_resources
+        )
+        return _AssetRegistryConversionPlan(
+            resources=selected_resources,
+            resource_keys=resource_keys,
+            requested_keys=tuple(requested_keys),
+            unavailable=tuple(unavailable),
+        )
+
+    def _declared_registry_resources(
+        self,
+    ) -> tuple[tuple[_DeclaredRegistryResource, ...], ...]:
+        """Return unique supported YYP base assets, including rejected paths."""
+        declared_by_identity: dict[
+            tuple[str, str],
+            list[_DeclaredRegistryResource],
+        ] = {}
+        seen_declarations: set[tuple[str, str, str | None]] = set()
+
+        def add(resource: _DeclaredRegistryResource) -> None:
+            identity = self._resource_identity(resource.kind, resource.name)
+            declaration_key = (*identity, resource.source_path)
+            if (
+                not resource.name
+                or resource.kind not in self.RESOURCE_TYPE_BY_KIND
+                or declaration_key in seen_declarations
+            ):
+                return
+            seen_declarations.add(declaration_key)
+            declared_by_identity.setdefault(identity, []).append(resource)
+
+        for resource in self.project_manifest.resources:
+            kind = self._manifest_registry_kind(
+                resource.kind,
+                resource.resource_type,
+            )
+            if kind is None:
+                continue
+            manifest_field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None
+                and resource.source.field_path
+                else "resources[].id.path"
+            )
+            add(
+                _DeclaredRegistryResource(
+                    kind=kind,
+                    name=resource.name,
+                    source_path=resource.path,
+                    owner_source_path=self.project_manifest.yyp_path,
+                    manifest_field=manifest_field,
+                )
+            )
+
+        for diagnostic in self.project_manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+            ):
+                continue
+            kind = self._manifest_diagnostic_registry_kind(diagnostic)
+            if kind is None:
+                continue
+            add(
+                _DeclaredRegistryResource(
+                    kind=kind,
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else self.project_manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                )
+            )
+
+        for included_file in self.project_manifest.included_files:
+            raw_field = next(
+                (
+                    key
+                    for key in ("path", "filePath", "filename")
+                    if key in included_file.raw_data
+                ),
+                "path",
+            )
+            source_path = included_file.path
+            if (
+                raw_field == "filePath"
+                and included_file.name
+                and posixpath.basename(source_path) != included_file.name
+            ):
+                # Current GameMaker projects store the containing datafiles
+                # directory in filePath and the payload filename in name.
+                source_path = posixpath.join(source_path, included_file.name)
+            logical_name = self._included_file_logical_name(
+                source_path,
+                included_file.name,
+            )
+            manifest_field = (
+                f"{included_file.source.field_path}.{raw_field}"
+                if included_file.source is not None
+                and included_file.source.field_path
+                else f"IncludedFiles[].{raw_field}"
+            )
+            add(
+                _DeclaredRegistryResource(
+                    kind="included_files",
+                    name=logical_name,
+                    source_path=source_path or None,
+                    owner_source_path=self.project_manifest.yyp_path,
+                    manifest_field=manifest_field,
+                )
+            )
+
+        return tuple(
+            tuple(declarations)
+            for declarations in declared_by_identity.values()
+        )
+
+    @classmethod
+    def _manifest_registry_kind(
+        cls,
+        kind: str | None,
+        resource_type: str | None,
+    ) -> str | None:
+        normalized_kind = (kind or "").casefold()
+        if normalized_kind == "datafiles":
+            normalized_kind = "included_files"
+        if normalized_kind in cls.RESOURCE_TYPE_BY_KIND:
+            return normalized_kind
+        return cls.MANIFEST_KIND_BY_RESOURCE_TYPE.get(
+            (resource_type or "").casefold()
+        )
+
+    @classmethod
+    def _manifest_diagnostic_registry_kind(
+        cls,
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> str | None:
+        return cls._manifest_registry_kind(
+            diagnostic.resource_kind,
+            diagnostic.resource_type,
+        )
+
+    @staticmethod
+    def _resource_identity(kind: str, name: str) -> tuple[str, str]:
+        return (kind, name)
+
+    @staticmethod
+    def _included_file_logical_name(path: str, name: str) -> str:
+        normalized = posixpath.normpath(path.replace("\\", "/"))
+        if normalized.startswith("datafiles/"):
+            relative_path = normalized.removeprefix("datafiles/")
+            if relative_path and relative_path != ".":
+                return relative_path
+        return name or posixpath.basename(normalized)
+
+    def _declared_included_file_source(
+        self,
+        resource: _DeclaredRegistryResource,
+    ) -> tuple[str | None, str]:
+        if resource.source_path is None:
+            return None, "its manifest source path was rejected"
+        resolved = self._resolve_project_source(
+            resource.source_path,
+            owner_source_path=resource.owner_source_path,
+            resource=resource.name,
+            resource_type="included_file",
+            field=resource.manifest_field,
+        )
+        if resolved is None:
+            return None, "its manifest source path was rejected"
+        try:
+            source_kind, separator, _remainder = (
+                resolved.source_path.partition("/")
+            )
+            if not separator or source_kind.casefold() != "datafiles":
+                raise ProjectSourcePathError(
+                    "Resolved GameMaker included-file path must remain under "
+                    "the 'datafiles' directory after normalization: "
+                    f"{resolved.source_path!r}"
+                )
+            canonical_datafiles = os.path.realpath(
+                os.path.join(self.gm_project_path, "datafiles")
+            )
+            canonical_source = os.path.realpath(resolved.filesystem_path)
+            if os.path.normcase(
+                os.path.commonpath(
+                    (canonical_datafiles, canonical_source)
+                )
+            ) != os.path.normcase(canonical_datafiles):
+                raise ProjectSourcePathError(
+                    "Resolved GameMaker included-file target must remain "
+                    "under the 'datafiles' directory after symbolic-link "
+                    f"resolution: {resolved.source_path!r}"
+                )
+        except ProjectSourcePathError as exc:
+            self._report_source_path_rejection(
+                resource.source_path,
+                exc,
+                owner_source_path=resource.owner_source_path,
+                resource=resource.name,
+                resource_type="included_file",
+                field=resource.manifest_field,
+            )
+            return None, "its manifest source path was rejected"
+        except ValueError as exc:
+            self._report_source_path_rejection(
+                resource.source_path,
+                ProjectSourcePathError(str(exc)),
+                owner_source_path=resource.owner_source_path,
+                resource=resource.name,
+                resource_type="included_file",
+                field=resource.manifest_field,
+            )
+            return None, "its manifest source path was rejected"
+        if (
+            resolved.source_path.endswith(".yy")
+            or not os.path.isfile(resolved.filesystem_path)
+        ):
+            return (
+                None,
+                f"the declared file is missing at {resolved.source_path!r}",
+            )
+        return resolved.source_path, ""
+
+    @staticmethod
+    def _unavailable_outcome_resource_key(
+        resource: _DeclaredRegistryResource,
+    ) -> str:
+        source_label = resource.source_path or resource.manifest_field or ""
+        return f"{resource.kind}:{resource.name}:{source_label}"
+
+    def _report_unavailable_registry_resource(
+        self,
+        resource: _UnavailableRegistryResource,
+    ) -> None:
+        declaration = resource.declaration
+        asset_type = self.RESOURCE_TYPE_BY_KIND[declaration.kind]
+        message = (
+            "Warning: Skipping manifest-declared GameMaker asset-registry "
+            f"{asset_type} {declaration.name!r} because {resource.reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    declaration.owner_source_path
+                ),
+                resource=declaration.name,
+                resource_type=asset_type,
+                manifest_entry=declaration.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker resource inside the "
+                    "project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
+
+    def _build_entries_from_resources(
+        self,
+        resources: tuple[_ProjectResource, ...],
+        *,
+        track_outcomes: bool = False,
+    ) -> tuple[tuple[AssetRegistryEntry, ...], int]:
+        """Build entries and report how many base resources began processing."""
+        self._timeline_action_source_failures.clear()
         room_order_indices = self._room_order_indices(resources)
         godot_paths = self._stable_godot_paths(resources)
+        timeline_script_stems = self._stable_timeline_script_stems(resources)
         used_ids: set[int] = set()
         entries: list[AssetRegistryEntry] = []
+        processed_count = 0
 
         for resource in resources:
             if not self.conversion_running():
                 break
+            if track_outcomes:
+                self._resource_started(self._outcome_resource_key(resource))
             asset_type = self.RESOURCE_TYPE_BY_KIND[resource.kind]
             entry = AssetRegistryEntry(
                 id=self._stable_asset_id(asset_type, resource.name, used_ids),
@@ -255,7 +1074,14 @@ class AssetRegistryConverter(BaseConverter):
                 godot_path=godot_paths[self._resource_key(resource)],
                 legacy_id=self._legacy_id(resource),
                 tags=self._extract_tags(resource.raw_data),
-                metadata=self._metadata(resource, room_order_indices),
+                metadata=self._metadata(
+                    resource,
+                    room_order_indices,
+                    timeline_script_stem=timeline_script_stems.get(
+                        self._resource_key(resource)
+                    ),
+                    godot_path=godot_paths[self._resource_key(resource)],
+                ),
             )
             entries.append(entry)
             if resource.kind == "scripts":
@@ -280,33 +1106,78 @@ class AssetRegistryConverter(BaseConverter):
                             },
                         )
                     )
+            processed_count += 1
 
-        return tuple(entries)
+        return tuple(entries), processed_count
 
     def convert_all(self) -> str:
-        entries = self.build_entries()
-        texture_groups, audio_groups = self.build_group_registries(entries)
-        registry_path = os.path.join(self.godot_project_path, ASSET_REGISTRY_RELATIVE_PATH)
-        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        self._reset_resource_outcomes()
+        plan = self._conversion_plan()
+        resources = plan.resources
+        for resource_key in plan.requested_keys:
+            self._resource_requested(resource_key)
+        for unavailable in plan.unavailable:
+            self._resource_skipped(unavailable.outcome_key)
+            self._report_unavailable_registry_resource(unavailable)
 
-        with open(registry_path, "w", encoding="utf-8") as f:
-            f.write(
-                render_asset_registry_script(
-                    entries,
-                    texture_groups=texture_groups,
-                    audio_groups=audio_groups,
-                )
-            )
-        self._write_group_compatibility_report(entries, texture_groups, audio_groups)
-        self._write_timeline_action_scripts(entries)
-        write_path_registry(self.gm_project_path, self.godot_project_path, entries)
-        write_animation_curve_registry(self.gm_project_path, self.godot_project_path, entries)
-        write_extension_compatibility_outputs(
-            self.gm_project_path,
-            self.godot_project_path,
-            diagnostics=self.diagnostics,
-            log_callback=self.log_callback,
+        entries, processed_count = self._build_entries_from_resources(
+            resources,
+            track_outcomes=True,
         )
+        registry_path = os.path.join(self.godot_project_path, ASSET_REGISTRY_RELATIVE_PATH)
+        if processed_count < len(resources) or not self.conversion_running():
+            return registry_path
+
+        try:
+            texture_groups, audio_groups = self.build_group_registries(entries)
+            self._write_group_compatibility_report(
+                entries,
+                texture_groups,
+                audio_groups,
+            )
+            timeline_completeness = self._write_timeline_action_scripts(entries)
+            write_path_registry(
+                self.gm_project_path,
+                self.godot_project_path,
+                entries,
+            )
+            write_animation_curve_registry(
+                self.gm_project_path,
+                self.godot_project_path,
+                entries,
+            )
+            write_extension_compatibility_outputs(
+                self.gm_project_path,
+                self.godot_project_path,
+                diagnostics=self.diagnostics,
+                log_callback=self.log_callback,
+                asset_entries=entries,
+            )
+            registry_script = render_asset_registry_script(
+                entries,
+                texture_groups=texture_groups,
+                audio_groups=audio_groups,
+            )
+            self._atomic_write_text(
+                registry_path,
+                registry_script,
+                confinement_root=self.godot_project_path,
+            )
+        except Exception:
+            for resource_key in plan.resource_keys:
+                self._resource_failed(resource_key)
+            raise
+
+        for resource in resources:
+            resource_key = self._outcome_resource_key(resource)
+            timeline_key = (resource.name, resource.source_path)
+            if (
+                resource.kind == "timelines"
+                and not timeline_completeness.get(timeline_key, True)
+            ):
+                self._resource_skipped(resource_key)
+            else:
+                self._resource_completed(resource_key)
 
         self.log_callback(
             "Generated GameMaker asset registry: {path} ({count} assets)".format(
@@ -315,6 +1186,29 @@ class AssetRegistryConverter(BaseConverter):
             )
         )
         return registry_path
+
+    @staticmethod
+    def _atomic_write_text(
+        output_path: str,
+        content: str,
+        *,
+        confinement_root: str | None = None,
+    ) -> None:
+        """Publish generated UTF-8 text through a confined, no-follow path."""
+        output_absolute = os.path.abspath(output_path)
+        output_directory = os.path.dirname(output_absolute) or os.curdir
+        root = os.path.abspath(confinement_root or output_directory)
+        components = _asset_output_components(root, output_absolute)
+        _ensure_asset_output_root(root)
+        if _confined_asset_output_supported():
+            _atomic_write_asset_text_at(root, components, content)
+            return
+        _atomic_write_asset_text_fallback(root, components, content)
+
+    @staticmethod
+    def _outcome_resource_key(resource: _ProjectResource) -> str:
+        """Return an opaque lifecycle key for one deduplicated base resource."""
+        return f"{resource.kind}:{resource.name}:{resource.source_path}"
 
     def build_group_registries(
         self,
@@ -440,13 +1334,21 @@ class AssetRegistryConverter(BaseConverter):
                 self._safe_log(f"Warning: Skipping missing GameMaker asset {name}: {yy_path}")
                 continue
 
+            raw_data = self._read_yy_file(yy_path)
+            if raw_data is None:
+                self._safe_log(
+                    "Warning: Skipping unreadable or malformed GameMaker "
+                    f"asset metadata for {name}: {yy_path}"
+                )
+                continue
+
             resources.append(
                 _ProjectResource(
                     kind=kind,
                     name=name,
                     yy_path=yy_path,
                     source_path=source_path,
-                    raw_data=self._read_yy_file(yy_path) or {},
+                    raw_data=raw_data,
                 )
             )
         return tuple(resources)
@@ -514,15 +1416,21 @@ class AssetRegistryConverter(BaseConverter):
                     continue
                 if not os.path.isfile(yy_source.filesystem_path):
                     continue
+                raw_data = self._read_yy_file(yy_source.filesystem_path)
+                if raw_data is None:
+                    self._safe_log(
+                        "Warning: Skipping unreadable or malformed GameMaker "
+                        f"asset metadata for {name}: "
+                        f"{yy_source.filesystem_path}"
+                    )
+                    continue
                 resources.append(
                     _ProjectResource(
                         kind=kind,
                         name=name,
                         yy_path=yy_source.filesystem_path,
                         source_path=yy_source.source_path,
-                        raw_data=(
-                            self._read_yy_file(yy_source.filesystem_path) or {}
-                        ),
+                        raw_data=raw_data,
                     )
                 )
         return tuple(resources)
@@ -712,9 +1620,20 @@ class AssetRegistryConverter(BaseConverter):
         self,
         resources: Iterable[_ProjectResource],
     ) -> dict[tuple[str, str, str], str]:
+        ordered_resources = tuple(resources)
+        extension_paths = collision_safe_extension_stub_resource_paths(
+            (resource.name, resource.source_path)
+            for resource in ordered_resources
+            if resource.kind == "extensions"
+        )
         paths: dict[tuple[str, str, str], str] = {}
         used_paths: set[str] = set()
-        for resource in resources:
+        for resource in ordered_resources:
+            if resource.kind == "extensions":
+                path = extension_paths[(resource.name, resource.source_path)]
+                used_paths.add(path.casefold())
+                paths[self._resource_key(resource)] = path
+                continue
             suffix_index = 0
             base_path = ""
             while True:
@@ -732,6 +1651,41 @@ class AssetRegistryConverter(BaseConverter):
                 used_paths.add(folded_path)
             paths[self._resource_key(resource)] = path
         return paths
+
+    @classmethod
+    def _stable_timeline_script_stems(
+        cls,
+        resources: Iterable[_ProjectResource],
+    ) -> dict[tuple[str, str, str], str]:
+        """Return order-independent, case-insensitively unique timeline stems."""
+        timeline_resources = sorted(
+            (
+                resource
+                for resource in resources
+                if resource.kind == "timelines"
+            ),
+            key=lambda resource: (
+                generated_resource_stem(resource.name).casefold(),
+                resource.name.casefold(),
+                resource.name,
+                resource.source_path.casefold(),
+                resource.source_path,
+            ),
+        )
+        stems: dict[tuple[str, str, str], str] = {}
+        used_stems: set[str] = set()
+        for resource in timeline_resources:
+            base_stem = generated_resource_stem(resource.name)
+            suffix_index = 0
+            while True:
+                suffix = "" if suffix_index == 0 else f"_{suffix_index + 1}"
+                stem = base_stem + suffix
+                if stem.casefold() not in used_stems:
+                    break
+                suffix_index += 1
+            used_stems.add(stem.casefold())
+            stems[cls._resource_key(resource)] = stem
+        return stems
 
     @staticmethod
     def _resource_key(resource: _ProjectResource) -> tuple[str, str, str]:
@@ -764,7 +1718,10 @@ class AssetRegistryConverter(BaseConverter):
         if resource.kind == "included_files":
             return "res://included_files/" + resource.name
         if resource.kind == "extensions":
-            return extension_stub_resource_path(resource.name)
+            return extension_stub_resource_path(
+                resource.name,
+                suffix=suffix,
+            )
         return ""
 
     def _sound_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
@@ -795,6 +1752,9 @@ class AssetRegistryConverter(BaseConverter):
         self,
         resource: _ProjectResource,
         room_order_indices: dict[str, int] | None = None,
+        *,
+        timeline_script_stem: str | None = None,
+        godot_path: str = "",
     ) -> JsonDict:
         if resource.kind == "rooms":
             room_settings = resource.raw_data.get("roomSettings")
@@ -811,14 +1771,22 @@ class AssetRegistryConverter(BaseConverter):
             return self._sequence_metadata(resource.raw_data)
 
         if resource.kind == "timelines":
-            return self._timeline_metadata(resource)
+            return self._timeline_metadata(
+                resource,
+                script_stem=timeline_script_stem,
+            )
 
         if resource.kind in {"particles", "particlesystems"}:
             return self._particle_system_metadata(resource.raw_data)
 
         if resource.kind == "extensions":
             return extension_entry_metadata(
-                extension_entry_from_yy(self.gm_project_path, resource.yy_path, resource.raw_data)
+                extension_entry_from_yy(
+                    self.gm_project_path,
+                    resource.yy_path,
+                    resource.raw_data,
+                ),
+                stub_path=godot_path or None,
             )
 
         if resource.kind in {"sprites", "fonts", "tilesets"}:
@@ -917,11 +1885,12 @@ class AssetRegistryConverter(BaseConverter):
         audio_groups: tuple[JsonDict, ...],
     ) -> str:
         report_path = os.path.join(self.godot_project_path, GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH)
-        os.makedirs(os.path.dirname(report_path), exist_ok=True)
         payload = self._group_compatibility_report(entries, texture_groups, audio_groups)
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, sort_keys=True)
-            f.write("\n")
+        self._atomic_write_text(
+            report_path,
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            confinement_root=self.godot_project_path,
+        )
         return report_path
 
     def _group_compatibility_report(
@@ -1034,8 +2003,19 @@ class AssetRegistryConverter(BaseConverter):
             "broadcasts": self._sequence_event_metadata(raw_data, ("broadcastMessages", "broadcasts")),
         }
 
-    def _timeline_metadata(self, resource: _ProjectResource) -> JsonDict:
-        moments = self._timeline_moment_metadata(resource)
+    def _timeline_metadata(
+        self,
+        resource: _ProjectResource,
+        *,
+        script_stem: str | None = None,
+    ) -> JsonDict:
+        resolved_script_stem = script_stem or generated_resource_stem(
+            resource.name
+        )
+        moments = self._timeline_moment_metadata(
+            resource,
+            script_stem=resolved_script_stem,
+        )
         frames = [
             self._metadata_int(moment.get("frame"), 0)
             for moment in moments
@@ -1047,7 +2027,15 @@ class AssetRegistryConverter(BaseConverter):
             "max_moment": max(frames, default=-1),
         }
 
-    def _timeline_moment_metadata(self, resource: _ProjectResource) -> list[JsonDict]:
+    def _timeline_moment_metadata(
+        self,
+        resource: _ProjectResource,
+        *,
+        script_stem: str | None = None,
+    ) -> list[JsonDict]:
+        resolved_script_stem = script_stem or generated_resource_stem(
+            resource.name
+        )
         raw_moments = resource.raw_data.get("momentList")
         if not isinstance(raw_moments, list):
             raw_moments = resource.raw_data.get("moments")
@@ -1063,7 +2051,12 @@ class AssetRegistryConverter(BaseConverter):
                 moment.get("moment", moment.get("frame", moment.get("time", index))),
                 index,
             )
-            actions = self._timeline_action_metadata(resource, moment, frame)
+            actions = self._timeline_action_metadata(
+                resource,
+                moment,
+                frame,
+                script_stem=resolved_script_stem,
+            )
             moments.append({
                 "frame": frame,
                 "actions": actions,
@@ -1071,7 +2064,10 @@ class AssetRegistryConverter(BaseConverter):
             })
 
         if not moments:
-            discovered_actions = self._timeline_discovered_source_actions(resource)
+            discovered_actions = self._timeline_discovered_source_actions(
+                resource,
+                script_stem=resolved_script_stem,
+            )
             for frame, actions in discovered_actions:
                 moments.append({
                     "frame": frame,
@@ -1085,6 +2081,8 @@ class AssetRegistryConverter(BaseConverter):
         resource: _ProjectResource,
         moment: JsonDict,
         frame: int,
+        *,
+        script_stem: str | None = None,
     ) -> list[JsonDict]:
         actions: list[JsonDict] = []
         for raw_action in self._raw_action_items(moment):
@@ -1097,11 +2095,22 @@ class AssetRegistryConverter(BaseConverter):
             actions.append({
                 "kind": "gml",
                 "source_path": source_path,
-                "script_path": self._timeline_action_script_resource_path(resource.name, frame),
+                "script_path": self._timeline_action_script_resource_path(
+                    script_stem or generated_resource_stem(resource.name),
+                    frame,
+                ),
             })
         return actions
 
-    def _timeline_discovered_source_actions(self, resource: _ProjectResource) -> list[tuple[int, list[JsonDict]]]:
+    def _timeline_discovered_source_actions(
+        self,
+        resource: _ProjectResource,
+        *,
+        script_stem: str | None = None,
+    ) -> list[tuple[int, list[JsonDict]]]:
+        resolved_script_stem = script_stem or generated_resource_stem(
+            resource.name
+        )
         discovered: list[tuple[int, list[JsonDict]]] = []
         timeline_directory = self._resolve_discovered_project_source(
             os.path.dirname(resource.yy_path),
@@ -1111,10 +2120,16 @@ class AssetRegistryConverter(BaseConverter):
             field="timeline source directory",
         )
         if timeline_directory is None:
+            self._timeline_action_source_failures.add(
+                (resource.name, resource.source_path)
+            )
             return discovered
         try:
             filenames = sorted(os.listdir(timeline_directory.filesystem_path))
         except OSError:
+            self._timeline_action_source_failures.add(
+                (resource.name, resource.source_path)
+            )
             return discovered
 
         for filename in filenames:
@@ -1130,17 +2145,25 @@ class AssetRegistryConverter(BaseConverter):
                 resource_type="timeline",
                 field="discovered timeline moment source",
             )
-            if (
-                resolved_source is None
-                or not os.path.isfile(resolved_source.filesystem_path)
-            ):
+            if resolved_source is None:
+                self._timeline_action_source_failures.add(
+                    (resource.name, resource.source_path)
+                )
+                continue
+            if not os.path.isfile(resolved_source.filesystem_path):
+                self._timeline_action_source_failures.add(
+                    (resource.name, resource.source_path)
+                )
                 continue
             discovered.append((
                 frame,
                 [{
                     "kind": "gml",
                     "source_path": resolved_source.source_path,
-                    "script_path": self._timeline_action_script_resource_path(resource.name, frame),
+                    "script_path": self._timeline_action_script_resource_path(
+                        resolved_script_stem,
+                        frame,
+                    ),
                 }],
             ))
         return discovered
@@ -1161,6 +2184,10 @@ class AssetRegistryConverter(BaseConverter):
                     resource_type="timeline",
                     field=key,
                 )
+                if resolved_source is None:
+                    self._timeline_action_source_failures.add(
+                        (resource.name, resource.source_path)
+                    )
                 return resolved_source.source_path if resolved_source is not None else ""
         for candidate in (
             f"Moment_{frame}.gml",
@@ -1244,14 +2271,26 @@ class AssetRegistryConverter(BaseConverter):
             "raw": raw_data,
         }
 
-    def _write_timeline_action_scripts(self, entries: tuple[AssetRegistryEntry, ...]) -> None:
+    def _write_timeline_action_scripts(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> dict[tuple[str, str], bool]:
+        """Write GML-backed moments and report each timeline's completeness."""
         asset_names = {entry.name for entry in entries}
+        completeness: dict[tuple[str, str], bool] = {}
         for entry in entries:
             if entry.asset_type != "timeline":
                 continue
+            timeline_key = (entry.name, entry.source_path)
+            timeline_complete = (
+                timeline_key not in self._timeline_action_source_failures
+            )
             metadata = entry.metadata or {}
             raw_moments = metadata.get("moments")
             if not isinstance(raw_moments, list):
+                completeness[timeline_key] = (
+                    completeness.get(timeline_key, True) and timeline_complete
+                )
                 continue
             for raw_moment in cast(list[object], raw_moments):
                 if not isinstance(raw_moment, dict):
@@ -1265,10 +2304,12 @@ class AssetRegistryConverter(BaseConverter):
                     if not isinstance(raw_action, dict):
                         continue
                     action = cast(JsonDict, raw_action)
+                    if action.get("kind") != "gml":
+                        continue
                     source_path = action.get("source_path")
                     script_path = action.get("script_path")
                     if isinstance(source_path, str) and isinstance(script_path, str):
-                        self._write_timeline_action_script(
+                        action_complete = self._write_timeline_action_script(
                             entry.name,
                             frame,
                             entry.source_path,
@@ -1276,6 +2317,15 @@ class AssetRegistryConverter(BaseConverter):
                             script_path,
                             asset_names,
                         )
+                    else:
+                        action_complete = False
+                    if not action_complete:
+                        action.pop("script_path", None)
+                        timeline_complete = False
+            completeness[timeline_key] = (
+                completeness.get(timeline_key, True) and timeline_complete
+            )
+        return completeness
 
     def _write_timeline_action_script(
         self,
@@ -1285,9 +2335,9 @@ class AssetRegistryConverter(BaseConverter):
         source_path: str,
         script_path: str,
         asset_names: set[str],
-    ) -> None:
+    ) -> bool:
         if not script_path.startswith("res://"):
-            return
+            return False
         resolved_source = self._resolve_project_source(
             source_path,
             owner_source_path=owner_source_path,
@@ -1296,7 +2346,7 @@ class AssetRegistryConverter(BaseConverter):
             field="timeline action source_path",
         )
         if resolved_source is None:
-            return
+            return False
         gm_source_path = resolved_source.filesystem_path
         try:
             with open(gm_source_path, "r", encoding="utf-8") as source_file:
@@ -1306,7 +2356,7 @@ class AssetRegistryConverter(BaseConverter):
                 "Warning: Could not read GameMaker timeline moment code for "
                 f"{timeline_name} frame {frame}: {gm_source_path}"
             )
-            return
+            return False
 
         try:
             body = transpile_gml_code(
@@ -1336,29 +2386,29 @@ class AssetRegistryConverter(BaseConverter):
                     workaround="Split or rewrite unsupported GML in this timeline moment.",
                 )
             self._safe_log(message)
-            return
+            return False
 
         if not body.strip():
             body = "\tpass"
         output_path = os.path.join(self.godot_project_path, *script_path[len("res://"):].split("/"))
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as script_file:
-            script_file.write(
-                "\n".join([
-                    "extends RefCounted",
-                    "",
-                    'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")',
-                    "",
-                    "static func execute(_gm_instance):",
-                    body.rstrip(),
-                    "",
-                ])
-            )
+        self._atomic_write_text(
+            output_path,
+            "\n".join([
+                "extends RefCounted",
+                "",
+                'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")',
+                "",
+                "static func execute(_gm_instance):",
+                body.rstrip(),
+                "",
+            ]),
+            confinement_root=self.godot_project_path,
+        )
+        return True
 
     @staticmethod
-    def _timeline_action_script_resource_path(timeline_name: str, frame: int) -> str:
-        safe_name = generated_resource_stem(timeline_name)
-        return f"res://gm2godot/timelines/{safe_name}_{frame}.gd"
+    def _timeline_action_script_resource_path(script_stem: str, frame: int) -> str:
+        return f"res://gm2godot/timelines/{script_stem}_{frame}.gd"
 
     @staticmethod
     def _timeline_frame_from_filename(filename: str) -> int | None:

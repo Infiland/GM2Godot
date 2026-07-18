@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,7 +12,10 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.shaders import ShaderConverter
 from src.conversion.asset_output_paths import build_asset_output_paths
+from src.conversion.converter import Converter
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
 SAMPLE_FSH = """\
 precision highp float;
@@ -25,6 +29,11 @@ void main()
     gl_FragColor = col * v_vColour;
 }
 """
+
+
+class _EnabledSetting:
+    def get(self) -> bool:
+        return True
 
 
 class TestShaderConverterBasic(unittest.TestCase):
@@ -61,6 +70,132 @@ class TestShaderConverterBasic(unittest.TestCase):
         expected = os.path.join(self.godot_dir, "shaders", "test_shader.gdshader")
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} to exist after conversion")
+
+    def test_resource_outcome_counts_logical_shader_asset(self):
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result().resources
+
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
+
+    def test_disappearing_only_stage_fails_without_placeholder(self):
+        safe_stage_path = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "safe_shader.fsh",
+        )
+        with open(safe_stage_path, "w", encoding="utf-8") as safe_stage:
+            safe_stage.write(SAMPLE_FSH)
+        stage_path = self.fsh_path
+
+        class UnlinkAfterDiscoveryShaderConverter(ShaderConverter):
+            def _disk_shader_assets(
+                self,
+                shader_root: ResolvedProjectSourcePath,
+            ):
+                assets = super()._disk_shader_assets(shader_root)
+                os.unlink(stage_path)
+                return assets
+
+        converter = UnlinkAfterDiscoveryShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        )
+        converter.convert_all()
+
+        output = os.path.join(
+            self.godot_dir,
+            "shaders",
+            "test_shader.gdshader",
+        )
+        safe_output = os.path.join(
+            self.godot_dir,
+            "shaders",
+            "safe_shader.gdshader",
+        )
+        self.assertFalse(os.path.exists(output))
+        self.assertTrue(os.path.isfile(safe_output))
+        counts = converter.conversion_step_result().resources
+        self.assertEqual(counts.requested, 2)
+        self.assertEqual(counts.executed, 2)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 1)
+
+    def test_disappearing_one_of_two_stages_fails_whole_shader(self) -> None:
+        vertex_path = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "test_shader.vsh",
+        )
+        with open(vertex_path, "w", encoding="utf-8") as vertex_file:
+            vertex_file.write(
+                "attribute vec3 in_Position;\n"
+                "void main() { gl_Position = vec4(in_Position, 1.0); }\n"
+            )
+        fragment_path = self.fsh_path
+
+        class UnlinkFragmentAfterDiscoveryShaderConverter(ShaderConverter):
+            def _disk_shader_assets(
+                self,
+                shader_root: ResolvedProjectSourcePath,
+            ):
+                assets = super()._disk_shader_assets(shader_root)
+                os.unlink(fragment_path)
+                return assets
+
+        converter = UnlinkFragmentAfterDiscoveryShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        )
+
+        converter.convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    "test_shader.gdshader",
+                )
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
+
+    def test_blank_only_stage_fails_without_header_only_shader(self) -> None:
+        with open(self.fsh_path, "w", encoding="utf-8") as fragment_file:
+            fragment_file.write("  \n\t")
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    "test_shader.gdshader",
+                )
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
 
     def test_gl_fragcolor_converted_to_color(self):
         converter = self._make_converter()
@@ -346,6 +481,273 @@ void main()
         self.assertEqual(generated_shaders, [output_path])
 
 
+class TestShaderManifestOutcomeAccounting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_yyp(self, resources: list[dict[str, object]]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "ShaderAccounting.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "%Name": "Shader Accounting",
+                    "resources": resources,
+                },
+                project_file,
+            )
+
+    @staticmethod
+    def _shader_declaration(name: str, path: str) -> dict[str, object]:
+        return {
+            "id": {"name": name, "path": path},
+            "resourceType": "GMShader",
+        }
+
+    def _make_converter(
+        self,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> ShaderConverter:
+        return ShaderConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=2,
+            diagnostics=diagnostics,
+        )
+
+    def test_missing_only_manifest_shader_makes_converter_outcome_partial(
+        self,
+    ) -> None:
+        self._write_yyp(
+            [
+                self._shader_declaration(
+                    "shd_missing",
+                    "shaders/shd_missing/shd_missing.yy",
+                )
+            ]
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+            max_workers=1,
+        )
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"shaders": _EnabledSetting()},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_safe_and_missing_manifest_shaders_have_strict_counts(self) -> None:
+        safe_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_safe",
+        )
+        os.makedirs(safe_directory)
+        with open(
+            os.path.join(safe_directory, "shd_safe.yy"),
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+            json.dump(
+                {"name": "shd_safe", "resourceType": "GMShader"},
+                metadata_file,
+            )
+        with open(
+            os.path.join(safe_directory, "shd_safe.fsh"),
+            "w",
+            encoding="utf-8",
+        ) as fragment_file:
+            fragment_file.write(SAMPLE_FSH)
+        self._write_yyp(
+            [
+                self._shader_declaration(
+                    "shd_missing",
+                    "shaders/shd_missing/shd_missing.yy",
+                ),
+                self._shader_declaration(
+                    "shd_safe",
+                    "shaders/shd_safe/shd_safe.yy",
+                ),
+            ]
+        )
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    "shd_safe.gdshader",
+                )
+            )
+        )
+
+    def test_declared_shader_without_stages_is_skipped(self) -> None:
+        shader_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_empty",
+        )
+        os.makedirs(shader_directory)
+        with open(
+            os.path.join(shader_directory, "shd_empty.yy"),
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+            json.dump(
+                {"name": "shd_empty", "resourceType": "GMShader"},
+                metadata_file,
+            )
+        self._write_yyp(
+            [
+                self._shader_declaration(
+                    "shd_empty",
+                    "shaders/shd_empty/shd_empty.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+
+        converter = self._make_converter(diagnostics=diagnostics)
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SHADER-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "shd_empty")
+
+    def test_duplicate_manifest_shader_declaration_is_counted_once(self) -> None:
+        declaration = self._shader_declaration(
+            "shd_missing",
+            "shaders/shd_missing/shd_missing.yy",
+        )
+        self._write_yyp([declaration, declaration])
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+
+    def test_malformed_yyp_uses_contained_disk_fallback(self) -> None:
+        shader_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_fallback",
+        )
+        os.makedirs(shader_directory)
+        with open(
+            os.path.join(shader_directory, "shd_fallback.fsh"),
+            "w",
+            encoding="utf-8",
+        ) as fragment_file:
+            fragment_file.write(SAMPLE_FSH)
+        with open(
+            os.path.join(self.gm_dir, "ShaderAccounting.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            project_file.write("{ malformed")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    "shd_fallback.gdshader",
+                )
+            )
+        )
+
+    def test_valid_yyp_does_not_use_disk_fallback_for_orphan_shader(self) -> None:
+        shader_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            "shd_orphan",
+        )
+        os.makedirs(shader_directory)
+        with open(
+            os.path.join(shader_directory, "shd_orphan.fsh"),
+            "w",
+            encoding="utf-8",
+        ) as fragment_file:
+            fragment_file.write(SAMPLE_FSH)
+        self._write_yyp([])
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    "shd_orphan.gdshader",
+                )
+            )
+        )
+
+
 class TestShaderSourcePathContainment(unittest.TestCase):
     def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
@@ -445,7 +847,8 @@ class TestShaderSourcePathContainment(unittest.TestCase):
             ]
         )
 
-        self._make_converter().convert_all()
+        converter = self._make_converter()
+        converter.convert_all()
 
         rejected = self._source_path_rejections()
         self.assertEqual(len(rejected), len(unsafe_paths), rejected)
@@ -468,6 +871,13 @@ class TestShaderSourcePathContainment(unittest.TestCase):
             all(diagnostic.resource_type == "shader" for diagnostic in rejected)
         )
         self.assertEqual(self._generated_shaders(), [])
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(
+                requested=len(unsafe_paths),
+                skipped=len(unsafe_paths),
+            ),
+        )
 
     def test_rejects_manifest_yy_and_stage_symlink_escapes(self) -> None:
         outside_yy = os.path.join(self.outside_dir, "outside.yy")
@@ -541,7 +951,8 @@ class TestShaderSourcePathContainment(unittest.TestCase):
             ]
         )
 
-        self._make_converter().convert_all()
+        converter = self._make_converter()
+        converter.convert_all()
 
         rejected = self._source_path_rejections()
         self.assertEqual(len(rejected), 3, rejected)
@@ -560,6 +971,10 @@ class TestShaderSourcePathContainment(unittest.TestCase):
         )
         self.assertEqual(stage_rejection.manifest_entry, "derived .fsh stage")
         self.assertEqual(self._generated_shaders(), [])
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(requested=3, skipped=3),
+        )
 
     def test_manifest_requires_shader_yy_family_and_suffix(self) -> None:
         cross_family_yy = os.path.join(
@@ -608,7 +1023,8 @@ class TestShaderSourcePathContainment(unittest.TestCase):
             ]
         )
 
-        self._make_converter().convert_all()
+        converter = self._make_converter()
+        converter.convert_all()
 
         rejected = self._source_path_rejections()
         self.assertEqual(
@@ -640,6 +1056,15 @@ class TestShaderSourcePathContainment(unittest.TestCase):
         self.assertIn("SAFE_MANIFEST_STAGE", contents)
         self.assertNotIn("CROSS_FAMILY_STAGE", contents)
         self.assertNotIn("NON_YY_MANIFEST_STAGE", contents)
+        self.assertEqual(
+            converter.conversion_step_result().resources,
+            ConversionCounts(
+                requested=3,
+                executed=1,
+                completed=1,
+                skipped=2,
+            ),
+        )
 
     def test_disk_fallback_rejects_file_and_directory_symlink_escapes(
         self,

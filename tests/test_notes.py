@@ -1,14 +1,19 @@
+import json
 import os
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
+from unittest.mock import MagicMock
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.notes import NoteConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 
 
@@ -85,6 +90,258 @@ class TestNoteConverterBasic(unittest.TestCase):
         for base in ("test_note", "readme", "changelog"):
             expected = os.path.join(self.godot_dir, "notes", base, f"{base}.txt")
             self.assertTrue(os.path.isfile(expected), f"Expected {expected}")
+
+    def test_resource_outcome_counts_logical_notes(self):
+        notes_dir = os.path.join(self.gm_dir, "notes")
+        with open(os.path.join(notes_dir, "second.txt"), "w", encoding="utf-8") as f:
+            f.write("Second note")
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result().resources
+
+        self.assertEqual(counts.requested, 2)
+        self.assertEqual(counts.executed, 2)
+        self.assertEqual(counts.completed, 2)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
+
+
+class TestNoteConverterManifestAccounting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        os.makedirs(os.path.join(self.gm_dir, "notes"))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(
+        self,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> NoteConverter:
+        return NoteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+    def _write_yyp(self, resources: list[tuple[str, str]]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "NoteAccounting.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "resources": [
+                        {"id": {"name": name, "path": path}}
+                        for name, path in resources
+                    ],
+                    "resourceType": "GMProject",
+                },
+                project_file,
+            )
+
+    def _write_note(
+        self,
+        note_name: str,
+        *,
+        include_text: bool = True,
+    ) -> None:
+        note_directory = os.path.join(self.gm_dir, "notes", note_name)
+        os.makedirs(note_directory)
+        with open(
+            os.path.join(note_directory, f"{note_name}.yy"),
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+            json.dump(
+                {
+                    "name": note_name,
+                    "resourceType": "GMNotes",
+                    "parent": {
+                        "name": "Notes",
+                        "path": "folders/Notes.yy",
+                    },
+                },
+                metadata_file,
+            )
+        if include_text:
+            with open(
+                os.path.join(note_directory, f"{note_name}.txt"),
+                "w",
+                encoding="utf-8",
+            ) as note_file:
+                note_file.write(f"Contents of {note_name}")
+
+    def test_missing_only_declared_note_makes_conversion_partial(self) -> None:
+        self._write_yyp(
+            [("note_missing", "notes/note_missing/note_missing.yy")]
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+            max_workers=1,
+        )
+        notes_enabled = MagicMock()
+        notes_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"notes": notes_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-NOTE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "note_missing")
+        self.assertEqual(unavailable[0].source_path, "NoteAccounting.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    def test_safe_and_missing_declared_notes_have_strict_counts(self) -> None:
+        self._write_note("note_safe")
+        self._write_note("note_missing_text", include_text=False)
+        self._write_note("note_orphan")
+        safe_reference = (
+            "note_safe",
+            "notes/note_safe/note_safe.yy",
+        )
+        self._write_yyp(
+            [
+                safe_reference,
+                safe_reference,
+                (
+                    "note_missing_text",
+                    "notes/note_missing_text/note_missing_text.yy",
+                ),
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "notes",
+                    "note_safe",
+                    "note_safe.txt",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "notes", "note_orphan")
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "notes", "note_missing_text")
+            )
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-NOTE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "note_missing_text")
+
+    def test_rejected_declared_note_is_requested_and_skipped(self) -> None:
+        self._write_yyp(
+            [
+                (
+                    "note_rejected",
+                    "notes/../../outside/note_rejected/note_rejected.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        diagnostic_codes = {
+            diagnostic.code for diagnostic in diagnostics.diagnostics()
+        }
+        self.assertIn("GM2GD-SOURCE-PATH-REJECTED", diagnostic_codes)
+        self.assertIn("GM2GD-NOTE-SOURCE-UNAVAILABLE", diagnostic_codes)
+
+    def test_malformed_yyp_uses_contained_disk_fallback(self) -> None:
+        self._write_note("note_fallback")
+        with open(
+            os.path.join(self.gm_dir, "NoteAccounting.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            project_file.write("{ malformed")
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "notes",
+                    "note_fallback",
+                    "note_fallback.txt",
+                )
+            )
+        )
 
 
 class TestNoteConverterMissingFolder(unittest.TestCase):

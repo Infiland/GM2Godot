@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
+import stat
+import tempfile
 from dataclasses import dataclass
-from typing import Iterable, cast
+from typing import Iterable, Mapping, Protocol, cast
 
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler_parts.extension_functions import (
@@ -24,6 +27,12 @@ EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join(
     "gm2godot", "extension_compatibility_report.json"
 )
 EXTENSION_STUBS_RELATIVE_DIR = os.path.join("addons", "gm2godot_extensions")
+
+
+@dataclass(frozen=True)
+class _OutputFileState:
+    identity: tuple[int, int] | None
+    mode: int | None
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,20 @@ class _SourceContext:
     field: str
 
 
+class _ExtensionAssetEntry(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def source_path(self) -> str: ...
+
+    @property
+    def godot_path(self) -> str: ...
+
+
 def build_extension_entries(
     gm_project_path: str,
     *,
@@ -180,45 +203,321 @@ def write_extension_compatibility_outputs(
     *,
     diagnostics: DiagnosticCollector | None = None,
     log_callback: LogCallback | None = None,
+    asset_entries: Iterable[_ExtensionAssetEntry] | None = None,
 ) -> str:
     entries = build_extension_entries(
         gm_project_path,
         diagnostics=diagnostics,
         log_callback=log_callback,
     )
+    selected_stub_paths: dict[str, str] | None = None
+    if asset_entries is not None:
+        selected_by_source: dict[str, _ExtensionAssetEntry] = {}
+        selected_candidates = sorted(
+            (
+                asset_entry
+                for asset_entry in asset_entries
+                if asset_entry.kind == "extensions"
+            ),
+            key=lambda asset_entry: (
+                _extension_source_key(asset_entry.source_path),
+                asset_entry.name.casefold(),
+                asset_entry.name,
+                asset_entry.source_path,
+                asset_entry.godot_path.casefold(),
+                asset_entry.godot_path,
+            ),
+        )
+        for asset_entry in selected_candidates:
+            selected_by_source.setdefault(
+                _extension_source_key(asset_entry.source_path),
+                asset_entry,
+            )
+        selected_entries: list[ExtensionEntry] = []
+        selected_stub_paths = {}
+        for entry in entries:
+            asset_entry = selected_by_source.get(
+                _extension_source_key(entry.source_path)
+            )
+            if asset_entry is None:
+                same_file_candidates = [
+                    candidate
+                    for candidate in selected_candidates
+                    if _extension_sources_are_same_file(
+                        gm_project_path,
+                        entry.source_path,
+                        candidate.source_path,
+                    )
+                ]
+                if len(same_file_candidates) == 1:
+                    asset_entry = same_file_candidates[0]
+            if asset_entry is None:
+                continue
+            selected_entries.append(entry)
+            selected_stub_paths[entry.source_path] = asset_entry.godot_path
+        entries = tuple(selected_entries)
+    default_stub_paths = collision_safe_extension_stub_resource_paths(
+        (entry.name, entry.source_path)
+        for entry in entries
+    )
+    output_stub_paths = {
+        entry.source_path: (
+            selected_stub_paths.get(entry.source_path, "")
+            if selected_stub_paths is not None
+            else ""
+        )
+        or default_stub_paths[(entry.name, entry.source_path)]
+        for entry in entries
+    }
     mappings = _load_extension_mapping_names(
         gm_project_path,
         diagnostics=diagnostics,
         log_callback=log_callback,
     )
     report_path = os.path.join(godot_project_path, EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH)
-    os.makedirs(os.path.dirname(report_path), exist_ok=True)
-    with open(report_path, "w", encoding="utf-8") as report_file:
-        json.dump(
-            render_extension_compatibility_report(entries, mappings),
-            report_file,
-            indent=2,
-            sort_keys=True,
+    report_content = json.dumps(
+        render_extension_compatibility_report(
+            entries,
+            mappings,
+            stub_paths_by_source=output_stub_paths,
+        ),
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    report_directory = os.path.dirname(report_path) or os.curdir
+    report_directory_identity = _ensure_extension_report_directory(
+        report_directory
+    )
+    previous_report_mode = _invalidate_extension_report(
+        report_path,
+        report_directory,
+        report_directory_identity,
+    )
+    try:
+        for entry in entries:
+            _write_extension_stub(
+                godot_project_path,
+                entry,
+                stub_resource_path=output_stub_paths[entry.source_path],
+            )
+        _atomic_write_extension_report(
+            report_path,
+            report_content,
+            report_directory=report_directory,
+            report_directory_identity=report_directory_identity,
+            output_mode=previous_report_mode,
         )
-        report_file.write("\n")
-    for entry in entries:
-        _write_extension_stub(godot_project_path, entry)
+    except BaseException as publish_error:
+        try:
+            _invalidate_extension_report(
+                report_path,
+                report_directory,
+                report_directory_identity,
+            )
+        except OSError as invalidation_error:
+            publish_error.add_note(
+                "Extension compatibility report invalidation failed: "
+                f"{invalidation_error}"
+            )
+        raise
     return report_path
+
+
+def _ensure_extension_report_directory(
+    report_directory: str,
+) -> tuple[int, int]:
+    os.makedirs(report_directory, exist_ok=True)
+    report_directory_stat = os.lstat(report_directory)
+    if (
+        _is_redirecting_extension_path(
+            report_directory,
+            report_directory_stat,
+        )
+        or not stat.S_ISDIR(report_directory_stat.st_mode)
+    ):
+        raise OSError(
+            "Refusing redirected extension-report output directory: "
+            f"{report_directory}"
+        )
+    return (
+        report_directory_stat.st_dev,
+        report_directory_stat.st_ino,
+    )
+
+
+def _invalidate_extension_report(
+    report_path: str,
+    report_directory: str,
+    report_directory_identity: tuple[int, int],
+) -> int | None:
+    """Remove the report entry itself without following its referent."""
+    _verify_extension_report_directory(
+        report_directory,
+        report_directory_identity,
+    )
+    try:
+        report_stat = os.lstat(report_path)
+    except FileNotFoundError:
+        return None
+    if not (
+        stat.S_ISREG(report_stat.st_mode)
+        or stat.S_ISLNK(report_stat.st_mode)
+    ):
+        raise OSError(
+            "Refusing non-regular extension compatibility report: "
+            f"{report_path}"
+        )
+    output_mode = (
+        stat.S_IMODE(report_stat.st_mode)
+        if stat.S_ISREG(report_stat.st_mode)
+        else None
+    )
+    os.unlink(report_path)
+    return output_mode
+
+
+def _atomic_write_extension_report(
+    report_path: str,
+    content: str,
+    *,
+    report_directory: str,
+    report_directory_identity: tuple[int, int],
+    output_mode: int | None,
+) -> None:
+    """Publish the compatibility report without following its final entry."""
+    _verify_extension_report_directory(
+        report_directory,
+        report_directory_identity,
+    )
+    target_state = _OutputFileState(identity=None, mode=None)
+    _verify_output_file_state(
+        report_path,
+        target_state,
+        description="extension compatibility report",
+    )
+    file_descriptor, staged_path = tempfile.mkstemp(
+        dir=report_directory,
+        prefix=f".{os.path.basename(report_path)}.",
+        suffix=".tmp",
+    )
+    staged_pending = True
+    try:
+        if output_mode is not None:
+            os.chmod(staged_path, output_mode)
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as staged_file:
+            file_descriptor = -1
+            staged_file.write(content)
+            staged_file.flush()
+            os.fsync(staged_file.fileno())
+        _verify_extension_report_directory(
+            report_directory,
+            report_directory_identity,
+        )
+        _verify_output_file_state(
+            report_path,
+            target_state,
+            description="extension compatibility report",
+        )
+        os.replace(staged_path, report_path)
+        staged_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if staged_pending:
+            try:
+                _verify_extension_report_directory(
+                    report_directory,
+                    report_directory_identity,
+                )
+                os.unlink(staged_path)
+            except OSError:
+                pass
+
+
+def _verify_extension_report_directory(
+    path: str,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        path_stat = os.lstat(path)
+    except OSError as error:
+        raise OSError(
+            f"Extension-report output directory changed: {path}"
+        ) from error
+    if (
+        _is_redirecting_extension_path(path, path_stat)
+        or not stat.S_ISDIR(path_stat.st_mode)
+        or (path_stat.st_dev, path_stat.st_ino) != expected_identity
+    ):
+        raise OSError(f"Extension-report output directory changed: {path}")
+
+
+def _output_file_state(path: str, *, description: str) -> _OutputFileState:
+    try:
+        path_stat = os.lstat(path)
+    except FileNotFoundError:
+        return _OutputFileState(identity=None, mode=None)
+    if not stat.S_ISREG(path_stat.st_mode):
+        raise OSError(f"Refusing non-regular {description}: {path}")
+    return _OutputFileState(
+        identity=(path_stat.st_dev, path_stat.st_ino),
+        mode=stat.S_IMODE(path_stat.st_mode),
+    )
+
+
+def _verify_output_file_state(
+    path: str,
+    expected: _OutputFileState,
+    *,
+    description: str,
+) -> None:
+    try:
+        path_stat = os.lstat(path)
+    except FileNotFoundError:
+        if expected.identity is None:
+            return
+        raise OSError(f"{description.capitalize()} changed during publication: {path}")
+    if (
+        expected.identity is None
+        or not stat.S_ISREG(path_stat.st_mode)
+        or (path_stat.st_dev, path_stat.st_ino) != expected.identity
+    ):
+        raise OSError(f"{description.capitalize()} changed during publication: {path}")
 
 
 def render_extension_compatibility_report(
     entries: Iterable[ExtensionEntry],
     mapped_functions: Iterable[str] = (),
+    *,
+    stub_paths_by_source: Mapping[str, str] | None = None,
 ) -> JsonDict:
     extension_entries = tuple(entries)
+    default_stub_paths = collision_safe_extension_stub_resource_paths(
+        (entry.name, entry.source_path)
+        for entry in extension_entries
+    )
+
+    def stub_path(entry: ExtensionEntry) -> str:
+        if stub_paths_by_source is not None:
+            selected_path = stub_paths_by_source.get(entry.source_path)
+            if selected_path:
+                return selected_path
+        return default_stub_paths[(entry.name, entry.source_path)]
+
     mapped = set(mapped_functions)
     diagnostics: list[JsonDict] = []
     function_bindings: list[JsonDict] = []
     stubs: list[JsonDict] = []
     for entry in extension_entries:
+        entry_stub_path = stub_path(entry)
         stubs.append({
             "extension": entry.name,
-            "path": extension_stub_resource_path(entry.name),
+            "path": entry_stub_path,
         })
         for file_entry in entry.files:
             if _is_native_extension_file(file_entry.filename):
@@ -243,7 +542,7 @@ def render_extension_compatibility_report(
                     "file": file_entry.filename,
                     "platform": file_entry.platform,
                     "mapped": function.name in mapped,
-                    "stub_path": extension_stub_resource_path(entry.name),
+                    "stub_path": entry_stub_path,
                 })
                 if function.name not in mapped:
                     diagnostics.append({
@@ -295,13 +594,17 @@ def extension_entry_from_yy(
     )
 
 
-def extension_entry_metadata(entry: ExtensionEntry) -> JsonDict:
+def extension_entry_metadata(
+    entry: ExtensionEntry,
+    *,
+    stub_path: str | None = None,
+) -> JsonDict:
     return {
         "name": entry.name,
         "source_path": entry.source_path,
         "version": entry.version,
         "platforms": list(entry.platforms),
-        "stub_path": extension_stub_resource_path(entry.name),
+        "stub_path": stub_path or extension_stub_resource_path(entry.name),
         "options": list(entry.options),
         "constants": list(entry.constants),
         "macros": list(entry.macros),
@@ -309,17 +612,71 @@ def extension_entry_metadata(entry: ExtensionEntry) -> JsonDict:
     }
 
 
-def extension_stub_relative_dir(extension_name: str) -> str:
-    return os.path.join(EXTENSION_STUBS_RELATIVE_DIR, _safe_identifier(extension_name))
+def extension_stub_relative_dir(
+    extension_name: str,
+    *,
+    suffix: str = "",
+) -> str:
+    return os.path.join(
+        EXTENSION_STUBS_RELATIVE_DIR,
+        _safe_identifier(extension_name) + suffix,
+    )
 
 
-def extension_stub_relative_script_path(extension_name: str) -> str:
-    safe_name = _safe_identifier(extension_name)
-    return os.path.join(extension_stub_relative_dir(extension_name), f"{safe_name}_extension.gd")
+def extension_stub_relative_script_path(
+    extension_name: str,
+    *,
+    suffix: str = "",
+) -> str:
+    safe_name = _safe_identifier(extension_name) + suffix
+    return os.path.join(
+        extension_stub_relative_dir(extension_name, suffix=suffix),
+        f"{safe_name}_extension.gd",
+    )
 
 
-def extension_stub_resource_path(extension_name: str) -> str:
-    return "res://" + extension_stub_relative_script_path(extension_name).replace(os.sep, "/")
+def extension_stub_resource_path(
+    extension_name: str,
+    *,
+    suffix: str = "",
+) -> str:
+    return "res://" + extension_stub_relative_script_path(
+        extension_name,
+        suffix=suffix,
+    ).replace(os.sep, "/")
+
+
+def collision_safe_extension_stub_resource_paths(
+    identities: Iterable[tuple[str, str]],
+) -> dict[tuple[str, str], str]:
+    """Return stable, case-insensitively unique extension stub paths."""
+    ordered_identities = sorted(
+        set(identities),
+        key=lambda identity: (
+            _safe_identifier(identity[0]).casefold(),
+            identity[0].casefold(),
+            identity[0],
+            identity[1].casefold(),
+            identity[1],
+        ),
+    )
+    paths: dict[tuple[str, str], str] = {}
+    used_paths: set[str] = set()
+    for identity in ordered_identities:
+        extension_name, _source_path = identity
+        suffix_index = 0
+        while True:
+            suffix = "" if suffix_index == 0 else f"_{suffix_index + 1}"
+            path = extension_stub_resource_path(
+                extension_name,
+                suffix=suffix,
+            )
+            if path.casefold() not in used_paths:
+                break
+            suffix_index += 1
+        used_paths.add(path.casefold())
+        paths[identity] = path
+    return paths
 
 
 def _extension_file_from_yy(data: JsonDict) -> ExtensionFileEntry:
@@ -360,24 +717,371 @@ def _extension_function_from_yy(data: JsonDict) -> ExtensionFunctionEntry | None
     )
 
 
-def _write_extension_stub(godot_project_path: str, entry: ExtensionEntry) -> None:
-    safe_name = _safe_identifier(entry.name)
-    output_dir = os.path.join(godot_project_path, extension_stub_relative_dir(entry.name))
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "plugin.cfg"), "w", encoding="utf-8") as plugin_file:
-        plugin_file.write(
-            "\n".join([
-                "[plugin]",
-                f'name="GM2Godot Extension Stub - {entry.name}"',
-                'description="Generated binding stub for GameMaker extension metadata."',
-                'author="GM2Godot"',
-                'version="1.0"',
-                f'script="{safe_name}_extension.gd"',
-                "",
-            ])
+def _write_extension_stub(
+    godot_project_path: str,
+    entry: ExtensionEntry,
+    *,
+    stub_resource_path: str | None = None,
+) -> None:
+    resolved_stub_path = stub_resource_path or extension_stub_resource_path(
+        entry.name
+    )
+    if not resolved_stub_path.startswith("res://"):
+        raise ValueError(
+            "Generated extension stub path must use the res:// scheme: "
+            f"{resolved_stub_path!r}"
         )
-    with open(os.path.join(output_dir, f"{safe_name}_extension.gd"), "w", encoding="utf-8") as script_file:
-        script_file.write(render_extension_stub_script(entry))
+    relative_script_path = resolved_stub_path.removeprefix("res://").replace(
+        "/",
+        os.sep,
+    )
+    relative_dir = os.path.dirname(relative_script_path)
+    script_filename = os.path.basename(relative_script_path)
+    _atomic_write_extension_text(
+        godot_project_path,
+        os.path.join(relative_dir, "plugin.cfg"),
+        "\n".join([
+            "[plugin]",
+            f'name="GM2Godot Extension Stub - {entry.name}"',
+            'description="Generated binding stub for GameMaker extension metadata."',
+            'author="GM2Godot"',
+            'version="1.0"',
+            f'script="{script_filename}"',
+            "",
+        ]),
+    )
+    _atomic_write_extension_text(
+        godot_project_path,
+        relative_script_path,
+        render_extension_stub_script(entry),
+    )
+
+
+def _atomic_write_extension_text(
+    godot_project_path: str,
+    relative_path: str,
+    content: str,
+) -> None:
+    """Atomically publish one stub without following replaceable output symlinks."""
+    components = _extension_output_components(relative_path)
+    if _confined_directory_fds_supported():
+        _atomic_write_extension_text_at(
+            os.path.abspath(godot_project_path),
+            components,
+            content,
+        )
+        return
+    _atomic_write_extension_text_fallback(
+        os.path.abspath(godot_project_path),
+        components,
+        content,
+    )
+
+
+def _extension_output_components(relative_path: str) -> tuple[str, ...]:
+    normalized = relative_path.replace("\\", "/")
+    components = tuple(normalized.split("/"))
+    managed_root = ("addons", "gm2godot_extensions")
+    if (
+        os.path.isabs(relative_path)
+        or any(component in {"", ".", ".."} for component in components)
+        or components[: len(managed_root)] != managed_root
+        or len(components) <= len(managed_root)
+    ):
+        raise ValueError(f"Unsafe generated extension output path: {relative_path!r}")
+    return components
+
+
+def _confined_directory_fds_supported() -> bool:
+    return all(
+        operation in os.supports_dir_fd
+        for operation in (os.open, os.mkdir, os.stat, os.rename, os.unlink)
+    )
+
+
+def _atomic_write_extension_text_at(
+    project_path: str,
+    components: tuple[str, ...],
+    content: str,
+) -> None:
+    directory_flags = os.O_RDONLY
+    directory_flags |= getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+    project_fd = os.open(project_path, directory_flags)
+    current_fd = project_fd
+    try:
+        _verify_open_extension_directory(project_path, project_path, project_fd)
+        for component in components[:-1]:
+            child_fd = _open_or_create_extension_directory(
+                current_fd,
+                component,
+                directory_flags,
+            )
+            if current_fd != project_fd:
+                os.close(current_fd)
+            current_fd = child_fd
+
+        output_directory = os.path.join(project_path, *components[:-1])
+        _verify_open_extension_directory(project_path, output_directory, current_fd)
+        _atomic_write_text_at(current_fd, components[-1], content)
+        _verify_open_extension_directory(project_path, output_directory, current_fd)
+    finally:
+        if current_fd != project_fd:
+            os.close(current_fd)
+        os.close(project_fd)
+
+
+def _open_or_create_extension_directory(
+    parent_fd: int,
+    component: str,
+    flags: int,
+) -> int:
+    try:
+        return os.open(component, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        try:
+            os.mkdir(component, 0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        return os.open(component, flags, dir_fd=parent_fd)
+    except OSError as error:
+        raise OSError(
+            f"Refusing redirected generated extension output directory: {component}"
+        ) from error
+
+
+def _verify_open_extension_directory(
+    project_path: str,
+    directory_path: str,
+    directory_fd: int,
+) -> None:
+    try:
+        path_stat = os.lstat(directory_path)
+        open_stat = os.fstat(directory_fd)
+    except OSError as error:
+        raise OSError(
+            f"Generated extension output directory changed: {directory_path}"
+        ) from error
+    project_real = os.path.realpath(project_path)
+    directory_real = os.path.realpath(directory_path)
+    try:
+        contained = os.path.commonpath((directory_real, project_real)) == project_real
+    except ValueError:
+        contained = False
+    if (
+        stat.S_ISLNK(path_stat.st_mode)
+        or not stat.S_ISDIR(path_stat.st_mode)
+        or (path_stat.st_dev, path_stat.st_ino)
+        != (open_stat.st_dev, open_stat.st_ino)
+        or not contained
+    ):
+        raise OSError(
+            f"Refusing redirected generated extension output directory: {directory_path}"
+        )
+
+
+def _atomic_write_text_at(directory_fd: int, filename: str, content: str) -> None:
+    output_mode = 0o644
+    existing_mode: int | None = None
+    try:
+        output_stat = os.stat(filename, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISREG(output_stat.st_mode):
+            raise OSError(f"Refusing non-regular generated extension output: {filename}")
+        output_mode = stat.S_IMODE(output_stat.st_mode)
+        existing_mode = output_mode
+
+    temporary_name = ""
+    file_descriptor = -1
+    for _attempt in range(100):
+        temporary_name = f".{filename}.{secrets.token_hex(8)}.tmp"
+        try:
+            file_descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                output_mode,
+                dir_fd=directory_fd,
+            )
+            break
+        except FileExistsError:
+            continue
+    if file_descriptor < 0:
+        raise OSError(f"Could not stage generated extension output: {filename}")
+
+    temporary_pending = True
+    try:
+        if existing_mode is not None and os.name != "nt":
+            os.fchmod(file_descriptor, existing_mode)
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as temporary_file:
+            file_descriptor = -1
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.rename(
+            temporary_name,
+            filename,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        temporary_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_pending:
+            try:
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+
+
+def _atomic_write_extension_text_fallback(
+    project_path: str,
+    components: tuple[str, ...],
+    content: str,
+) -> None:
+    """Best-effort no-follow fallback for platforms without directory handles."""
+    project_real = _normalized_real_path(project_path)
+    directory_path = project_path
+    for component in components[:-1]:
+        directory_path = os.path.join(directory_path, component)
+        try:
+            path_stat = os.lstat(directory_path)
+        except FileNotFoundError:
+            os.mkdir(directory_path)
+            path_stat = os.lstat(directory_path)
+        if (
+            _is_redirecting_extension_path(directory_path, path_stat)
+            or not stat.S_ISDIR(path_stat.st_mode)
+        ):
+            raise OSError(
+                f"Refusing redirected generated extension output directory: {directory_path}"
+            )
+        directory_real = _normalized_real_path(directory_path)
+        try:
+            contained = (
+                os.path.commonpath((directory_real, project_real))
+                == project_real
+            )
+        except ValueError:
+            contained = False
+        if not contained:
+            raise OSError(
+                f"Refusing redirected generated extension output directory: {directory_path}"
+            )
+
+    directory_stat = os.lstat(directory_path)
+    directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+    output_path = os.path.join(directory_path, components[-1])
+    output_state = _output_file_state(
+        output_path,
+        description="generated extension output",
+    )
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        dir=directory_path,
+        prefix=f".{components[-1]}.",
+        suffix=".tmp",
+    )
+    temporary_stat = os.fstat(file_descriptor)
+    temporary_identity = (temporary_stat.st_dev, temporary_stat.st_ino)
+    temporary_pending = True
+    try:
+        if output_state.mode is not None:
+            os.chmod(temporary_path, output_state.mode)
+        with os.fdopen(
+            file_descriptor,
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as temporary_file:
+            file_descriptor = -1
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        _verify_fallback_extension_directory(
+            project_real,
+            directory_path,
+            directory_identity,
+        )
+        _verify_output_file_state(
+            output_path,
+            output_state,
+            description="generated extension output",
+        )
+        os.replace(temporary_path, output_path)
+        temporary_pending = False
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_pending:
+            try:
+                _verify_fallback_extension_directory(
+                    project_real,
+                    directory_path,
+                    directory_identity,
+                )
+                current_temporary_stat = os.lstat(temporary_path)
+                if (
+                    current_temporary_stat.st_dev,
+                    current_temporary_stat.st_ino,
+                ) != temporary_identity:
+                    raise OSError(
+                        "Generated extension staging file changed: "
+                        f"{temporary_path}"
+                    )
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+
+
+def _normalized_real_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.realpath(path)))
+
+
+def _is_redirecting_extension_path(
+    path: str,
+    path_stat: os.stat_result,
+) -> bool:
+    is_junction = getattr(os.path, "isjunction", None)
+    return stat.S_ISLNK(path_stat.st_mode) or (
+        is_junction is not None and is_junction(path)
+    )
+
+
+def _verify_fallback_extension_directory(
+    project_real: str,
+    directory_path: str,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        directory_stat = os.lstat(directory_path)
+    except OSError as error:
+        raise OSError(
+            f"Generated extension output directory changed: {directory_path}"
+        ) from error
+    directory_real = _normalized_real_path(directory_path)
+    try:
+        contained = os.path.commonpath((directory_real, project_real)) == project_real
+    except ValueError:
+        contained = False
+    if (
+        _is_redirecting_extension_path(directory_path, directory_stat)
+        or not stat.S_ISDIR(directory_stat.st_mode)
+        or (directory_stat.st_dev, directory_stat.st_ino) != expected_identity
+        or not contained
+    ):
+        raise OSError(
+            f"Generated extension output directory changed: {directory_path}"
+        )
 
 
 def render_extension_stub_script(entry: ExtensionEntry) -> str:
@@ -533,6 +1237,31 @@ def _collect_platform_names(platforms: set[str], value: object) -> None:
 
 def _is_native_extension_file(filename: str) -> bool:
     return filename.lower().endswith((".dll", ".so", ".dylib", ".framework", ".aar", ".jar", ".a"))
+
+
+def _extension_source_key(source_path: str) -> str:
+    normalized = os.path.normpath(
+        source_path.replace("\\", os.sep).replace("/", os.sep)
+    )
+    return os.path.normcase(normalized).replace("\\", "/")
+
+
+def _extension_sources_are_same_file(
+    gm_project_path: str,
+    left_source_path: str,
+    right_source_path: str,
+) -> bool:
+    def filesystem_path(source_path: str) -> str:
+        normalized = source_path.replace("\\", "/")
+        return os.path.join(gm_project_path, *normalized.split("/"))
+
+    try:
+        return os.path.samefile(
+            filesystem_path(left_source_path),
+            filesystem_path(right_source_path),
+        )
+    except OSError:
+        return False
 
 
 def _safe_identifier(value: str) -> str:

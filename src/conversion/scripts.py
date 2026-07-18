@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import posixpath
+import tempfile
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -27,10 +28,15 @@ from src.conversion.gml_transpiler import (
     write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.project_manifest import (
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     is_safe_project_source_component,
+    validate_project_resource_source_path,
 )
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
@@ -76,6 +82,14 @@ class _ScriptCallableNames:
     scoped_call_method: str
     callable_accessor: str
     scoped_callable_accessor: str
+
+
+@dataclass(frozen=True)
+class _DeclaredScriptResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
 
 
 def _script_scope_context() -> _ScopeContext:
@@ -244,13 +258,124 @@ class ScriptConverter(BaseConverter):
             self.godot_project_path,
             log_callback=lambda _message: None,
             progress_callback=lambda _value: None,
-            conversion_running=self.conversion_running,
+            # Planning must enumerate the complete deterministic resource set.
+            # The live cancellation flag is checked before script execution.
+            conversion_running=lambda: True,
             macro_configuration=self.macro_configuration,
         )
         return tuple(registry_converter.build_entries())
 
     def _asset_entries(self) -> tuple[AssetRegistryEntry, ...]:
         return tuple(entry for entry in self._registry_entries() if entry.asset_type == "script")
+
+    def _declared_script_resources(
+        self,
+    ) -> tuple[_DeclaredScriptResource, ...] | None:
+        """Return base scripts selected by a valid YYP, including rejected paths."""
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="script",
+        )
+        if manifest.yyp_path is None or any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        ):
+            return None
+
+        declared: dict[str, _DeclaredScriptResource] = {}
+        for resource in manifest.find_resources(kind="scripts"):
+            if not resource.name:
+                continue
+            field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            declared.setdefault(
+                resource.name,
+                _DeclaredScriptResource(
+                    name=resource.name,
+                    source_path=resource.path,
+                    owner_source_path=manifest.yyp_path,
+                    manifest_field=field,
+                ),
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_script(diagnostic)
+            ):
+                continue
+            declared.setdefault(
+                diagnostic.resource,
+                _DeclaredScriptResource(
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                ),
+            )
+
+        return tuple(declared.values())
+
+    @staticmethod
+    def _manifest_diagnostic_is_script(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "scripts"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold() in {"script", "gmscript"}
+        )
+
+    def _report_unavailable_declared_script(
+        self,
+        resource: _DeclaredScriptResource,
+    ) -> None:
+        """Retain path diagnostics while accounting for an unavailable script."""
+        if resource.source_path is None:
+            return
+        resolved = self._resolve_project_source(
+            resource.source_path,
+            owner_source_path=resource.owner_source_path,
+            resource=resource.name,
+            resource_type="script",
+            field=resource.manifest_field,
+        )
+        if resolved is None:
+            return
+        try:
+            validate_project_resource_source_path(resolved, "scripts")
+        except ProjectSourcePathError as error:
+            self._report_source_path_rejection(
+                resource.source_path,
+                error,
+                owner_source_path=resource.owner_source_path,
+                resource=resource.name,
+                resource_type="script",
+                field=resource.manifest_field,
+            )
+            return
+        if not os.path.isfile(resolved.filesystem_path):
+            self._safe_log(
+                "Warning: Skipping missing GameMaker asset "
+                f"{resource.name}: {resolved.filesystem_path}"
+            )
 
     def _script_yy_source(
         self,
@@ -840,8 +965,30 @@ class ScriptConverter(BaseConverter):
             for entry in all_entries
             if entry.asset_type == "script" and not _is_script_function_entry(entry)
         )
+        declared_resources = self._declared_script_resources()
+        entries_by_name = {entry.name: entry for entry in entries}
+        requested_names = dict.fromkeys(
+            (
+                resource.name
+                for resource in declared_resources
+            )
+            if declared_resources is not None
+            else ()
+        )
+        requested_names.update(dict.fromkeys(entries_by_name))
+        for script_name in requested_names:
+            self._resource_requested(script_name)
+        if declared_resources is not None:
+            for resource in declared_resources:
+                if resource.name in entries_by_name:
+                    continue
+                self._report_unavailable_declared_script(resource)
+                self._resource_skipped(resource.name)
         if not entries:
             self.log_callback(get_localized("Console_Convertor_Scripts_Complete"))
+            return None
+        if not self.conversion_running():
+            self.log_callback(get_localized("Console_Convertor_Scripts_Stopped"))
             return None
 
         write_gml_runtime(self.godot_project_path)
@@ -863,37 +1010,83 @@ class ScriptConverter(BaseConverter):
             macro_configuration=self.macro_configuration,
         )
         registry_entries: list[ScriptRegistryEntry] = []
+        successful_script_names: list[str] = []
         total = len(entries)
 
         for index, entry in enumerate(entries, start=1):
             if not self.conversion_running():
                 self.log_callback(get_localized("Console_Convertor_Scripts_Stopped"))
                 return None
-            converted_registry_entries = self._write_script(
-                entry,
-                asset_names=asset_names,
-                script_entries_by_name=script_entries_by_name,
-                extension_functions=extension_functions,
-                extension_function_mappings=extension_function_mappings,
-                enum_values=enum_values,
-                macro_values=macro_values,
-            )
+            self._resource_started(entry.name)
+            try:
+                converted_registry_entries = self._write_script(
+                    entry,
+                    asset_names=asset_names,
+                    script_entries_by_name=script_entries_by_name,
+                    extension_functions=extension_functions,
+                    extension_function_mappings=extension_function_mappings,
+                    enum_values=enum_values,
+                    macro_values=macro_values,
+                )
+            except Exception:
+                self._resource_failed(entry.name)
+                raise
             if converted_registry_entries:
+                successful_script_names.append(entry.name)
                 registry_entries.extend(converted_registry_entries)
                 self._safe_log(
                     get_localized("Console_Convertor_Scripts_Converted").format(script_name=entry.name)
                 )
+            else:
+                self._resource_skipped(entry.name)
             self._safe_progress(int(index / total * 100))
 
         registry_path = os.path.join(self.godot_project_path, SCRIPT_REGISTRY_RELATIVE_PATH)
-        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
-        with open(registry_path, "w", encoding="utf-8") as registry_file:
-            registry_file.write(render_script_registry_script(registry_entries))
+        self._atomic_write_text(
+            registry_path,
+            render_script_registry_script(registry_entries),
+        )
+        for script_name in successful_script_names:
+            self._resource_completed(script_name)
 
         self.log_callback(get_localized("Console_Convertor_Scripts_Complete"))
         return registry_path
 
+    @staticmethod
+    def _atomic_write_text(output_path: str, content: str) -> None:
+        """Publish generated UTF-8 text without exposing a partial file."""
+        output_directory = os.path.dirname(output_path) or os.curdir
+        os.makedirs(output_directory, exist_ok=True)
+        file_descriptor, staged_path = tempfile.mkstemp(
+            dir=output_directory,
+            prefix=f".{os.path.basename(output_path)}.",
+            suffix=".tmp",
+        )
+        staged_pending = True
+        try:
+            with os.fdopen(
+                file_descriptor,
+                "w",
+                encoding="utf-8",
+                newline="",
+            ) as staged_file:
+                file_descriptor = -1
+                staged_file.write(content)
+                staged_file.flush()
+                os.fsync(staged_file.fileno())
+            os.replace(staged_path, output_path)
+            staged_pending = False
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
+            if staged_pending:
+                try:
+                    os.unlink(staged_path)
+                except FileNotFoundError:
+                    pass
+
     def convert_all(self) -> str | None:
+        self._reset_resource_outcomes()
         return self.convert_scripts()
 
 

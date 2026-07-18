@@ -50,6 +50,7 @@ class _EnabledSetting:
 def _run_cli_convert(
     gm_directory: Path,
     destination: Path,
+    *extra_args: str,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -60,6 +61,7 @@ def _run_cli_convert(
             os.fspath(gm_directory),
             "--godot-project",
             os.fspath(destination),
+            *extra_args,
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -188,6 +190,33 @@ class ProjectDestinationPreflightTests(unittest.TestCase):
         )
         self.assertEqual(list(external_destination.iterdir()), [])
 
+    def test_rejects_destination_reported_as_windows_junction(self) -> None:
+        _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
+        destination = self.root / "godot-junction"
+        destination.mkdir()
+        destination_path = os.path.normcase(os.path.abspath(destination))
+
+        def is_mock_junction(path: str) -> bool:
+            return os.path.normcase(os.path.abspath(path)) == destination_path
+
+        with mock.patch.object(
+            os.path,
+            "isjunction",
+            side_effect=is_mock_junction,
+            create=True,
+        ):
+            with self.assertRaises(ConversionPreflightError) as raised:
+                prepare_godot_project_destination(
+                    self.gm_directory,
+                    destination,
+                )
+
+        self.assertEqual(
+            raised.exception.code,
+            "GM2GD-CONVERT-DESTINATION-SYMLINK",
+        )
+        self.assertEqual(list(destination.iterdir()), [])
+
     def test_converter_rejects_managed_output_directory_symlink_without_external_write(
         self,
     ) -> None:
@@ -245,6 +274,57 @@ class ProjectDestinationPreflightTests(unittest.TestCase):
             "GM2GD-CONVERT-MANAGED-OUTPUT-SYMLINK",
         )
         self.assertEqual(list(external_directory.iterdir()), [])
+
+    def test_rejects_nested_managed_directory_reported_as_windows_junction(
+        self,
+    ) -> None:
+        _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
+        destination = self.root / "godot"
+        destination.mkdir()
+        (destination / "project.godot").write_text(
+            'config_version=5\n[application]\nconfig/name="Demo"\n',
+            encoding="utf-8",
+        )
+        scripts = destination / "scripts"
+        scripts.mkdir()
+        nested = scripts / "junction-cycle"
+        nested.mkdir()
+        nested_path = os.path.normcase(os.path.abspath(nested))
+        real_scandir = os.scandir
+
+        def is_mock_junction(path: str) -> bool:
+            return os.path.normcase(os.path.abspath(path)) == nested_path
+
+        def refuse_nested_scan(path: str):
+            self.assertNotEqual(
+                os.path.normcase(os.path.abspath(path)),
+                nested_path,
+                "junction-marked managed directories must not be traversed",
+            )
+            return real_scandir(path)
+
+        with (
+            mock.patch.object(
+                os.path,
+                "isjunction",
+                side_effect=is_mock_junction,
+                create=True,
+            ),
+            mock.patch(
+                "src.conversion.project_godot.os.scandir",
+                side_effect=refuse_nested_scan,
+            ),
+        ):
+            with self.assertRaises(ConversionPreflightError) as raised:
+                prepare_godot_project_destination(
+                    self.gm_directory,
+                    destination,
+                )
+
+        self.assertEqual(
+            raised.exception.code,
+            "GM2GD-CONVERT-MANAGED-OUTPUT-SYMLINK",
+        )
 
     def test_rejects_managed_output_file_symlink_without_external_write(self) -> None:
         _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
@@ -329,7 +409,41 @@ class ProjectDestinationPreflightTests(unittest.TestCase):
         self.assertEqual(external_script.read_bytes(), external_original)
         self.assertEqual(output_script.read_bytes(), external_original)
 
-    def test_allows_symlink_outside_managed_output_locations(self) -> None:
+    def test_rejects_extension_stub_root_symlink_without_external_write(self) -> None:
+        _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
+        destination = self.root / "godot"
+        destination.mkdir()
+        project_file = destination / "project.godot"
+        project_file.write_text(
+            'config_version=5\n[application]\nconfig/name="Demo"\n',
+            encoding="utf-8",
+        )
+        addons = destination / "addons"
+        addons.mkdir()
+        external_stubs = self.root / "external-extension-stubs"
+        external_stubs.mkdir()
+        (addons / "gm2godot_extensions").symlink_to(
+            external_stubs,
+            target_is_directory=True,
+        )
+
+        with self.assertRaises(ConversionPreflightError) as raised:
+            _converter().convert(
+                os.fspath(self.gm_directory),
+                "windows",
+                os.fspath(destination),
+                {},
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "GM2GD-CONVERT-MANAGED-OUTPUT-SYMLINK",
+        )
+        self.assertEqual(list(external_stubs.iterdir()), [])
+
+    def test_rejects_addons_ancestor_symlink_when_external_subtree_is_missing(
+        self,
+    ) -> None:
         _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
         destination = self.root / "godot"
         destination.mkdir()
@@ -345,13 +459,45 @@ class ProjectDestinationPreflightTests(unittest.TestCase):
             target_is_directory=True,
         )
 
+        with self.assertRaises(ConversionPreflightError) as raised:
+            _converter().convert(
+                os.fspath(self.gm_directory),
+                "windows",
+                os.fspath(destination),
+                {},
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "GM2GD-CONVERT-MANAGED-OUTPUT-SYMLINK",
+        )
+        self.assertFalse((external_addons / "gm2godot_extensions").exists())
+        self.assertEqual(list(external_addons.iterdir()), [])
+
+    def test_allows_unrelated_addons_without_traversing_their_contents(self) -> None:
+        _write_yyp(self.gm_directory, "Demo.yyp", "Demo")
+        destination = self.root / "godot"
+        destination.mkdir()
+        project_file = destination / "project.godot"
+        project_file.write_text(
+            'config_version=5\n[application]\nconfig/name="Demo"\n',
+            encoding="utf-8",
+        )
+        addons = destination / "addons"
+        addons.mkdir()
+        external_plugin = self.root / "external-unrelated-plugin"
+        external_plugin.mkdir()
+        unrelated_plugin = addons / "third_party_plugin"
+        unrelated_plugin.symlink_to(external_plugin, target_is_directory=True)
+
         returned_path = prepare_godot_project_destination(
             self.gm_directory,
             destination,
         )
 
         self.assertEqual(Path(returned_path), project_file)
-        self.assertTrue((destination / "addons").is_symlink())
+        self.assertTrue(unrelated_plugin.is_symlink())
+        self.assertEqual(list(external_plugin.iterdir()), [])
 
     def test_rejects_project_files_that_godot_cannot_parse(self) -> None:
         invalid_projects = (
@@ -475,7 +621,11 @@ class ProjectDestinationCLITests(unittest.TestCase):
     def test_cli_creates_project_file_for_absent_destination(self) -> None:
         destination = self.root / "cli-output"
 
-        result = _run_cli_convert(self.gm_directory, destination)
+        result = _run_cli_convert(
+            self.gm_directory,
+            destination,
+            "--allow-partial",
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         project_file = destination / "project.godot"

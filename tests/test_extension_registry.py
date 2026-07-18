@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import textwrap
@@ -15,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+    ExtensionEntry,
     build_extension_entries,
     extension_stub_relative_script_path,
     extension_stub_resource_path,
@@ -213,6 +215,358 @@ class TestExtensionRegistry(unittest.TestCase):
         with open(plugin_path, "r", encoding="utf-8") as f:
             plugin = f.read()
         self.assertIn('script="ad_sdk_extension.gd"', plugin)
+
+    def test_report_replaces_final_symlink_without_mutating_referent(self) -> None:
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        os.makedirs(os.path.dirname(report_path))
+        external_path = os.path.join(self.outside_dir, "report.json")
+        _write_file(external_path, "external sentinel\n")
+        self._make_symlink(external_path, report_path)
+
+        returned_path = write_extension_compatibility_outputs(
+            self.gm_dir,
+            self.godot_dir,
+        )
+
+        self.assertEqual(returned_path, report_path)
+        self.assertFalse(os.path.islink(report_path))
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            self.assertEqual(json.load(report_file)["extensions"], [])
+        with open(external_path, "r", encoding="utf-8") as external_file:
+            self.assertEqual(external_file.read(), "external sentinel\n")
+
+    def test_report_refuses_symlinked_output_directory(self) -> None:
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        external_directory = os.path.join(self.outside_dir, "report_directory")
+        os.makedirs(external_directory)
+        self._make_symlink(external_directory, os.path.dirname(report_path))
+
+        with self.assertRaisesRegex(
+            OSError,
+            "redirected extension-report output directory",
+        ):
+            write_extension_compatibility_outputs(self.gm_dir, self.godot_dir)
+
+        self.assertEqual(os.listdir(external_directory), [])
+
+    def test_report_replaces_hardlink_without_mutating_referent(self) -> None:
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        os.makedirs(os.path.dirname(report_path))
+        external_path = os.path.join(self.outside_dir, "report.json")
+        _write_file(external_path, "external sentinel\n")
+        try:
+            os.link(external_path, report_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Hard links are unavailable: {error}")
+
+        returned_path = write_extension_compatibility_outputs(
+            self.gm_dir,
+            self.godot_dir,
+        )
+
+        self.assertEqual(returned_path, report_path)
+        with open(external_path, "r", encoding="utf-8") as external_file:
+            self.assertEqual(external_file.read(), "external sentinel\n")
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            self.assertEqual(json.load(report_file)["extensions"], [])
+        self.assertNotEqual(
+            os.stat(external_path).st_ino,
+            os.stat(report_path).st_ino,
+        )
+
+    def test_report_refuses_nonregular_target(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO creation is unavailable")
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        os.makedirs(os.path.dirname(report_path))
+        os.mkfifo(report_path)
+
+        with self.assertRaisesRegex(
+            OSError,
+            "non-regular extension compatibility report",
+        ):
+            write_extension_compatibility_outputs(self.gm_dir, self.godot_dir)
+
+    def test_report_publish_failure_invalidates_previous_and_cleans_temp(self) -> None:
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        report_directory = os.path.dirname(report_path)
+        _write_file(report_path, "previous report\n")
+        os.chmod(report_path, 0o640)
+
+        with patch(
+            "src.conversion.extension_registry.os.replace",
+            side_effect=OSError("report publish failed"),
+        ):
+            with self.assertRaisesRegex(OSError, "report publish failed"):
+                write_extension_compatibility_outputs(
+                    self.gm_dir,
+                    self.godot_dir,
+                )
+
+        self.assertFalse(os.path.lexists(report_path))
+        self.assertFalse(
+            any(
+                name.startswith(f".{os.path.basename(report_path)}.")
+                for name in os.listdir(report_directory)
+            )
+        )
+
+    def test_later_stub_failure_leaves_previous_report_absent(self) -> None:
+        self._write_extension("First", "First")
+        self._write_extension("Second", "Second")
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        _write_file(report_path, "previous report\n")
+        real_writer = getattr(extension_registry, "_write_extension_stub")
+        write_count = 0
+
+        def fail_second_stub(
+            godot_project_path: str,
+            entry: ExtensionEntry,
+            *,
+            stub_resource_path: str | None = None,
+        ) -> None:
+            nonlocal write_count
+            write_count += 1
+            if write_count == 2:
+                raise OSError("later stub failed")
+            real_writer(
+                godot_project_path,
+                entry,
+                stub_resource_path=stub_resource_path,
+            )
+
+        with patch.object(
+            extension_registry,
+            "_write_extension_stub",
+            side_effect=fail_second_stub,
+        ):
+            with self.assertRaisesRegex(OSError, "later stub failed"):
+                write_extension_compatibility_outputs(
+                    self.gm_dir,
+                    self.godot_dir,
+                )
+
+        self.assertEqual(write_count, 2)
+        self.assertFalse(os.path.lexists(report_path))
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are required")
+    def test_confined_stub_writer_preserves_existing_mode_under_umask(self) -> None:
+        confined_supported = getattr(
+            extension_registry,
+            "_confined_directory_fds_supported",
+        )
+        if not confined_supported():
+            self.skipTest("directory-relative output operations are unavailable")
+        self._write_extension()
+        write_extension_compatibility_outputs(self.gm_dir, self.godot_dir)
+        script_path = os.path.join(
+            self.godot_dir,
+            extension_stub_relative_script_path("AdSDK"),
+        )
+        plugin_path = os.path.join(os.path.dirname(script_path), "plugin.cfg")
+        os.chmod(script_path, 0o664)
+        os.chmod(plugin_path, 0o664)
+
+        previous_umask = os.umask(0o077)
+        try:
+            write_extension_compatibility_outputs(self.gm_dir, self.godot_dir)
+        finally:
+            os.umask(previous_umask)
+
+        self.assertEqual(stat.S_IMODE(os.stat(script_path).st_mode), 0o664)
+        self.assertEqual(stat.S_IMODE(os.stat(plugin_path).st_mode), 0o664)
+
+    def test_windows_fallback_does_not_require_os_fchmod(self) -> None:
+        self._write_extension()
+
+        with (
+            patch.object(
+                extension_registry,
+                "_confined_directory_fds_supported",
+                return_value=False,
+            ),
+            patch.object(
+                os,
+                "fchmod",
+                side_effect=AssertionError("os.fchmod must not be called"),
+                create=True,
+            ),
+        ):
+            report_path = write_extension_compatibility_outputs(
+                self.gm_dir,
+                self.godot_dir,
+            )
+
+        self.assertTrue(os.path.isfile(report_path))
+        script_path = os.path.join(
+            self.godot_dir,
+            extension_stub_relative_script_path("AdSDK"),
+        )
+        self.assertTrue(os.path.isfile(script_path))
+
+    def test_windows_fallback_refuses_final_stub_symlink(self) -> None:
+        external_path = os.path.join(self.outside_dir, "plugin.cfg")
+        _write_file(external_path, "external sentinel\n")
+        relative_path = os.path.join(
+            "addons",
+            "gm2godot_extensions",
+            "safe",
+            "plugin.cfg",
+        )
+        output_path = os.path.join(self.godot_dir, relative_path)
+        os.makedirs(os.path.dirname(output_path))
+        self._make_symlink(external_path, output_path)
+
+        with patch.object(
+            extension_registry,
+            "_confined_directory_fds_supported",
+            return_value=False,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "non-regular generated extension output",
+            ):
+                fallback_writer = getattr(
+                    extension_registry,
+                    "_atomic_write_extension_text",
+                )
+                fallback_writer(
+                    self.godot_dir,
+                    relative_path,
+                    "replacement\n",
+                )
+
+        with open(external_path, "r", encoding="utf-8") as external_file:
+            self.assertEqual(external_file.read(), "external sentinel\n")
+
+    def test_writes_distinct_stubs_for_normalized_name_collisions(self) -> None:
+        self._write_extension("Ext-One", "Ext-One")
+        self._write_extension("Ext_One", "Ext_One")
+
+        report_path = write_extension_compatibility_outputs(
+            self.gm_dir,
+            self.godot_dir,
+        )
+
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            report = json.load(report_file)
+        stub_paths = {
+            stub["extension"]: stub["path"]
+            for stub in report["stubs"]
+        }
+        self.assertEqual(
+            stub_paths,
+            {
+                "Ext-One": (
+                    "res://addons/gm2godot_extensions/ext_one/"
+                    "ext_one_extension.gd"
+                ),
+                "Ext_One": (
+                    "res://addons/gm2godot_extensions/ext_one_2/"
+                    "ext_one_2_extension.gd"
+                ),
+            },
+        )
+        for extension_name, stub_path in stub_paths.items():
+            output_path = os.path.join(
+                self.godot_dir,
+                *stub_path.removeprefix("res://").split("/"),
+            )
+            with open(output_path, "r", encoding="utf-8") as script_file:
+                self.assertIn(
+                    f"# GameMaker extension: {extension_name}",
+                    script_file.read(),
+                )
+            with open(
+                os.path.join(os.path.dirname(output_path), "plugin.cfg"),
+                "r",
+                encoding="utf-8",
+            ) as plugin_file:
+                self.assertIn(
+                    f'script="{os.path.basename(output_path)}"',
+                    plugin_file.read(),
+                )
+
+    def test_refuses_extension_output_symlink_swaps_without_external_write(
+        self,
+    ) -> None:
+        self._write_extension()
+        real_writer = getattr(extension_registry, "_atomic_write_extension_text")
+
+        for swap_level in ("addons", "managed_root"):
+            with self.subTest(swap_level=swap_level):
+                destination = os.path.join(self.godot_dir, swap_level)
+                managed_root = os.path.join(
+                    destination,
+                    "addons",
+                    "gm2godot_extensions",
+                )
+                os.makedirs(managed_root)
+                external_target = os.path.join(
+                    self.outside_dir,
+                    swap_level,
+                )
+                os.makedirs(external_target)
+                swapped = False
+
+                def swap_then_write(
+                    project_path: str,
+                    relative_path: str,
+                    content: str,
+                ) -> None:
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        if swap_level == "addons":
+                            shutil.rmtree(os.path.join(destination, "addons"))
+                            self._make_symlink(
+                                external_target,
+                                os.path.join(destination, "addons"),
+                            )
+                        else:
+                            shutil.rmtree(managed_root)
+                            self._make_symlink(external_target, managed_root)
+                    real_writer(project_path, relative_path, content)
+
+                with patch.object(
+                    extension_registry,
+                    "_atomic_write_extension_text",
+                    side_effect=swap_then_write,
+                ):
+                    with self.assertRaises(OSError):
+                        write_extension_compatibility_outputs(
+                            self.gm_dir,
+                            destination,
+                        )
+
+                self.assertTrue(swapped)
+                self.assertEqual(os.listdir(external_target), [])
+                self.assertFalse(
+                    os.path.exists(
+                        os.path.join(
+                            external_target,
+                            "gm2godot_extensions",
+                        )
+                    )
+                )
 
     def test_rejects_extensions_root_symlink_outside_project(self) -> None:
         outside_extensions = os.path.join(self.outside_dir, "extensions")

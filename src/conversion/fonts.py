@@ -7,6 +7,7 @@ import re
 import shutil
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
 from src.localization import get_localized
@@ -16,7 +17,11 @@ from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_resource_stem,
 )
-from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     validate_project_resource_source_path,
@@ -35,6 +40,21 @@ class FontData(TypedDict):
     AntiAlias: int
     includeTTF: bool
     TTFName: str
+
+
+@dataclass(frozen=True)
+class _DeclaredFontResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _FontConversionPlan:
+    requested_keys: tuple[str, ...]
+    available_fonts: tuple[tuple[str, str], ...]
+    skipped_keys: tuple[str, ...]
 
 
 def bundled_font_output_filename(ttf_name: str) -> str | None:
@@ -158,59 +178,214 @@ class FontConverter(BaseConverter):
         self._font_output_paths: dict[str, str] = {}
 
     def find_font_files(self) -> list[str]:
+        """Return available font metadata selected by the project plan."""
+        return [
+            yy_path
+            for _resource_key, yy_path in self._font_conversion_plan().available_fonts
+        ]
+
+    def _font_conversion_plan(self) -> _FontConversionPlan:
+        """Plan logical font resources before filtering unavailable metadata."""
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="font",
         )
         if manifest.yyp_path is not None:
-            font_files: list[str] = []
-            seen_paths: set[str] = set()
-            for resource in manifest.resources:
-                if resource.kind.casefold() != "fonts":
-                    continue
-                source_path = resource.path.casefold()
-                if not source_path.endswith(".yy") or source_path.endswith(".old.yy"):
-                    continue
-                manifest_field = (
-                    f"{resource.source.field_path}.id.path"
-                    if resource.source is not None and resource.source.field_path
-                    else "resources[].id.path"
-                )
-                resolved = self._resolve_project_source(
-                    resource.path,
+            return self._plan_manifest_fonts(manifest)
+
+        font_files = self._find_disk_font_files()
+        return _FontConversionPlan(
+            requested_keys=tuple(font_files),
+            available_fonts=tuple((font_file, font_file) for font_file in font_files),
+            skipped_keys=(),
+        )
+
+    def _declared_font_resources(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> tuple[tuple[_DeclaredFontResource, ...], ...]:
+        """Return ordered logical YYP fonts, including rejected declarations."""
+        declared_by_name: dict[str, list[_DeclaredFontResource]] = {}
+        seen_declarations: set[tuple[str, str | None]] = set()
+
+        def add(resource: _DeclaredFontResource) -> None:
+            declaration_key = (resource.name, resource.source_path)
+            if not resource.name or declaration_key in seen_declarations:
+                return
+            seen_declarations.add(declaration_key)
+            declared_by_name.setdefault(resource.name, []).append(resource)
+
+        for resource in manifest.resources:
+            if resource.kind.casefold() != "fonts":
+                continue
+            source_path = resource.path.casefold()
+            if not source_path.endswith(".yy") or source_path.endswith(".old.yy"):
+                continue
+            manifest_field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            add(
+                _DeclaredFontResource(
+                    name=resource.name,
+                    source_path=resource.path,
                     owner_source_path=manifest.yyp_path,
-                    resource=resource.name,
+                    manifest_field=manifest_field,
+                )
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_font(diagnostic)
+            ):
+                continue
+            add(
+                _DeclaredFontResource(
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                )
+            )
+
+        return tuple(tuple(resources) for resources in declared_by_name.values())
+
+    @staticmethod
+    def _manifest_diagnostic_is_font(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "fonts"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold() in {"font", "gmfont"}
+        )
+
+    def _plan_manifest_fonts(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> _FontConversionPlan:
+        """Resolve one available source for every logical base font."""
+        requested_keys: list[str] = []
+        available_fonts: list[tuple[str, str]] = []
+        skipped_keys: list[str] = []
+        seen_paths: set[str] = set()
+
+        for declarations in self._declared_font_resources(manifest):
+            font_name = declarations[0].name
+            selected_path: str | None = None
+            duplicate_source = False
+            unavailable_reason = "all of its manifest source paths are unavailable"
+
+            for resource in declarations:
+                if resource.source_path is None:
+                    unavailable_reason = "its manifest source path was rejected"
+                    continue
+                resolved = self._resolve_project_source(
+                    resource.source_path,
+                    owner_source_path=resource.owner_source_path,
+                    resource=font_name,
                     resource_type="font",
-                    field=manifest_field,
+                    field=resource.manifest_field,
                 )
                 if resolved is None:
+                    unavailable_reason = "its manifest source path is unavailable"
                     continue
                 try:
-                    validate_project_resource_source_path(
-                        resolved,
-                        "fonts",
-                    )
+                    validate_project_resource_source_path(resolved, "fonts")
                 except ProjectSourcePathError as exc:
                     self._report_source_path_rejection(
-                        resource.path,
+                        resource.source_path,
                         exc,
-                        owner_source_path=manifest.yyp_path,
-                        resource=resource.name,
+                        owner_source_path=resource.owner_source_path,
+                        resource=font_name,
                         resource_type="font",
-                        field=manifest_field,
+                        field=resource.manifest_field,
                     )
+                    unavailable_reason = "its manifest source path was rejected"
                     continue
                 if not os.path.isfile(resolved.filesystem_path):
+                    unavailable_reason = (
+                        f"metadata is missing at {resolved.source_path!r}"
+                    )
                     continue
+
                 canonical_path = os.path.normcase(
                     os.path.realpath(resolved.filesystem_path)
                 )
                 if canonical_path in seen_paths:
-                    continue
+                    # Preserve the historical behavior for duplicate exact YYP
+                    # references: convert and account for the source only once.
+                    duplicate_source = True
+                    break
                 seen_paths.add(canonical_path)
-                font_files.append(resolved.filesystem_path)
-            return font_files
+                selected_path = resolved.filesystem_path
+                break
+
+            if duplicate_source:
+                continue
+
+            requested_keys.append(font_name)
+            if selected_path is None:
+                skipped_keys.append(font_name)
+                self._report_unavailable_declared_font(
+                    declarations[0],
+                    reason=unavailable_reason,
+                )
+            else:
+                available_fonts.append((font_name, selected_path))
+
+        return _FontConversionPlan(
+            requested_keys=tuple(requested_keys),
+            available_fonts=tuple(available_fonts),
+            skipped_keys=tuple(skipped_keys),
+        )
+
+    def _report_unavailable_declared_font(
+        self,
+        resource: _DeclaredFontResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker font "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-FONT-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="font",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker font .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
+
+    def _find_disk_font_files(self) -> list[str]:
+        """Discover fonts on disk when the project has no YYP manifest."""
 
         font_folder = self._resolve_discovered_project_source(
             os.path.join(self.gm_project_path, 'fonts'),
@@ -509,6 +684,17 @@ class FontConverter(BaseConverter):
 
         return font_name
 
+    def _process_requested_font(
+        self,
+        resource_key: str,
+        yy_path: str,
+    ) -> str | Literal[False] | None:
+        """Process one requested font while preserving cancellation semantics."""
+        if not self.conversion_running():
+            return None
+        self._resource_started(resource_key)
+        return self._process_font(yy_path)
+
     def _font_output_destination(
         self,
         yy_path: str,
@@ -543,10 +729,19 @@ class FontConverter(BaseConverter):
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_fonts_path, exist_ok=True)
 
-        font_files = self.find_font_files()
+        plan = self._font_conversion_plan()
+        font_files = plan.available_fonts
+
+        for resource_key in plan.requested_keys:
+            self._resource_requested(resource_key)
+        for resource_key in plan.skipped_keys:
+            self._resource_skipped(resource_key)
 
         if not font_files:
-            self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
+            if plan.requested_keys:
+                self.log_callback(get_localized("Console_Convertor_Fonts_Complete"))
+            else:
+                self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
 
         # Imported lazily to avoid the fonts -> asset registry -> fonts import
@@ -561,24 +756,57 @@ class FontConverter(BaseConverter):
 
         total_fonts = len(font_files)
         processed_fonts = 0
+        cancelled = False
+        completed_font_keys: set[str] = set()
+        failed_font_keys: set[str] = set()
+        first_error: Exception | None = None
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map: dict[Future[str | Literal[False] | None], str] = {executor.submit(self._process_font, ff): ff for ff in font_files}
+            futures_map: dict[
+                Future[str | Literal[False] | None],
+                str,
+            ] = {
+                executor.submit(
+                    self._process_requested_font,
+                    resource_key,
+                    font_file,
+                ): resource_key
+                for resource_key, font_file in font_files
+            }
             for future in as_completed(futures_map):
-                result = future.result()
+                resource_key = futures_map[future]
+                try:
+                    result = future.result()
+                except Exception as error:
+                    failed_font_keys.add(resource_key)
+                    if first_error is None:
+                        first_error = error
+                    continue
                 if result is None:
-                    self.log_callback(get_localized("Console_Convertor_Fonts_Stopped"))
-                    return
+                    cancelled = True
+                    continue
+                processed_fonts += 1
                 if result is not False:
-                    processed_fonts += 1
+                    completed_font_keys.add(resource_key)
                     if self.compact_logging:
                         self._safe_log_progress(result, processed_fonts, total_fonts)
-                    self._safe_progress(int(processed_fonts / total_fonts * 100))
                 else:
-                    processed_fonts += 1
-                    self._safe_progress(int(processed_fonts / total_fonts * 100))
+                    failed_font_keys.add(resource_key)
+                self._safe_progress(int(processed_fonts / total_fonts * 100))
+
+        for resource_key in sorted(completed_font_keys):
+            self._resource_completed(resource_key)
+        for resource_key in sorted(failed_font_keys):
+            self._resource_failed(resource_key)
+
+        if first_error is not None:
+            raise first_error
+        if cancelled:
+            self.log_callback(get_localized("Console_Convertor_Fonts_Stopped"))
+            return
 
         self.log_callback(get_localized("Console_Convertor_Fonts_Complete"))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_fonts()

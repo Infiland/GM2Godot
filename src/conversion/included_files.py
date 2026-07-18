@@ -11,6 +11,11 @@ from typing import BinaryIO
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
@@ -23,6 +28,21 @@ class _IncludedFileSource:
     filesystem_path: str
     relative_path: str
     owner_source_path: str
+
+
+@dataclass(frozen=True)
+class _DeclaredIncludedFile:
+    name: str
+    source_path: str | None
+    owner_source_path: str
+    manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _IncludedFileConversionPlan:
+    requested_keys: tuple[str, ...]
+    available_files: tuple[_IncludedFileSource, ...]
+    skipped_keys: tuple[str, ...]
 
 
 class IncludedFilesConverter(BaseConverter):
@@ -44,28 +64,35 @@ class IncludedFilesConverter(BaseConverter):
     ) -> tuple[str, bool] | None:
         if not self.conversion_running():
             return None
+        self._resource_requested(rel_path)
+        self._resource_started(rel_path)
 
-        opened_source = self._open_confined_source_file(
-            gm_file_path,
-            owner_source_path=owner_source_path,
-            resource=rel_path,
-        )
-        if opened_source is None:
-            return rel_path, False
+        try:
+            opened_source = self._open_confined_source_file(
+                gm_file_path,
+                owner_source_path=owner_source_path,
+                resource=rel_path,
+            )
+            if opened_source is None:
+                self._resource_failed(rel_path)
+                return rel_path, False
 
-        source_file, source_stat = opened_source
-        with source_file:
-            with open(godot_file_path, "wb") as target_file:
-                shutil.copyfileobj(source_file, target_file)
+            source_file, source_stat = opened_source
+            with source_file:
+                with open(godot_file_path, "wb") as target_file:
+                    shutil.copyfileobj(source_file, target_file)
 
-        # Preserve the source file's main copy2 metadata without consulting the
-        # source path again after it has been validated and opened. The held
-        # descriptor remains safe if a path component is swapped concurrently.
-        os.chmod(godot_file_path, stat.S_IMODE(source_stat.st_mode))
-        os.utime(
-            godot_file_path,
-            ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-        )
+            # Preserve metadata without consulting the source path again after
+            # its validated descriptor has been pinned.
+            os.chmod(godot_file_path, stat.S_IMODE(source_stat.st_mode))
+            os.utime(
+                godot_file_path,
+                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+            )
+        except Exception:
+            self._resource_failed(rel_path)
+            raise
+        self._resource_completed(rel_path)
         return rel_path, True
 
     def _open_confined_source_file(
@@ -266,8 +293,67 @@ class IncludedFilesConverter(BaseConverter):
                 )
         return sorted(included_files, key=lambda item: item.relative_path)
 
-    def convert_included_files(self) -> None:
-        godot_included_path = os.path.join(self.godot_project_path, "included_files")
+    def _included_file_conversion_plan(self) -> _IncludedFileConversionPlan:
+        """Plan logical included files before filtering unavailable sources."""
+        manifest = load_gamemaker_project_manifest(self.gm_project_path)
+        self._record_project_manifest_source_path_diagnostics(
+            manifest,
+            resource_type="included_file",
+        )
+        malformed = any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        )
+        manifest_declares_included_files = (
+            "IncludedFiles" in manifest.raw_data
+            or "includedFiles" in manifest.raw_data
+            or any(
+                resource.kind.casefold() == "datafiles"
+                or resource.resource_type.casefold() == "gmincludedfile"
+                for resource in manifest.resources
+            )
+            or any(
+                self._manifest_diagnostic_is_included_file(diagnostic)
+                for diagnostic in manifest.diagnostics
+            )
+        )
+        if (
+            manifest.yyp_path is not None
+            and not malformed
+            and manifest_declares_included_files
+        ):
+            declared_plan = self._plan_manifest_included_files(manifest)
+            # Included Files are directory-backed rather than ordinary Asset
+            # Browser resources: current GameMaker automatically reflects
+            # contained files added under datafiles even before their YYP
+            # metadata is refreshed. Preserve those files while still
+            # accounting for stale manifest declarations.
+            requested_keys = list(declared_plan.requested_keys)
+            available_files = list(declared_plan.available_files)
+            seen_keys = set(requested_keys)
+            for source in self._discovered_included_files():
+                if source.relative_path in seen_keys:
+                    continue
+                seen_keys.add(source.relative_path)
+                requested_keys.append(source.relative_path)
+                available_files.append(source)
+            return _IncludedFileConversionPlan(
+                requested_keys=tuple(requested_keys),
+                available_files=tuple(available_files),
+                skipped_keys=declared_plan.skipped_keys,
+            )
+
+        available_files = self._discovered_included_files()
+        return _IncludedFileConversionPlan(
+            requested_keys=tuple(
+                source.relative_path for source in available_files
+            ),
+            available_files=available_files,
+            skipped_keys=(),
+        )
+
+    def _discovered_included_files(self) -> tuple[_IncludedFileSource, ...]:
+        """Return every contained regular payload under datafiles."""
 
         datafiles = self._resolve_discovered_project_source(
             os.path.join(self.gm_project_path, "datafiles"),
@@ -276,16 +362,276 @@ class IncludedFilesConverter(BaseConverter):
             field="datafiles directory",
         )
         if datafiles is None or not os.path.isdir(datafiles.filesystem_path):
+            return ()
+        return tuple(self._collect_included_files(datafiles))
+
+    def _plan_manifest_included_files(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> _IncludedFileConversionPlan:
+        requested_keys: list[str] = []
+        available_files: list[_IncludedFileSource] = []
+        skipped_keys: list[str] = []
+        seen_keys: set[str] = set()
+
+        for declaration in self._declared_included_files(manifest):
+            resolved: ResolvedProjectSourcePath | None = None
+            unavailable_reason = "its manifest source path was rejected"
+            if declaration.source_path is not None:
+                resolved = self._resolve_project_source(
+                    declaration.source_path,
+                    owner_source_path=declaration.owner_source_path,
+                    resource=declaration.name,
+                    resource_type="included_file",
+                    field=declaration.manifest_field,
+                )
+                if resolved is None:
+                    unavailable_reason = "its manifest source path was rejected"
+
+            relative_path = self._declared_relative_path(declaration, resolved)
+            if relative_path in seen_keys:
+                continue
+            seen_keys.add(relative_path)
+            requested_keys.append(relative_path)
+
+            if resolved is not None:
+                source_root, separator, source_relative = (
+                    resolved.source_path.partition("/")
+                )
+                if (
+                    not separator
+                    or source_root.casefold() != "datafiles"
+                    or not source_relative
+                ):
+                    self._report_source_path_rejection(
+                        declaration.source_path or resolved.source_path,
+                        ProjectSourcePathError(
+                            "Resolved included-file source must remain under "
+                            "the GameMaker 'datafiles' directory"
+                        ),
+                        owner_source_path=declaration.owner_source_path,
+                        resource=declaration.name,
+                        resource_type="included_file",
+                        field=declaration.manifest_field,
+                    )
+                    resolved = None
+                    unavailable_reason = (
+                        "its manifest source path was rejected outside the "
+                        "datafiles resource family"
+                    )
+                elif not os.path.isfile(resolved.filesystem_path):
+                    unavailable_reason = (
+                        f"the source file is missing at {resolved.source_path!r}"
+                    )
+                    resolved = None
+
+            if resolved is None:
+                skipped_keys.append(relative_path)
+                self._report_unavailable_declared_included_file(
+                    declaration,
+                    reason=unavailable_reason,
+                )
+                continue
+
+            available_files.append(
+                _IncludedFileSource(
+                    filesystem_path=resolved.filesystem_path,
+                    relative_path=relative_path,
+                    owner_source_path=declaration.owner_source_path,
+                )
+            )
+
+        return _IncludedFileConversionPlan(
+            requested_keys=tuple(requested_keys),
+            available_files=tuple(available_files),
+            skipped_keys=tuple(skipped_keys),
+        )
+
+    def _declared_included_files(
+        self,
+        manifest: GameMakerProjectManifest,
+    ) -> tuple[_DeclaredIncludedFile, ...]:
+        """Return unique included-file declarations from a valid YYP."""
+        declared: dict[str, _DeclaredIncludedFile] = {}
+
+        def add(resource: _DeclaredIncludedFile, identity: str) -> None:
+            normalized_identity = self._normalized_declaration_path(identity)
+            if not normalized_identity:
+                normalized_identity = resource.name
+            if not normalized_identity:
+                return
+            declared.setdefault(normalized_identity, resource)
+
+        for included_file in manifest.included_files:
+            source = included_file.source
+            field = source.field_path if source is not None else None
+            raw_field = next(
+                (
+                    key
+                    for key in ("path", "filePath", "filename")
+                    if key in included_file.raw_data
+                ),
+                "path",
+            )
+            manifest_field = f"{field}.{raw_field}" if field else raw_field
+            source_path = included_file.path
+            if (
+                raw_field == "filePath"
+                and included_file.name
+                and posixpath.basename(source_path) != included_file.name
+            ):
+                # Current GameMaker YYP files store the containing directory in
+                # ``filePath`` and the payload filename separately in ``name``.
+                source_path = posixpath.join(source_path, included_file.name)
+            add(
+                _DeclaredIncludedFile(
+                    name=included_file.name or included_file.path,
+                    source_path=source_path,
+                    owner_source_path=manifest.yyp_path or "",
+                    manifest_field=manifest_field,
+                ),
+                source_path or included_file.name,
+            )
+
+        for resource in manifest.resources:
+            if (
+                resource.kind.casefold() != "datafiles"
+                and resource.resource_type.casefold() != "gmincludedfile"
+            ):
+                continue
+            field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            add(
+                _DeclaredIncludedFile(
+                    name=resource.name,
+                    source_path=resource.path,
+                    owner_source_path=manifest.yyp_path or "",
+                    manifest_field=field,
+                ),
+                resource.path,
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_included_file(diagnostic)
+            ):
+                continue
+            source = diagnostic.source
+            field = source.field_path if source is not None else None
+            add(
+                _DeclaredIncludedFile(
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        source.path
+                        if source is not None
+                        else manifest.yyp_path or ""
+                    ),
+                    manifest_field=field,
+                ),
+                f"rejected:{diagnostic.resource}",
+            )
+
+        return tuple(declared.values())
+
+    @staticmethod
+    def _manifest_diagnostic_is_included_file(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "datafiles"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold()
+            in {"included_file", "includedfile", "gmincludedfile"}
+        )
+
+    @staticmethod
+    def _normalized_declaration_path(path: str) -> str:
+        normalized = posixpath.normpath(path.replace("\\", "/").strip())
+        return "" if normalized in {"", "."} else normalized
+
+    def _declared_relative_path(
+        self,
+        declaration: _DeclaredIncludedFile,
+        resolved: ResolvedProjectSourcePath | None,
+    ) -> str:
+        if resolved is not None:
+            source_root, separator, source_relative = (
+                resolved.source_path.partition("/")
+            )
+            if (
+                separator
+                and source_root.casefold() == "datafiles"
+                and source_relative
+            ):
+                return source_relative
+
+        fallback = self._normalized_declaration_path(
+            declaration.source_path or declaration.name
+        )
+        source_root, separator, source_relative = fallback.partition("/")
+        if (
+            separator
+            and source_root.casefold() == "datafiles"
+            and source_relative
+        ):
+            return source_relative
+        return fallback or declaration.name
+
+    def _report_unavailable_declared_included_file(
+        self,
+        declaration: _DeclaredIncludedFile,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker included file "
+            f"{declaration.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    declaration.owner_source_path
+                ),
+                resource=declaration.name,
+                resource_type="included_file",
+                manifest_entry=declaration.manifest_field,
+                workaround=(
+                    "Restore the declared included file under the GameMaker "
+                    "datafiles directory or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
+
+    def convert_included_files(self) -> None:
+        godot_included_path = os.path.join(self.godot_project_path, "included_files")
+        plan = self._included_file_conversion_plan()
+        for resource_key in plan.requested_keys:
+            self._resource_requested(resource_key)
+        for resource_key in plan.skipped_keys:
+            self._resource_skipped(resource_key)
+
+        if not plan.requested_keys:
             self.log_callback(get_localized("Console_Convertor_IncludedFiles_Error_NotFound"))
+            return
+
+        all_files = list(plan.available_files)
+        if not all_files:
             return
 
         os.makedirs(godot_included_path, exist_ok=True)
-
-        all_files = self._collect_included_files(datafiles)
-
-        if not all_files:
-            self.log_callback(get_localized("Console_Convertor_IncludedFiles_Error_NotFound"))
-            return
 
         # Pre-create all directories
         for source in all_files:
@@ -332,4 +678,5 @@ class IncludedFilesConverter(BaseConverter):
                 self._safe_progress(int((processed_files / total_files) * 100))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_included_files()

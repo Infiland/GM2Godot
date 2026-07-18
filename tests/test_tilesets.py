@@ -5,9 +5,10 @@ import json
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -15,6 +16,8 @@ if PROJECT_ROOT not in sys.path:
 
 from PIL import Image
 from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.tilesets import TileSetConverter, TilesetData
 
@@ -149,6 +152,18 @@ class TestTileSetConverterBasic(unittest.TestCase):
         self.assertIn('0:0/0 = 0', content)
         self.assertIn('metadata/gamemaker_tileset_tile_count = 4', content)
         self.assertIn('metadata/gamemaker_tileset_animation_frames = []', content)
+
+    def test_resource_outcome_counts_logical_tileset(self):
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result().resources
+
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
 
     def test_warns_when_preserving_tileset_metadata(self):
         yy_content = (
@@ -434,6 +449,233 @@ class TestTileSetSourceContainment(unittest.TestCase):
             and os.path.abspath(os.fspath(call.args[0])) == yyp_path
         ]
         self.assertEqual(len(yyp_reads), 1, yyp_reads)
+
+    def test_missing_only_declared_tileset_makes_conversion_partial(self) -> None:
+        missing_resource = {
+            "id": {
+                "name": "ts_missing",
+                "path": "tilesets/ts_missing/ts_missing.yy",
+                "resourceType": "GMTileSet",
+            },
+            "resourceType": "GMTileSet",
+        }
+        self._write_json(
+            os.path.join(self.gm_dir, "MissingTileset.yyp"),
+            {
+                "resources": [missing_resource, missing_resource],
+                "resourceType": "GMProject",
+            },
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        tilesets_enabled = MagicMock()
+        tilesets_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"tilesets": tilesets_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-TILESET-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == "ts_missing"
+                for diagnostic in converter.diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                "Skipping manifest-declared GameMaker tileset 'ts_missing'"
+                in log
+                for log in self.logs
+            )
+        )
+
+    def test_safe_and_missing_declared_tilesets_have_strict_counts(self) -> None:
+        safe_name = "ts_safe"
+        safe_sprite = "s_safe"
+        self._write_tileset(
+            os.path.join(
+                self.gm_dir,
+                "tilesets",
+                safe_name,
+                safe_name + ".yy",
+            ),
+            safe_name,
+            {
+                "name": safe_sprite,
+                "path": f"sprites/{safe_sprite}/{safe_sprite}.yy",
+            },
+        )
+        self._write_sprite(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                safe_sprite,
+                safe_sprite + ".yy",
+            ),
+            color="green",
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "MixedTilesets.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": safe_name,
+                            "path": f"tilesets/{safe_name}/{safe_name}.yy",
+                        }
+                    },
+                    {
+                        "id": {
+                            "name": "ts_missing",
+                            "path": "tilesets/ts_missing/ts_missing.yy",
+                        }
+                    },
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "tilesets",
+                    safe_name,
+                    safe_name + ".tres",
+                )
+            )
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-TILESET-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "ts_missing")
+        self.assertEqual(unavailable[0].source_path, "MixedTilesets.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[1].id.path",
+        )
+
+    def test_rejected_and_cross_family_declared_tilesets_are_skipped(self) -> None:
+        cross_family_path = "objects/ts_cross_family/ts_cross_family.yy"
+        self._write_json(
+            os.path.join(self.gm_dir, *cross_family_path.split("/")),
+            {"resourceType": "GMTileSet"},
+        )
+        orphan_name = "ts_orphan"
+        orphan_sprite = "s_orphan"
+        self._write_tileset(
+            os.path.join(
+                self.gm_dir,
+                "tilesets",
+                orphan_name,
+                orphan_name + ".yy",
+            ),
+            orphan_name,
+            {
+                "name": orphan_sprite,
+                "path": f"sprites/{orphan_sprite}/{orphan_sprite}.yy",
+            },
+        )
+        self._write_sprite(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                orphan_sprite,
+                orphan_sprite + ".yy",
+            ),
+            color="blue",
+        )
+        self._write_json(
+            os.path.join(self.gm_dir, "RejectedTilesets.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "ts_rejected",
+                            "path": "tilesets/../../outside/ts_rejected.yy",
+                            "resourceType": "GMTileSet",
+                        }
+                    },
+                    {
+                        "id": {
+                            "name": "ts_cross_family",
+                            "path": cross_family_path,
+                            "resourceType": "GMTileSet",
+                        }
+                    },
+                ],
+                "resourceType": "GMProject",
+            },
+        )
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=2, skipped=2),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "tilesets", orphan_name)
+            )
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in self.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-TILESET-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in unavailable},
+            {"ts_rejected", "ts_cross_family"},
+        )
+        rejected = [
+            diagnostic
+            for diagnostic in self._source_path_rejections()
+            if diagnostic.resource in {"ts_rejected", "ts_cross_family"}
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in rejected},
+            {"ts_rejected", "ts_cross_family"},
+        )
 
     def _source_path_rejections(self):
         return [

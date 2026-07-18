@@ -15,6 +15,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.base_converter import BaseConverter
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
@@ -106,6 +107,139 @@ class TestBaseConverterDefaults(unittest.TestCase):
             self.assertEqual(len(diagnostics.diagnostics()), 1)
             self.assertEqual(len(messages), 1)
             self.assertIn("Warning: Rejected GameMaker source path", messages[0])
+
+
+class TestBaseConverterResourceOutcomes(unittest.TestCase):
+    def setUp(self) -> None:
+        class StubConverter(BaseConverter):
+            def convert_all(self) -> None:
+                pass
+
+        self.running = threading.Event()
+        self.running.set()
+        self.converter = StubConverter(
+            "/gm",
+            "/godot",
+            conversion_running=self.running.is_set,
+        )
+
+    def test_resource_wrappers_build_public_step_result(self) -> None:
+        self.converter._resource_requested("script:completed")
+        self.converter._resource_started("script:completed")
+        self.converter._resource_completed("script:completed")
+        self.converter._resource_requested("script:skipped")
+        self.converter._resource_skipped("script:skipped")
+        self.converter._resource_requested("script:failed")
+        self.converter._resource_started("script:failed")
+        self.converter._resource_failed("script:failed")
+
+        result = self.converter.conversion_step_result()
+
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=3,
+                executed=2,
+                completed=1,
+                skipped=1,
+                failed=1,
+            ),
+        )
+        self.assertFalse(result.cancelled)
+
+    def test_step_result_infers_cancellation_from_running_flag(self) -> None:
+        self.running.clear()
+
+        result = self.converter._conversion_step_result()
+
+        self.assertTrue(result.cancelled)
+
+    def test_explicit_cancellation_overrides_running_flag(self) -> None:
+        self.assertTrue(self.running.is_set())
+
+        result = self.converter.conversion_step_result(cancelled=True)
+
+        self.assertTrue(result.cancelled)
+
+    def test_default_finalization_marks_unfinished_resources_skipped(self) -> None:
+        self.converter._resource_requested("script:not-started")
+        self.converter._resource_requested("script:started")
+        self.converter._resource_started("script:started")
+
+        result = self.converter.conversion_step_result()
+
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=0,
+                skipped=2,
+                failed=0,
+            ),
+        )
+
+    def test_failed_finalization_preserves_unstarted_resource_as_skipped(self) -> None:
+        self.converter._resource_requested("not-started")
+        self.converter._resource_requested("started")
+        self.converter._resource_started("started")
+
+        result = self.converter.conversion_step_result(
+            finalize_unfinished_as="failed",
+        )
+
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=0,
+                skipped=1,
+                failed=1,
+            ),
+        )
+
+    def test_no_finalization_rejects_unfinished_resource(self) -> None:
+        self.converter._resource_requested("opaque resource key")
+
+        with self.assertRaises(ValueError):
+            self.converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            )
+
+    def test_resource_wrappers_are_safe_across_threads(self) -> None:
+        errors: list[Exception] = []
+
+        def complete_resource(index: int) -> None:
+            try:
+                key = f"resource:{index}"
+                self.converter._resource_requested(key)
+                self.converter._resource_started(key)
+                self.converter._resource_completed(key)
+            except Exception as error:
+                errors.append(error)
+
+        threads = [
+            threading.Thread(target=complete_resource, args=(index,))
+            for index in range(40)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        result = self.converter.conversion_step_result()
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=40,
+                executed=40,
+                completed=40,
+                skipped=0,
+                failed=0,
+            ),
+        )
 
 
 class TestProjectManifestSourcePathDiagnosticBridge(unittest.TestCase):

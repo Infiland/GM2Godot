@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from src.conversion.conversion_outcome import ConversionOutcome
 from src.gui.main_window import MainWindow
 from src.gui.panels.console_panel import ConsolePanel
 from src.gui.panels.progress_panel import ProgressPanel
@@ -40,6 +41,31 @@ class _MainWindowOutcomeHarness:
 
 
 class ConversionWorkerOutcomeTests(unittest.TestCase):
+    def test_non_none_success_outcome_still_emits_worker_success(self) -> None:
+        converter = MagicMock()
+        converter.convert.return_value = ConversionOutcome(state="success")
+        conversion_running = threading.Event()
+        conversion_running.set()
+        worker = ConversionWorker(
+            "/game-maker",
+            "macos",
+            "/godot",
+            {},
+            True,
+            conversion_running,
+        )
+        outcomes: list[tuple[bool, str]] = []
+
+        def record_outcome(succeeded: bool, error: str) -> None:
+            outcomes.append((succeeded, error))
+
+        worker.conversion_finished.connect(record_outcome)
+
+        with patch("src.gui.workers.Converter", return_value=converter):
+            worker.run()
+
+        self.assertEqual(outcomes, [(True, "")])
+
     def test_exception_emits_failure_outcome_instead_of_success(self) -> None:
         converter = MagicMock()
         converter.convert.side_effect = RuntimeError("disk full")

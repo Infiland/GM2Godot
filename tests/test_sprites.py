@@ -5,9 +5,10 @@ import os
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -15,9 +16,17 @@ if PROJECT_ROOT not in sys.path:
 
 from PIL import Image
 from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.resource_index import GameMakerResourceIndex
-from src.conversion.sprites import AnimationData, CollisionData, SpriteConverter, SpriteParseResult
+from src.conversion.sprites import (
+    AnimationData,
+    CollisionData,
+    SpriteConverter,
+    SpriteParseResult,
+    SpriteProcessResult,
+)
 
 
 class TestSpriteConverterBasic(unittest.TestCase):
@@ -80,6 +89,237 @@ class TestSpriteConverterBasic(unittest.TestCase):
         godot_sprite_dir = os.path.join(self.godot_dir, "sprites", "test_sprite")
         png_files = [f for f in os.listdir(godot_sprite_dir) if f.endswith(".png")]
         self.assertEqual(len(png_files), 2)
+        scene_path = os.path.join(godot_sprite_dir, "test_sprite.tscn")
+        with open(scene_path, "r", encoding="utf-8") as scene_file:
+            scene = scene_file.read()
+        self.assertIn('type="AnimatedSprite2D"', scene)
+        self.assertIn("test_sprite_1.png", scene)
+        self.assertIn("test_sprite_2.png", scene)
+        self.assertNotIn('path="res://sprites/test_sprite/test_sprite.png"', scene)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+
+    def test_frame_without_output_fails_logical_sprite_and_omits_scene(self):
+        converter = self._make_converter()
+
+        with patch.object(
+            converter,
+            "_process_sprite",
+            return_value=("test_sprite", 1, 1, "missing.png", ""),
+        ):
+            result = converter.convert_all()
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                failed=1,
+            ),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    "test_sprite",
+                    "test_sprite.tscn",
+                )
+            )
+        )
+
+    def test_cancellation_leaves_started_sprite_for_inherited_finalization(self):
+        running = threading.Event()
+        running.set()
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=running.is_set,
+        )
+
+        def cancel_frame(*_args: object) -> None:
+            running.clear()
+            return None
+
+        with patch.object(converter, "_process_sprite", side_effect=cancel_frame):
+            converter.convert_all()
+
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+
+    def test_worker_exception_fails_bad_sprite_after_safe_sibling_completes(self):
+        bad_layer_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "bad_sprite",
+            "layers",
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        )
+        os.makedirs(bad_layer_dir)
+        Image.new("RGBA", (2, 2), "blue").save(
+            os.path.join(bad_layer_dir, "frame0.png"),
+            "PNG",
+        )
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+        )
+        original_process_sprite = converter._process_sprite
+
+        def process_sprite(
+            sprite_name: str,
+            index: int,
+            gm_sprite_paths: list[str],
+            images_count: int,
+            subfolder: str = "",
+        ) -> SpriteProcessResult | None:
+            if sprite_name == "bad_sprite":
+                raise RuntimeError("sprite worker failed")
+            return original_process_sprite(
+                sprite_name,
+                index,
+                gm_sprite_paths,
+                images_count,
+                subfolder,
+            )
+
+        with patch.object(converter, "_process_sprite", side_effect=process_sprite):
+            with self.assertRaisesRegex(RuntimeError, "sprite worker failed"):
+                converter.convert_all()
+
+        safe_sprite_dir = os.path.join(
+            self.godot_dir,
+            "sprites",
+            "test_sprite",
+        )
+        self.assertTrue(os.path.isfile(os.path.join(safe_sprite_dir, "test_sprite.png")))
+        self.assertTrue(os.path.isfile(os.path.join(safe_sprite_dir, "test_sprite.tscn")))
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    "bad_sprite",
+                    "bad_sprite.tscn",
+                )
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
+
+    def test_scene_exception_fails_bad_sprite_after_safe_sibling_completes(self):
+        bad_layer_dir = os.path.join(
+            self.gm_dir,
+            "sprites",
+            "a_bad_sprite",
+            "layers",
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        )
+        os.makedirs(bad_layer_dir)
+        Image.new("RGBA", (2, 2), "blue").save(
+            os.path.join(bad_layer_dir, "frame0.png"),
+            "PNG",
+        )
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            max_workers=1,
+        )
+        original_generate_scene = converter._generate_sprite_scene
+
+        def generate_scene(
+            sprite_name: str,
+            collision_data: CollisionData | None,
+            frame_count: int,
+            animation_data: AnimationData | None = None,
+            subfolder: str = "",
+        ) -> None:
+            if sprite_name == "a_bad_sprite":
+                raise RuntimeError("sprite scene failed")
+            original_generate_scene(
+                sprite_name,
+                collision_data,
+                frame_count,
+                animation_data,
+                subfolder,
+            )
+
+        with patch.object(
+            converter,
+            "_generate_sprite_scene",
+            side_effect=generate_scene,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "sprite scene failed"):
+                converter.convert_all()
+
+        safe_scene = os.path.join(
+            self.godot_dir,
+            "sprites",
+            "test_sprite",
+            "test_sprite.tscn",
+        )
+        self.assertTrue(os.path.isfile(safe_scene))
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    "a_bad_sprite",
+                    "a_bad_sprite.tscn",
+                )
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
 
     def test_empty_layers_directory_does_not_create_phantom_sprite(self):
         """The structural layers directory must not be mistaken for a sprite."""
@@ -441,7 +681,17 @@ def _make_yyp_content(sprite_names: list[str], extra_resources: list[str] | None
 
 def _make_sprite_on_disk(gm_dir: str, sprite_name: str,
                          layer_guid: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") -> None:
-    """Create a minimal sprite folder structure with a single-frame PNG."""
+    """Create a minimal sprite metadata file and a single-frame PNG."""
+    sprite_dir = os.path.join(gm_dir, "sprites", sprite_name)
+    os.makedirs(sprite_dir, exist_ok=True)
+    with open(
+        os.path.join(sprite_dir, sprite_name + ".yy"),
+        "w",
+        encoding="utf-8",
+    ) as yy_file:
+        yy_file.write(
+            _make_yy_content(sprite_name, ["frame0"], [layer_guid])
+        )
     layer_dir = os.path.join(gm_dir, "sprites", sprite_name, "layers", layer_guid)
     os.makedirs(layer_dir, exist_ok=True)
     img = Image.new("RGBA", (2, 2), "red")
@@ -623,6 +873,241 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         converted = set(os.listdir(godot_sprites))
         self.assertIn("s_m", converted)
         self.assertIn("s_n", converted)
+
+    def test_indexed_sprite_without_frames_is_requested_and_skipped(self):
+        _make_sprite_on_disk(self.gm_dir, "s_valid")
+        empty_sprite_dir = os.path.join(self.gm_dir, "sprites", "s_empty")
+        os.makedirs(empty_sprite_dir)
+        with open(
+            os.path.join(empty_sprite_dir, "s_empty.yy"),
+            "w",
+            encoding="utf-8",
+        ) as yy_file:
+            yy_file.write(
+                _make_yy_content("s_empty", ["empty-frame"], ["empty-layer"])
+            )
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as yyp_file:
+            yyp_file.write(_make_yyp_content(["s_valid", "s_empty"]))
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    "s_valid",
+                    "s_valid.tscn",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "sprites", "s_empty"))
+        )
+        self.assertTrue(
+            any(
+                "s_empty" in log and "no discoverable frame images" in log
+                for log in self.logs
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+
+    def test_missing_only_declared_sprite_makes_conversion_partial(self):
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as yyp_file:
+            yyp_file.write(_make_yyp_content(["s_missing", "s_missing"]))
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        sprites_enabled = MagicMock()
+        sprites_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"sprites": sprites_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SPRITE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "s_missing")
+        self.assertEqual(unavailable[0].source_path, "Test.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    def test_safe_missing_and_disk_orphan_have_strict_counts(self):
+        _make_sprite_on_disk(self.gm_dir, "s_safe")
+        _make_sprite_on_disk(self.gm_dir, "s_missing")
+        os.remove(
+            os.path.join(
+                self.gm_dir,
+                "sprites",
+                "s_missing",
+                "s_missing.yy",
+            )
+        )
+        _make_sprite_on_disk(self.gm_dir, "s_orphan")
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as yyp_file:
+            yyp_file.write(_make_yyp_content(["s_safe", "s_missing"]))
+        diagnostics = DiagnosticCollector()
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+            max_workers=1,
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sprites",
+                    "s_safe",
+                    "s_safe.tscn",
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "sprites", "s_missing")
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.godot_dir, "sprites", "s_orphan")
+            )
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SPRITE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "s_missing")
+        self.assertTrue(any("s_orphan" in log for log in self.logs))
+
+    def test_rejected_declared_sprite_is_requested_and_skipped(self):
+        rejected_name = "s_rejected"
+        with open(
+            os.path.join(self.gm_dir, "Test.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as yyp_file:
+            json.dump(
+                {
+                    "resources": [
+                        {
+                            "id": {
+                                "name": rejected_name,
+                                "path": (
+                                    "sprites/../../outside/"
+                                    f"{rejected_name}.yy"
+                                ),
+                            },
+                            "resourceType": "GMSprite",
+                        }
+                    ]
+                },
+                yyp_file,
+            )
+        diagnostics = DiagnosticCollector()
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                and diagnostic.resource == rejected_name
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SPRITE-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == rejected_name
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                rejected_name in log
+                and "manifest source path was rejected" in log
+                for log in self.logs
+            )
+        )
 
 
 class TestSpriteGeneratedPathCollisions(unittest.TestCase):

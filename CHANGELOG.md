@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.3 - 2026-07-18
+
+- Added explicit `success`, `partial`, `failed`, and `cancelled` conversion outcomes with machine-readable converter/resource counts, deterministic CLI summaries, and an opt-in for automation that accepts partial output.
+- Hardened current GameMaker LTS resource accounting and output publication, including Included Files paths, extension and timeline collisions, reusable converter runs, and transactional no-follow report writes.
+
 ## 0.7.2 - 2026-07-17
 
 - Confined nested GameMaker `.yy` sidecar and fallback-scan paths to the declared project root, rejecting traversal, absolute-path, drive-relative, NUL, and symlink escapes with source-linked diagnostics.

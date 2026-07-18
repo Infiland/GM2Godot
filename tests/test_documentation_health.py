@@ -49,7 +49,7 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/setup-python": 6,
     "actions/cache": 5,
     "actions/upload-artifact": 6,
-    "actions/download-artifact": 7,
+    "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
 

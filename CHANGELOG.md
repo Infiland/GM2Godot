@@ -1,8 +1,13 @@
 # Changelog
 
+## 0.7.7 - 2026-07-18
+
+- Upgraded the release-only artifact download action to immutable v8.0.1, retained fail-closed SHA-256 digest verification, and bypassed its deprecated Node extraction dependency before native archive extraction.
+- Added regression coverage for the verified-archive download mode and the exact Linux, macOS, and Windows extraction layout consumed by the release publisher.
+
 ## 0.7.6 - 2026-07-18
 
-- Pinned every GitHub Actions dependency to an immutable commit backed by a Node 24-native release, eliminating mutable tag drift and deprecated Node runtime warnings.
+- Pinned every GitHub Actions dependency to an immutable commit backed by a Node 24-native release, eliminating mutable tag drift and retired Node 20 runtime warnings.
 - Added repository policy checks that reject unpinned or non-Node-24-native action references before workflow changes can merge.
 
 ## 0.7.5 - 2026-07-18

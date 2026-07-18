@@ -29,11 +29,25 @@ jobs:
       - name: Check if tag already exists
         id: check_tag
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          tag_ref="refs/tags/v${{ steps.version.outputs.version }}"
+          ls_remote_status=0
+          git ls-remote --exit-code --refs origin "$tag_ref" >/dev/null || ls_remote_status=$?
+
+          case "$ls_remote_status" in
+            0)
+              exists=true
+              ;;
+            2)
+              exists=false
+              ;;
+            *)
+              echo "::error::Failed to query exact remote tag $tag_ref (git ls-remote exit $ls_remote_status)." >&2
+              exit "$ls_remote_status"
+              ;;
+          esac
+
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
   build:
     needs: get-version
@@ -138,7 +152,7 @@ jobs:
 
   release:
     needs: [get-version, build]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write

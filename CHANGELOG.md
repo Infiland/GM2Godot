@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.13 - 2026-07-18
+
+- Upgraded archived GitHub Actions artifact transport to immutable `actions/upload-artifact` v7.0.1 across release builds, release smoke, and bounded LTS failure reports, preserving the verified nested archive layout consumed by the v8 downloader.
+
 ## 0.7.12 - 2026-07-18
 
 - Added a pull-request-only release-action smoke that round-trips and verifies a deterministic artifact through the production pins, then proves the release publisher loaded and stopped at a credentialless pre-network boundary without changing tags or releases.

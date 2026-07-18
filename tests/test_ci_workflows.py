@@ -411,6 +411,91 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(len(smoke_pins), 1)
                 self.assertEqual(smoke_pins[0], next(iter(release_pins)))
 
+    def test_upload_artifact_calls_explicitly_preserve_archives(self) -> None:
+        uses_pattern = re.compile(
+            r"^(?P<indent> *)(?:-\s*)?(?P<key_quote>['\"]?)"
+            r"uses(?P=key_quote)\s*:\s*(?P<value>.*?)\s*$"
+        )
+        flow_uses_pattern = re.compile(
+            r"\{[^{}]*?(?:['\"]uses['\"]|uses)\s*:"
+            r"\s*(?P<value>[^,}]+)"
+        )
+        locations: list[str] = []
+        workflow_dir = PROJECT_ROOT / ".github" / "workflows"
+        workflows = (*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml"))
+        for workflow in sorted(workflows):
+            lines = workflow.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                for flow_match in flow_uses_pattern.finditer(line):
+                    flow_value = flow_match.group("value").strip().strip("'\"")
+                    if flow_value.casefold().startswith("actions/upload-artifact@"):
+                        self.fail(
+                            f"{workflow.name}:{index + 1}: upload-artifact must "
+                            "use block style so with.archive can be verified"
+                        )
+
+                uses_match = uses_pattern.match(line)
+                if uses_match is None:
+                    continue
+                raw_value = uses_match.group("value").partition("#")[0].strip()
+                action_value = raw_value.strip("'\"")
+                if not action_value.casefold().startswith("actions/upload-artifact@"):
+                    continue
+
+                locations.append(f"{workflow.name}:{index + 1}")
+                uses_indent = len(uses_match.group("indent"))
+                step_indent = (
+                    uses_indent
+                    if line[uses_indent:].startswith("-")
+                    else uses_indent - 2
+                )
+                end = index + 1
+                while end < len(lines):
+                    candidate = lines[end]
+                    candidate_indent = len(candidate) - len(candidate.lstrip())
+                    if candidate.strip() and candidate_indent <= step_indent:
+                        break
+                    end += 1
+
+                property_indent = step_indent + 2
+                with_pattern = re.compile(
+                    rf"^ {{{property_indent}}}(?P<quote>['\"]?)"
+                    r"with(?P=quote)\s*:\s*(?:#.*)?$"
+                )
+                with_index = next(
+                    (
+                        candidate_index
+                        for candidate_index in range(index + 1, end)
+                        if with_pattern.match(lines[candidate_index])
+                    ),
+                    None,
+                )
+                archive_inputs: list[str] = []
+                if with_index is not None:
+                    input_indent = property_indent + 2
+                    with_end = with_index + 1
+                    while with_end < end:
+                        candidate = lines[with_end]
+                        candidate_indent = len(candidate) - len(candidate.lstrip())
+                        if candidate.strip() and candidate_indent <= property_indent:
+                            break
+                        with_end += 1
+                    archive_pattern = re.compile(
+                        rf"^ {{{input_indent}}}(?P<quote>['\"]?)"
+                        r"archive(?P=quote)\s*:\s*"
+                        r"(?P<value>[^#]*?)\s*(?:#.*)?$"
+                    )
+                    for candidate in lines[with_index + 1:with_end]:
+                        archive_match = archive_pattern.match(candidate)
+                        if archive_match is not None:
+                            archive_inputs.append(
+                                archive_match.group("value").strip().strip("'\"").casefold()
+                            )
+                with self.subTest(location=locations[-1]):
+                    self.assertEqual(archive_inputs, ["true"])
+
+        self.assertEqual(len(locations), 4, locations)
+
     def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
         content = workflow.read_text(encoding="utf-8")
@@ -423,6 +508,7 @@ class TestCIWorkflows(unittest.TestCase):
             f"name: {RELEASE_SMOKE_ARTIFACT}",
             f"path: sentinel/{RELEASE_SMOKE_SENTINEL}",
             "if-no-files-found: error",
+            "archive: true",
             "retention-days: 1",
             "needs: upload-sentinel",
             "path: raw-artifacts/release-action-smoke",
@@ -434,8 +520,6 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, content)
-        self.assertNotIn("archive: true", content)
-
         create_script = _workflow_run_script(content, "Create sentinel")
         verify_script = _workflow_run_script(
             content,
@@ -1494,6 +1578,7 @@ raise SystemExit(97)
 
         self.assertIn("if: failure()", upload_step)
         self.assertIn("uses: actions/upload-artifact@", upload_step)
+        self.assertIn("archive: true", upload_step)
         self.assertIn("if-no-files-found: ignore", upload_step)
         self.assertIn("retention-days: 7", upload_step)
         for report_name in (

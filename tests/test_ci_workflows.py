@@ -135,7 +135,7 @@ class TestCIWorkflows(unittest.TestCase):
         godot_test_files = tuple((PROJECT_ROOT / "tests").glob("test_*_godot.py"))
 
         self.assertIn("GODOT_BIN=$godot_bin", content)
-        self.assertIn("actions/cache@v4", content)
+        self.assertIn("uses: actions/cache@", content)
         self.assertGreater(len(godot_test_files), 13)
         self.assertIn(
             "python -m unittest discover -s tests -p 'test_*_godot.py' -v",
@@ -265,7 +265,7 @@ class TestCIWorkflows(unittest.TestCase):
         upload_step = content[upload_index:]
 
         self.assertIn("if: failure()", upload_step)
-        self.assertIn("uses: actions/upload-artifact@v4", upload_step)
+        self.assertIn("uses: actions/upload-artifact@", upload_step)
         self.assertIn("if-no-files-found: ignore", upload_step)
         self.assertIn("retention-days: 7", upload_step)
         for report_name in (

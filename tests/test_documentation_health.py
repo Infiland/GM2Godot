@@ -9,6 +9,7 @@ from src.version import get_version
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WIKI_SOURCE_DIR = PROJECT_ROOT / "docs" / "wiki"
+WORKFLOW_DIR = PROJECT_ROOT / ".github" / "workflows"
 WIKI_PAGES = {
     "Home.md",
     "Installation.md",
@@ -18,6 +19,38 @@ WIKI_PAGES = {
     "Generated-Project-and-Runtime.md",
     "Contributing-and-Testing.md",
     "Maintainer-Release-and-Wiki.md",
+}
+WORKFLOW_USES_PATTERN = re.compile(
+    r"^\s*(?:-\s*)?(?P<key_quote>['\"]?)uses(?P=key_quote)\s*:"
+    r"\s*(?P<value>.*?)\s*$"
+)
+YAML_BLOCK_SCALAR_PATTERN = re.compile(
+    r"^(?P<indent> *)(?:-\s*)?[^#\n]+:\s*[>|][1-9+-]*"
+    r"\s*(?:#.*)?$"
+)
+FLOW_STYLE_USES_PATTERN = re.compile(
+    r"\{[^{}]*?(?:['\"]uses['\"]|uses)\s*:"
+    r"\s*(?P<value>[^,}]+)"
+)
+PINNED_EXTERNAL_ACTION_PATTERN = re.compile(
+    r"^(?P<quote>['\"]?)"
+    r"(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+    r"(?:/[A-Za-z0-9_.-]+)*)"
+    r"@(?P<sha>[0-9a-fA-F]{40})(?P=quote)"
+    r"\s+#\s*"
+    r"(?P<version>v(?P<major>0|[1-9]\d*)"
+    r"\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)"
+    r"\s*$"
+)
+APPROVED_NODE24_ACTION_MAJORS = {
+    "actions/checkout": 5,
+    "actions/setup-python": 6,
+    "actions/cache": 5,
+    "actions/upload-artifact": 6,
+    "actions/download-artifact": 7,
+    "softprops/action-gh-release": 3,
 }
 
 
@@ -162,6 +195,130 @@ class TestDocumentationHealth(unittest.TestCase):
         self.assertIn("ruff check .", workflow)
         self.assertIn("[tool.ruff.lint]", pyproject)
         self.assertIn('"F82"', pyproject)
+
+    def test_external_workflow_actions_are_immutable_and_node24_native(
+        self,
+    ) -> None:
+        workflows = sorted(
+            [
+                *WORKFLOW_DIR.glob("*.yml"),
+                *WORKFLOW_DIR.glob("*.yaml"),
+            ]
+        )
+        self.assertTrue(workflows)
+
+        pins: dict[str, tuple[str, str, str]] = {}
+        external_count = 0
+
+        for workflow in workflows:
+            lines = workflow.read_text(encoding="utf-8").splitlines()
+            block_scalar_indent: int | None = None
+            for line_number, line in enumerate(lines, start=1):
+                stripped_line = line.strip()
+                indentation = len(line) - len(line.lstrip(" "))
+                if block_scalar_indent is not None:
+                    if (
+                        not stripped_line
+                        or stripped_line.startswith("#")
+                        or indentation > block_scalar_indent
+                    ):
+                        continue
+                    block_scalar_indent = None
+
+                location = (
+                    f"{workflow.relative_to(PROJECT_ROOT)}:{line_number}"
+                )
+                uses_match = WORKFLOW_USES_PATTERN.match(line)
+                if uses_match is None:
+                    block_scalar_match = YAML_BLOCK_SCALAR_PATTERN.match(line)
+                    if block_scalar_match is not None:
+                        block_scalar_indent = len(
+                            block_scalar_match.group("indent")
+                        )
+                        continue
+
+                    flow_uses_match = FLOW_STYLE_USES_PATTERN.search(line)
+                    if flow_uses_match is None:
+                        continue
+
+                    flow_value = flow_uses_match.group("value").strip()
+                    unquoted_flow_value = (
+                        flow_value[1:]
+                        if flow_value[:1] in {'"', "'"}
+                        else flow_value
+                    )
+                    if unquoted_flow_value.startswith(("./", "docker://")):
+                        continue
+
+                    external_count += 1
+                    with self.subTest(location=location):
+                        self.fail(
+                            f"{location}: external uses must be on its own "
+                            "line so its immutable pin can be verified"
+                        )
+                    continue
+
+                raw_value = uses_match.group("value").strip()
+                unquoted_value = (
+                    raw_value[1:]
+                    if raw_value[:1] in {'"', "'"}
+                    else raw_value
+                )
+                if unquoted_value.startswith(("./", "docker://")):
+                    continue
+
+                external_count += 1
+                pin_match = PINNED_EXTERNAL_ACTION_PATTERN.fullmatch(raw_value)
+
+                with self.subTest(location=location):
+                    self.assertIsNotNone(
+                        pin_match,
+                        f"{location}: external uses must be "
+                        "<action>@<40-character SHA> # vMAJOR.MINOR.PATCH",
+                    )
+                if pin_match is None:
+                    continue
+
+                action = pin_match.group("action")
+                sha = pin_match.group("sha").lower()
+                version = pin_match.group("version")
+                repository = "/".join(action.split("/")[:2]).casefold()
+                approved_major = APPROVED_NODE24_ACTION_MAJORS.get(repository)
+
+                with self.subTest(location=location, action=action):
+                    self.assertIsNotNone(
+                        approved_major,
+                        f"{location}: review this action's runtime and add "
+                        "its smallest Node-24-native major to "
+                        "APPROVED_NODE24_ACTION_MAJORS",
+                    )
+                if approved_major is None:
+                    continue
+
+                with self.subTest(location=location, action=action):
+                    self.assertEqual(
+                        int(pin_match.group("major")),
+                        approved_major,
+                        f"{location}: use the approved smallest "
+                        f"Node-24-native major v{approved_major}",
+                    )
+
+                action_key = action.casefold()
+                observed_pin = (sha, version)
+                previous_pin = pins.get(action_key)
+                if previous_pin is None:
+                    pins[action_key] = (sha, version, location)
+                    continue
+
+                with self.subTest(location=location, action=action):
+                    self.assertEqual(
+                        observed_pin,
+                        previous_pin[:2],
+                        f"{location}: {action} differs from "
+                        f"{previous_pin[2]}",
+                    )
+
+        self.assertGreater(external_count, 0)
 
 
 if __name__ == "__main__":

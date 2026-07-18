@@ -41,6 +41,7 @@ from src.conversion.diagnostics import (
 )
 from src.conversion.godot_validation import GodotValidationReport
 from src.conversion.project_godot import ConversionPreflightError
+from src.version import get_version
 
 
 class _OutcomeConverterStub:
@@ -662,7 +663,7 @@ class TestCLIReports(unittest.TestCase):
             exit_code = cli.main(["--version"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.7.4")
+        self.assertEqual(output.getvalue().strip(), f"GM2Godot {get_version()}")
 
     def test_list_converters_writes_text_inventory(self) -> None:
         output = io.StringIO()
@@ -731,7 +732,7 @@ class TestCLIReports(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "GM2Godot 0.7.4")
+        self.assertEqual(result.stdout.strip(), f"GM2Godot {get_version()}")
 
     def test_app_entrypoint_routes_global_cli_flags(self) -> None:
         app_entrypoint = importlib.import_module("main")

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.5 - 2026-07-18
+
+- Added reviewable GitHub Wiki sources with installation, conversion, compatibility, diagnostics, generated-runtime, contributor, and maintainer guidance for GameMaker LTS 2026 and Godot 4.7.1.
+- Corrected stale destination, localization, UI, support, code-of-conduct, and license documentation, and added a versioned release/Wiki review checklist with local link coverage.
+
 ## 0.7.4 - 2026-07-18
 
 - Added format-v2 trusted conversion manifests with terminal outcomes and plan-ordered requested, executed, completed, skipped, and failed step names for successful and partial conversions.

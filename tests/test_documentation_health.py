@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
+
+from src.version import get_version
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WIKI_SOURCE_DIR = PROJECT_ROOT / "docs" / "wiki"
+WIKI_PAGES = {
+    "Home.md",
+    "Installation.md",
+    "Quick-Start-Conversion.md",
+    "Compatibility-and-Limitations.md",
+    "Diagnostics-and-Troubleshooting.md",
+    "Generated-Project-and-Runtime.md",
+    "Contributing-and-Testing.md",
+    "Maintainer-Release-and-Wiki.md",
+}
 
 
 class TestDocumentationHealth(unittest.TestCase):
@@ -37,6 +51,82 @@ class TestDocumentationHealth(unittest.TestCase):
         for heading in required_headings:
             with self.subTest(heading=heading):
                 self.assertIn(heading, contributing)
+
+    def test_reviewable_wiki_source_is_complete_and_versioned(self) -> None:
+        self.assertEqual(
+            {path.name for path in WIKI_SOURCE_DIR.glob("*.md")},
+            WIKI_PAGES | {"_Sidebar.md"},
+        )
+
+        current_version = get_version()
+        applies_to_pattern = re.compile(
+            rf"^> \*\*Applies to:\*\* GM2Godot {re.escape(current_version)} · "
+            r"GameMaker LTS 2026 · Godot 4\.7\.1\s*$",
+            re.MULTILINE,
+        )
+        reviewed_pattern = re.compile(
+            r"^> \*\*Last reviewed:\*\* \d{4}-\d{2}-\d{2}\s*$",
+            re.MULTILINE,
+        )
+
+        for filename in sorted(WIKI_PAGES):
+            with self.subTest(page=filename):
+                content = (WIKI_SOURCE_DIR / filename).read_text(encoding="utf-8")
+                self.assertRegex(content, applies_to_pattern)
+                self.assertRegex(content, reviewed_pattern)
+                self.assertEqual(
+                    set(re.findall(r"\bGM2Godot (\d+\.\d+\.\d+)\b", content)),
+                    {current_version},
+                )
+
+    def test_wiki_sidebar_and_local_page_links_resolve(self) -> None:
+        sidebar = (WIKI_SOURCE_DIR / "_Sidebar.md").read_text(encoding="utf-8")
+        for filename in sorted(WIKI_PAGES):
+            with self.subTest(sidebar_page=filename):
+                self.assertIn(f"]({filename.removesuffix('.md')})", sidebar)
+
+        markdown_link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+        for source in sorted(WIKI_SOURCE_DIR.glob("*.md")):
+            content = source.read_text(encoding="utf-8")
+            for target in markdown_link_pattern.findall(content):
+                target_without_fragment = target.split("#", 1)[0]
+                if (
+                    not target_without_fragment
+                    or "://" in target_without_fragment
+                    or target_without_fragment.startswith("mailto:")
+                ):
+                    continue
+                target_filename = (
+                    target_without_fragment
+                    if target_without_fragment.endswith(".md")
+                    else f"{target_without_fragment}.md"
+                )
+                with self.subTest(source=source.name, target=target):
+                    self.assertIn(target_filename, WIKI_PAGES | {"_Sidebar.md"})
+                    self.assertTrue((WIKI_SOURCE_DIR / target_filename).is_file())
+
+    def test_user_documentation_links_and_guidance_are_current(self) -> None:
+        readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        contributing = (PROJECT_ROOT / "CONTRIBUTING.md").read_text(
+            encoding="utf-8"
+        )
+        maintenance = (PROJECT_ROOT / "docs" / "WIKI_MAINTENANCE.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "[Documentation](https://github.com/Infiland/GM2Godot/wiki) ·",
+            readme,
+        )
+        self.assertIn("missing, empty, or an existing valid Godot project", readme)
+        self.assertIn("Languages/template/template.json", contributing)
+        self.assertNotIn("Languages/template.json", contributing)
+        self.assertNotIn("modern_widgets.py", contributing)
+        self.assertNotIn("Add community links", readme + contributing)
+        self.assertNotIn("Add link if available", readme + contributing)
+        self.assertIn("docs/wiki/", maintenance)
+        self.assertIn("merged main-repository SHA", maintenance)
+        self.assertIn("must not auto-close", maintenance)
 
     def test_runtime_docs_cover_ownership_event_order_and_state(self) -> None:
         segment_readme = (PROJECT_ROOT / "src" / "conversion" / "gml_runtime_parts" / "README.md").read_text(
@@ -76,4 +166,3 @@ class TestDocumentationHealth(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

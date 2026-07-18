@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 from src.version import get_version
@@ -10,19 +11,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_7_4(self) -> None:
-        self.assertEqual(get_version(), "0.7.4")
+    def test_release_version_is_0_7_5(self) -> None:
+        self.assertEqual(get_version(), "0.7.5")
 
-    def test_release_docs_reference_0_7_4(self) -> None:
+    def test_release_surfaces_match_source_version(self) -> None:
         changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         issue_template = (
             PROJECT_ROOT / ".github" / "ISSUE_TEMPLATE" / "unsupported_gml_api.yml"
         ).read_text(encoding="utf-8")
 
+        current_version = get_version()
+        self.assertRegex(
+            changelog,
+            rf"(?m)^## {re.escape(current_version)} - \d{{4}}-\d{{2}}-\d{{2}}$",
+        )
+        self.assertIn(f"Current source version: `{current_version}`.", readme)
+        self.assertIn(
+            f"GM2Godot {current_version}, GameMaker LTS 2026",
+            issue_template,
+        )
         self.assertIn("## 0.7.4 - 2026-07-18", changelog)
-        self.assertIn("Current source version: `0.7.4`.", readme)
-        self.assertIn("GM2Godot 0.7.4, GameMaker LTS 2026", issue_template)
         self.assertIn("## 0.7.1 - 2026-07-17", changelog)
         self.assertIn("immutable GameMaker LTS 2026 SNAP and Adding fixtures", changelog)
         self.assertIn("## 0.7.0 - 2026-07-17", changelog)

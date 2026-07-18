@@ -4,6 +4,8 @@
 
 GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It converts supported project data and GML through a GUI or headless CLI, with generated Godot runtime helpers, deterministic asset registries, diagnostics, compatibility reports, and fixture-backed regression tests.
 
+[Documentation](https://github.com/Infiland/GM2Godot/wiki) · [Latest release](https://github.com/Infiland/GM2Godot/releases/latest) · [Issues](https://github.com/Infiland/GM2Godot/issues)
+
 ## Features
 
 - **Modern Dark Theme UI**: Clean project selection, settings, progress, and logs
@@ -43,7 +45,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.4`.
+Current source version: `0.7.5`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 
@@ -94,8 +96,9 @@ python main.py
 
 2. **Configure Project Paths**
 - Set your GameMaker project directory
-- Set an empty Godot project directory
-  - **Important**: Godot directory must be empty to prevent data loss
+- Set a separate Godot project destination
+  - The destination may be missing, empty, or an existing valid Godot project containing `project.godot`.
+  - GM2Godot rejects a non-empty non-project directory. Back up existing projects because managed output paths may be replaced by a later conversion.
 
 3. **Configure Settings**
 - Click the "Settings" button to open the configuration window
@@ -127,7 +130,7 @@ python main.py validate --godot-project path/to/GodotProject --fail-on-unsupport
 
 You can also invoke the same headless interface directly with `python -m src.cli`.
 
-CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md` and `gml_api_compatibility.md`.
+CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md`, `gml_api_compatibility.md`, and the JSON/Markdown platform capability reports.
 
 Every valid `convert` invocation prints exactly one terminal outcome summary after its buffered conversion logs. The diagnostic JSON report also includes a top-level `outcome` object with:
 
@@ -186,7 +189,6 @@ To contribute:
 
 - Report issues on our [GitHub Issues](https://github.com/Infiland/GM2Godot/issues) page
 - Check our [Documentation](https://github.com/Infiland/GM2Godot/wiki) for detailed guides
-- Join our community (Add community links if available)
 
 ---
 

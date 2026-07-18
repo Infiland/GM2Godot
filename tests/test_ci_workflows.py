@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -61,7 +65,120 @@ def _godot_env_lines(content: str) -> tuple[str, ...]:
     )
 
 
+def _workflow_run_script(content: str, step_name: str) -> str:
+    marker = f"      - name: {step_name}\n        run: |\n"
+    _, separator, remainder = content.partition(marker)
+    if not separator:
+        raise AssertionError(f"Workflow step not found: {step_name}")
+
+    script_lines: list[str] = []
+    for line in remainder.splitlines():
+        if line.startswith("      - name: "):
+            break
+        script_lines.append(line)
+    return textwrap.dedent("\n".join(script_lines)).strip() + "\n"
+
+
+def _write_raw_artifact_archive(
+    root: Path,
+    artifact_name: str,
+    members: dict[str, bytes],
+) -> None:
+    artifact_dir = root / "raw-artifacts" / artifact_name
+    artifact_dir.mkdir(parents=True)
+    with zipfile.ZipFile(
+        artifact_dir / f"{artifact_name}.zip",
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
+        for member_name, payload in members.items():
+            archive.writestr(member_name, payload)
+
+
 class TestCIWorkflows(unittest.TestCase):
+    def test_release_preserves_digest_checks_without_deprecated_extraction(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        self.assertIn("contents: write", content)
+        self.assertIn("uses: actions/download-artifact@", content)
+        self.assertIn("path: raw-artifacts", content)
+        self.assertIn("skip-decompress: true", content)
+        self.assertIn("digest-mismatch: error", content)
+        self.assertIn("Extract verified artifact archives", content)
+        self.assertIn(
+            "for name in GM2Godot-windows GM2Godot-macos GM2Godot-linux",
+            content,
+        )
+        self.assertIn('archive="raw-artifacts/$name/$name.zip"', content)
+        self.assertIn('[[ ! -s "$archive" ]]', content)
+        self.assertIn('unzip -q "$archive" -d "artifacts/$name"', content)
+
+        expected_members = {
+            "GM2Godot-windows": {"GM2Godot-windows.zip": b"windows"},
+            "GM2Godot-macos": {
+                "GM2Godot-macos.zip": b"macos-zip",
+                "GM2Godot-macos.dmg": b"macos-dmg",
+            },
+            "GM2Godot-linux": {"GM2Godot-linux.zip": b"linux"},
+        }
+        for artifact_name, members in expected_members.items():
+            for member_name in members:
+                with self.subTest(release_file=member_name):
+                    self.assertIn(
+                        f"artifacts/{artifact_name}/{member_name}",
+                        content,
+                    )
+
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            for artifact_name, members in expected_members.items():
+                _write_raw_artifact_archive(root, artifact_name, members)
+
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for artifact_name, members in expected_members.items():
+                for member_name, payload in members.items():
+                    with self.subTest(artifact=artifact_name, member=member_name):
+                        extracted = root / "artifacts" / artifact_name / member_name
+                        self.assertEqual(extracted.read_bytes(), payload)
+
+    def test_release_extraction_fails_when_verified_archive_is_missing(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            _write_raw_artifact_archive(
+                root,
+                "GM2Godot-windows",
+                {"GM2Godot-windows.zip": b"windows"},
+            )
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "Missing or empty verified archive: "
+            "raw-artifacts/GM2Godot-macos/GM2Godot-macos.zip",
+            result.stderr,
+        )
+
     def test_unit_workflow_runs_discovery_for_golden_and_threshold_gates(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
         content = workflow.read_text(encoding="utf-8")

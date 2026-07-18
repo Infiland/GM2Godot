@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.11 - 2026-07-18
+
+- Enabled weekly Dependabot checks for SHA-pinned GitHub Actions while preserving immutable references and their same-line release-version comments.
+
 ## 0.7.10 - 2026-07-18
 
 - Serialized the two-run workflow publisher race across tag checks, builds, and publication without blocking pull-request validation; the surviving waiter rechecks the exact tag, same-version release state detected without that tag fails before builds with manual-recovery guidance, and asset collisions are non-overwriting.

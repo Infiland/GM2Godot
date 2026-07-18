@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from typing import Iterable, cast
+from typing import BinaryIO, Iterable, cast
 from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +23,7 @@ from src.conversion.asset_registry import (
     GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
     _ProjectResource,
 )
+from src.conversion import asset_registry as asset_registry_module
 from src.conversion.animation_curve_registry import ANIMATION_CURVE_REGISTRY_RELATIVE_PATH
 from src.conversion.converter import Converter
 from src.conversion.conversion_outcome import ConversionCounts
@@ -2403,6 +2404,205 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 for diagnostic in diagnostics.diagnostics()
             )
         )
+
+    def test_windows_path_handle_fingerprint_match_ignores_only_ctime(
+        self,
+    ) -> None:
+        baseline = (11, 22, 33, 44, 55)
+        ctime_only_drift = (11, 22, 33, 44, 99)
+        real_drift = {
+            "device": (12, 22, 33, 44, 55),
+            "inode": (11, 23, 33, 44, 55),
+            "size": (11, 22, 34, 44, 55),
+            "mtime": (11, 22, 33, 45, 55),
+        }
+
+        with patch.object(
+            asset_registry_module,
+            "_uses_windows_included_file_path_handle_semantics",
+            return_value=True,
+        ):
+            self.assertTrue(
+                asset_registry_module._included_file_path_handle_fingerprints_match(
+                    baseline,
+                    ctime_only_drift,
+                )
+            )
+            for field, fingerprint in real_drift.items():
+                with self.subTest(field=field):
+                    self.assertFalse(
+                        asset_registry_module._included_file_path_handle_fingerprints_match(
+                            baseline,
+                            fingerprint,
+                        )
+                    )
+
+        with patch.object(
+            asset_registry_module,
+            "_uses_windows_included_file_path_handle_semantics",
+            return_value=False,
+        ):
+            self.assertFalse(
+                asset_registry_module._included_file_path_handle_fingerprints_match(
+                    baseline,
+                    ctime_only_drift,
+                )
+            )
+
+    def test_windows_fallback_rejects_same_inode_output_change(self) -> None:
+        payload = b"GOOD"
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            "payload.bin",
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        output_stat = os.lstat(output_path)
+        converter = self._converter()
+        original_match = asset_registry_module._included_file_streams_match
+        original_fingerprint = (
+            asset_registry_module._included_file_content_fingerprint
+        )
+        original_verify = converter._verify_included_file_output_fallback
+        verify_calls = 0
+        mutated = False
+
+        def compare_then_mutate(
+            source_file: BinaryIO,
+            output_file: BinaryIO,
+        ) -> tuple[bool, str, str]:
+            nonlocal mutated
+            matches = original_match(source_file, output_file)
+            with open(output_path, "r+b", buffering=0) as mutator:
+                mutator.write(b"EVIL")
+                os.fsync(mutator.fileno())
+            os.utime(
+                output_path,
+                ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+            )
+            if os.lstat(output_path).st_mtime_ns != output_stat.st_mtime_ns:
+                self.skipTest("Filesystem cannot restore nanosecond mtime")
+            mutated = True
+            return matches
+
+        def verify_initial_path_state(
+            directory_identities: list[tuple[str, tuple[int, int]]],
+            path: str,
+            expected_fingerprint: tuple[int, int, int, int, int],
+        ) -> None:
+            nonlocal verify_calls
+            verify_calls += 1
+            if verify_calls == 1:
+                original_verify(
+                    directory_identities,
+                    path,
+                    expected_fingerprint,
+                )
+
+        def windows_creation_time_fingerprint(
+            file_stat: os.stat_result,
+        ) -> tuple[int, int, int, int, int]:
+            fingerprint = original_fingerprint(file_stat)
+            return (*fingerprint[:4], output_stat.st_ctime_ns)
+
+        with open(source_path, "rb") as source_file:
+            with (
+                patch.object(
+                    asset_registry_module,
+                    "_uses_windows_included_file_path_handle_semantics",
+                    return_value=True,
+                ),
+                patch.object(
+                    asset_registry_module,
+                    "_included_file_streams_match",
+                    side_effect=compare_then_mutate,
+                ),
+                patch.object(
+                    asset_registry_module,
+                    "_included_file_content_fingerprint",
+                    side_effect=windows_creation_time_fingerprint,
+                ),
+                patch.object(
+                    converter,
+                    "_verify_included_file_output_fallback",
+                    side_effect=verify_initial_path_state,
+                ),
+                self.assertRaisesRegex(OSError, "changed during validation"),
+            ):
+                converter._included_file_output_matches_fallback(
+                    output_path,
+                    ("included_files", "payload.bin"),
+                    source_file,
+                )
+
+        self.assertTrue(mutated)
+        self.assertEqual(verify_calls, 1)
+        with open(output_path, "rb") as output_file:
+            self.assertEqual(output_file.read(), b"EVIL")
+
+    def test_windows_fallback_rejects_same_inode_source_change(self) -> None:
+        payload = b"GOOD"
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            "payload.bin",
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        source_stat = os.lstat(source_path)
+        converter = self._converter()
+        original_match = asset_registry_module._included_file_streams_match
+        mutated = False
+
+        def compare_then_mutate(
+            source_file: BinaryIO,
+            output_file: BinaryIO,
+        ) -> tuple[bool, str, str]:
+            nonlocal mutated
+            result = original_match(source_file, output_file)
+            with open(source_path, "r+b", buffering=0) as mutator:
+                mutator.write(b"EVIL")
+                os.fsync(mutator.fileno())
+            os.utime(
+                source_path,
+                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+            )
+            if os.lstat(source_path).st_mtime_ns != source_stat.st_mtime_ns:
+                self.skipTest("Filesystem cannot restore nanosecond mtime")
+            mutated = True
+            return result
+
+        with open(source_path, "rb") as source_file:
+            with (
+                patch.object(
+                    asset_registry_module,
+                    "_included_file_streams_match",
+                    side_effect=compare_then_mutate,
+                ),
+                self.assertRaisesRegex(OSError, "source changed during validation"),
+            ):
+                converter._included_file_output_matches_fallback(
+                    output_path,
+                    ("included_files", "payload.bin"),
+                    source_file,
+                )
+
+        self.assertTrue(mutated)
+        with open(source_path, "rb") as source_file:
+            self.assertEqual(source_file.read(), b"EVIL")
+        with open(output_path, "rb") as output_file:
+            self.assertEqual(output_file.read(), b"GOOD")
 
     def test_convert_all_omits_redirected_included_file_output(self) -> None:
         self._write_included_source("payload.bin", b"matching payload")

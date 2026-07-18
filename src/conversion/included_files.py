@@ -61,6 +61,8 @@ class _IncludedFileConversionPlan:
 
 _PathIdentity = tuple[int, int]
 _PathFingerprint = tuple[int, int, int, int, int, int]
+_PathHandleBinding = tuple[int, int, int, int, int, int]
+_HandleState = tuple[int, int, int, int, int, int, int]
 _IncludedSourceFingerprint = tuple[int, int, int, int, int, int]
 _INCLUDED_FILES_ROOT_NAME = "included_files"
 _INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
@@ -403,6 +405,35 @@ def _included_path_fingerprint(path_stat: os.stat_result) -> _PathFingerprint:
     )
 
 
+def _included_path_handle_binding(
+    file_stat: os.stat_result,
+) -> _PathHandleBinding:
+    """Return metadata that is stable across path and handle stat on Windows."""
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        stat.S_IFMT(file_stat.st_mode),
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_nlink,
+    )
+
+
+def _included_handle_state(file_stat: os.stat_result) -> _HandleState:
+    """Return metadata used to detect mutation of one open file handle."""
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        file_stat.st_mode,
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_ctime_ns,
+        file_stat.st_nlink,
+    )
+
+
 def _included_source_fingerprint(
     source_stat: os.stat_result,
 ) -> _IncludedSourceFingerprint:
@@ -435,6 +466,7 @@ def _digest_included_regular_file(
     expected_stat: os.stat_result,
 ) -> str:
     expected_fingerprint = _included_path_fingerprint(expected_stat)
+    expected_binding = _included_path_handle_binding(expected_stat)
     expected_ctime_ns = expected_stat.st_ctime_ns
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     file_descriptor = os.open(path, flags)
@@ -442,26 +474,35 @@ def _digest_included_regular_file(
         opened_stat = os.fstat(file_descriptor)
         if (
             not stat.S_ISREG(opened_stat.st_mode)
-            or _included_path_fingerprint(opened_stat) != expected_fingerprint
-            or opened_stat.st_ctime_ns != expected_ctime_ns
+            or _included_path_handle_binding(opened_stat) != expected_binding
         ):
             raise OSError(f"Included Files file changed before hashing: {path}")
+        opened_state = _included_handle_state(opened_stat)
         with os.fdopen(file_descriptor, "rb") as opened_file:
             file_descriptor = -1
             byte_count, content_sha256 = _digest_open_included_file(opened_file)
+            current_opened_stat = os.fstat(opened_file.fileno())
+            if (
+                _included_handle_state(current_opened_stat) != opened_state
+                or byte_count != expected_stat.st_size
+            ):
+                raise OSError(
+                    f"Included Files file changed while hashing: {path}"
+                )
+
+            current_stat = os.lstat(path)
+            if (
+                _included_output_path_is_redirected(path, current_stat)
+                or not stat.S_ISREG(current_stat.st_mode)
+                or _included_path_fingerprint(current_stat) != expected_fingerprint
+                or current_stat.st_ctime_ns != expected_ctime_ns
+            ):
+                raise OSError(
+                    f"Included Files file changed while hashing: {path}"
+                )
     finally:
         if file_descriptor >= 0:
             os.close(file_descriptor)
-
-    current_stat = os.lstat(path)
-    if (
-        _included_output_path_is_redirected(path, current_stat)
-        or not stat.S_ISREG(current_stat.st_mode)
-        or _included_path_fingerprint(current_stat) != expected_fingerprint
-        or current_stat.st_ctime_ns != expected_ctime_ns
-        or byte_count != expected_stat.st_size
-    ):
-        raise OSError(f"Included Files file changed while hashing: {path}")
     return content_sha256
 
 
@@ -727,6 +768,7 @@ def _digest_included_regular_file_at(
     display_path: str,
 ) -> str:
     expected_fingerprint = _included_path_fingerprint(expected_stat)
+    expected_binding = _included_path_handle_binding(expected_stat)
     expected_ctime_ns = expected_stat.st_ctime_ns
     file_descriptor = os.open(
         name,
@@ -737,27 +779,40 @@ def _digest_included_regular_file_at(
         opened_stat = os.fstat(file_descriptor)
         if (
             not stat.S_ISREG(opened_stat.st_mode)
-            or _included_path_fingerprint(opened_stat) != expected_fingerprint
-            or opened_stat.st_ctime_ns != expected_ctime_ns
+            or _included_path_handle_binding(opened_stat) != expected_binding
         ):
             raise OSError(
                 f"Included Files file changed before hashing: {display_path}"
             )
+        opened_state = _included_handle_state(opened_stat)
         with os.fdopen(file_descriptor, "rb") as opened_file:
             file_descriptor = -1
             byte_count, content_sha256 = _digest_open_included_file(opened_file)
+            current_opened_stat = os.fstat(opened_file.fileno())
+            if (
+                _included_handle_state(current_opened_stat) != opened_state
+                or byte_count != expected_stat.st_size
+            ):
+                raise OSError(
+                    "Included Files file changed while hashing: "
+                    f"{display_path}"
+                )
+
+            current_stat = _included_entry_stat_at(parent_fd, name)
+            if (
+                current_stat is None
+                or not stat.S_ISREG(current_stat.st_mode)
+                or _included_path_fingerprint(current_stat)
+                != expected_fingerprint
+                or current_stat.st_ctime_ns != expected_ctime_ns
+            ):
+                raise OSError(
+                    "Included Files file changed while hashing: "
+                    f"{display_path}"
+                )
     finally:
         if file_descriptor >= 0:
             os.close(file_descriptor)
-    current_stat = _included_entry_stat_at(parent_fd, name)
-    if (
-        current_stat is None
-        or not stat.S_ISREG(current_stat.st_mode)
-        or _included_path_fingerprint(current_stat) != expected_fingerprint
-        or current_stat.st_ctime_ns != expected_ctime_ns
-        or byte_count != expected_stat.st_size
-    ):
-        raise OSError(f"Included Files file changed while hashing: {display_path}")
     return content_sha256
 
 
@@ -931,6 +986,10 @@ def _capture_included_tree_descriptor(
         os.close(parent_fd)
 
 
+def _after_included_fallback_tree_directory_scan(_path: str) -> None:
+    """Narrow test seam after a fallback path scan returns its entries."""
+
+
 def _capture_included_tree_fallback(
     root_path: str,
     expected_parent_identity: _PathIdentity | None,
@@ -964,6 +1023,7 @@ def _capture_included_tree_fallback(
         directory_identities = _capture_fallback_directory_ancestors(
             directory_path
         )
+        _verify_fallback_directory_ancestors(directory_identities)
         try:
             directory_entries = sorted(
                 os.scandir(directory_path),
@@ -973,7 +1033,10 @@ def _capture_included_tree_fallback(
             raise OSError(
                 f"Could not inspect Included Files directory: {directory_path}"
             ) from error
+        _after_included_fallback_tree_directory_scan(directory_path)
+        _verify_fallback_directory_ancestors(directory_identities)
         for directory_entry in directory_entries:
+            _verify_fallback_directory_ancestors(directory_identities)
             entry_path = os.path.join(directory_path, directory_entry.name)
             try:
                 entry_stat = os.lstat(entry_path)
@@ -997,6 +1060,7 @@ def _capture_included_tree_fallback(
             elif stat.S_ISREG(entry_stat.st_mode):
                 kind = "file"
                 ctime_ns = entry_stat.st_ctime_ns
+                _verify_fallback_directory_ancestors(directory_identities)
                 content_sha256 = _digest_included_regular_file(
                     entry_path,
                     entry_stat,
@@ -1014,6 +1078,7 @@ def _capture_included_tree_fallback(
                     content_sha256=content_sha256,
                 )
             )
+            _verify_fallback_directory_ancestors(directory_identities)
         _verify_fallback_directory_ancestors(directory_identities)
 
     _verify_fallback_directory_ancestors(root_parent_identities)

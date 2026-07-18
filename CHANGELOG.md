@@ -5,6 +5,7 @@
 - Aligned Included File emission, asset registry and conversion-manifest paths, and generated GML file APIs on `res://included_files/`, using GameMaker packaged-name normalization (ASCII `A`–`Z` to lowercase and spaces to underscores) with deterministic collision-safe suffixes and diagnostics.
 - Preserved `user://gm2godot/`-first relative read precedence over packaged defaults and added exact Godot 4.7.1 end-to-end coverage for nested `file_exists()`, text-file reads, and `buffer_load()`.
 - Confined Included File publication against redirected or non-regular destination paths, hardlink referent mutation, and tested late path swaps while preserving binary bytes and source metadata.
+- Made Included File integrity checks portable across Windows path and handle metadata while retaining exact same-handle and SHA-256 source/output mutation detection, and expanded the native Windows transaction regression job.
 - Made `res://included_files/` and its generated runtime registry one converter-owned output set whose previous pair survives ordinary conversion failures and cancellation. Its separate publication steps are not process-crash-atomic, so conversion must not run alongside a live game or another converter until [#727](https://github.com/Infiland/GM2Godot/issues/727) is implemented.
 
 ## 0.7.7 - 2026-07-18

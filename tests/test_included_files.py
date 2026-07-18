@@ -1,5 +1,6 @@
 # pyright: reportPrivateUsage=false
 
+import hashlib
 import json
 import os
 import posixpath
@@ -9,6 +10,7 @@ import shutil
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from typing import BinaryIO, Callable
 from unittest.mock import MagicMock, patch
 
@@ -343,6 +345,122 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         self.assertEqual(project_debris, [])
         self.assertEqual(registry_debris, [])
+
+    @staticmethod
+    def _modeled_handle_stat(
+        path_stat: os.stat_result,
+        *,
+        ctime_offset: int,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            st_dev=path_stat.st_dev,
+            st_ino=path_stat.st_ino,
+            st_mode=path_stat.st_mode ^ stat.S_IXUSR,
+            st_size=path_stat.st_size,
+            st_mtime_ns=path_stat.st_mtime_ns,
+            st_ctime_ns=path_stat.st_ctime_ns + ctime_offset,
+            st_nlink=path_stat.st_nlink,
+        )
+
+    def test_digest_accepts_stable_path_handle_metadata_skew(self) -> None:
+        payload = b"stable staged payload"
+        staged_path = os.path.join(self.godot_dir, "staged.bin")
+        with open(staged_path, "wb") as staged_file:
+            staged_file.write(payload)
+        path_stat = os.lstat(staged_path)
+        handle_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=1,
+        )
+
+        with patch.object(
+            included_files_module.os,
+            "fstat",
+            side_effect=(handle_stat, handle_stat),
+        ):
+            digest = included_files_module._digest_included_regular_file(
+                staged_path,
+                path_stat,
+            )
+
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+
+    def test_digest_rejects_open_handle_change_during_hashing(self) -> None:
+        staged_path = os.path.join(self.godot_dir, "staged.bin")
+        with open(staged_path, "wb") as staged_file:
+            staged_file.write(b"mutated staged payload")
+        path_stat = os.lstat(staged_path)
+        opened_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=1,
+        )
+        changed_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=2,
+        )
+
+        with (
+            patch.object(
+                included_files_module.os,
+                "fstat",
+                side_effect=(opened_stat, changed_stat),
+            ),
+            self.assertRaisesRegex(OSError, "changed while hashing"),
+        ):
+            included_files_module._digest_included_regular_file(
+                staged_path,
+                path_stat,
+            )
+
+    def test_descriptor_digest_rechecks_the_open_handle(self) -> None:
+        if not included_files_module._included_descriptor_paths_supported():
+            self.skipTest("Descriptor-pinned Included Files paths are unavailable")
+        payload = b"descriptor staged payload"
+        staged_path = os.path.join(self.godot_dir, "staged.bin")
+        with open(staged_path, "wb") as staged_file:
+            staged_file.write(payload)
+        path_stat = os.lstat(staged_path)
+        opened_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=1,
+        )
+        changed_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=2,
+        )
+        parent_fd = included_files_module._open_pinned_included_directory(
+            self.godot_dir
+        )
+        try:
+            with patch.object(
+                included_files_module.os,
+                "fstat",
+                side_effect=(opened_stat, opened_stat),
+            ):
+                digest = included_files_module._digest_included_regular_file_at(
+                    parent_fd,
+                    "staged.bin",
+                    path_stat,
+                    staged_path,
+                )
+            self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+
+            with (
+                patch.object(
+                    included_files_module.os,
+                    "fstat",
+                    side_effect=(opened_stat, changed_stat),
+                ),
+                self.assertRaisesRegex(OSError, "changed while hashing"),
+            ):
+                included_files_module._digest_included_regular_file_at(
+                    parent_fd,
+                    "staged.bin",
+                    path_stat,
+                    staged_path,
+                )
+        finally:
+            os.close(parent_fd)
 
     def test_regular_file_in_place_of_managed_root_is_preserved(self) -> None:
         self._write("new.txt", "new")
@@ -1354,7 +1472,11 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.chmod(owned_path, 0o600)
         os.chmod(replacement_path, 0o640)
         owned_stat = os.lstat(owned_path)
-        replacement_mode = stat.S_IMODE(os.lstat(replacement_path).st_mode)
+        owned_mode = stat.S_IMODE(owned_stat.st_mode)
+        replacement_stat = os.lstat(replacement_path)
+        replacement_mode = stat.S_IMODE(replacement_stat.st_mode)
+        owned_writable = bool(owned_stat.st_mode & stat.S_IWRITE)
+        replacement_writable = bool(replacement_stat.st_mode & stat.S_IWRITE)
         parent_stat = os.lstat(chmod_directory)
         swapped = False
 
@@ -1387,14 +1509,37 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             )
 
         self.assertTrue(swapped)
+        current_replacement_stat = os.lstat(owned_path)
+        current_owned_stat = os.lstat(parked_path)
         self.assertEqual(
-            stat.S_IMODE(os.lstat(owned_path).st_mode),
-            replacement_mode,
+            (current_replacement_stat.st_dev, current_replacement_stat.st_ino),
+            (replacement_stat.st_dev, replacement_stat.st_ino),
         )
         self.assertEqual(
-            stat.S_IMODE(os.lstat(parked_path).st_mode),
-            0o600,
+            (current_owned_stat.st_dev, current_owned_stat.st_ino),
+            (owned_stat.st_dev, owned_stat.st_ino),
         )
+        self.assertEqual(
+            bool(current_replacement_stat.st_mode & stat.S_IWRITE),
+            replacement_writable,
+        )
+        self.assertEqual(
+            bool(current_owned_stat.st_mode & stat.S_IWRITE),
+            owned_writable,
+        )
+        with open(owned_path, encoding="utf-8") as replacement_file:
+            self.assertEqual(replacement_file.read(), "unknown replacement")
+        with open(parked_path, encoding="utf-8") as owned_file:
+            self.assertEqual(owned_file.read(), "owned chmod target")
+        if os.name != "nt":
+            self.assertEqual(
+                stat.S_IMODE(current_replacement_stat.st_mode),
+                replacement_mode,
+            )
+            self.assertEqual(
+                stat.S_IMODE(current_owned_stat.st_mode),
+                owned_mode,
+            )
 
     def test_windows_fallback_chmod_skips_matching_write_bit(self) -> None:
         chmod_directory = os.path.join(self.godot_dir, "windows-chmod-match")
@@ -1539,6 +1684,10 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             if stage_link is not None and os.path.islink(stage_link):
                 os.unlink(stage_link)
 
+    @unittest.skipUnless(
+        included_files_module._included_descriptor_paths_supported(),
+        "Descriptor-pinned Included Files paths are unavailable",
+    )
     def test_deep_directory_swap_is_not_followed_during_tree_capture(
         self,
     ) -> None:
@@ -1586,6 +1735,71 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         finally:
             if os.path.islink(deep_directory):
                 os.unlink(deep_directory)
+            if os.path.isdir(parked_directory):
+                os.rename(parked_directory, deep_directory)
+
+    def test_fallback_deep_directory_swap_during_scan_is_detected_before_hashing(
+        self,
+    ) -> None:
+        scan_root = os.path.join(self.godot_dir, "fallback-scan-root")
+        deep_directory = os.path.join(scan_root, "a", "b")
+        os.makedirs(deep_directory)
+        with open(
+            os.path.join(deep_directory, "contained.txt"),
+            "w",
+            encoding="utf-8",
+        ) as contained_file:
+            contained_file.write("contained")
+        outside_directory = os.path.join(self.gm_dir, "fallback-outside-scan")
+        os.mkdir(outside_directory)
+        outside_file = os.path.join(outside_directory, "external.txt")
+        with open(outside_file, "w", encoding="utf-8") as external_file:
+            external_file.write("external sentinel")
+        parked_directory = os.path.join(scan_root, "parked-b")
+        original_digest = included_files_module._digest_included_regular_file
+        swapped = False
+
+        def swap_after_scan(path: str) -> None:
+            nonlocal swapped
+            if swapped or os.path.normcase(path) != os.path.normcase(
+                deep_directory
+            ):
+                return
+            os.rename(deep_directory, parked_directory)
+            os.rename(outside_directory, deep_directory)
+            swapped = True
+
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_included_descriptor_paths_supported",
+                    return_value=False,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_after_included_fallback_tree_directory_scan",
+                    side_effect=swap_after_scan,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_digest_included_regular_file",
+                    wraps=original_digest,
+                ) as digest_file,
+                self.assertRaises(OSError),
+            ):
+                included_files_module._capture_included_tree(scan_root)
+
+            self.assertTrue(swapped)
+            digest_file.assert_not_called()
+            with open(
+                os.path.join(deep_directory, "external.txt"),
+                encoding="utf-8",
+            ) as external_file:
+                self.assertEqual(external_file.read(), "external sentinel")
+        finally:
+            if swapped and os.path.isdir(deep_directory):
+                os.rename(deep_directory, outside_directory)
             if os.path.isdir(parked_directory):
                 os.rename(parked_directory, deep_directory)
 

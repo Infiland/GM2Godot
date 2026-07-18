@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import posixpath
@@ -561,17 +562,79 @@ def _included_file_content_fingerprint(
     )
 
 
+def _included_file_path_handle_fingerprints_match(
+    path_fingerprint: tuple[int, int, int, int, int],
+    handle_fingerprint: tuple[int, int, int, int, int],
+) -> bool:
+    """Compare stable content metadata across Windows path and handle stat."""
+
+    if _uses_windows_included_file_path_handle_semantics():
+        return path_fingerprint[:4] == handle_fingerprint[:4]
+    return path_fingerprint == handle_fingerprint
+
+
+def _uses_windows_included_file_path_handle_semantics() -> bool:
+    return os.name == "nt"
+
+
 def _included_file_streams_match(
     source_file: BinaryIO,
     output_file: BinaryIO,
-) -> bool:
+) -> tuple[bool, str, str]:
+    source_digest = hashlib.sha256()
+    output_digest = hashlib.sha256()
     while True:
         source_chunk = source_file.read(1024 * 1024)
         output_chunk = output_file.read(1024 * 1024)
+        source_digest.update(source_chunk)
+        output_digest.update(output_chunk)
         if source_chunk != output_chunk:
-            return False
+            return (
+                False,
+                source_digest.hexdigest(),
+                output_digest.hexdigest(),
+            )
         if not source_chunk:
-            return True
+            return (
+                True,
+                source_digest.hexdigest(),
+                output_digest.hexdigest(),
+            )
+
+
+def _included_file_stream_sha256(opened_file: BinaryIO) -> str:
+    digest = hashlib.sha256()
+    while True:
+        chunk = opened_file.read(1024 * 1024)
+        if not chunk:
+            return digest.hexdigest()
+        digest.update(chunk)
+
+
+def _included_file_streams_match_stably(
+    source_file: BinaryIO,
+    output_file: BinaryIO,
+    output_path: str,
+) -> bool:
+    matches, source_sha256, output_sha256 = _included_file_streams_match(
+        source_file,
+        output_file,
+    )
+    if not matches:
+        return False
+
+    source_file.seek(0)
+    if _included_file_stream_sha256(source_file) != source_sha256:
+        raise OSError(
+            "Asset-registry Included File source changed during validation"
+        )
+    output_file.seek(0)
+    if _included_file_stream_sha256(output_file) != output_sha256:
+        raise OSError(
+            "Asset-registry Included File output changed during validation: "
+            f"{output_path}"
+        )
+    return True
 
 
 @dataclass(frozen=True)
@@ -1050,9 +1113,10 @@ class AssetRegistryConverter(BaseConverter):
                 )
             with os.fdopen(output_fd, "rb") as output_file:
                 output_fd = -1
-                matches = _included_file_streams_match(
+                matches = _included_file_streams_match_stably(
                     source_file,
                     output_file,
+                    output_path,
                 )
                 final_open_stat = os.fstat(output_file.fileno())
             _verify_open_asset_output_directory(
@@ -1145,6 +1209,9 @@ class AssetRegistryConverter(BaseConverter):
         expected_fingerprint = _included_file_content_fingerprint(output_stat)
         with open(output_path, "rb") as output_file:
             opened_stat = os.fstat(output_file.fileno())
+            opened_fingerprint = _included_file_content_fingerprint(
+                opened_stat
+            )
             if (
                 not stat.S_ISREG(opened_stat.st_mode)
                 or not os.path.samestat(opened_stat, output_stat)
@@ -1158,9 +1225,10 @@ class AssetRegistryConverter(BaseConverter):
                 output_path,
                 expected_fingerprint,
             )
-            matches = _included_file_streams_match(
+            matches = _included_file_streams_match_stably(
                 source_file,
                 output_file,
+                output_path,
             )
             final_open_stat = os.fstat(output_file.fileno())
         self._verify_included_file_output_fallback(
@@ -1170,7 +1238,11 @@ class AssetRegistryConverter(BaseConverter):
         )
         if (
             _included_file_content_fingerprint(final_open_stat)
-            != expected_fingerprint
+            != opened_fingerprint
+            or not _included_file_path_handle_fingerprints_match(
+                expected_fingerprint,
+                _included_file_content_fingerprint(final_open_stat),
+            )
         ):
             raise OSError(
                 "Asset-registry Included File output changed during "

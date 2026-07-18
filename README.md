@@ -15,7 +15,8 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 - **Asset Conversion**: Converts GameMaker project resources to Godot format:
   - Sprites, collision masks, animation metadata, and generated scenes
   - Sound effects, audio groups, bus layouts, and runtime playback metadata
-  - Fonts, notes, included files, scripts, objects, rooms, tilesets, shaders, paths, timelines, sequences, particles, extensions, texture groups, and options metadata where supported
+  - Fonts, notes, scripts, objects, rooms, tilesets, shaders, paths, timelines, sequences, particles, extensions, texture groups, and options metadata where supported
+  - Included Files under `res://included_files/`, with GameMaker packaged-path normalization, `user://gm2godot/`-first read precedence, and deterministic collision-safe suffixes and diagnostics
   - Project settings, game icons, platform options, and validation reports
 - **Platform Support**: Converts settings for multiple platforms:
   - Windows
@@ -24,6 +25,8 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 - **Diagnostics and Reports**: Writes structured warnings/errors, compatibility Markdown/JSON, trusted conversion manifests, per-attempt outcome ledgers, architecture-policy reports, and optional headless Godot validation reports
 - **Customizable Conversion**: Choose conversion groups or specific converter keys
 - **Compatibility Roadmap**: Tracks current and missing GameMaker-to-Godot coverage in [`todo-list/`](todo-list/README.md)
+
+`res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` are one converter-owned output set. Ordinary conversion failures and cancellation preserve the previous pair, but the two publication steps are not process-crash-atomic. Until [#727](https://github.com/Infiland/GM2Godot/issues/727) is implemented, do not convert a project while a live game or another converter is accessing that output.
 
 ## What GM2Godot Is and Isn't
 
@@ -45,7 +48,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.7`.
+Current source version: `0.7.8`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 

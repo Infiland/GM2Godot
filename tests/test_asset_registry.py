@@ -18,6 +18,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.asset_registry import (
     ASSET_REGISTRY_RELATIVE_PATH,
+    AssetRegistryEntry,
     AssetRegistryConverter,
     GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
     _ProjectResource,
@@ -31,6 +32,7 @@ from src.conversion.extension_registry import (
     extension_stub_relative_script_path,
 )
 from src.conversion.fonts import FontConverter
+from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
 from src.conversion.type_defs import JsonDict, StrPath
 
@@ -128,6 +130,35 @@ class TestAssetRegistryConverter(unittest.TestCase):
             macro_configuration=macro_configuration,
             diagnostics=diagnostics,
         )
+
+    def _emit_included_files(self) -> None:
+        IncludedFilesConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).convert_included_files()
+
+    def _write_included_source(self, relative_path: str, payload: bytes) -> None:
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            *relative_path.split("/"),
+        )
+        os.makedirs(os.path.dirname(source_path), exist_ok=True)
+        with open(source_path, "wb") as source_file:
+            source_file.write(payload)
+
+    def _write_included_output(self, relative_path: str, payload: bytes) -> None:
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            *relative_path.split("/"),
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "wb") as output_file:
+            output_file.write(payload)
 
     def test_bundled_font_registry_path_matches_safe_emitted_filename(self) -> None:
         _write_yyp(self.gm_dir, [("fonts", "fnt_ui")])
@@ -1892,6 +1923,631 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "res://included_files/real/payload.txt",
         )
 
+    def test_included_file_registry_paths_match_converted_outputs(self) -> None:
+        payloads = {
+            "Config/My File.BIN": b"\x00nested\xffpayload",
+            "Foo Bar/item.bin": b"normalized nested-prefix payload",
+            "Read Me.txt": b"normalized collision payload",
+            "foo_bar": b"normalized blocking-file payload",
+            "read_me.txt": b"canonical payload",
+            "read_me_2.txt": b"natural suffix payload",
+        }
+        for relative_path, payload in payloads.items():
+            source_path = os.path.join(
+                self.gm_dir,
+                "datafiles",
+                *relative_path.split("/"),
+            )
+            os.makedirs(os.path.dirname(source_path), exist_ok=True)
+            with open(source_path, "wb") as source_file:
+                source_file.write(payload)
+
+        registry_converter = self._converter()
+        entries = {
+            entry.name: entry
+            for entry in registry_converter.build_entries()
+            if entry.kind == "included_files"
+        }
+
+        self.assertEqual(set(entries), set(payloads))
+        self.assertEqual(
+            {name: entry.godot_path for name, entry in entries.items()},
+            {
+                "Config/My File.BIN": (
+                    "res://included_files/config/my_file.bin"
+                ),
+                "Foo Bar/item.bin": (
+                    "res://included_files/foo_bar/item.bin"
+                ),
+                "Read Me.txt": "res://included_files/read_me_3.txt",
+                "foo_bar": "res://included_files/foo_bar_2",
+                "read_me.txt": "res://included_files/read_me.txt",
+                "read_me_2.txt": "res://included_files/read_me_2.txt",
+            },
+        )
+        self.assertEqual(
+            {name: entry.source_path for name, entry in entries.items()},
+            {
+                name: "datafiles/" + name
+                for name in payloads
+            },
+        )
+
+        resources = registry_converter._ordered_project_resources()
+        self.assertEqual(
+            registry_converter._stable_godot_paths(resources),
+            registry_converter._stable_godot_paths(reversed(resources)),
+        )
+
+        included_converter = IncludedFilesConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        )
+        included_converter.convert_included_files()
+
+        for name, payload in payloads.items():
+            output_path = os.path.join(
+                self.godot_dir,
+                *entries[name].godot_path.removeprefix("res://").split("/"),
+            )
+            self.assertTrue(os.path.isfile(output_path), output_path)
+            with open(output_path, "rb") as output_file:
+                self.assertEqual(output_file.read(), payload)
+
+    def test_convert_all_omits_absent_included_file_output(self) -> None:
+        self._write_included_source("payload.bin", b"current payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertNotIn('"name": "payload.bin"', registry_file.read())
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].source_path, "datafiles/payload.bin")
+        self.assertEqual(unavailable[0].resource, "payload.bin")
+        self.assertEqual(unavailable[0].resource_type, "included_file")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "generated Included File output",
+        )
+
+    def test_convert_all_omits_stale_included_file_output(self) -> None:
+        self._write_included_source("payload.bin", b"current payload")
+        self._write_included_output("payload.bin", b"stale payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertNotIn('"name": "payload.bin"', registry_file.read())
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+
+    def test_convert_all_filters_colliders_after_full_path_planning(self) -> None:
+        self._write_included_source("Read Me.txt", b"suffixed payload")
+        self._write_included_source("read_me.txt", b"canonical payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+        planned = {
+            entry.name: entry.godot_path
+            for entry in converter.build_entries()
+            if entry.kind == "included_files"
+        }
+        self.assertEqual(
+            planned,
+            {
+                "Read Me.txt": "res://included_files/read_me_2.txt",
+                "read_me.txt": "res://included_files/read_me.txt",
+            },
+        )
+        self._write_included_output("read_me.txt", b"stale canonical output")
+        self._write_included_output("read_me_2.txt", b"suffixed payload")
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "Read Me.txt"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/read_me_2.txt"',
+            registry,
+        )
+        self.assertNotIn('"name": "read_me.txt"', registry)
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            [diagnostic.resource for diagnostic in unavailable],
+            ["read_me.txt"],
+        )
+
+    def test_prior_single_collision_output_satisfies_no_new_collision_claim(
+        self,
+    ) -> None:
+        self._write_included_source("Read Me.txt", b"original payload")
+        self._emit_included_files()
+        self._write_included_source("read_me.txt", b"new canonical payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                skipped=2,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertNotIn('"name": "Read Me.txt"', registry)
+        self.assertNotIn('"name": "read_me.txt"', registry)
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in unavailable},
+            {"Read Me.txt", "read_me.txt"},
+        )
+
+    def test_missing_canonical_reserves_suffix_for_matching_normalized_alias(
+        self,
+    ) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "read_me.txt",
+                        "path": "datafiles/read_me.txt",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("Read Me.txt", b"alias payload")
+        self._write_included_output("read_me_2.txt", b"alias payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "Read Me.txt"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/read_me_2.txt"',
+            registry,
+        )
+        self.assertNotIn('"name": "read_me.txt"', registry)
+
+    def test_identical_stale_canonical_output_cannot_satisfy_normalized_alias(
+        self,
+    ) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "read_me.txt",
+                        "path": "datafiles/read_me.txt",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("Read Me.txt", b"identical alias payload")
+        self._write_included_output("read_me.txt", b"identical alias payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                skipped=2,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertNotIn('"name": "Read Me.txt"', registry)
+        self.assertNotIn('"name": "read_me.txt"', registry)
+        unavailable_outputs = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            [diagnostic.resource for diagnostic in unavailable_outputs],
+            ["Read Me.txt"],
+        )
+
+    def test_missing_natural_suffix_reserves_third_normalized_alias_path(
+        self,
+    ) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "read_me_2.txt",
+                        "path": "datafiles/read_me_2.txt",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("read_me.txt", b"canonical payload")
+        self._write_included_source("Read Me.txt", b"alias payload")
+        self._write_included_output("read_me.txt", b"canonical payload")
+        self._write_included_output("read_me_3.txt", b"alias payload")
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=3,
+                executed=2,
+                completed=2,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "read_me.txt"', registry)
+        self.assertIn('"name": "Read Me.txt"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/read_me_3.txt"',
+            registry,
+        )
+        self.assertNotIn('"name": "read_me_2.txt"', registry)
+
+    def test_missing_nested_alias_reserves_suffix_for_blocking_file(self) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "item.txt",
+                        "path": "datafiles/Foo Bar/item.txt",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("foo_bar", b"blocking file payload")
+        self._write_included_output("foo_bar_2", b"blocking file payload")
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "foo_bar"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/foo_bar_2"',
+            registry,
+        )
+        self.assertNotIn('"name": "Foo Bar/item.txt"', registry)
+
+    def test_rejected_traversal_does_not_reserve_safe_alias_basename(
+        self,
+    ) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "read_me.txt",
+                        "path": "datafiles/../../outside/read_me.txt",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("Read Me.txt", b"alias payload")
+        self._write_included_output("read_me.txt", b"alias payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "Read Me.txt"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/read_me.txt"',
+            registry,
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_convert_all_advertises_matching_included_file_output(self) -> None:
+        self._write_included_source("payload.bin", b"matching payload")
+        self._write_included_output("payload.bin", b"matching payload")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertIn('"name": "payload.bin"', registry_file.read())
+        self.assertFalse(
+            any(
+                diagnostic.code
+                == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_convert_all_omits_redirected_included_file_output(self) -> None:
+        self._write_included_source("payload.bin", b"matching payload")
+        referent_path = os.path.join(self.godot_dir, "matching-payload.bin")
+        with open(referent_path, "wb") as referent_file:
+            referent_file.write(b"matching payload")
+        output_directory = os.path.join(self.godot_dir, "included_files")
+        os.makedirs(output_directory, exist_ok=True)
+        output_path = os.path.join(output_directory, "payload.bin")
+        try:
+            os.symlink(referent_path, output_path)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"Symbolic links are unavailable: {exc}")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertNotIn('"name": "payload.bin"', registry_file.read())
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+
+    def test_output_delete_at_registry_publish_boundary_leaves_no_registry(
+        self,
+    ) -> None:
+        self._write_included_source("payload.bin", b"matching payload")
+        self._write_included_output("payload.bin", b"matching payload")
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        converter = self._converter()
+        real_revalidate = converter.revalidate_published_entries
+        validation_calls = 0
+
+        def delete_then_revalidate(
+            entries: tuple[AssetRegistryEntry, ...],
+        ) -> None:
+            nonlocal validation_calls
+            validation_calls += 1
+            if validation_calls == 1:
+                os.unlink(output_path)
+            real_revalidate(entries)
+
+        with (
+            patch.object(
+                converter,
+                "revalidate_published_entries",
+                side_effect=delete_then_revalidate,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "publication inputs changed",
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(validation_calls, 1)
+        self.assertFalse(os.path.exists(registry_path))
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                failed=1,
+            ),
+        )
+
+    def test_output_byte_change_after_registry_publish_removes_registry(
+        self,
+    ) -> None:
+        self._write_included_source("payload.bin", b"matching payload")
+        self._write_included_output("payload.bin", b"matching payload")
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        converter = self._converter()
+        real_revalidate = converter.revalidate_published_entries
+        validation_calls = 0
+
+        def mutate_then_revalidate(
+            entries: tuple[AssetRegistryEntry, ...],
+        ) -> None:
+            nonlocal validation_calls
+            validation_calls += 1
+            if validation_calls == 2:
+                with open(output_path, "wb") as output_file:
+                    output_file.write(b"changed after publication")
+            real_revalidate(entries)
+
+        with (
+            patch.object(
+                converter,
+                "revalidate_published_entries",
+                side_effect=mutate_then_revalidate,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "publication inputs changed",
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(validation_calls, 2)
+        self.assertFalse(os.path.exists(registry_path))
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                failed=1,
+            ),
+        )
+
     def test_project_yyp_link_is_rejected_before_disk_fallback(self) -> None:
         self._write_resource(
             "sprites",
@@ -2727,6 +3383,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
         diagnostics = DiagnosticCollector()
         converter = self._converter(diagnostics=diagnostics)
 
+        self._emit_included_files()
+
         registry_path = converter.convert_all()
 
         self.assertEqual(
@@ -2759,6 +3417,47 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "IncludedFiles[1].path",
         )
 
+    def test_nested_gmincludedfile_resource_is_one_logical_resource(self) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "safe.json",
+                            "path": "datafiles/config/safe.json",
+                        },
+                        "resourceType": "GMIncludedFile",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        self._write_included_source("config/safe.json", b"safe payload")
+        self._write_included_output("config/safe.json", b"safe payload")
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "config/safe.json"', registry)
+        self.assertIn(
+            '"godot_path": "res://included_files/config/safe.json"',
+            registry,
+        )
+
     def test_current_gamemaker_file_path_directory_combines_payload_name(
         self,
     ) -> None:
@@ -2787,6 +3486,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
         )
         diagnostics = DiagnosticCollector()
         converter = self._converter(diagnostics=diagnostics)
+
+        self._emit_included_files()
 
         registry_path = converter.convert_all()
 

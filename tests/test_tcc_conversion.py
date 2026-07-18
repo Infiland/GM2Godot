@@ -207,7 +207,7 @@ class TestTCCConversion(unittest.TestCase):
 
     def test_included_files_subdirectories(self):
         included_dir = os.path.join(self.godot_dir, "included_files")
-        for name in ("Calendar", "Challenges", "Fonts", "Languages", "Other", "Quests"):
+        for name in ("calendar", "challenges", "fonts", "languages", "other", "quests"):
             self.assertTrue(
                 os.path.isdir(os.path.join(included_dir, name)),
                 f"Expected included_files/{name}/ directory",

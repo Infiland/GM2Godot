@@ -15,6 +15,7 @@ from unittest.mock import patch
 from src import cli
 from src.conversion import conversion_manifest as conversion_manifest_module
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
+from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.conversion_manifest import (
     CONVERSION_ATTEMPT_RELATIVE_PATH,
     CONVERSION_MANIFEST_RELATIVE_PATH,
@@ -201,6 +202,335 @@ class TestConversionManifest(unittest.TestCase):
                 diagnostic["code"] == "GM2GD-PATH-COLLISION-RENAMED"
                 for diagnostic in cast(list[dict[str, object]], manifest["path_diagnostics"])
             )
+        )
+
+    def test_manifest_groups_included_file_packaged_lookup_collisions(
+        self,
+    ) -> None:
+        gm_dir = self.temp_dir / "gm"
+        godot_dir = self.temp_dir / "godot"
+        gm_dir.mkdir()
+        godot_dir.mkdir()
+        (gm_dir / "IncludedFiles.yyp").write_text(
+            json.dumps(
+                {
+                    "%Name": "IncludedFiles",
+                    "resourceType": "GMProject",
+                    "resources": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        entries = (
+            AssetRegistryEntry(
+                id=0,
+                name="Config/Read Me.TXT",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/Config/Read Me.TXT",
+                godot_path="res://included_files/config/read_me_3.txt",
+                legacy_id="",
+            ),
+            AssetRegistryEntry(
+                id=1,
+                name="config/read_me.txt",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/config/read_me.txt",
+                godot_path="res://included_files/config/read_me.txt",
+                legacy_id="",
+            ),
+            AssetRegistryEntry(
+                id=2,
+                name="config/read_me_2.txt",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/config/read_me_2.txt",
+                godot_path="res://included_files/config/read_me_2.txt",
+                legacy_id="",
+            ),
+        )
+
+        with patch.object(
+            conversion_manifest_module,
+            "_asset_registry_entries",
+            return_value=entries,
+        ):
+            manifest = build_conversion_manifest(
+                str(gm_dir),
+                str(godot_dir),
+                target_platform="windows",
+                enabled_converters=[],
+                output_snapshot=capture_conversion_output_snapshot(
+                    str(godot_dir)
+                ),
+                conversion_outcome=self._successful_outcome(),
+            )
+
+        resources = cast(list[dict[str, object]], manifest["resources"])
+        self.assertEqual(
+            {
+                str(resource["name"]): str(resource["godot_path"])
+                for resource in resources
+            },
+            {
+                "Config/Read Me.TXT": (
+                    "res://included_files/config/read_me_3.txt"
+                ),
+                "config/read_me.txt": (
+                    "res://included_files/config/read_me.txt"
+                ),
+                "config/read_me_2.txt": (
+                    "res://included_files/config/read_me_2.txt"
+                ),
+            },
+        )
+        collisions = [
+            diagnostic
+            for diagnostic in cast(
+                list[dict[str, object]],
+                manifest["path_diagnostics"],
+            )
+            if diagnostic["code"] == "GM2GD-PATH-COLLISION-RENAMED"
+        ]
+        self.assertEqual(len(collisions), 1)
+        collision = collisions[0]
+        self.assertEqual(
+            collision["base_godot_path_casefold"],
+            "res://included_files/config/read_me.txt",
+        )
+        collision_resources = cast(
+            list[dict[str, object]],
+            collision["resources"],
+        )
+        self.assertEqual(
+            {
+                str(resource["name"]): (
+                    str(resource["base_godot_path"]),
+                    str(resource["stable_godot_path"]),
+                )
+                for resource in collision_resources
+            },
+            {
+                "Config/Read Me.TXT": (
+                    "res://included_files/config/read_me.txt",
+                    "res://included_files/config/read_me_3.txt",
+                ),
+                "config/read_me.txt": (
+                    "res://included_files/config/read_me.txt",
+                    "res://included_files/config/read_me.txt",
+                ),
+            },
+        )
+
+    def test_manifest_groups_included_file_prefix_collisions_independent_of_order(
+        self,
+    ) -> None:
+        gm_dir = self.temp_dir / "gm-prefix"
+        godot_dir = self.temp_dir / "godot-prefix"
+        gm_dir.mkdir()
+        godot_dir.mkdir()
+        (gm_dir / "IncludedFiles.yyp").write_text(
+            json.dumps(
+                {
+                    "%Name": "IncludedFiles",
+                    "resourceType": "GMProject",
+                    "resources": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        entries = (
+            AssetRegistryEntry(
+                id=0,
+                name="foo_bar",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/foo_bar",
+                godot_path="res://included_files/foo_bar_3",
+                legacy_id="",
+            ),
+            AssetRegistryEntry(
+                id=1,
+                name="Foo Bar/item.txt",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/Foo Bar/item.txt",
+                godot_path="res://included_files/foo_bar/item.txt",
+                legacy_id="",
+            ),
+            AssetRegistryEntry(
+                id=2,
+                name="foo_bar_2",
+                kind="included_files",
+                asset_type="included_file",
+                type_name="Included File",
+                source_path="datafiles/foo_bar_2",
+                godot_path="res://included_files/foo_bar_2",
+                legacy_id="",
+            ),
+        )
+
+        def path_diagnostics_for(
+            registry_entries: tuple[AssetRegistryEntry, ...],
+        ) -> list[dict[str, object]]:
+            with patch.object(
+                conversion_manifest_module,
+                "_asset_registry_entries",
+                return_value=registry_entries,
+            ):
+                manifest = build_conversion_manifest(
+                    str(gm_dir),
+                    str(godot_dir),
+                    target_platform="windows",
+                    enabled_converters=[],
+                    output_snapshot=capture_conversion_output_snapshot(
+                        str(godot_dir)
+                    ),
+                    conversion_outcome=self._successful_outcome(),
+                )
+            return cast(
+                list[dict[str, object]],
+                manifest["path_diagnostics"],
+            )
+
+        forward = path_diagnostics_for(entries)
+        reverse = path_diagnostics_for(tuple(reversed(entries)))
+
+        self.assertEqual(forward, reverse)
+        collisions = [
+            diagnostic
+            for diagnostic in forward
+            if diagnostic["code"] == "GM2GD-PATH-COLLISION-RENAMED"
+        ]
+        self.assertEqual(len(collisions), 1)
+        collision = collisions[0]
+        self.assertEqual(
+            collision["base_godot_path_casefold"],
+            "res://included_files/foo_bar",
+        )
+        collision_resources = cast(
+            list[dict[str, object]],
+            collision["resources"],
+        )
+        self.assertEqual(
+            {
+                str(resource["name"]): (
+                    str(resource["base_godot_path"]),
+                    str(resource["stable_godot_path"]),
+                )
+                for resource in collision_resources
+            },
+            {
+                "foo_bar": (
+                    "res://included_files/foo_bar",
+                    "res://included_files/foo_bar_3",
+                ),
+                "Foo Bar/item.txt": (
+                    "res://included_files/foo_bar/item.txt",
+                    "res://included_files/foo_bar/item.txt",
+                ),
+            },
+        )
+
+    def test_manifest_excludes_unavailable_included_file_outputs(self) -> None:
+        gm_dir = self.temp_dir / "gm-publication-filter"
+        godot_dir = self.temp_dir / "godot-publication-filter"
+        datafiles_dir = gm_dir / "datafiles"
+        included_files_dir = godot_dir / "included_files"
+        datafiles_dir.mkdir(parents=True)
+        included_files_dir.mkdir(parents=True)
+        (gm_dir / "IncludedFiles.yyp").write_text(
+            json.dumps(
+                {
+                    "%Name": "IncludedFiles",
+                    "resourceType": "GMProject",
+                    "resources": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (datafiles_dir / "absent.bin").write_bytes(b"absent output payload")
+        (datafiles_dir / "stale.bin").write_bytes(b"current stale payload")
+        (datafiles_dir / "matching.bin").write_bytes(b"matching payload")
+        (included_files_dir / "stale.bin").write_bytes(b"old stale payload")
+        (included_files_dir / "matching.bin").write_bytes(b"matching payload")
+
+        manifest = build_conversion_manifest(
+            str(gm_dir),
+            str(godot_dir),
+            target_platform="windows",
+            enabled_converters=[],
+            output_snapshot=capture_conversion_output_snapshot(str(godot_dir)),
+            conversion_outcome=self._successful_outcome(),
+        )
+
+        resources = cast(list[dict[str, object]], manifest["resources"])
+        included_resources = {
+            str(resource["name"]): str(resource["godot_path"])
+            for resource in resources
+            if resource["kind"] == "included_files"
+        }
+        self.assertEqual(
+            included_resources,
+            {
+                "matching.bin": "res://included_files/matching.bin",
+            },
+        )
+
+    def test_manifest_reserves_missing_canonical_before_normalized_alias(
+        self,
+    ) -> None:
+        gm_dir = self.temp_dir / "gm-reserved-included-path"
+        godot_dir = self.temp_dir / "godot-reserved-included-path"
+        datafiles_dir = gm_dir / "datafiles"
+        included_files_dir = godot_dir / "included_files"
+        datafiles_dir.mkdir(parents=True)
+        included_files_dir.mkdir(parents=True)
+        (gm_dir / "IncludedFiles.yyp").write_text(
+            json.dumps(
+                {
+                    "%Name": "IncludedFiles",
+                    "resourceType": "GMProject",
+                    "resources": [],
+                    "IncludedFiles": [
+                        {
+                            "name": "read_me.txt",
+                            "path": "datafiles/read_me.txt",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (datafiles_dir / "Read Me.txt").write_bytes(b"alias payload")
+        (included_files_dir / "read_me_2.txt").write_bytes(b"alias payload")
+
+        manifest = build_conversion_manifest(
+            str(gm_dir),
+            str(godot_dir),
+            target_platform="windows",
+            enabled_converters=[],
+            output_snapshot=capture_conversion_output_snapshot(str(godot_dir)),
+            conversion_outcome=self._successful_outcome(),
+        )
+
+        resources = cast(list[dict[str, object]], manifest["resources"])
+        included_resources = {
+            str(resource["name"]): str(resource["godot_path"])
+            for resource in resources
+            if resource["kind"] == "included_files"
+        }
+        self.assertEqual(
+            included_resources,
+            {
+                "Read Me.txt": "res://included_files/read_me_2.txt",
+            },
         )
 
     def test_manifest_records_source_project_ide_version(self) -> None:
@@ -612,6 +942,112 @@ class TestConversionManifest(unittest.TestCase):
             self._write_artifacts(godot_dir)
 
         self.assertFalse((godot_dir / "gm2godot").exists())
+
+    def test_included_output_delete_at_manifest_boundary_rolls_back_pair(
+        self,
+    ) -> None:
+        (
+            gm_dir,
+            godot_dir,
+            output_path,
+            manifest_path,
+            attempt_path,
+            manifest_before,
+            attempt_before,
+        ) = self._included_publication_fixture("delete-boundary")
+        real_revalidate = AssetRegistryConverter.revalidate_published_entries
+        validation_calls = 0
+
+        def delete_then_revalidate(
+            converter: AssetRegistryConverter,
+            entries: tuple[AssetRegistryEntry, ...],
+        ) -> None:
+            nonlocal validation_calls
+            validation_calls += 1
+            if validation_calls == 1:
+                output_path.unlink()
+            real_revalidate(converter, entries)
+
+        with (
+            patch.object(
+                AssetRegistryConverter,
+                "revalidate_published_entries",
+                new=delete_then_revalidate,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "publication inputs changed",
+            ),
+        ):
+            write_conversion_artifacts(
+                str(gm_dir),
+                str(godot_dir),
+                target_platform="windows",
+                enabled_converters=(),
+                output_snapshot=capture_conversion_output_snapshot(
+                    str(godot_dir)
+                ),
+                manifest_outcome=self._successful_outcome(),
+                attempt_outcome=self._successful_outcome(),
+            )
+
+        self.assertEqual(validation_calls, 1)
+        self.assertEqual(manifest_path.read_bytes(), manifest_before)
+        self.assertEqual(attempt_path.read_bytes(), attempt_before)
+        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+
+    def test_included_output_byte_change_after_manifest_publish_rolls_back_pair(
+        self,
+    ) -> None:
+        (
+            gm_dir,
+            godot_dir,
+            output_path,
+            manifest_path,
+            attempt_path,
+            manifest_before,
+            attempt_before,
+        ) = self._included_publication_fixture("change-after-publish")
+        real_revalidate = AssetRegistryConverter.revalidate_published_entries
+        validation_calls = 0
+
+        def mutate_then_revalidate(
+            converter: AssetRegistryConverter,
+            entries: tuple[AssetRegistryEntry, ...],
+        ) -> None:
+            nonlocal validation_calls
+            validation_calls += 1
+            if validation_calls == 2:
+                output_path.write_bytes(b"changed after manifest publication")
+            real_revalidate(converter, entries)
+
+        with (
+            patch.object(
+                AssetRegistryConverter,
+                "revalidate_published_entries",
+                new=mutate_then_revalidate,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "publication inputs changed",
+            ),
+        ):
+            write_conversion_artifacts(
+                str(gm_dir),
+                str(godot_dir),
+                target_platform="windows",
+                enabled_converters=(),
+                output_snapshot=capture_conversion_output_snapshot(
+                    str(godot_dir)
+                ),
+                manifest_outcome=self._successful_outcome(),
+                attempt_outcome=self._successful_outcome(),
+            )
+
+        self.assertEqual(validation_calls, 2)
+        self.assertEqual(manifest_path.read_bytes(), manifest_before)
+        self.assertEqual(attempt_path.read_bytes(), attempt_before)
+        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
 
     def test_outcome_steps_must_match_enabled_conversion_plan(self) -> None:
         godot_dir = self.temp_dir / "godot"
@@ -2198,6 +2634,48 @@ class TestConversionManifest(unittest.TestCase):
             output_snapshot=capture_conversion_output_snapshot(str(godot_dir)),
             manifest_outcome=selected_manifest_outcome,
             attempt_outcome=selected_attempt_outcome,
+        )
+
+    def _included_publication_fixture(
+        self,
+        name: str,
+    ) -> tuple[Path, Path, Path, Path, Path, bytes, bytes]:
+        gm_dir = self.temp_dir / f"{name}-gm"
+        godot_dir = self.temp_dir / f"{name}-godot"
+        datafiles_dir = gm_dir / "datafiles"
+        included_files_dir = godot_dir / "included_files"
+        artifact_dir = godot_dir / "gm2godot"
+        datafiles_dir.mkdir(parents=True)
+        included_files_dir.mkdir(parents=True)
+        artifact_dir.mkdir(parents=True)
+        (gm_dir / "IncludedFiles.yyp").write_text(
+            json.dumps(
+                {
+                    "%Name": "IncludedFiles",
+                    "resourceType": "GMProject",
+                    "resources": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = b"matching included payload"
+        (datafiles_dir / "payload.bin").write_bytes(payload)
+        output_path = included_files_dir / "payload.bin"
+        output_path.write_bytes(payload)
+        manifest_path = artifact_dir / "conversion_manifest.json"
+        attempt_path = artifact_dir / "conversion_attempt.json"
+        manifest_before = b"previous canonical manifest\n"
+        attempt_before = b"previous conversion attempt\n"
+        manifest_path.write_bytes(manifest_before)
+        attempt_path.write_bytes(attempt_before)
+        return (
+            gm_dir,
+            godot_dir,
+            output_path,
+            manifest_path,
+            attempt_path,
+            manifest_before,
+            attempt_before,
         )
 
     @staticmethod

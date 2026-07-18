@@ -1,7 +1,8 @@
 const GML_FILE_TEXT_HANDLE_KIND = "file_text"
 const GML_FILE_BINARY_HANDLE_KIND = "file_binary"
 const GML_FILE_USER_ROOT = "user://gm2godot"
-const GML_FILE_DATAFILES_ROOT = "res://datafiles"
+const GML_FILE_INCLUDED_FILES_ROOT = "res://included_files"
+const GML_INCLUDED_FILE_REGISTRY_PATH = "res://gm2godot/gml_included_file_registry.gd"
 const GML_FILE_BIN_READ = 0
 const GML_FILE_BIN_WRITE = 1
 const GML_FILE_BIN_READ_WRITE = 2
@@ -9,6 +10,11 @@ const GML_FILE_BIN_READ_WRITE = 2
 static var _gml_ini_config = ConfigFile.new()
 static var _gml_ini_path = ""
 static var _gml_ini_open = false
+static var _gml_included_file_registry_loaded = false
+static var _gml_included_file_registry_available = false
+static var _gml_included_file_exact_paths = {}
+static var _gml_included_file_canonical_paths = {}
+static var _gml_included_file_ambiguous_paths = {}
 
 
 static func gml_file_resolve_path(path, write = false):
@@ -39,7 +45,7 @@ static func gml_file_delete(path):
 
 
 static func gml_directory_exists(path):
-	return DirAccess.dir_exists_absolute(_gml_file_resolve_path(path, false))
+	return DirAccess.dir_exists_absolute(_gml_file_resolve_path(path, false, true))
 
 
 static func gml_directory_create(path):
@@ -400,7 +406,7 @@ static func _gml_file_bin_file(file_id):
 	return null
 
 
-static func _gml_file_resolve_path(path, write = false):
+static func _gml_file_resolve_path(path, write = false, expect_directory = false):
 	var text = _gml_file_plain_path(path)
 	if text.begins_with("user://"):
 		return text
@@ -412,20 +418,144 @@ static func _gml_file_resolve_path(path, write = false):
 	var user_path = GML_FILE_USER_ROOT + "/" + relative
 	if write:
 		return user_path
-	if FileAccess.file_exists(user_path) or DirAccess.dir_exists_absolute(user_path):
+	if expect_directory and DirAccess.dir_exists_absolute(user_path):
 		return user_path
-	var data_path = GML_FILE_DATAFILES_ROOT + "/" + relative
-	if FileAccess.file_exists(data_path) or DirAccess.dir_exists_absolute(data_path):
-		return data_path
+	if not expect_directory and FileAccess.file_exists(user_path):
+		return user_path
+	var logical_path = _gml_file_registry_logical_path(relative)
+	var packaged_relative = _gml_file_packaged_relative_path(
+		logical_path if logical_path != "" else relative
+	)
+	var packaged_path = GML_FILE_INCLUDED_FILES_ROOT + "/" + packaged_relative
+	if expect_directory:
+		if DirAccess.dir_exists_absolute(packaged_path):
+			return packaged_path
+		return user_path
+
+	_gml_included_file_registry_ensure_loaded()
+	if _gml_included_file_registry_available and logical_path != "":
+		if _gml_included_file_exact_paths.has(logical_path):
+			var exact_path = _gml_included_file_registry_output_path(
+				_gml_included_file_exact_paths[logical_path]
+			)
+			if exact_path != "" and FileAccess.file_exists(exact_path):
+				return exact_path
+			return user_path
+		if _gml_included_file_ambiguous_paths.has(packaged_relative):
+			return user_path
+		if _gml_included_file_canonical_paths.has(packaged_relative):
+			var canonical_path = _gml_included_file_registry_output_path(
+				_gml_included_file_canonical_paths[packaged_relative]
+			)
+			if canonical_path != "" and FileAccess.file_exists(canonical_path):
+				return canonical_path
+			return user_path
+
+	if FileAccess.file_exists(packaged_path):
+		return packaged_path
 	return user_path
 
 
+static func _gml_included_file_registry_ensure_loaded():
+	if _gml_included_file_registry_loaded:
+		return
+	_gml_included_file_registry_loaded = true
+	_gml_included_file_registry_available = false
+	_gml_included_file_exact_paths = {}
+	_gml_included_file_canonical_paths = {}
+	_gml_included_file_ambiguous_paths = {}
+	if not ResourceLoader.exists(GML_INCLUDED_FILE_REGISTRY_PATH):
+		return
+	var registry_script = load(GML_INCLUDED_FILE_REGISTRY_PATH)
+	if registry_script == null or not registry_script.has_method("gml_included_file_registry_entries"):
+		return
+	var entries = registry_script.gml_included_file_registry_entries()
+	if not (entries is Array):
+		return
+	_gml_included_file_registry_available = true
+	var canonical_candidates = {}
+	for entry in entries:
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		var logical_path = _gml_file_registry_logical_path(
+			str(entry.get("logical_path", ""))
+		)
+		var canonical_path = str(entry.get("canonical_path", ""))
+		var assigned_path = str(entry.get("assigned_path", ""))
+		if (
+			logical_path == ""
+			or canonical_path == ""
+			or assigned_path == ""
+			or canonical_path != _gml_file_packaged_relative_path(logical_path)
+		):
+			continue
+		var normalized_entry = {
+			"assigned_path": assigned_path,
+			"emitted": bool(entry.get("emitted", true))
+		}
+		_gml_included_file_exact_paths[logical_path] = normalized_entry
+		if not canonical_candidates.has(canonical_path):
+			canonical_candidates[canonical_path] = []
+		canonical_candidates[canonical_path].append(normalized_entry)
+	for candidate_key in canonical_candidates:
+		var candidates = canonical_candidates[candidate_key]
+		if candidates.size() == 1:
+			_gml_included_file_canonical_paths[candidate_key] = candidates[0]
+		else:
+			_gml_included_file_ambiguous_paths[candidate_key] = true
+
+
+static func _gml_included_file_registry_output_path(entry):
+	if typeof(entry) != TYPE_DICTIONARY or not bool(entry.get("emitted", false)):
+		return ""
+	var assigned_path = str(entry.get("assigned_path", ""))
+	if (
+		assigned_path == ""
+		or _gml_file_registry_logical_path(assigned_path) != assigned_path
+	):
+		return ""
+	return GML_FILE_INCLUDED_FILES_ROOT + "/" + assigned_path
+
+
+static func _gml_file_registry_logical_path(path):
+	var components = []
+	for component in str(path).replace("\\", "/").split("/", false):
+		if component == ".":
+			continue
+		if component == "..":
+			if components.is_empty():
+				return ""
+			components.pop_back()
+			continue
+		components.append(component)
+	var normalized = ""
+	for component in components:
+		if normalized != "":
+			normalized += "/"
+		normalized += str(component)
+	return normalized
+
+
+static func _gml_file_packaged_relative_path(path):
+	var text = str(path)
+	var normalized = ""
+	for index in range(text.length()):
+		var code = text.unicode_at(index)
+		if code >= 65 and code <= 90:
+			normalized += char(code + 32)
+		elif code == 32:
+			normalized += "_"
+		else:
+			normalized += char(code)
+	return normalized
+
+
 static func _gml_file_plain_path(path):
-	return str(path).replace("\\", "/").strip_edges()
+	return str(path).replace("\\", "/")
 
 
 static func _gml_file_relative_path(path):
-	var relative = str(path).replace("\\", "/").strip_edges()
+	var relative = str(path).replace("\\", "/")
 	while relative.begins_with("./"):
 		relative = relative.substr(2)
 	while relative.begins_with("/"):

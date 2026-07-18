@@ -87,7 +87,7 @@
       "resource_type": "GMIncludedFile",
       "game_maker_resource_path": "projects/resource_matrix/datafiles/config/defaults.json",
       "source_path": "source/resource_matrix.gml",
-      "assertion_paths": ["tests/test_included_files.py::TestIncludedFilesConverterNestedDirs.test_preserves_directory_structure"]
+      "assertion_paths": ["tests/test_included_files.py::TestIncludedFilesConverterNestedDirs.test_normalizes_nested_packaged_paths"]
     },
     {
       "area": "fonts",

@@ -1829,6 +1829,50 @@ class TestGMLRuntimeScript(unittest.TestCase):
         for helper_name in helper_names:
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_file_paths_preserve_literal_edge_spaces(self):
+        self.assertIn(
+            'static func _gml_file_plain_path(path):\n\treturn str(path).replace("\\\\", "/")',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            'var relative = str(path).replace("\\\\", "/")',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertNotIn(
+            'str(path).replace("\\\\", "/").strip_edges()',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            'elif code == 32:\n\t\t\tnormalized += "_"',
+            GML_RUNTIME_SCRIPT,
+        )
+
+    def test_runtime_loads_dedicated_included_file_path_registry(self):
+        self.assertIn(
+            'const GML_INCLUDED_FILE_REGISTRY_PATH = "res://gm2godot/gml_included_file_registry.gd"',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func _gml_included_file_registry_ensure_loaded():",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            'registry_script.gml_included_file_registry_entries()',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func _gml_file_resolve_path(path, write = false, expect_directory = false):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "_gml_file_resolve_path(path, false, true)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertNotIn(
+            "_gml_asset_registry_ensure_loaded()\n\tif _gml_included_file_exact_paths",
+            GML_RUNTIME_SCRIPT,
+        )
+
     def test_runtime_helpers_keep_any_values_untyped(self):
         self.assertNotRegex(GML_RUNTIME_SCRIPT, r"static func \w+\([^)]*:\s")
         self.assertNotIn("Array[", GML_RUNTIME_SCRIPT)

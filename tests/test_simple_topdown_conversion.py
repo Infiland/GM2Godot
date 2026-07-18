@@ -14,7 +14,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
-from src.conversion.conversion_outcome import ConversionOutcome
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
 
@@ -83,10 +83,41 @@ class TestSimpleTopDownConversion(unittest.TestCase):
             ConversionOutcome,
             converter.convert(cls.project_path, "windows", cls.godot_dir, settings),
         )
-        if outcome.state != "success":
+        expected_outcome = ConversionOutcome(
+            state="partial",
+            converters=ConversionCounts(
+                requested=15,
+                executed=15,
+                completed=15,
+            ),
+            resources=ConversionCounts(
+                requested=10,
+                executed=10,
+                completed=9,
+                skipped=1,
+            ),
+        )
+        if outcome != expected_outcome:
             raise AssertionError(
-                "SimpleTopDown conversion did not complete successfully:\n"
+                "SimpleTopDown conversion outcome was unexpected:\n"
                 + outcome.summary_line()
+            )
+        if not any(
+            "icon" in log.casefold() and "not found" in log.casefold()
+            for log in cls.logs
+        ):
+            raise AssertionError(
+                "SimpleTopDown's expected missing-icon skip was not reported."
+            )
+        unexpected_icons = tuple(
+            icon_name
+            for icon_name in ("icon.ico", "icon.png")
+            if os.path.exists(os.path.join(cls.godot_dir, icon_name))
+        )
+        if unexpected_icons:
+            raise AssertionError(
+                "SimpleTopDown unexpectedly generated icons from missing input: "
+                + ", ".join(unexpected_icons)
             )
 
     @classmethod

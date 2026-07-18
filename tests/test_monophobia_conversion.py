@@ -15,7 +15,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
-from src.conversion.conversion_outcome import ConversionOutcome
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
 
@@ -83,10 +83,41 @@ class TestMonophobiaConversion(unittest.TestCase):
             ConversionOutcome,
             converter.convert(cls.monophobia_path, "windows", cls.godot_dir, settings),
         )
-        if outcome.state != "success":
+        expected_outcome = ConversionOutcome(
+            state="partial",
+            converters=ConversionCounts(
+                requested=15,
+                executed=15,
+                completed=15,
+            ),
+            resources=ConversionCounts(
+                requested=450,
+                executed=450,
+                completed=447,
+                skipped=3,
+            ),
+        )
+        if outcome != expected_outcome:
             raise AssertionError(
-                "Monophobia conversion did not complete successfully:\n"
+                "Monophobia conversion outcome was unexpected:\n"
                 + outcome.summary_line()
+            )
+        expected_missing_sidecars = (
+            "room creation code file for room r_endlessroad",
+            "instance creation code file for room r_endlessroad",
+            "instance creation code file for room r_house",
+            "instance creation code file for room r_road2",
+        )
+        folded_logs = "\n".join(cls.logs).casefold()
+        missing_markers = tuple(
+            marker
+            for marker in expected_missing_sidecars
+            if marker not in folded_logs
+        )
+        if missing_markers:
+            raise AssertionError(
+                "Monophobia's expected missing sidecar skips were not reported: "
+                + ", ".join(missing_markers)
             )
 
     @classmethod
@@ -162,7 +193,7 @@ class TestMonophobiaConversion(unittest.TestCase):
 
         self.assertEqual(player_background_failures, [])
 
-    def test_conversion_diagnostics_have_no_warnings(self) -> None:
+    def test_conversion_diagnostics_match_expected_missing_sidecars(self) -> None:
         diagnostics = self._conversion_diagnostics()
         diagnostic_entries = cast(list[dict[str, Any]], diagnostics.get("diagnostics", []))
         warnings = [
@@ -176,9 +207,40 @@ class TestMonophobiaConversion(unittest.TestCase):
             if diagnostic.get("severity") == "info"
         ]
 
-        self.assertEqual(warnings, [])
+        warning_signatures = sorted(
+            (
+                str(diagnostic.get("code", "")),
+                str(diagnostic.get("resource", "")),
+                str(diagnostic.get("event", "")),
+            )
+            for diagnostic in warnings
+        )
+        self.assertEqual(
+            warning_signatures,
+            [
+                (
+                    "GM2GD-ROOM-CREATION-MISSING",
+                    "r_endlessroad",
+                    "instance creation code for inst_7CD70322",
+                ),
+                (
+                    "GM2GD-ROOM-CREATION-MISSING",
+                    "r_endlessroad",
+                    "room creation code",
+                ),
+                (
+                    "GM2GD-ROOM-CREATION-MISSING",
+                    "r_house",
+                    "instance creation code for inst_392002BE",
+                ),
+                (
+                    "GM2GD-ROOM-CREATION-MISSING",
+                    "r_road2",
+                    "instance creation code for inst_66085D2F",
+                ),
+            ],
+        )
         self.assertTrue(any("Unsupported GameMaker project option" in message for message in info_messages))
-        self.assertTrue(any("Missing GameMaker" in message for message in info_messages))
 
     def test_named_collision_event_files_are_transpiled(self) -> None:
         player = self._read_generated_file("objects", "o_player", "o_player.gd")

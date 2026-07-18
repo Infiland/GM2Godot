@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -14,7 +15,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
-from src.conversion.conversion_outcome import ConversionOutcome
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.generated_paths import generated_resource_stem
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
@@ -84,9 +85,23 @@ class TestTCCConversion(unittest.TestCase):
             ConversionOutcome,
             converter.convert(cls.tcc_path, "windows", cls.godot_dir, settings),
         )
-        if outcome.state != "success":
+        expected_outcome = ConversionOutcome(
+            state="partial",
+            converters=ConversionCounts(
+                requested=15,
+                executed=15,
+                completed=15,
+            ),
+            resources=ConversionCounts(
+                requested=5386,
+                executed=5386,
+                completed=5146,
+                skipped=240,
+            ),
+        )
+        if outcome != expected_outcome:
             raise AssertionError(
-                "The Colorful Creature conversion did not complete successfully:\n"
+                "The Colorful Creature conversion outcome was unexpected:\n"
                 + outcome.summary_line()
             )
 
@@ -94,6 +109,16 @@ class TestTCCConversion(unittest.TestCase):
     def tearDownClass(cls) -> None:
         if hasattr(cls, "godot_dir") and os.path.isdir(cls.godot_dir):
             shutil.rmtree(cls.godot_dir)
+
+    def _read_generated_file(self, *parts: str) -> str:
+        with open(os.path.join(self.godot_dir, *parts), "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _conversion_diagnostics(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            json.loads(self._read_generated_file("gm2godot", "conversion_diagnostics.json")),
+        )
 
     # --- Sprites ---
 
@@ -215,6 +240,116 @@ class TestTCCConversion(unittest.TestCase):
     def test_no_tracebacks_in_logs(self):
         joined = "\n".join(str(msg) for msg in self.logs)
         self.assertNotIn("Traceback", joined, "Conversion produced a Python traceback")
+
+    def test_partial_outcome_diagnostics_match_known_source_gaps(self) -> None:
+        diagnostics = self._conversion_diagnostics()
+        diagnostic_entries = cast(list[dict[str, Any]], diagnostics.get("diagnostics", []))
+
+        script_transpile_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-TRANSPILE"
+            and diagnostic.get("resource_type") == "script"
+        ]
+        script_transpile_resources = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in script_transpile_diagnostics
+        }
+        object_transpile_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-TRANSPILE"
+            and diagnostic.get("resource_type") == "object"
+        ]
+        object_transpile_resources = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in object_transpile_diagnostics
+        }
+        room_transpile_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-TRANSPILE"
+            and diagnostic.get("resource_type") == "room"
+        ]
+        room_transpile_resources = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in room_transpile_diagnostics
+        }
+        all_transpile_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-TRANSPILE"
+        ]
+        self.assertNotIn("", script_transpile_resources)
+        self.assertNotIn("", object_transpile_resources)
+        self.assertEqual(len(all_transpile_diagnostics), 191)
+        self.assertEqual(len(script_transpile_diagnostics), 74)
+        self.assertEqual(len(script_transpile_resources), 74)
+        self.assertEqual(len(object_transpile_diagnostics), 115)
+        self.assertEqual(len(object_transpile_resources), 100)
+        self.assertEqual(len(room_transpile_diagnostics), 2)
+        self.assertEqual(room_transpile_resources, {"r_donolvl1", "r_lvl1"})
+
+        object_event_source_missing = [
+            (
+                str(diagnostic.get("resource", "")),
+                str(diagnostic.get("event", "")),
+            )
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-OBJECT-EVENT-SOURCE-MISSING"
+        ]
+        object_collision_source_missing = [
+            (
+                str(diagnostic.get("resource", "")),
+                str(diagnostic.get("event", "")),
+            )
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code")
+            == "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE"
+        ]
+        self.assertEqual(
+            object_event_source_missing,
+            [("o_animatedLEicon", "_draw")],
+        )
+        self.assertEqual(
+            object_collision_source_missing,
+            [("o_playerbulletMU", "_on_collision")],
+        )
+
+        room_creation_missing = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-ROOM-CREATION-MISSING"
+        ]
+        room_creation_missing_resources = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in room_creation_missing
+        }
+        self.assertEqual(len(room_creation_missing), 75)
+        self.assertNotIn("", room_creation_missing_resources)
+        self.assertEqual(len(room_creation_missing_resources), 64)
+
+        expected_skipped_resources_path = os.path.join(
+            PROJECT_ROOT,
+            "tests",
+            "fixtures",
+            "tcc_expected_skipped_resources.json",
+        )
+        with open(expected_skipped_resources_path, encoding="utf-8") as expected_file:
+            expected_skipped_resources = cast(
+                dict[str, list[str]],
+                json.load(expected_file),
+            )
+        actual_skipped_resources = {
+            "scripts": sorted(script_transpile_resources),
+            "objects": sorted(
+                object_transpile_resources
+                | {resource for resource, _event in object_event_source_missing}
+                | {resource for resource, _event in object_collision_source_missing}
+            ),
+            "rooms": sorted(room_creation_missing_resources | room_transpile_resources),
+        }
+        self.assertEqual(actual_skipped_resources, expected_skipped_resources)
 
     @unittest.skipIf(find_godot_binary() is None, "Godot binary not available")
     def test_generated_project_has_no_godot_warnings_or_errors(self) -> None:

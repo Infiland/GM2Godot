@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 import zipfile
+import zlib
 from pathlib import Path
 
 
@@ -71,6 +75,14 @@ RELEASE_PAYLOADS = (
     ("artifacts/GM2Godot-macos/GM2Godot-macos.zip", b"macOS ZIP payload\n"),
     ("artifacts/GM2Godot-windows/GM2Godot-windows.zip", b"windows payload\n"),
 )
+RELEASE_ARCHIVE_MEMBERS = {
+    "GM2Godot-windows": (("GM2Godot-windows.zip", b"windows"),),
+    "GM2Godot-macos": (
+        ("GM2Godot-macos.dmg", b"macos-dmg"),
+        ("GM2Godot-macos.zip", b"macos-zip"),
+    ),
+    "GM2Godot-linux": (("GM2Godot-linux.zip", b"linux"),),
+}
 
 
 def _godot_env_lines(content: str) -> tuple[str, ...]:
@@ -324,7 +336,7 @@ raise SystemExit(int(os.environ["FAKE_GH_EXIT"]))
 def _write_raw_artifact_archive(
     root: Path,
     artifact_name: str,
-    members: dict[str, bytes],
+    members: Sequence[tuple[str | zipfile.ZipInfo, bytes]],
 ) -> None:
     artifact_dir = root / "raw-artifacts" / artifact_name
     artifact_dir.mkdir(parents=True)
@@ -333,8 +345,62 @@ def _write_raw_artifact_archive(
         "w",
         compression=zipfile.ZIP_DEFLATED,
     ) as archive:
-        for member_name, payload in members.items():
-            archive.writestr(member_name, payload)
+        for member_name, payload in members:
+            if isinstance(member_name, str):
+                member = zipfile.ZipInfo(member_name)
+                member.create_system = 3
+                member.external_attr = (stat.S_IFREG | 0o644) << 16
+                member.compress_type = zipfile.ZIP_DEFLATED
+            else:
+                member = member_name
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"Duplicate name: .*",
+                    category=UserWarning,
+                )
+                archive.writestr(member, payload)
+
+
+def _strip_central_extra_field(archive_path: Path) -> None:
+    data = bytearray(archive_path.read_bytes())
+    central_offset = data.index(b"PK\x01\x02")
+    name_length = int.from_bytes(data[central_offset + 28 : central_offset + 30], "little")
+    extra_length = int.from_bytes(data[central_offset + 30 : central_offset + 32], "little")
+    if extra_length == 0:
+        raise AssertionError("test archive has no central extra field to strip")
+
+    extra_offset = central_offset + 46 + name_length
+    del data[extra_offset : extra_offset + extra_length]
+    data[central_offset + 30 : central_offset + 32] = b"\0\0"
+    end_offset = data.index(b"PK\x05\x06", central_offset)
+    central_size = int.from_bytes(data[end_offset + 12 : end_offset + 16], "little")
+    data[end_offset + 12 : end_offset + 16] = (central_size - extra_length).to_bytes(
+        4,
+        "little",
+    )
+    archive_path.write_bytes(data)
+
+
+def _fake_unzip_environment(root: Path) -> tuple[dict[str, str], Path]:
+    tools_dir = root / "tools"
+    tools_dir.mkdir()
+    call_log = root / "unzip-calls.log"
+    fake_unzip = tools_dir / "unzip"
+    fake_unzip.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >> "$FAKE_UNZIP_CALL_LOG"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_unzip.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["FAKE_UNZIP_CALL_LOG"] = str(call_log)
+    environment["PATH"] = os.pathsep.join(
+        (str(tools_dir), environment.get("PATH", ""))
+    )
+    return environment, call_log
 
 
 def _write_release_payloads(root: Path) -> None:
@@ -556,28 +622,28 @@ class TestCIWorkflows(unittest.TestCase):
         cases = (
             (
                 "valid",
-                {RELEASE_SMOKE_SENTINEL: RELEASE_SMOKE_PAYLOAD},
+                ((RELEASE_SMOKE_SENTINEL, RELEASE_SMOKE_PAYLOAD),),
                 None,
                 0,
                 "",
             ),
             (
                 "wrong archive digest",
-                {RELEASE_SMOKE_SENTINEL: RELEASE_SMOKE_PAYLOAD},
+                ((RELEASE_SMOKE_SENTINEL, RELEASE_SMOKE_PAYLOAD),),
                 "0" * 64,
                 1,
                 "Downloaded archive differs from the uploaded artifact",
             ),
             (
                 "altered sentinel bytes",
-                {RELEASE_SMOKE_SENTINEL: b"altered\n"},
+                ((RELEASE_SMOKE_SENTINEL, b"altered\n"),),
                 None,
                 1,
                 "",
             ),
             (
                 "nested sentinel",
-                {f"nested/{RELEASE_SMOKE_SENTINEL}": RELEASE_SMOKE_PAYLOAD},
+                ((f"nested/{RELEASE_SMOKE_SENTINEL}", RELEASE_SMOKE_PAYLOAD),),
                 None,
                 1,
                 "Unexpected sentinel archive layout",
@@ -822,19 +888,25 @@ raise SystemExit(97)
             content,
         )
         self.assertIn('archive="raw-artifacts/$name/$name.zip"', content)
-        self.assertIn('[[ ! -s "$archive" ]]', content)
+        self.assertIn(
+            '[[ ! -f "$archive" || -L "$archive" || ! -s "$archive" ]]',
+            content,
+        )
+        self.assertIn("with zipfile.ZipFile(archive_path) as archive:", content)
+        self.assertIn("members = archive.infolist()", content)
+        self.assertIn("member_name = member.orig_filename", content)
+        self.assertIn("member.create_system != 3", content)
+        self.assertIn("not stat.S_ISREG(unix_mode)", content)
+        self.assertIn('local_header_struct = struct.Struct("<IHHHHHIIIHH")', content)
+        self.assertIn("if local_extra:", content)
+        self.assertIn("actual_counts = Counter(", content)
+        self.assertIn("[[ -e artifacts || -L artifacts ]]", content)
+        self.assertIn('mkdir -- "$destination"', content)
         self.assertIn('unzip -q "$archive" -d "artifacts/$name"', content)
+        self.assertNotIn("unzip -Z", content)
 
-        expected_members = {
-            "GM2Godot-windows": {"GM2Godot-windows.zip": b"windows"},
-            "GM2Godot-macos": {
-                "GM2Godot-macos.zip": b"macos-zip",
-                "GM2Godot-macos.dmg": b"macos-dmg",
-            },
-            "GM2Godot-linux": {"GM2Godot-linux.zip": b"linux"},
-        }
-        for artifact_name, members in expected_members.items():
-            for member_name in members:
+        for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
+            for member_name, _ in members:
                 with self.subTest(release_file=member_name):
                     self.assertIn(
                         f"artifacts/{artifact_name}/{member_name}",
@@ -842,9 +914,11 @@ raise SystemExit(97)
                     )
 
         script = _workflow_run_script(content, "Extract verified artifact archives")
+        self.assertLess(script.index("python3 - <<'PY'"), script.index("mkdir -- artifacts"))
+        self.assertLess(script.index("members = archive.infolist()"), script.index("unzip -q"))
         with tempfile.TemporaryDirectory() as temp_directory:
             root = Path(temp_directory)
-            for artifact_name, members in expected_members.items():
+            for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
                 _write_raw_artifact_archive(root, artifact_name, members)
 
             result = subprocess.run(
@@ -855,11 +929,306 @@ raise SystemExit(97)
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            for artifact_name, members in expected_members.items():
-                for member_name, payload in members.items():
+            for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
+                for member_name, payload in members:
                     with self.subTest(artifact=artifact_name, member=member_name):
                         extracted = root / "artifacts" / artifact_name / member_name
                         self.assertEqual(extracted.read_bytes(), payload)
+
+    def test_release_rejects_existing_extraction_roots_before_unzip(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+
+        for root_kind in ("directory", "symlink", "broken-symlink"):
+            with self.subTest(root_kind=root_kind):
+                with (
+                    tempfile.TemporaryDirectory() as temp_directory,
+                    tempfile.TemporaryDirectory() as outside_directory,
+                ):
+                    root = Path(temp_directory)
+                    outside_root = Path(outside_directory)
+                    for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
+                        _write_raw_artifact_archive(root, artifact_name, members)
+
+                    extraction_root = root / "artifacts"
+                    broken_target = root / "missing-extraction-root"
+                    if root_kind == "directory":
+                        extraction_root.mkdir()
+                    elif root_kind == "symlink":
+                        extraction_root.symlink_to(
+                            outside_root,
+                            target_is_directory=True,
+                        )
+                    else:
+                        extraction_root.symlink_to(
+                            broken_target,
+                            target_is_directory=True,
+                        )
+                    environment, unzip_log = _fake_unzip_environment(root)
+
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(
+                        "Release extraction root already exists: artifacts",
+                        result.stderr,
+                    )
+                    self.assertFalse(unzip_log.exists())
+                    self.assertEqual(list(outside_root.iterdir()), [])
+                    self.assertFalse(broken_target.exists())
+
+    def test_release_rejects_unsafe_or_unexpected_members_before_extraction(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+        expected_linux = RELEASE_ARCHIVE_MEMBERS["GM2Godot-linux"][0]
+
+        def typed_member(file_type: int) -> zipfile.ZipInfo:
+            member = zipfile.ZipInfo("GM2Godot-linux.zip")
+            member.create_system = 3
+            member.external_attr = (file_type | 0o755) << 16
+            return member
+
+        def alternate_path_member() -> zipfile.ZipInfo:
+            member = typed_member(stat.S_IFREG)
+            encoded_member_name = b"GM2Godot-linux.zip"
+            unicode_path_payload = (
+                b"\x01"
+                + zlib.crc32(encoded_member_name).to_bytes(4, "little")
+                + b"../escape.bin"
+            )
+            member.extra = (
+                b"\x75\x70"
+                + len(unicode_path_payload).to_bytes(2, "little")
+                + unicode_path_payload
+            )
+            return member
+
+        dos_member = zipfile.ZipInfo("GM2Godot-linux.zip")
+        dos_member.create_system = 0
+        dos_member.external_attr = 0
+        dos_directory_member = typed_member(stat.S_IFREG)
+        dos_directory_member.external_attr |= 0x10
+
+        cases = (
+            (
+                "traversal",
+                (expected_linux, ("../escape.bin", b"escape")),
+                "Unsafe archive member",
+            ),
+            (
+                "posix-absolute",
+                (),
+                "Unsafe archive member",
+            ),
+            (
+                "windows-drive-absolute",
+                (expected_linux, ("C:/escape.bin", b"escape")),
+                "Unsafe archive member",
+            ),
+            (
+                "backslash-traversal",
+                (expected_linux, ("..\\escape.bin", b"escape")),
+                "Unsafe archive member",
+            ),
+            (
+                "duplicate",
+                (expected_linux, expected_linux),
+                "Unexpected archive members",
+            ),
+            (
+                "unexpected-extra",
+                (expected_linux, ("unexpected.bin", b"extra")),
+                "Unexpected archive members",
+            ),
+            (
+                "newline-name",
+                (expected_linux, ("unexpected\nmember.bin", b"extra")),
+                "Unexpected archive members",
+            ),
+            (
+                "missing-expected",
+                (),
+                "Unexpected archive members",
+            ),
+            (
+                "symlink",
+                ((typed_member(stat.S_IFLNK), b"target"),),
+                "Non-regular archive member",
+            ),
+            (
+                "directory",
+                ((typed_member(stat.S_IFDIR), b""),),
+                "Non-regular archive member",
+            ),
+            (
+                "special-file",
+                ((typed_member(stat.S_IFIFO), b""),),
+                "Non-regular archive member",
+            ),
+            (
+                "unsupported-origin-system",
+                ((dos_member, b"linux"),),
+                "Non-regular archive member",
+            ),
+            (
+                "dos-directory-attribute",
+                ((dos_directory_member, b"linux"),),
+                "Non-regular archive member",
+            ),
+            (
+                "alternate-path-extra-field",
+                ((alternate_path_member(), b"linux"),),
+                "Unsupported archive member metadata",
+            ),
+            (
+                "local-only-alternate-path-extra-field",
+                ((alternate_path_member(), b"linux"),),
+                "Unsupported archive member metadata",
+            ),
+        )
+
+        for case_name, invalid_members, error_fragment in cases:
+            with self.subTest(case=case_name):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    absolute_escape = root.parent / f"{root.name}-absolute-escape.bin"
+                    self.assertFalse(absolute_escape.exists())
+                    members = (
+                        (expected_linux, (str(absolute_escape), b"escape"))
+                        if case_name == "posix-absolute"
+                        else invalid_members
+                    )
+                    for artifact_name in ("GM2Godot-windows", "GM2Godot-macos"):
+                        _write_raw_artifact_archive(
+                            root,
+                            artifact_name,
+                            RELEASE_ARCHIVE_MEMBERS[artifact_name],
+                        )
+                    _write_raw_artifact_archive(root, "GM2Godot-linux", members)
+                    if case_name == "local-only-alternate-path-extra-field":
+                        _strip_central_extra_field(
+                            root
+                            / "raw-artifacts"
+                            / "GM2Godot-linux"
+                            / "GM2Godot-linux.zip"
+                        )
+
+                    if case_name == "duplicate":
+                        archive_path = (
+                            root
+                            / "raw-artifacts"
+                            / "GM2Godot-linux"
+                            / "GM2Godot-linux.zip"
+                        )
+                        with zipfile.ZipFile(archive_path) as archive:
+                            self.assertEqual(
+                                [member.filename for member in archive.infolist()],
+                                ["GM2Godot-linux.zip", "GM2Godot-linux.zip"],
+                            )
+
+                    environment, unzip_log = _fake_unzip_environment(root)
+
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(error_fragment, result.stderr)
+                    self.assertFalse(unzip_log.exists())
+                    self.assertFalse((root / "artifacts").exists())
+                    self.assertFalse(absolute_escape.exists())
+
+    def test_release_rejects_inconsistent_local_metadata_before_extraction(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+        mutations = (
+            ("flags", 6, (0x800).to_bytes(2, "little")),
+            ("compression", 8, (0).to_bytes(2, "little")),
+            ("raw-name", 30, b"XM2Godot-linux.zip"),
+        )
+
+        for case_name, offset, replacement in mutations:
+            with self.subTest(case=case_name):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
+                        _write_raw_artifact_archive(root, artifact_name, members)
+                    linux_archive = (
+                        root
+                        / "raw-artifacts"
+                        / "GM2Godot-linux"
+                        / "GM2Godot-linux.zip"
+                    )
+                    archive_bytes = bytearray(linux_archive.read_bytes())
+                    archive_bytes[offset : offset + len(replacement)] = replacement
+                    linux_archive.write_bytes(archive_bytes)
+                    environment, unzip_log = _fake_unzip_environment(root)
+
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        cwd=root,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("Inconsistent local member metadata", result.stderr)
+                    self.assertFalse(unzip_log.exists())
+                    self.assertFalse((root / "artifacts").exists())
+
+    def test_release_rejects_unreadable_zip_metadata_before_extraction(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            for artifact_name, members in RELEASE_ARCHIVE_MEMBERS.items():
+                _write_raw_artifact_archive(root, artifact_name, members)
+            linux_archive = (
+                root
+                / "raw-artifacts"
+                / "GM2Godot-linux"
+                / "GM2Godot-linux.zip"
+            )
+            linux_archive.write_bytes(b"PK\x03\x04truncated")
+
+            environment, unzip_log = _fake_unzip_environment(root)
+
+            result = subprocess.run(
+                ["bash", "-c", script],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Cannot read verified archive metadata", result.stderr)
+            self.assertFalse(unzip_log.exists())
+            self.assertFalse((root / "artifacts").exists())
 
     def test_release_extraction_fails_when_verified_archive_is_missing(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
@@ -871,7 +1240,7 @@ raise SystemExit(97)
             _write_raw_artifact_archive(
                 root,
                 "GM2Godot-windows",
-                {"GM2Godot-windows.zip": b"windows"},
+                (("GM2Godot-windows.zip", b"windows"),),
             )
             result = subprocess.run(
                 ["bash", "-c", script],
@@ -883,7 +1252,7 @@ raise SystemExit(97)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "Missing or empty verified archive: "
+            "Missing, non-regular, symlinked, or empty verified archive: "
             "raw-artifacts/GM2Godot-macos/GM2Godot-macos.zip",
             result.stderr,
         )

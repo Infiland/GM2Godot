@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.15 - 2026-07-18
+
+- Validated every release artifact ZIP member table against exact flat regular-file allowlists before extraction, rejecting unsafe or alternate-path metadata, duplicate, extra, symlink, directory, and special-file entries while preserving the verified payload bytes.
+
 ## 0.7.14 - 2026-07-18
 
 - Added a deterministic `SHA256SUMS` release asset for the four final platform payloads, with fail-closed file validation and executable manifest regression coverage.

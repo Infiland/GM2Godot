@@ -48,7 +48,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.14`.
+Current source version: `0.7.15`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.

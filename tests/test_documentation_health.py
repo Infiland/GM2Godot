@@ -48,7 +48,7 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/checkout": 5,
     "actions/setup-python": 6,
     "actions/cache": 5,
-    "actions/upload-artifact": 6,
+    "actions/upload-artifact": 7,
     "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
@@ -304,7 +304,7 @@ class TestDocumentationHealth(unittest.TestCase):
                     self.assertIsNotNone(
                         approved_major,
                         f"{location}: review this action's runtime and add "
-                        "its smallest Node-24-native major to "
+                        "its reviewed Node-24-native major to "
                         "APPROVED_NODE24_ACTION_MAJORS",
                     )
                 if approved_major is None:
@@ -314,7 +314,7 @@ class TestDocumentationHealth(unittest.TestCase):
                     self.assertEqual(
                         int(pin_match.group("major")),
                         approved_major,
-                        f"{location}: use the approved smallest "
+                        f"{location}: use the approved "
                         f"Node-24-native major v{approved_major}",
                     )
 

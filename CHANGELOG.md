@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.17 - 2026-07-19
+
+- Replaced the update-capable release action with a create-only publisher that seals the exact `main` event SHA and five local asset receipts, claims the tag through one validated `201 Created` response, and derives the only writable release ID from this run's validated draft-creation response.
+- Bound every asset upload and finalization request to that run-owned numeric release ID, with draft-aware uniqueness, exact tag-target, owned-state, and uploaded-prefix gates before each mutation; collisions, ambiguous responses, and drift fail closed without retry, adoption, deletion, replacement, or automatic rollback.
+- Added an atomic recovery receipt plus final release-by-ID, release-by-tag, tag, asset, and paginated uniqueness verification, and replaced the third-party publisher smoke with a local pre-network rejection check.
+
 ## 0.7.16 - 2026-07-18
 
 - Added an operationally read-only audit for existing-tag release reruns: it requires one exact published release, verifies the exact five uploaded assets through independent paginated API state, downloads by asset ID into a private temporary directory, and checks sizes plus GitHub SHA-256 digests.

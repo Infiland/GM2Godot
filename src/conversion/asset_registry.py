@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import posixpath
@@ -7,7 +8,7 @@ import secrets
 import stat
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, ClassVar, Iterable, cast
+from typing import BinaryIO, Callable, ClassVar, Iterable, cast
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
@@ -28,9 +29,14 @@ from src.conversion.generated_paths import (
     generated_path_segment,
     generated_resource_stem,
 )
+from src.conversion.included_file_paths import (
+    canonical_included_file_lookup_path,
+    plan_included_file_paths,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     is_safe_project_source_component,
+    resolve_project_source_path,
     validate_project_resource_source_path,
 )
 from src.conversion.script_functions import modern_script_function_names
@@ -119,6 +125,7 @@ def _atomic_write_asset_text_at(
     root: str,
     components: tuple[str, ...],
     content: str,
+    publication_validator: Callable[[], None] | None = None,
 ) -> None:
     directory_flags = os.O_RDONLY
     directory_flags |= getattr(os, "O_DIRECTORY", 0)
@@ -143,6 +150,7 @@ def _atomic_write_asset_text_at(
             current_fd,
             components[-1],
             content,
+            publication_validator,
         )
         _verify_open_asset_output_directory(root, output_directory, current_fd)
     finally:
@@ -234,6 +242,7 @@ def _atomic_write_asset_text_in_directory(
     directory_fd: int,
     filename: str,
     content: str,
+    publication_validator: Callable[[], None] | None = None,
 ) -> None:
     output_identity, output_mode = _asset_output_state_at(directory_fd, filename)
     temporary_name = ""
@@ -282,6 +291,8 @@ def _atomic_write_asset_text_in_directory(
             or (staged_stat.st_dev, staged_stat.st_ino) != temporary_identity
         ):
             raise OSError(f"Generated asset staging file changed: {filename}")
+        if publication_validator is not None:
+            publication_validator()
         _verify_asset_output_state_at(directory_fd, filename, output_identity)
         os.replace(
             temporary_name,
@@ -290,6 +301,28 @@ def _atomic_write_asset_text_in_directory(
             dst_dir_fd=directory_fd,
         )
         temporary_pending = False
+        if publication_validator is not None:
+            try:
+                publication_validator()
+            except BaseException as validation_error:
+                try:
+                    published_stat = os.stat(
+                        filename,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        stat.S_ISREG(published_stat.st_mode)
+                        and (published_stat.st_dev, published_stat.st_ino)
+                        == temporary_identity
+                    ):
+                        os.unlink(filename, dir_fd=directory_fd)
+                except BaseException as cleanup_error:
+                    validation_error.add_note(
+                        "Failed to remove invalid generated asset registry: "
+                        f"{cleanup_error}"
+                    )
+                raise
     finally:
         if file_descriptor >= 0:
             os.close(file_descriptor)
@@ -304,6 +337,7 @@ def _atomic_write_asset_text_fallback(
     root: str,
     components: tuple[str, ...],
     content: str,
+    publication_validator: Callable[[], None] | None = None,
 ) -> None:
     directory_identities = _prepare_asset_output_directories_fallback(
         root,
@@ -342,9 +376,48 @@ def _atomic_write_asset_text_fallback(
             raise OSError(
                 f"Generated asset staging file changed: {components[-1]}"
             )
+        if publication_validator is not None:
+            publication_validator()
         _verify_asset_output_state(output_path, output_identity)
         os.replace(staged_path, output_path)
         staged_pending = False
+        if publication_validator is not None:
+            try:
+                publication_validator()
+            except BaseException as validation_error:
+                try:
+                    published_stat = os.lstat(output_path)
+                    if (
+                        stat.S_ISREG(published_stat.st_mode)
+                        and (published_stat.st_dev, published_stat.st_ino)
+                        == temporary_identity
+                    ):
+                        try:
+                            os.unlink(output_path)
+                        except PermissionError:
+                            if os.name != "nt":
+                                raise
+                            os.chmod(output_path, stat.S_IWRITE)
+                            writable_stat = os.lstat(output_path)
+                            if (
+                                not stat.S_ISREG(writable_stat.st_mode)
+                                or (
+                                    writable_stat.st_dev,
+                                    writable_stat.st_ino,
+                                )
+                                != temporary_identity
+                            ):
+                                raise OSError(
+                                    "Generated asset registry changed before "
+                                    f"cleanup: {output_path}"
+                                )
+                            os.unlink(output_path)
+                except BaseException as cleanup_error:
+                    validation_error.add_note(
+                        "Failed to remove invalid generated asset registry: "
+                        f"{cleanup_error}"
+                    )
+                raise
     finally:
         if file_descriptor >= 0:
             os.close(file_descriptor)
@@ -448,6 +521,122 @@ def _verify_asset_output_state(
         raise OSError(f"Asset registry changed during publication: {output_path}")
 
 
+def atomic_write_confined_generated_text(
+    output_path: str,
+    content: str,
+    *,
+    confinement_root: str,
+    publication_validator: Callable[[], None] | None = None,
+) -> None:
+    """Publish UTF-8 generated text through a confined, no-follow path."""
+
+    output_absolute = os.path.abspath(output_path)
+    root = os.path.abspath(confinement_root)
+    components = _asset_output_components(root, output_absolute)
+    _ensure_asset_output_root(root)
+    if _confined_asset_output_supported():
+        _atomic_write_asset_text_at(
+            root,
+            components,
+            content,
+            publication_validator,
+        )
+        return
+    _atomic_write_asset_text_fallback(
+        root,
+        components,
+        content,
+        publication_validator,
+    )
+
+
+def _included_file_content_fingerprint(
+    file_stat: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_ctime_ns,
+    )
+
+
+def _included_file_path_handle_fingerprints_match(
+    path_fingerprint: tuple[int, int, int, int, int],
+    handle_fingerprint: tuple[int, int, int, int, int],
+) -> bool:
+    """Compare stable content metadata across Windows path and handle stat."""
+
+    if _uses_windows_included_file_path_handle_semantics():
+        return path_fingerprint[:4] == handle_fingerprint[:4]
+    return path_fingerprint == handle_fingerprint
+
+
+def _uses_windows_included_file_path_handle_semantics() -> bool:
+    return os.name == "nt"
+
+
+def _included_file_streams_match(
+    source_file: BinaryIO,
+    output_file: BinaryIO,
+) -> tuple[bool, str, str]:
+    source_digest = hashlib.sha256()
+    output_digest = hashlib.sha256()
+    while True:
+        source_chunk = source_file.read(1024 * 1024)
+        output_chunk = output_file.read(1024 * 1024)
+        source_digest.update(source_chunk)
+        output_digest.update(output_chunk)
+        if source_chunk != output_chunk:
+            return (
+                False,
+                source_digest.hexdigest(),
+                output_digest.hexdigest(),
+            )
+        if not source_chunk:
+            return (
+                True,
+                source_digest.hexdigest(),
+                output_digest.hexdigest(),
+            )
+
+
+def _included_file_stream_sha256(opened_file: BinaryIO) -> str:
+    digest = hashlib.sha256()
+    while True:
+        chunk = opened_file.read(1024 * 1024)
+        if not chunk:
+            return digest.hexdigest()
+        digest.update(chunk)
+
+
+def _included_file_streams_match_stably(
+    source_file: BinaryIO,
+    output_file: BinaryIO,
+    output_path: str,
+) -> bool:
+    matches, source_sha256, output_sha256 = _included_file_streams_match(
+        source_file,
+        output_file,
+    )
+    if not matches:
+        return False
+
+    source_file.seek(0)
+    if _included_file_stream_sha256(source_file) != source_sha256:
+        raise OSError(
+            "Asset-registry Included File source changed during validation"
+        )
+    output_file.seek(0)
+    if _included_file_stream_sha256(output_file) != output_sha256:
+        raise OSError(
+            "Asset-registry Included File output changed during validation: "
+            f"{output_path}"
+        )
+    return True
+
+
 @dataclass(frozen=True)
 class AssetRegistryEntry:
     id: int
@@ -479,6 +668,12 @@ class AssetRegistryEntry:
 
 
 @dataclass(frozen=True)
+class _UnavailablePublishedIncludedFile:
+    entry: AssetRegistryEntry
+    reason: str
+
+
+@dataclass(frozen=True)
 class _ProjectResource:
     kind: str
     name: str
@@ -494,6 +689,7 @@ class _DeclaredRegistryResource:
     source_path: str | None
     owner_source_path: str | None
     manifest_field: str | None
+    included_file_logical_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -509,6 +705,7 @@ class _AssetRegistryConversionPlan:
     resource_keys: tuple[str, ...]
     requested_keys: tuple[str, ...]
     unavailable: tuple[_UnavailableRegistryResource, ...]
+    included_file_logical_paths: tuple[str, ...]
 
 
 @dataclass
@@ -662,6 +859,427 @@ class AssetRegistryConverter(BaseConverter):
         entries, _processed_count = self._build_entries_from_resources(resources)
         return entries
 
+    def build_published_entries(self) -> tuple[AssetRegistryEntry, ...]:
+        """Return entries whose Included File outputs match current sources.
+
+        ``build_entries()`` remains the source-planning API used by converters
+        that need the complete deterministic asset namespace before outputs
+        exist. Artifact publishers use this method so they never advertise an
+        absent, redirected, stale, or otherwise mismatched Included File.
+        """
+
+        plan = self._conversion_plan()
+        entries, _processed_count = self._build_entries_from_resources(
+            plan.resources,
+            included_file_logical_paths=plan.included_file_logical_paths,
+        )
+        published, _unavailable = self._filter_published_included_file_entries(
+            entries
+        )
+        return published
+
+    def revalidate_published_entries(
+        self,
+        expected_entries: tuple[AssetRegistryEntry, ...],
+    ) -> None:
+        """Fail if current published Included Files differ from the plan."""
+
+        expected_included_files = tuple(
+            entry
+            for entry in expected_entries
+            if entry.kind == "included_files"
+        )
+        current_included_files = tuple(
+            entry
+            for entry in self.build_published_entries()
+            if entry.kind == "included_files"
+        )
+        if current_included_files != expected_included_files:
+            raise OSError(
+                "Asset-registry Included File publication inputs changed after "
+                "planning."
+            )
+
+    def _filter_published_included_file_entries(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> tuple[
+        tuple[AssetRegistryEntry, ...],
+        tuple[_UnavailablePublishedIncludedFile, ...],
+    ]:
+        published: list[AssetRegistryEntry] = []
+        unavailable: list[_UnavailablePublishedIncludedFile] = []
+        for entry in entries:
+            if entry.kind != "included_files":
+                published.append(entry)
+                continue
+            matches, reason = self._included_file_output_matches_source(entry)
+            if matches:
+                published.append(entry)
+            else:
+                unavailable.append(
+                    _UnavailablePublishedIncludedFile(
+                        entry=entry,
+                        reason=reason,
+                    )
+                )
+        return tuple(published), tuple(unavailable)
+
+    def _included_file_output_matches_source(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> tuple[bool, str]:
+        source_file: BinaryIO | None = None
+        try:
+            source_file, source_stat = self._open_pinned_included_file_source(
+                entry
+            )
+            output_path, components = self._included_file_output_path(entry)
+            with source_file:
+                self._verify_pinned_included_file_source(
+                    entry,
+                    source_file,
+                    source_stat,
+                )
+                if _confined_asset_output_supported():
+                    matches = self._included_file_output_matches_at(
+                        output_path,
+                        components,
+                        source_file,
+                    )
+                else:
+                    matches = self._included_file_output_matches_fallback(
+                        output_path,
+                        components,
+                        source_file,
+                    )
+                self._verify_pinned_included_file_source(
+                    entry,
+                    source_file,
+                    source_stat,
+                )
+        except (OSError, ProjectSourcePathError, ValueError) as error:
+            if source_file is not None and not source_file.closed:
+                source_file.close()
+            return False, str(error)
+        if not matches:
+            return False, "the generated output bytes differ from the source file"
+        return True, ""
+
+    def _open_pinned_included_file_source(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> tuple[BinaryIO, os.stat_result]:
+        resolved = resolve_project_source_path(
+            self.gm_project_path,
+            entry.source_path,
+        )
+        source_file = open(resolved.filesystem_path, "rb")
+        try:
+            source_stat = os.fstat(source_file.fileno())
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise OSError(
+                    "Asset-registry Included File source is not regular: "
+                    f"{entry.source_path}"
+                )
+            self._verify_pinned_included_file_source(
+                entry,
+                source_file,
+                source_stat,
+            )
+        except Exception:
+            source_file.close()
+            raise
+        return source_file, source_stat
+
+    def _verify_pinned_included_file_source(
+        self,
+        entry: AssetRegistryEntry,
+        source_file: BinaryIO,
+        expected_stat: os.stat_result,
+    ) -> None:
+        resolved = resolve_project_source_path(
+            self.gm_project_path,
+            entry.source_path,
+        )
+        current_path_stat = os.stat(resolved.filesystem_path)
+        current_open_stat = os.fstat(source_file.fileno())
+        if (
+            not stat.S_ISREG(current_open_stat.st_mode)
+            or not os.path.samestat(expected_stat, current_path_stat)
+            or _included_file_content_fingerprint(current_open_stat)
+            != _included_file_content_fingerprint(expected_stat)
+        ):
+            raise OSError(
+                "Asset-registry Included File source changed during validation: "
+                f"{entry.source_path}"
+            )
+
+    def _included_file_output_path(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> tuple[str, tuple[str, ...]]:
+        prefix = "res://included_files/"
+        if not entry.godot_path.startswith(prefix):
+            raise ValueError(
+                "Asset-registry Included File output is outside its managed root: "
+                f"{entry.godot_path}"
+            )
+        relative_path = entry.godot_path.removeprefix(prefix)
+        normalized_relative = posixpath.normpath(relative_path)
+        relative_components = tuple(normalized_relative.split("/"))
+        if (
+            not relative_path
+            or "\\" in relative_path
+            or normalized_relative != relative_path
+            or any(
+                component in {"", ".", ".."}
+                for component in relative_components
+            )
+        ):
+            raise ValueError(
+                "Asset-registry Included File output path is invalid: "
+                f"{entry.godot_path}"
+            )
+        project_root = os.path.abspath(self.godot_project_path)
+        components = ("included_files", *relative_components)
+        output_path = os.path.join(project_root, *components)
+        if _asset_output_components(project_root, output_path) != components:
+            raise ValueError(
+                "Asset-registry Included File output escapes the Godot project: "
+                f"{entry.godot_path}"
+            )
+        return output_path, components
+
+    def _included_file_output_matches_at(
+        self,
+        output_path: str,
+        components: tuple[str, ...],
+        source_file: BinaryIO,
+    ) -> bool:
+        project_root = os.path.abspath(self.godot_project_path)
+        directory_flags = os.O_RDONLY
+        directory_flags |= getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        project_fd = os.open(project_root, directory_flags)
+        current_fd = project_fd
+        output_fd = -1
+        try:
+            _verify_open_asset_output_directory(
+                project_root,
+                project_root,
+                project_fd,
+            )
+            for component in components[:-1]:
+                child_fd = os.open(
+                    component,
+                    directory_flags,
+                    dir_fd=current_fd,
+                )
+                if current_fd != project_fd:
+                    os.close(current_fd)
+                current_fd = child_fd
+
+            output_directory = os.path.dirname(output_path)
+            _verify_open_asset_output_directory(
+                project_root,
+                output_directory,
+                current_fd,
+            )
+            output_fd = os.open(
+                components[-1],
+                file_flags,
+                dir_fd=current_fd,
+            )
+            opened_stat = os.fstat(output_fd)
+            path_stat = os.stat(
+                components[-1],
+                dir_fd=current_fd,
+                follow_symlinks=False,
+            )
+            expected_fingerprint = _included_file_content_fingerprint(
+                opened_stat
+            )
+            if (
+                _path_is_redirected(output_path, path_stat)
+                or not stat.S_ISREG(opened_stat.st_mode)
+                or not stat.S_ISREG(path_stat.st_mode)
+                or not os.path.samestat(opened_stat, path_stat)
+            ):
+                raise OSError(
+                    "Asset-registry Included File output is redirected or "
+                    f"non-regular: {output_path}"
+                )
+            with os.fdopen(output_fd, "rb") as output_file:
+                output_fd = -1
+                matches = _included_file_streams_match_stably(
+                    source_file,
+                    output_file,
+                    output_path,
+                )
+                final_open_stat = os.fstat(output_file.fileno())
+            _verify_open_asset_output_directory(
+                project_root,
+                output_directory,
+                current_fd,
+            )
+            final_path_stat = os.stat(
+                components[-1],
+                dir_fd=current_fd,
+                follow_symlinks=False,
+            )
+            if (
+                _path_is_redirected(output_path, final_path_stat)
+                or not stat.S_ISREG(final_path_stat.st_mode)
+                or not os.path.samestat(opened_stat, final_path_stat)
+                or _included_file_content_fingerprint(final_open_stat)
+                != expected_fingerprint
+                or _included_file_content_fingerprint(final_path_stat)
+                != expected_fingerprint
+            ):
+                raise OSError(
+                    "Asset-registry Included File output changed during "
+                    f"validation: {output_path}"
+                )
+            return matches
+        finally:
+            if output_fd >= 0:
+                os.close(output_fd)
+            if current_fd != project_fd:
+                os.close(current_fd)
+            os.close(project_fd)
+
+    def _included_file_output_matches_fallback(
+        self,
+        output_path: str,
+        components: tuple[str, ...],
+        source_file: BinaryIO,
+    ) -> bool:
+        project_root = os.path.abspath(self.godot_project_path)
+        project_real = os.path.normcase(os.path.realpath(project_root))
+        directory_path = project_root
+        directory_identities: list[tuple[str, tuple[int, int]]] = []
+        for component in (None, *components[:-1]):
+            if component is not None:
+                directory_path = os.path.join(directory_path, component)
+            directory_stat = os.lstat(directory_path)
+            directory_real = os.path.normcase(os.path.realpath(directory_path))
+            try:
+                contained = (
+                    os.path.commonpath((project_real, directory_real))
+                    == project_real
+                )
+            except ValueError:
+                contained = False
+            if (
+                _path_is_redirected(directory_path, directory_stat)
+                or not stat.S_ISDIR(directory_stat.st_mode)
+                or not contained
+            ):
+                raise OSError(
+                    "Asset-registry Included File output directory is "
+                    f"redirected or invalid: {directory_path}"
+                )
+            directory_identities.append(
+                (
+                    directory_path,
+                    (directory_stat.st_dev, directory_stat.st_ino),
+                )
+            )
+
+        output_stat = os.lstat(output_path)
+        output_real = os.path.normcase(os.path.realpath(output_path))
+        try:
+            output_contained = (
+                os.path.commonpath((project_real, output_real))
+                == project_real
+            )
+        except ValueError:
+            output_contained = False
+        if (
+            _path_is_redirected(output_path, output_stat)
+            or not stat.S_ISREG(output_stat.st_mode)
+            or not output_contained
+        ):
+            raise OSError(
+                "Asset-registry Included File output is redirected or "
+                f"non-regular: {output_path}"
+            )
+        expected_fingerprint = _included_file_content_fingerprint(output_stat)
+        with open(output_path, "rb") as output_file:
+            opened_stat = os.fstat(output_file.fileno())
+            opened_fingerprint = _included_file_content_fingerprint(
+                opened_stat
+            )
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or not os.path.samestat(opened_stat, output_stat)
+            ):
+                raise OSError(
+                    "Asset-registry Included File output changed before "
+                    f"validation: {output_path}"
+                )
+            self._verify_included_file_output_fallback(
+                directory_identities,
+                output_path,
+                expected_fingerprint,
+            )
+            matches = _included_file_streams_match_stably(
+                source_file,
+                output_file,
+                output_path,
+            )
+            final_open_stat = os.fstat(output_file.fileno())
+        self._verify_included_file_output_fallback(
+            directory_identities,
+            output_path,
+            expected_fingerprint,
+        )
+        if (
+            _included_file_content_fingerprint(final_open_stat)
+            != opened_fingerprint
+            or not _included_file_path_handle_fingerprints_match(
+                expected_fingerprint,
+                _included_file_content_fingerprint(final_open_stat),
+            )
+        ):
+            raise OSError(
+                "Asset-registry Included File output changed during "
+                f"validation: {output_path}"
+            )
+        return matches
+
+    @staticmethod
+    def _verify_included_file_output_fallback(
+        directory_identities: list[tuple[str, tuple[int, int]]],
+        output_path: str,
+        expected_fingerprint: tuple[int, int, int, int, int],
+    ) -> None:
+        for directory_path, expected_identity in directory_identities:
+            directory_stat = os.lstat(directory_path)
+            if (
+                _path_is_redirected(directory_path, directory_stat)
+                or not stat.S_ISDIR(directory_stat.st_mode)
+                or (directory_stat.st_dev, directory_stat.st_ino)
+                != expected_identity
+            ):
+                raise OSError(
+                    "Asset-registry Included File output directory changed: "
+                    f"{directory_path}"
+                )
+        output_stat = os.lstat(output_path)
+        if (
+            _path_is_redirected(output_path, output_stat)
+            or not stat.S_ISREG(output_stat.st_mode)
+            or _included_file_content_fingerprint(output_stat)
+            != expected_fingerprint
+        ):
+            raise OSError(
+                "Asset-registry Included File output changed during "
+                f"validation: {output_path}"
+            )
+
     def _ordered_project_resources(self) -> tuple[_ProjectResource, ...]:
         """Return every discoverable base resource in stable registry order."""
         return tuple(
@@ -695,6 +1313,11 @@ class AssetRegistryConverter(BaseConverter):
                 resource_keys=resource_keys,
                 requested_keys=resource_keys,
                 unavailable=(),
+                included_file_logical_paths=self._valid_included_file_logical_paths(
+                    resource.name
+                    for resource in resources
+                    if resource.kind == "included_files"
+                ),
             )
 
         declaration_groups = self._declared_registry_resources()
@@ -706,12 +1329,17 @@ class AssetRegistryConverter(BaseConverter):
         declared_identities: set[tuple[str, str]] = set()
         requested_keys: list[str] = []
         unavailable: list[_UnavailableRegistryResource] = []
+        requested_included_file_paths: list[str] = []
 
         for declarations in declaration_groups:
             declaration = declarations[0]
+            declaration_name = (
+                declaration.included_file_logical_path
+                or declaration.name
+            )
             identity = self._resource_identity(
                 declaration.kind,
-                declaration.name,
+                declaration_name,
             )
             declared_identities.add(identity)
             available = available_by_identity.get(identity)
@@ -725,8 +1353,13 @@ class AssetRegistryConverter(BaseConverter):
                 allowed_sources: set[str] = set()
                 reasons: list[str] = []
                 for item in declarations:
-                    source_path, reason = self._declared_included_file_source(
-                        item
+                    (
+                        source_path,
+                        requested_logical_path,
+                        reason,
+                    ) = self._declared_included_file_source(item)
+                    requested_included_file_paths.append(
+                        requested_logical_path
                     )
                     if source_path is not None:
                         allowed_sources.add(source_path)
@@ -784,7 +1417,30 @@ class AssetRegistryConverter(BaseConverter):
             resource_keys=resource_keys,
             requested_keys=tuple(requested_keys),
             unavailable=tuple(unavailable),
+            included_file_logical_paths=self._valid_included_file_logical_paths(
+                (
+                    *requested_included_file_paths,
+                    *(
+                        resource.name
+                        for resource in resources
+                        if resource.kind == "included_files"
+                    ),
+                )
+            ),
         )
+
+    @staticmethod
+    def _valid_included_file_logical_paths(
+        logical_paths: Iterable[str],
+    ) -> tuple[str, ...]:
+        valid_paths: list[str] = []
+        for logical_path in logical_paths:
+            try:
+                canonical_included_file_lookup_path(logical_path)
+            except ProjectSourcePathError:
+                continue
+            valid_paths.append(logical_path)
+        return tuple(valid_paths)
 
     def _declared_registry_resources(
         self,
@@ -797,7 +1453,10 @@ class AssetRegistryConverter(BaseConverter):
         seen_declarations: set[tuple[str, str, str | None]] = set()
 
         def add(resource: _DeclaredRegistryResource) -> None:
-            identity = self._resource_identity(resource.kind, resource.name)
+            identity = self._resource_identity(
+                resource.kind,
+                resource.included_file_logical_path or resource.name,
+            )
             declaration_key = (*identity, resource.source_path)
             if (
                 not resource.name
@@ -828,6 +1487,14 @@ class AssetRegistryConverter(BaseConverter):
                     source_path=resource.path,
                     owner_source_path=self.project_manifest.yyp_path,
                     manifest_field=manifest_field,
+                    included_file_logical_path=(
+                        self._included_file_logical_name(
+                            resource.path,
+                            resource.name,
+                        )
+                        if kind == "included_files"
+                        else None
+                    ),
                 )
             )
 
@@ -893,6 +1560,7 @@ class AssetRegistryConverter(BaseConverter):
                     source_path=source_path or None,
                     owner_source_path=self.project_manifest.yyp_path,
                     manifest_field=manifest_field,
+                    included_file_logical_path=logical_name,
                 )
             )
 
@@ -932,19 +1600,38 @@ class AssetRegistryConverter(BaseConverter):
 
     @staticmethod
     def _included_file_logical_name(path: str, name: str) -> str:
-        normalized = posixpath.normpath(path.replace("\\", "/"))
-        if normalized.startswith("datafiles/"):
-            relative_path = normalized.removeprefix("datafiles/")
-            if relative_path and relative_path != ".":
-                return relative_path
-        return name or posixpath.basename(normalized)
+        normalized = posixpath.normpath(
+            (path or name).replace("\\", "/").strip()
+        )
+        project_prefix = "${project_dir}/"
+        if normalized.startswith(project_prefix):
+            normalized = normalized.removeprefix(project_prefix)
+        source_root, separator, source_relative = normalized.partition("/")
+        if (
+            separator
+            and source_root.casefold() == "datafiles"
+            and source_relative
+        ):
+            return source_relative
+        return name if normalized in {"", "."} else normalized
 
     def _declared_included_file_source(
         self,
         resource: _DeclaredRegistryResource,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str | None, str, str]:
+        requested_logical_path = (
+            resource.included_file_logical_path
+            or self._included_file_logical_name(
+                resource.source_path or "",
+                resource.name,
+            )
+        )
         if resource.source_path is None:
-            return None, "its manifest source path was rejected"
+            return (
+                None,
+                requested_logical_path,
+                "its manifest source path was rejected",
+            )
         resolved = self._resolve_project_source(
             resource.source_path,
             owner_source_path=resource.owner_source_path,
@@ -953,7 +1640,15 @@ class AssetRegistryConverter(BaseConverter):
             field=resource.manifest_field,
         )
         if resolved is None:
-            return None, "its manifest source path was rejected"
+            return (
+                None,
+                requested_logical_path,
+                "its manifest source path was rejected",
+            )
+        requested_logical_path = self._included_file_logical_name(
+            resolved.source_path,
+            resource.name,
+        )
         try:
             source_kind, separator, _remainder = (
                 resolved.source_path.partition("/")
@@ -987,7 +1682,11 @@ class AssetRegistryConverter(BaseConverter):
                 resource_type="included_file",
                 field=resource.manifest_field,
             )
-            return None, "its manifest source path was rejected"
+            return (
+                None,
+                requested_logical_path,
+                "its manifest source path was rejected",
+            )
         except ValueError as exc:
             self._report_source_path_rejection(
                 resource.source_path,
@@ -997,23 +1696,29 @@ class AssetRegistryConverter(BaseConverter):
                 resource_type="included_file",
                 field=resource.manifest_field,
             )
-            return None, "its manifest source path was rejected"
+            return (
+                None,
+                requested_logical_path,
+                "its manifest source path was rejected",
+            )
         if (
             resolved.source_path.endswith(".yy")
             or not os.path.isfile(resolved.filesystem_path)
         ):
             return (
                 None,
+                requested_logical_path,
                 f"the declared file is missing at {resolved.source_path!r}",
             )
-        return resolved.source_path, ""
+        return resolved.source_path, requested_logical_path, ""
 
     @staticmethod
     def _unavailable_outcome_resource_key(
         resource: _DeclaredRegistryResource,
     ) -> str:
         source_label = resource.source_path or resource.manifest_field or ""
-        return f"{resource.kind}:{resource.name}:{source_label}"
+        resource_name = resource.included_file_logical_path or resource.name
+        return f"{resource.kind}:{resource_name}:{source_label}"
 
     def _report_unavailable_registry_resource(
         self,
@@ -1043,16 +1748,45 @@ class AssetRegistryConverter(BaseConverter):
             )
         self._safe_log(message)
 
+    def _report_unavailable_published_included_file(
+        self,
+        unavailable: _UnavailablePublishedIncludedFile,
+    ) -> None:
+        entry = unavailable.entry
+        message = (
+            "Warning: Omitting GameMaker asset-registry Included File "
+            f"{entry.name!r} because {unavailable.reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(entry.source_path),
+                resource=entry.name,
+                resource_type="included_file",
+                manifest_entry="generated Included File output",
+                workaround=(
+                    "Run the Included Files converter successfully, then retry "
+                    "asset-registry publication."
+                ),
+            )
+        self._safe_log(message)
+
     def _build_entries_from_resources(
         self,
         resources: tuple[_ProjectResource, ...],
         *,
         track_outcomes: bool = False,
+        included_file_logical_paths: tuple[str, ...] = (),
     ) -> tuple[tuple[AssetRegistryEntry, ...], int]:
         """Build entries and report how many base resources began processing."""
         self._timeline_action_source_failures.clear()
         room_order_indices = self._room_order_indices(resources)
-        godot_paths = self._stable_godot_paths(resources)
+        godot_paths = self._stable_godot_paths(
+            resources,
+            included_file_logical_paths=included_file_logical_paths,
+        )
         timeline_script_stems = self._stable_timeline_script_stems(resources)
         used_ids: set[int] = set()
         entries: list[AssetRegistryEntry] = []
@@ -1123,10 +1857,23 @@ class AssetRegistryConverter(BaseConverter):
         entries, processed_count = self._build_entries_from_resources(
             resources,
             track_outcomes=True,
+            included_file_logical_paths=plan.included_file_logical_paths,
         )
         registry_path = os.path.join(self.godot_project_path, ASSET_REGISTRY_RELATIVE_PATH)
         if processed_count < len(resources) or not self.conversion_running():
             return registry_path
+
+        entries, unavailable_outputs = self._filter_published_included_file_entries(
+            entries
+        )
+        unavailable_output_keys = {
+            self._entry_outcome_resource_key(unavailable.entry)
+            for unavailable in unavailable_outputs
+        }
+        for unavailable in unavailable_outputs:
+            resource_key = self._entry_outcome_resource_key(unavailable.entry)
+            self._resource_skipped(resource_key)
+            self._report_unavailable_published_included_file(unavailable)
 
         try:
             texture_groups, audio_groups = self.build_group_registries(entries)
@@ -1162,14 +1909,20 @@ class AssetRegistryConverter(BaseConverter):
                 registry_path,
                 registry_script,
                 confinement_root=self.godot_project_path,
+                publication_validator=lambda: self.revalidate_published_entries(
+                    entries
+                ),
             )
         except Exception:
             for resource_key in plan.resource_keys:
-                self._resource_failed(resource_key)
+                if resource_key not in unavailable_output_keys:
+                    self._resource_failed(resource_key)
             raise
 
         for resource in resources:
             resource_key = self._outcome_resource_key(resource)
+            if resource_key in unavailable_output_keys:
+                continue
             timeline_key = (resource.name, resource.source_path)
             if (
                 resource.kind == "timelines"
@@ -1193,22 +1946,26 @@ class AssetRegistryConverter(BaseConverter):
         content: str,
         *,
         confinement_root: str | None = None,
+        publication_validator: Callable[[], None] | None = None,
     ) -> None:
         """Publish generated UTF-8 text through a confined, no-follow path."""
-        output_absolute = os.path.abspath(output_path)
-        output_directory = os.path.dirname(output_absolute) or os.curdir
-        root = os.path.abspath(confinement_root or output_directory)
-        components = _asset_output_components(root, output_absolute)
-        _ensure_asset_output_root(root)
-        if _confined_asset_output_supported():
-            _atomic_write_asset_text_at(root, components, content)
-            return
-        _atomic_write_asset_text_fallback(root, components, content)
+        output_directory = os.path.dirname(os.path.abspath(output_path)) or os.curdir
+        atomic_write_confined_generated_text(
+            output_path,
+            content,
+            confinement_root=confinement_root or output_directory,
+            publication_validator=publication_validator,
+        )
 
     @staticmethod
     def _outcome_resource_key(resource: _ProjectResource) -> str:
         """Return an opaque lifecycle key for one deduplicated base resource."""
         return f"{resource.kind}:{resource.name}:{resource.source_path}"
+
+    @staticmethod
+    def _entry_outcome_resource_key(entry: AssetRegistryEntry) -> str:
+        """Return the lifecycle key for one planned base registry entry."""
+        return f"{entry.kind}:{entry.name}:{entry.source_path}"
 
     def build_group_registries(
         self,
@@ -1619,8 +2376,25 @@ class AssetRegistryConverter(BaseConverter):
     def _stable_godot_paths(
         self,
         resources: Iterable[_ProjectResource],
+        *,
+        included_file_logical_paths: Iterable[str] = (),
     ) -> dict[tuple[str, str, str], str]:
         ordered_resources = tuple(resources)
+        included_file_paths = {
+            assignment.original_logical_path: (
+                "res://included_files/" + assignment.assigned_output_path
+            )
+            for assignment in plan_included_file_paths(
+                (
+                    *included_file_logical_paths,
+                    *(
+                        resource.name
+                        for resource in ordered_resources
+                        if resource.kind == "included_files"
+                    ),
+                )
+            )
+        }
         extension_paths = collision_safe_extension_stub_resource_paths(
             (resource.name, resource.source_path)
             for resource in ordered_resources
@@ -1629,6 +2403,13 @@ class AssetRegistryConverter(BaseConverter):
         paths: dict[tuple[str, str, str], str] = {}
         used_paths: set[str] = set()
         for resource in ordered_resources:
+            if resource.kind == "included_files":
+                path = included_file_paths[
+                    posixpath.normpath(resource.name.replace("\\", "/"))
+                ]
+                used_paths.add(path.casefold())
+                paths[self._resource_key(resource)] = path
+                continue
             if resource.kind == "extensions":
                 path = extension_paths[(resource.name, resource.source_path)]
                 used_paths.add(path.casefold())
@@ -1716,7 +2497,10 @@ class AssetRegistryConverter(BaseConverter):
         if resource.kind == "shaders":
             return self._flat_resource_path("shaders", self._get_subfolder_from_resource(resource), resource.name, ".gdshader", suffix=suffix)
         if resource.kind == "included_files":
-            return "res://included_files/" + resource.name
+            return (
+                "res://included_files/"
+                + canonical_included_file_lookup_path(resource.name)
+            )
         if resource.kind == "extensions":
             return extension_stub_resource_path(
                 resource.name,
@@ -2642,5 +3426,6 @@ __all__ = [
     "GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH",
     "AssetRegistryConverter",
     "AssetRegistryEntry",
+    "atomic_write_confined_generated_text",
     "render_asset_registry_script",
 ]

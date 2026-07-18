@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.7 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.8 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -45,6 +45,18 @@ GM2Godot treats these directories as managed output roots:
 - `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `rooms/`, `scripts/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
 
 The top-level `default_bus_layout.tres`, `icon.ico`, and `icon.png` are managed files. `project.godot` is jointly managed: GM2Godot can update the generated `GM*` autoload entries and, when a room is generated, set `run/main_scene` from the first GameMaker `RoomOrderNodes` entry. Existing unrelated project settings and unrelated autoloads are preserved.
+
+### Included Files and file reads
+
+GameMaker Included Files from `datafiles/` are emitted under `res://included_files/`. Each relative path uses GameMaker's packaged lookup form: ASCII `A`–`Z` is lowercased and spaces become underscores, including nested directory components; other characters are preserved.
+
+For relative file and buffer reads, the generated runtime checks the exact `user://gm2godot/<path>` first and then the normalized `res://included_files/<path>`. Writes target user storage. A saved user file therefore overrides its packaged default, and deleting the saved copy reveals the packaged file again. `file_exists()`, text-file reads, and `buffer_load()` share this precedence.
+
+When source paths collapse to the same packaged name, or when one normalized file path would block another file's directory, GM2Godot reserves natural names and deterministically assigns `_2`, `_3`, and later suffixes before the extension. The emitted files, asset registry, and conversion manifest use the same assignments. `GM2GD-INCLUDED-FILE-PATH-COLLISION` reports the mapping; rename these conflicts in GameMaker because normalized lookup cannot distinguish every original alias. Publication also rejects redirected or non-regular paths in the managed `included_files/` output tree instead of writing through them.
+
+`res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` form one converter-owned output set. Ordinary conversion failures and cancellation preserve the previous pair, but the root and registry are published in separate steps and are not process-crash-atomic. Until [#727](https://github.com/Infiland/GM2Godot/issues/727) is implemented, do not run conversion while a live game or another converter is accessing the same output project.
+
+This emission and runtime-read contract is covered by an end-to-end smoke test using the exact supported Godot 4.7.1 build.
 
 Treat every generated file under a managed root as reproducible output. A later conversion can replace it even if the converter does not delete the entire directory. For repeatable migrations:
 

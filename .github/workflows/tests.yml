@@ -51,3 +51,6 @@ jobs:
           tests.test_architecture_policy
           tests.test_converter
           tests.test_cli
+          tests.test_asset_registry
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction
+          tests.test_included_files.TestIncludedFilesConverterOutputContainment

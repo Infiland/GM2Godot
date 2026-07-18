@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import stat
 import tempfile
 from collections.abc import Callable, Iterable, Mapping
@@ -20,6 +21,10 @@ from src.conversion.generated_paths import (
     is_snake_case_path_segment,
     res_path_segments,
     snake_case_res_path,
+)
+from src.conversion.included_file_paths import (
+    canonical_included_file_lookup_path,
+    plan_included_file_paths,
 )
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.type_defs import JsonDict
@@ -146,14 +151,25 @@ def write_conversion_artifacts(
     )
 
     manifest_content: bytes | None = None
+    manifest_asset_converter: AssetRegistryConverter | None = None
+    manifest_asset_entries: tuple[AssetRegistryEntry, ...] = ()
     if manifest_outcome is not None:
-        manifest_payload = build_conversion_manifest(
+        manifest_asset_converter = _asset_registry_converter(
+            gm_project_path,
+            godot_project_path,
+            macro_configuration=target_platform,
+        )
+        manifest_asset_entries = (
+            manifest_asset_converter.build_published_entries()
+        )
+        manifest_payload = _build_conversion_manifest(
             gm_project_path,
             godot_project_path,
             target_platform=target_platform,
-            enabled_converters=enabled_converter_keys,
+            enabled_converter_keys=enabled_converter_keys,
             output_snapshot=output_snapshot,
             conversion_outcome=manifest_outcome,
+            asset_entries=manifest_asset_entries,
         )
         manifest_content = _serialize_json(manifest_payload)
         manifest_status = "updated"
@@ -267,6 +283,13 @@ def write_conversion_artifacts(
                 )
                 verify_preserved_manifest()
                 _verify_artifact_target_state(target_path, target_state)
+                if (
+                    target_path == manifest_path
+                    and manifest_asset_converter is not None
+                ):
+                    manifest_asset_converter.revalidate_published_entries(
+                        manifest_asset_entries
+                    )
                 staged_artifact = staged[target_path]
                 backup = backups[target_path]
                 _publish_staged_artifact(
@@ -288,6 +311,13 @@ def write_conversion_artifacts(
                     path=target_path,
                 )
                 verify_preserved_manifest()
+                if (
+                    target_path == manifest_path
+                    and manifest_asset_converter is not None
+                ):
+                    manifest_asset_converter.revalidate_published_entries(
+                        manifest_asset_entries
+                    )
             _verify_artifact_directory(
                 godot_project_path,
                 root_identity,
@@ -383,12 +413,33 @@ def build_conversion_manifest(
         conversion_outcome,
         _planned_step_names(enabled_converter_keys),
     )
-    project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
     asset_entries = _asset_registry_entries(
         gm_project_path,
         godot_project_path,
         macro_configuration=target_platform,
     )
+    return _build_conversion_manifest(
+        gm_project_path,
+        godot_project_path,
+        target_platform=target_platform,
+        enabled_converter_keys=enabled_converter_keys,
+        output_snapshot=output_snapshot,
+        conversion_outcome=conversion_outcome,
+        asset_entries=asset_entries,
+    )
+
+
+def _build_conversion_manifest(
+    gm_project_path: str,
+    godot_project_path: str,
+    *,
+    target_platform: str,
+    enabled_converter_keys: tuple[str, ...],
+    output_snapshot: ConversionOutputSnapshot,
+    conversion_outcome: ConversionOutcome,
+    asset_entries: tuple[AssetRegistryEntry, ...],
+) -> JsonDict:
+    project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
     generated_files = _generated_files(godot_project_path, output_snapshot)
     return {
         "format_version": 2,
@@ -1469,7 +1520,21 @@ def _asset_registry_entries(
     *,
     macro_configuration: str | None = None,
 ) -> tuple[AssetRegistryEntry, ...]:
-    converter = AssetRegistryConverter(
+    converter = _asset_registry_converter(
+        gm_project_path,
+        godot_project_path,
+        macro_configuration=macro_configuration,
+    )
+    return converter.build_published_entries()
+
+
+def _asset_registry_converter(
+    gm_project_path: str,
+    godot_project_path: str,
+    *,
+    macro_configuration: str | None = None,
+) -> AssetRegistryConverter:
+    return AssetRegistryConverter(
         gm_project_path,
         godot_project_path,
         log_callback=lambda _message: None,
@@ -1477,7 +1542,6 @@ def _asset_registry_entries(
         conversion_running=lambda: True,
         macro_configuration=macro_configuration,
     )
-    return converter.build_entries()
 
 
 def capture_conversion_output_snapshot(godot_project_path: str) -> ConversionOutputSnapshot:
@@ -1623,13 +1687,23 @@ def _path_diagnostics(entries: tuple[AssetRegistryEntry, ...]) -> list[JsonDict]
     diagnostics: list[JsonDict] = []
     paths_by_casefold: dict[str, list[AssetRegistryEntry]] = {}
     base_paths_by_casefold: dict[str, list[tuple[AssetRegistryEntry, str]]] = {}
+    included_collision_components = _included_file_collision_components(entries)
     for entry in entries:
         if not entry.godot_path:
             continue
         paths_by_casefold.setdefault(entry.godot_path.casefold(), []).append(entry)
         base_path = _base_generated_path(entry)
         if base_path:
-            base_paths_by_casefold.setdefault(base_path.casefold(), []).append((entry, base_path))
+            collision_key = base_path.casefold()
+            if entry.kind == "included_files":
+                logical_path = posixpath.normpath(
+                    entry.name.replace("\\", "/")
+                )
+                collision_key = included_collision_components.get(
+                    logical_path,
+                    collision_key,
+                )
+            base_paths_by_casefold.setdefault(collision_key, []).append((entry, base_path))
         unsafe_segments = _unsafe_segments(entry.godot_path)
         if unsafe_segments:
             diagnostics.append({
@@ -1691,6 +1765,33 @@ def _path_diagnostics(entries: tuple[AssetRegistryEntry, ...]) -> list[JsonDict]
     return diagnostics
 
 
+def _included_file_collision_components(
+    entries: tuple[AssetRegistryEntry, ...],
+) -> dict[str, str]:
+    assignments = plan_included_file_paths(
+        entry.name
+        for entry in entries
+        if entry.kind == "included_files"
+    )
+    component_roots: dict[tuple[str, ...], str] = {}
+    for assignment in assignments:
+        if not assignment.has_collision:
+            continue
+        component_roots.setdefault(
+            assignment.collision_group,
+            (
+                "res://included_files/"
+                + assignment.canonical_lookup_path
+            ).casefold(),
+        )
+
+    return {
+        logical_path: component_root
+        for collision_group, component_root in component_roots.items()
+        for logical_path in collision_group
+    }
+
+
 def _base_generated_path(entry: AssetRegistryEntry) -> str:
     segments = res_path_segments(entry.godot_path)
     if len(segments) < 2:
@@ -1708,6 +1809,11 @@ def _base_generated_path(entry: AssetRegistryEntry) -> str:
         base_segments = list(segments)
         base_segments[-2] = generated_resource_stem(entry.name)
         return "res://" + "/".join(base_segments)
+    if kind == "included_files":
+        return (
+            "res://included_files/"
+            + canonical_included_file_lookup_path(entry.name)
+        )
     return entry.godot_path
 
 

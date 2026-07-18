@@ -34,6 +34,7 @@ REPRESENTATIVE_OUTPUTS = (
     "addons/gm2godot_extensions/ext_analytics/ext_analytics_extension.gd",
     "default_bus_layout.tres",
     "gm2godot/gml_asset_registry.gd",
+    "gm2godot/gml_included_file_registry.gd",
     "gm2godot/gml_runtime.gd",
     "icon.ico",
     "icon.png",

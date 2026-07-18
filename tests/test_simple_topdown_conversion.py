@@ -17,6 +17,7 @@ from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
+from tests.conversion_outcome_helpers import completed_conversion_step_ledger
 
 
 def _get_simple_topdown_path():
@@ -85,11 +86,7 @@ class TestSimpleTopDownConversion(unittest.TestCase):
         )
         expected_outcome = ConversionOutcome(
             state="partial",
-            converters=ConversionCounts(
-                requested=15,
-                executed=15,
-                completed=15,
-            ),
+            steps=completed_conversion_step_ledger(all_keys),
             resources=ConversionCounts(
                 requested=10,
                 executed=10,

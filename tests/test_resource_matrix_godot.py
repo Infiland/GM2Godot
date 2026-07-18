@@ -240,7 +240,7 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
             self._assert_exact_godot_validation(destination, godot_binary)
 
     def _assert_manifest(self, manifest: dict[str, object]) -> None:
-        self.assertEqual(manifest["format_version"], 1)
+        self.assertEqual(manifest["format_version"], 2)
         self.assertEqual(manifest["target_platform"], "linux")
         self.assertEqual(
             set(cast(list[str], manifest["enabled_converters"])),

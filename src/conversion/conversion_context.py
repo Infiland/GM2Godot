@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
+from src.conversion.conversion_plan import CONVERSION_STEPS
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import BoolSetting, ConversionRunning, LogCallback, ProgressCallback
+
+
+_CONVERSION_STEP_KEYS = frozenset(step.key for step in CONVERSION_STEPS)
 
 
 class RunningFlag(Protocol):
@@ -39,7 +43,7 @@ def enabled_converter_keys(settings: Mapping[str, BoolSetting]) -> tuple[str, ..
         sorted(
             key
             for key, setting in settings.items()
-            if key != "sound_group_folders" and setting.get()
+            if key in _CONVERSION_STEP_KEYS and setting.get()
         )
     )
 
@@ -47,4 +51,3 @@ def enabled_converter_keys(settings: Mapping[str, BoolSetting]) -> tuple[str, ..
 def sound_group_folders_enabled(settings: Mapping[str, BoolSetting]) -> bool:
     sound_group_setting = settings.get("sound_group_folders")
     return bool(sound_group_setting is not None and sound_group_setting.get())
-

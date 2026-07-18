@@ -28,8 +28,12 @@ from src.conversion.converter import Converter
 from src.conversion.conversion_outcome import (
     ConversionCounts,
     ConversionOutcome,
+    ConversionStepLedger,
 )
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
+from src.conversion.conversion_manifest import (
+    CONVERSION_ATTEMPT_RELATIVE_PATH,
+    CONVERSION_MANIFEST_RELATIVE_PATH,
+)
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
@@ -53,8 +57,8 @@ class _OutcomeConverterStub:
         self.warning = warning
         self.on_convert = on_convert
         self.diagnostics = DiagnosticCollector()
-        self.manifest_refreshes = 0
-        self.manifest_invalidations = 0
+        self.artifact_refreshes: list[ConversionOutcome] = []
+        self.attempt_publications: list[ConversionOutcome] = []
 
     def convert(
         self,
@@ -76,12 +80,19 @@ class _OutcomeConverterStub:
             raise self.error
         return self.outcome
 
-    def refresh_conversion_manifest(self) -> str:
-        self.manifest_refreshes += 1
-        return ""
+    def refresh_conversion_artifacts(
+        self,
+        attempt_outcome: ConversionOutcome,
+    ) -> tuple[str | None, str]:
+        self.artifact_refreshes.append(attempt_outcome)
+        return "", ""
 
-    def invalidate_conversion_manifest(self) -> None:
-        self.manifest_invalidations += 1
+    def publish_conversion_attempt(
+        self,
+        attempt_outcome: ConversionOutcome,
+    ) -> str:
+        self.attempt_publications.append(attempt_outcome)
+        return ""
 
 
 def _success_outcome() -> ConversionOutcome:
@@ -90,21 +101,21 @@ def _success_outcome() -> ConversionOutcome:
         executed=1,
         completed=1,
     )
+    steps = ConversionStepLedger.from_requested(("scripts",))
+    steps = steps.start("scripts").complete("scripts")
     return ConversionOutcome(
         state="success",
-        converters=completed,
+        steps=steps,
         resources=completed,
     )
 
 
 def _partial_outcome() -> ConversionOutcome:
+    steps = ConversionStepLedger.from_requested(("scripts",))
+    steps = steps.start("scripts").complete("scripts")
     return ConversionOutcome(
         state="partial",
-        converters=ConversionCounts(
-            requested=1,
-            executed=1,
-            completed=1,
-        ),
+        steps=steps,
         resources=ConversionCounts(
             requested=2,
             executed=2,
@@ -115,13 +126,11 @@ def _partial_outcome() -> ConversionOutcome:
 
 
 def _failed_outcome() -> ConversionOutcome:
+    steps = ConversionStepLedger.from_requested(("scripts",))
+    steps = steps.start("scripts").fail("scripts")
     return ConversionOutcome(
         state="failed",
-        converters=ConversionCounts(
-            requested=1,
-            executed=1,
-            failed=1,
-        ),
+        steps=steps,
         failed_step="scripts",
         failure_phase="converter",
     )
@@ -166,6 +175,27 @@ class TestCLIReports(unittest.TestCase):
             exit_code = cli.main(self._convert_args(*extra))
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
+    def _run_real_convert(
+        self,
+        gm_project: str,
+        godot_project: str,
+        *extra: str,
+    ) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = cli.main(
+                [
+                    "convert",
+                    "--gm-project",
+                    gm_project,
+                    "--godot-project",
+                    godot_project,
+                    *extra,
+                ]
+            )
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
     def _write_outcome_reports(
         self,
         destination: str,
@@ -185,6 +215,24 @@ class TestCLIReports(unittest.TestCase):
         outcome = report["outcome"]
         self.assertIsInstance(outcome, dict)
         return outcome["state"]
+
+    def _read_conversion_artifact(
+        self,
+        destination: str,
+        relative_path: str,
+    ) -> dict[str, Any]:
+        with open(
+            os.path.join(destination, relative_path),
+            "r",
+            encoding="utf-8",
+        ) as artifact_file:
+            artifact = json.load(artifact_file)
+        self.assertIsInstance(artifact, dict)
+        return artifact
+
+    def _artifact_sha256(self, destination: str, relative_path: str) -> str:
+        with open(os.path.join(destination, relative_path), "rb") as artifact_file:
+            return "sha256:" + hashlib.sha256(artifact_file.read()).hexdigest()
 
     def _write_real_script_project(self, name: str) -> tuple[str, str]:
         gm_dir = os.path.join(self.temp_dir, f"{name}-gm")
@@ -614,7 +662,7 @@ class TestCLIReports(unittest.TestCase):
             exit_code = cli.main(["--version"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.7.3")
+        self.assertEqual(output.getvalue().strip(), "GM2Godot 0.7.4")
 
     def test_list_converters_writes_text_inventory(self) -> None:
         output = io.StringIO()
@@ -683,7 +731,7 @@ class TestCLIReports(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "GM2Godot 0.7.3")
+        self.assertEqual(result.stdout.strip(), "GM2Godot 0.7.4")
 
     def test_app_entrypoint_routes_global_cli_flags(self) -> None:
         app_entrypoint = importlib.import_module("main")
@@ -813,16 +861,16 @@ class TestCLIReports(unittest.TestCase):
             project_file.write('[application]\nconfig/name="Demo"\n')
 
         report_destinations: list[str] = []
-        original_write_reports = DiagnosticCollector.write_reports
+        original_publish_reports = DiagnosticCollector.publish_reports
 
         def track_report_write(
             diagnostics: DiagnosticCollector,
             destination: str | os.PathLike[str],
-        ) -> tuple[str, str]:
+        ) -> object:
             report_destinations.append(os.fspath(destination))
-            return original_write_reports(diagnostics, destination)
+            return original_publish_reports(diagnostics, destination)
 
-        with patch.object(DiagnosticCollector, "write_reports", track_report_write):
+        with patch.object(DiagnosticCollector, "publish_reports", track_report_write):
             exit_code = cli.main([
                 "convert",
                 "--gm-project",
@@ -940,6 +988,8 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(failed_outcome.failure_phase, "report")
         self.assertEqual(failed_outcome.converters, outcome.converters)
         self.assertEqual(failed_outcome.resources, outcome.resources)
+        self.assertEqual(converter.artifact_refreshes, [failed_outcome])
+        self.assertEqual(converter.attempt_publications, [])
 
     def test_external_report_failure_repairs_published_success_json(self) -> None:
         outcome = _success_outcome()
@@ -977,6 +1027,9 @@ class TestCLIReports(unittest.TestCase):
         )
         self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
         self.assertEqual(self._read_report_outcome_state(report_dir), "failed")
+        self.assertEqual(len(converter.artifact_refreshes), 1)
+        self.assertEqual(converter.artifact_refreshes[0].state, "failed")
+        self.assertEqual(converter.attempt_publications, [])
 
     def test_real_external_report_failure_refreshes_canonical_manifest_hashes(
         self,
@@ -1015,8 +1068,608 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
         self.assertEqual(self._read_report_outcome_state(report_dir), "failed")
         self._assert_manifest_diagnostic_hashes(godot_dir)
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(manifest["conversion"]["state"], "success")
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(attempt["attempt"]["failed_step"], "external_reports")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "updated")
+        self.assertTrue(attempt["canonical_manifest"]["updated"])
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "verified",
+        )
+        self.assertEqual(
+            attempt["canonical_manifest"]["sha256"],
+            self._artifact_sha256(
+                godot_dir,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            ),
+        )
 
-    def test_external_report_failure_invalidates_every_failed_repair_pair(
+    def test_real_canonical_report_dir_refreshes_static_report_manifest_hashes(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project("CanonicalReports")
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = cli.main(
+                [
+                    "convert",
+                    "--gm-project",
+                    gm_dir,
+                    "--godot-project",
+                    godot_dir,
+                    "--only",
+                    "scripts",
+                    "--report-dir",
+                    godot_dir,
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("GM2Godot conversion outcome: success", stdout.getvalue())
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(manifest["format_version"], 2)
+        generated_files = {
+            entry["path"]: entry["sha256"]
+            for entry in manifest["generated_files"]
+        }
+        for filename in self._STATIC_REPORT_FILENAMES:
+            relative_path = f"gm2godot/{filename}"
+            with self.subTest(relative_path=relative_path):
+                self.assertEqual(
+                    generated_files[relative_path],
+                    self._artifact_sha256(godot_dir, relative_path),
+                )
+        self.assertEqual(attempt["attempt"]["state"], "success")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "updated")
+        self.assertEqual(
+            attempt["canonical_manifest"]["sha256"],
+            self._artifact_sha256(
+                godot_dir,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            ),
+        )
+
+    def test_real_nested_managed_report_dir_enters_manifest_file_ledger(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project("NestedReports")
+        report_dir = os.path.join(godot_dir, "reports")
+
+        exit_code, stdout, stderr = self._run_real_convert(
+            gm_dir,
+            godot_dir,
+            "--only",
+            "scripts",
+            "--report-dir",
+            report_dir,
+        )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("GM2Godot conversion outcome: success", stdout)
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        generated_files = {
+            entry["path"]: entry["sha256"]
+            for entry in manifest["generated_files"]
+        }
+        managed_report_paths = (
+            *(f"reports/gm2godot/{name}" for name in self._STATIC_REPORT_FILENAMES),
+            "reports/" + DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
+            "reports/"
+            + DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
+        )
+        for relative_path in managed_report_paths:
+            with self.subTest(relative_path=relative_path):
+                self.assertEqual(
+                    generated_files[relative_path],
+                    self._artifact_sha256(godot_dir, relative_path),
+                )
+
+    def test_nested_managed_report_repair_failure_is_terminal(self) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "NestedReportRepairFailure"
+        )
+        report_dir = os.path.join(godot_dir, "reports")
+        original_publish_reports = DiagnosticCollector.publish_reports
+        nested_publications = 0
+
+        def fail_second_nested_publication(
+            diagnostics: DiagnosticCollector,
+            destination: str | os.PathLike[str],
+        ) -> object:
+            nonlocal nested_publications
+            if (
+                os.path.realpath(os.fspath(destination))
+                == os.path.realpath(report_dir)
+            ):
+                nested_publications += 1
+                if nested_publications == 2:
+                    raise OSError("nested report disk full")
+            return original_publish_reports(diagnostics, destination)
+
+        with patch.object(
+            DiagnosticCollector,
+            "publish_reports",
+            fail_second_nested_publication,
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                report_dir,
+            )
+
+        self.assertEqual(nested_publications, 2)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion report repair failed: "
+            "nested report disk full\n",
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    report_dir,
+                    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
+                )
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    report_dir,
+                    DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
+                )
+            )
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(
+            attempt["attempt"]["failed_step"],
+            "conversion_diagnostics",
+        )
+        self.assertEqual(
+            attempt["attempt"]["failure_phase"],
+            "finalizer",
+        )
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertFalse(attempt["canonical_manifest"]["updated"])
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "unverified",
+        )
+        self._assert_manifest_diagnostic_hashes(godot_dir)
+
+    def test_nested_managed_diagnostics_restore_after_late_refresh_failure(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "NestedReportRestoration"
+        )
+        report_dir = os.path.join(godot_dir, "reports")
+        original_refresh = Converter.refresh_conversion_artifacts
+        refresh_calls = 0
+        manifest_before_failure: bytes | None = None
+
+        def interrupt_then_fail_refresh(
+            converter: Converter,
+            attempt_outcome: ConversionOutcome,
+        ) -> tuple[str | None, str]:
+            nonlocal manifest_before_failure, refresh_calls
+            refresh_calls += 1
+            if refresh_calls == 3:
+                raise OSError("cancelled nested refresh failed")
+            result = original_refresh(converter, attempt_outcome)
+            if refresh_calls == 2:
+                with open(
+                    os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+                    "rb",
+                ) as manifest_file:
+                    manifest_before_failure = manifest_file.read()
+                signal.raise_signal(signal.SIGINT)
+            return result
+
+        with patch.object(
+            Converter,
+            "refresh_conversion_artifacts",
+            interrupt_then_fail_refresh,
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                report_dir,
+            )
+
+        self.assertEqual(refresh_calls, 3)
+        self.assertEqual(exit_code, 130)
+        self.assertEqual(stderr, "")
+        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
+        self.assertIsNotNone(manifest_before_failure)
+        manifest_path = os.path.join(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        with open(manifest_path, "rb") as manifest_file:
+            self.assertEqual(manifest_file.read(), manifest_before_failure)
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "cancelled")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        generated_files = {
+            entry["path"]: entry["sha256"]
+            for entry in manifest["generated_files"]
+        }
+        managed_diagnostics = (
+            DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
+            DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
+            "reports/" + DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
+            "reports/"
+            + DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
+        )
+        for relative_path in managed_diagnostics:
+            with self.subTest(relative_path=relative_path):
+                self.assertEqual(
+                    generated_files[relative_path],
+                    self._artifact_sha256(godot_dir, relative_path),
+                )
+
+    def test_managed_report_symlink_alias_restores_after_cancelled_refresh_failure(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "AliasedReportRestoration"
+        )
+        os.makedirs(godot_dir)
+        report_alias = os.path.join(self.temp_dir, "aliased-godot-reports")
+        try:
+            os.symlink(godot_dir, report_alias, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Directory symlink creation unavailable: {error}")
+
+        original_external_write = getattr(
+            cli,
+            "_write_external_conversion_reports",
+        )
+        original_refresh = Converter.refresh_conversion_artifacts
+        refresh_calls = 0
+
+        def interrupt_after_external_write(
+            destination: str | None,
+            target_platform: str,
+            diagnostics: DiagnosticCollector,
+        ) -> object:
+            receipt = original_external_write(
+                destination,
+                target_platform,
+                diagnostics,
+            )
+            signal.raise_signal(signal.SIGINT)
+            return receipt
+
+        def fail_cancelled_refresh(
+            converter: Converter,
+            attempt_outcome: ConversionOutcome,
+        ) -> tuple[str | None, str]:
+            nonlocal refresh_calls
+            refresh_calls += 1
+            if refresh_calls == 2:
+                raise OSError("cancelled aliased refresh failed")
+            return original_refresh(converter, attempt_outcome)
+
+        with (
+            patch(
+                "src.cli._write_external_conversion_reports",
+                side_effect=interrupt_after_external_write,
+            ),
+            patch.object(
+                Converter,
+                "refresh_conversion_artifacts",
+                fail_cancelled_refresh,
+            ),
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                report_alias,
+            )
+
+        self.assertEqual(refresh_calls, 2)
+        self.assertEqual(exit_code, 130)
+        self.assertEqual(stderr, "")
+        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
+        self.assertEqual(self._read_report_outcome_state(godot_dir), "success")
+        self._assert_manifest_diagnostic_hashes(godot_dir)
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "cancelled")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "unverified",
+        )
+
+    def test_real_late_canonical_report_repair_failure_is_terminal(self) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "LateCanonicalReportRepairFailure"
+        )
+        original_publish_reports = DiagnosticCollector.publish_reports
+        canonical_write_calls = 0
+
+        def fail_first_late_canonical_repair(
+            diagnostics: DiagnosticCollector,
+            destination: str | os.PathLike[str],
+        ) -> object:
+            nonlocal canonical_write_calls
+            if os.path.realpath(os.fspath(destination)) == os.path.realpath(godot_dir):
+                canonical_write_calls += 1
+                if canonical_write_calls == 3:
+                    raise OSError("late canonical report disk full")
+            return original_publish_reports(diagnostics, destination)
+
+        with patch.object(
+            DiagnosticCollector,
+            "publish_reports",
+            fail_first_late_canonical_repair,
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                godot_dir,
+            )
+
+        self.assertEqual(canonical_write_calls, 3)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion report repair failed: "
+            "late canonical report disk full\n",
+        )
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(manifest["conversion"]["state"], "success")
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(
+            attempt["attempt"]["failed_step"],
+            "conversion_diagnostics",
+        )
+        self.assertEqual(attempt["attempt"]["failure_phase"], "finalizer")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertFalse(attempt["canonical_manifest"]["updated"])
+        self._assert_manifest_diagnostic_hashes(godot_dir)
+        generated_files = {
+            entry["path"]: entry["sha256"]
+            for entry in manifest["generated_files"]
+        }
+        for filename in self._STATIC_REPORT_FILENAMES:
+            relative_path = f"gm2godot/{filename}"
+            with self.subTest(relative_path=relative_path):
+                self.assertNotIn(relative_path, generated_files)
+
+    def test_real_successful_late_artifact_refresh_failure_is_terminal(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "LateArtifactFailure"
+        )
+        original_refresh = Converter.refresh_conversion_artifacts
+        refresh_calls = 0
+        manifest_before: bytes | None = None
+
+        def fail_second_refresh(
+            converter: Converter,
+            attempt_outcome: ConversionOutcome,
+        ) -> tuple[str | None, str]:
+            nonlocal manifest_before, refresh_calls
+            refresh_calls += 1
+            if refresh_calls == 2:
+                with open(
+                    os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+                    "rb",
+                ) as manifest_file:
+                    manifest_before = manifest_file.read()
+                raise OSError("late artifact disk full")
+            return original_refresh(converter, attempt_outcome)
+
+        with patch.object(
+            Converter,
+            "refresh_conversion_artifacts",
+            fail_second_refresh,
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                godot_dir,
+            )
+
+        self.assertEqual(refresh_calls, 2)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion artifact publication failed: "
+            "late artifact disk full\n",
+        )
+        self.assertIsNotNone(manifest_before)
+        with open(
+            os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+            "rb",
+        ) as manifest_file:
+            self.assertEqual(manifest_file.read(), manifest_before)
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(
+            attempt["attempt"]["failed_step"],
+            "conversion_artifacts",
+        )
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertFalse(attempt["canonical_manifest"]["updated"])
+        self._assert_manifest_diagnostic_hashes(godot_dir)
+
+    def test_real_failed_terminal_attempt_publication_is_reported(self) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "TerminalAttemptPublicationFailure"
+        )
+        original_refresh = Converter.refresh_conversion_artifacts
+        refresh_calls = 0
+        attempt_publication_calls = 0
+
+        def fail_second_refresh(
+            converter: Converter,
+            attempt_outcome: ConversionOutcome,
+        ) -> tuple[str | None, str]:
+            nonlocal refresh_calls
+            refresh_calls += 1
+            if refresh_calls == 2:
+                raise OSError("late artifact disk full")
+            return original_refresh(converter, attempt_outcome)
+
+        def fail_terminal_attempt_publication(
+            _converter: Converter,
+            _attempt_outcome: ConversionOutcome,
+        ) -> str:
+            nonlocal attempt_publication_calls
+            attempt_publication_calls += 1
+            raise OSError("attempt ledger disk full")
+
+        with (
+            patch.object(
+                Converter,
+                "refresh_conversion_artifacts",
+                fail_second_refresh,
+            ),
+            patch.object(
+                Converter,
+                "publish_conversion_attempt",
+                fail_terminal_attempt_publication,
+            ),
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+                "--report-dir",
+                godot_dir,
+            )
+
+        self.assertEqual(refresh_calls, 2)
+        self.assertEqual(attempt_publication_calls, 1)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion artifact publication failed: "
+            "late artifact disk full\n"
+            "GM2Godot terminal conversion attempt publication failed: "
+            "attempt ledger disk full\n",
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "success")
+
+    def test_recovered_terminal_attempt_publication_clears_stale_error(self) -> None:
+        outcome = _success_outcome()
+        converter = _OutcomeConverterStub(outcome)
+        publish_calls: list[ConversionOutcome] = []
+
+        def fail_late_refresh(_current: ConversionOutcome) -> tuple[str | None, str]:
+            raise OSError("late artifact failure")
+
+        def fail_once_then_publish(current: ConversionOutcome) -> str:
+            publish_calls.append(current)
+            if len(publish_calls) == 1:
+                signal.raise_signal(signal.SIGINT)
+                raise OSError("intermediate attempt failure")
+            return ""
+
+        with (
+            patch.object(
+                converter,
+                "refresh_conversion_artifacts",
+                side_effect=fail_late_refresh,
+            ),
+            patch.object(
+                converter,
+                "publish_conversion_attempt",
+                side_effect=fail_once_then_publish,
+            ),
+        ):
+            exit_code, stdout, stderr = self._run_stubbed_convert(
+                converter,
+                "--report-dir",
+                os.path.join(self.temp_dir, "godot"),
+            )
+
+        self.assertEqual(exit_code, 130)
+        self.assertEqual(stderr, "")
+        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
+        self.assertEqual([item.state for item in publish_calls], ["failed", "cancelled"])
+        self.assertEqual(
+            self._read_report_outcome_state(os.path.join(self.temp_dir, "godot")),
+            "cancelled",
+        )
+
+    def test_external_report_failure_preserves_every_failed_repair_pair(
         self,
     ) -> None:
         outcome = _success_outcome()
@@ -1033,7 +1686,7 @@ class TestCLIReports(unittest.TestCase):
             ),
             patch.object(
                 DiagnosticCollector,
-                "write_reports",
+                "publish_reports",
                 side_effect=OSError("repair disk full"),
             ),
         ):
@@ -1052,22 +1705,17 @@ class TestCLIReports(unittest.TestCase):
         )
         for destination in (godot_dir, report_dir):
             with self.subTest(destination=destination):
-                self.assertFalse(
-                    os.path.exists(
-                        os.path.join(
-                            destination,
-                            DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-                        )
-                    )
+                self.assertEqual(
+                    self._read_report_outcome_state(destination),
+                    "success",
                 )
-                self.assertFalse(
-                    os.path.exists(
-                        os.path.join(
-                            destination,
-                            DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-                        )
-                    )
-                )
+        self.assertEqual(converter.artifact_refreshes, [])
+        self.assertEqual(len(converter.attempt_publications), 1)
+        self.assertEqual(converter.attempt_publications[0].state, "failed")
+        self.assertEqual(
+            converter.attempt_publications[0].failed_step,
+            "external_reports",
+        )
 
     def test_external_report_failure_deduplicates_canonical_destination(
         self,
@@ -1076,15 +1724,15 @@ class TestCLIReports(unittest.TestCase):
         converter = _OutcomeConverterStub(outcome)
         godot_dir = os.path.join(self.temp_dir, "godot")
         self._write_outcome_reports(godot_dir, outcome)
-        original_write_reports = DiagnosticCollector.write_reports
+        original_publish_reports = DiagnosticCollector.publish_reports
         repair_destinations: list[str] = []
 
         def track_repair(
             diagnostics: DiagnosticCollector,
             destination: str | os.PathLike[str],
-        ) -> tuple[str, str]:
+        ) -> object:
             repair_destinations.append(os.fspath(destination))
-            return original_write_reports(diagnostics, destination)
+            return original_publish_reports(diagnostics, destination)
 
         with (
             patch(
@@ -1093,7 +1741,7 @@ class TestCLIReports(unittest.TestCase):
             ),
             patch.object(
                 DiagnosticCollector,
-                "write_reports",
+                "publish_reports",
                 track_repair,
             ),
         ):
@@ -1106,6 +1754,95 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(repair_destinations, [godot_dir])
         self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
+        self.assertEqual(len(converter.artifact_refreshes), 1)
+        self.assertEqual(converter.attempt_publications, [])
+
+    def test_real_preflight_refusal_does_not_publish_conversion_artifacts(self) -> None:
+        gm_dir, godot_dir = self._write_real_script_project("UnsafeDestination")
+        os.makedirs(godot_dir)
+        sentinel_path = os.path.join(godot_dir, "keep.txt")
+        with open(sentinel_path, "w", encoding="utf-8") as sentinel_file:
+            sentinel_file.write("keep\n")
+
+        exit_code, stdout, stderr = self._run_real_convert(
+            gm_dir,
+            godot_dir,
+            "--only",
+            "scripts",
+        )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            json.loads(stderr)["code"],
+            "GM2GD-CONVERT-DESTINATION-NOT-EMPTY",
+        )
+        self.assertEqual(
+            sorted(os.listdir(godot_dir)),
+            ["keep.txt"],
+        )
+
+    def test_generic_preflight_failure_does_not_write_inside_project_roots(
+        self,
+    ) -> None:
+        for report_root_name in ("gm", "godot"):
+            with self.subTest(report_root=report_root_name):
+                case_root = os.path.join(
+                    self.temp_dir,
+                    f"generic-preflight-{report_root_name}",
+                )
+                gm_dir = os.path.join(case_root, "gm")
+                godot_dir = os.path.join(case_root, "godot")
+                os.makedirs(gm_dir)
+                os.makedirs(godot_dir)
+                for project_root in (gm_dir, godot_dir):
+                    with open(
+                        os.path.join(project_root, "keep.txt"),
+                        "w",
+                        encoding="utf-8",
+                    ) as sentinel_file:
+                        sentinel_file.write("keep\n")
+
+                converter = _OutcomeConverterStub(
+                    ConversionOutcome(
+                        state="failed",
+                        failure_phase="preflight",
+                    ),
+                    error=OSError("preflight scan denied"),
+                )
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    patch("src.cli.Converter", return_value=converter),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    exit_code = cli.main(
+                        [
+                            "convert",
+                            "--gm-project",
+                            gm_dir,
+                            "--godot-project",
+                            godot_dir,
+                            "--report-dir",
+                            os.path.join(
+                                gm_dir if report_root_name == "gm" else godot_dir,
+                                "nested-reports",
+                            ),
+                        ]
+                    )
+
+                self.assertEqual(exit_code, 1)
+                self.assertIn(
+                    "GM2Godot conversion outcome: failed",
+                    stdout.getvalue(),
+                )
+                self.assertEqual(
+                    stderr.getvalue(),
+                    "GM2Godot conversion failed: preflight scan denied\n",
+                )
+                self.assertEqual(sorted(os.listdir(gm_dir)), ["keep.txt"])
+                self.assertEqual(sorted(os.listdir(godot_dir)), ["keep.txt"])
 
     def test_preflight_error_survives_external_report_failure(self) -> None:
         outcome = ConversionOutcome(
@@ -1258,7 +1995,9 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
         self.assertEqual(
             stderr,
-            "GM2Godot conversion failed: converter disk full\n",
+            "GM2Godot conversion failed: converter disk full\n"
+            "GM2Godot conversion failure detail: external report generation "
+            "failed: report disk full\n",
         )
         with open(
             os.path.join(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH),
@@ -1432,6 +2171,33 @@ class TestCLIReports(unittest.TestCase):
             report = json.load(report_file)
         self.assertEqual(report["outcome"], outcome.to_dict())
 
+    def test_runtime_exception_prints_finalizer_notes_in_order(self) -> None:
+        runtime_error = OSError("manifest failed")
+        runtime_error.add_note(
+            "Additional conversion finalizer failure: diagnostic restore failed"
+        )
+        runtime_error.add_note(
+            "Additional conversion finalizer failure: architecture restore failed"
+        )
+
+        exit_code, stdout, stderr = self._run_stubbed_convert(
+            _OutcomeConverterStub(
+                _failed_outcome(),
+                error=runtime_error,
+            )
+        )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion failed: manifest failed\n"
+            "GM2Godot conversion failure detail: Additional conversion "
+            "finalizer failure: diagnostic restore failed\n"
+            "GM2Godot conversion failure detail: Additional conversion "
+            "finalizer failure: architecture restore failed\n",
+        )
+
     def test_runtime_exception_coerces_preexisting_nonfailed_outcome(self) -> None:
         for original_outcome in (_success_outcome(), _partial_outcome()):
             with self.subTest(original_state=original_outcome.state):
@@ -1481,6 +2247,50 @@ class TestCLIReports(unittest.TestCase):
                     report["outcome"]["resources"],
                     original_outcome.resources.to_dict(),
                 )
+
+    def test_real_second_run_runtime_failure_publishes_unverified_diagnostics(
+        self,
+    ) -> None:
+        gm_dir, godot_dir = self._write_real_script_project(
+            "HistoricalRuntimeFailure"
+        )
+        first_exit, _first_stdout, first_stderr = self._run_real_convert(
+            gm_dir,
+            godot_dir,
+            "--only",
+            "scripts",
+        )
+        self.assertEqual(first_exit, 0)
+        self.assertEqual(first_stderr, "")
+
+        with patch(
+            "src.conversion.scripts.ScriptConverter.convert_all",
+            side_effect=RuntimeError("second-run script failure"),
+        ):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir,
+                godot_dir,
+                "--only",
+                "scripts",
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GM2Godot conversion outcome: failed", stdout)
+        self.assertEqual(
+            stderr,
+            "GM2Godot conversion failed: second-run script failure\n",
+        )
+        self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(attempt["attempt"]["state"], "failed")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "unverified",
+        )
 
     def test_preflight_failure_keeps_stderr_as_one_diagnostic_json(self) -> None:
         outcome = ConversionOutcome(
@@ -1728,22 +2538,52 @@ class TestCLIReports(unittest.TestCase):
         self.assertIn("GM2Godot conversion outcome: cancelled", stdout.getvalue())
         self.assertEqual(self._read_report_outcome_state(godot_dir), "cancelled")
         self._assert_manifest_diagnostic_hashes(godot_dir)
+        manifest = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        )
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        self.assertEqual(manifest["conversion"]["state"], "success")
+        self.assertEqual(attempt["attempt"]["state"], "cancelled")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "updated")
+        self.assertTrue(attempt["canonical_manifest"]["updated"])
+        self.assertEqual(
+            attempt["canonical_manifest"]["current_output"],
+            "verified",
+        )
+        self.assertEqual(
+            attempt["canonical_manifest"]["sha256"],
+            self._artifact_sha256(
+                godot_dir,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            ),
+        )
 
-    def test_real_failed_cancelled_report_rewrite_invalidates_manifest(self) -> None:
+    def test_real_failed_cancelled_report_rewrite_preserves_manifest(self) -> None:
         gm_dir, godot_dir = self._write_real_script_project(
             "CancelledReportFailure"
         )
         original_print_logs = getattr(cli, "_print_conversion_logs")
-        original_write_reports = DiagnosticCollector.write_reports
+        original_publish_reports = DiagnosticCollector.publish_reports
+        manifest_before: bytes | None = None
 
         def interrupt_during_log_flush(logs: list[str]) -> None:
+            nonlocal manifest_before
+            with open(
+                os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+                "rb",
+            ) as manifest_file:
+                manifest_before = manifest_file.read()
             signal.raise_signal(signal.SIGINT)
             original_print_logs(logs)
 
         def fail_cancelled_canonical_report(
             diagnostics: DiagnosticCollector,
             destination: str | os.PathLike[str],
-        ) -> tuple[str, str]:
+        ) -> object:
             outcome = diagnostics.outcome()
             if (
                 outcome is not None
@@ -1752,7 +2592,7 @@ class TestCLIReports(unittest.TestCase):
                 == os.path.realpath(godot_dir)
             ):
                 raise OSError("cancelled report disk full")
-            return original_write_reports(diagnostics, destination)
+            return original_publish_reports(diagnostics, destination)
 
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -1763,7 +2603,7 @@ class TestCLIReports(unittest.TestCase):
             ),
             patch.object(
                 DiagnosticCollector,
-                "write_reports",
+                "publish_reports",
                 fail_cancelled_canonical_report,
             ),
             redirect_stdout(stdout),
@@ -1784,41 +2624,56 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(exit_code, 130)
         self.assertEqual(stderr.getvalue(), "")
         self.assertEqual(stdout.getvalue().count("GM2Godot conversion outcome:"), 1)
-        self.assertFalse(
-            os.path.exists(
-                os.path.join(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            )
+        self.assertEqual(self._read_report_outcome_state(godot_dir), "success")
+        self.assertIsNotNone(manifest_before)
+        with open(
+            os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+            "rb",
+        ) as manifest_file:
+            self.assertEqual(manifest_file.read(), manifest_before)
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
         )
-        self.assertFalse(
-            os.path.exists(
-                os.path.join(godot_dir, DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH)
-            )
-        )
-        self.assertFalse(
-            os.path.exists(
-                os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH)
-            )
+        self.assertEqual(attempt["attempt"]["state"], "cancelled")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertFalse(attempt["canonical_manifest"]["updated"])
+        self.assertEqual(
+            attempt["canonical_manifest"]["sha256"],
+            self._artifact_sha256(
+                godot_dir,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            ),
         )
 
-    def test_real_failed_late_manifest_refresh_invalidates_manifest(self) -> None:
+    def test_real_failed_late_artifact_refresh_preserves_manifest(self) -> None:
         gm_dir, godot_dir = self._write_real_script_project(
             "CancelledManifestFailure"
         )
         original_print_logs = getattr(cli, "_print_conversion_logs")
-        original_refresh_manifest = Converter.refresh_conversion_manifest
+        original_refresh_artifacts = Converter.refresh_conversion_artifacts
         refresh_calls = 0
+        manifest_before: bytes | None = None
 
         def interrupt_during_log_flush(logs: list[str]) -> None:
+            nonlocal manifest_before
+            with open(
+                os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+                "rb",
+            ) as manifest_file:
+                manifest_before = manifest_file.read()
             signal.raise_signal(signal.SIGINT)
             original_print_logs(logs)
 
-        def fail_late_manifest_refresh(converter: Converter) -> str:
+        def fail_late_artifact_refresh(
+            converter: Converter,
+            attempt_outcome: ConversionOutcome,
+        ) -> tuple[str | None, str]:
             nonlocal refresh_calls
             refresh_calls += 1
             if refresh_calls == 2:
-                converter.invalidate_conversion_manifest()
-                raise OSError("late manifest disk full")
-            return original_refresh_manifest(converter)
+                raise OSError("late artifact disk full")
+            return original_refresh_artifacts(converter, attempt_outcome)
 
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -1829,8 +2684,8 @@ class TestCLIReports(unittest.TestCase):
             ),
             patch.object(
                 Converter,
-                "refresh_conversion_manifest",
-                fail_late_manifest_refresh,
+                "refresh_conversion_artifacts",
+                fail_late_artifact_refresh,
             ),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -1851,12 +2706,28 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(exit_code, 130)
         self.assertEqual(stderr.getvalue(), "")
         self.assertEqual(stdout.getvalue().count("GM2Godot conversion outcome:"), 1)
-        self.assertEqual(self._read_report_outcome_state(godot_dir), "cancelled")
-        self.assertFalse(
-            os.path.exists(
-                os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH)
-            )
+        self.assertEqual(self._read_report_outcome_state(godot_dir), "success")
+        self.assertIsNotNone(manifest_before)
+        with open(
+            os.path.join(godot_dir, CONVERSION_MANIFEST_RELATIVE_PATH),
+            "rb",
+        ) as manifest_file:
+            self.assertEqual(manifest_file.read(), manifest_before)
+        attempt = self._read_conversion_artifact(
+            godot_dir,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
         )
+        self.assertEqual(attempt["attempt"]["state"], "cancelled")
+        self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
+        self.assertFalse(attempt["canonical_manifest"]["updated"])
+        self.assertEqual(
+            attempt["canonical_manifest"]["sha256"],
+            self._artifact_sha256(
+                godot_dir,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            ),
+        )
+        self._assert_manifest_diagnostic_hashes(godot_dir)
 
     def test_sigint_before_summary_output_republishes_cancelled_outcome(
         self,

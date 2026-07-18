@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.4 - 2026-07-18
+
+- Added format-v2 trusted conversion manifests with terminal outcomes and plan-ordered requested, executed, completed, skipped, and failed step names for successful and partial conversions.
+- Added a per-run `conversion_attempt.json` outcome ledger after destination preflight for success, partial, failure, and cancellation, preserving an existing canonical manifest as an explicitly unverified historical baseline after unsuccessful attempts.
+
 ## 0.7.3 - 2026-07-18
 
 - Added explicit `success`, `partial`, `failed`, and `cancelled` conversion outcomes with machine-readable converter/resource counts, deterministic CLI summaries, and an opt-in for automation that accepts partial output.

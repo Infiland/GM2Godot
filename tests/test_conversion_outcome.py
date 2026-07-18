@@ -7,6 +7,7 @@ from typing import Literal, cast
 from src.conversion.conversion_outcome import (
     ConversionCounts,
     ConversionOutcome,
+    ConversionStepLedger,
     ConversionTerminalState,
     ResourceOutcomeTracker,
 )
@@ -51,21 +52,21 @@ class ConversionOutcomeTests(unittest.TestCase):
     def test_success_requires_fully_completed_partitions(self) -> None:
         incomplete_partitions = (
             (
-                ConversionCounts(requested=1, skipped=1),
+                ConversionStepLedger.from_requested(("sprites",)),
                 ConversionCounts(),
             ),
             (
-                ConversionCounts(),
+                ConversionStepLedger(),
                 ConversionCounts(requested=1, executed=1, failed=1),
             ),
         )
 
-        for converters, resources in incomplete_partitions:
-            with self.subTest(converters=converters, resources=resources):
+        for steps, resources in incomplete_partitions:
+            with self.subTest(steps=steps, resources=resources):
                 with self.assertRaises(ValueError) as context:
                     ConversionOutcome(
                         state="success",
-                        converters=converters,
+                        steps=steps,
                         resources=resources,
                     )
 
@@ -76,7 +77,13 @@ class ConversionOutcomeTests(unittest.TestCase):
                 )
 
     def test_success_rejects_failure_context(self) -> None:
-        completed = ConversionCounts(requested=1, executed=1, completed=1)
+        completed = ConversionStepLedger.from_requested(("sprites",))
+        completed = completed.start("sprites").complete("sprites")
+        completed_resources = ConversionCounts(
+            requested=1,
+            executed=1,
+            completed=1,
+        )
 
         for context_fields in (
             {"failed_step": "objects"},
@@ -86,8 +93,8 @@ class ConversionOutcomeTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as context:
                     ConversionOutcome(
                         state="success",
-                        converters=completed,
-                        resources=completed,
+                        steps=completed,
+                        resources=completed_resources,
                         **context_fields,
                     )
 
@@ -99,9 +106,12 @@ class ConversionOutcomeTests(unittest.TestCase):
     def test_success_accepts_fully_completed_partitions_without_failure_context(
         self,
     ) -> None:
+        steps = ConversionStepLedger.from_requested(("sprites", "objects"))
+        steps = steps.start("sprites").complete("sprites")
+        steps = steps.start("objects").complete("objects")
         outcome = ConversionOutcome(
             state="success",
-            converters=ConversionCounts(requested=2, executed=2, completed=2),
+            steps=steps,
             resources=ConversionCounts(requested=3, executed=3, completed=3),
         )
 
@@ -126,15 +136,18 @@ class ConversionOutcomeTests(unittest.TestCase):
             completed=1,
         )
 
-        for converters, resources in (
-            (ConversionCounts(), ConversionCounts()),
-            (fully_completed, fully_completed),
+        completed_steps = ConversionStepLedger.from_requested(("sprites",))
+        completed_steps = completed_steps.start("sprites").complete("sprites")
+
+        for steps, resources in (
+            (ConversionStepLedger(), ConversionCounts()),
+            (completed_steps, fully_completed),
         ):
-            with self.subTest(converters=converters, resources=resources):
+            with self.subTest(steps=steps, resources=resources):
                 with self.assertRaises(ValueError) as context:
                     ConversionOutcome(
                         state="partial",
-                        converters=converters,
+                        steps=steps,
                         resources=resources,
                     )
 
@@ -143,22 +156,50 @@ class ConversionOutcomeTests(unittest.TestCase):
                     "Partial conversion outcomes require skipped or failed work.",
                 )
 
+    def test_partial_rejects_an_active_executed_step(self) -> None:
+        active_steps = ConversionStepLedger.from_requested(("sprites",))
+        active_steps = active_steps.start("sprites")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Partial conversion outcomes cannot include an active step",
+        ):
+            ConversionOutcome(state="partial", steps=active_steps)
+
+    def test_partial_requires_every_requested_converter_step_to_complete(
+        self,
+    ) -> None:
+        steps = ConversionStepLedger.from_requested(("sprites", "objects"))
+        steps = steps.start("sprites").complete("sprites")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "every requested converter step",
+        ):
+            ConversionOutcome(
+                state="partial",
+                steps=steps,
+                resources=ConversionCounts(requested=1, skipped=1),
+            )
+
     def test_non_success_states_allow_legitimate_terminal_shapes(self) -> None:
+        requested_steps = ConversionStepLedger.from_requested(("sprites",))
+        completed_steps = requested_steps.start("sprites").complete("sprites")
         outcomes = (
             ConversionOutcome(
                 state="failed",
-                converters=ConversionCounts(requested=1, skipped=1),
+                steps=requested_steps,
                 failed_step="preflight",
                 failure_phase="preflight",
             ),
             ConversionOutcome(
                 state="cancelled",
-                converters=ConversionCounts(requested=1, executed=1, completed=1),
+                steps=completed_steps,
                 resources=ConversionCounts(requested=1, skipped=1),
             ),
             ConversionOutcome(
                 state="partial",
-                converters=ConversionCounts(requested=1, executed=1, completed=1),
+                steps=completed_steps,
                 resources=ConversionCounts(requested=1, executed=1, failed=1),
                 failed_step="sprites",
                 failure_phase="runtime",
@@ -171,9 +212,11 @@ class ConversionOutcomeTests(unittest.TestCase):
         )
 
     def test_outcome_serializes_and_renders_deterministically(self) -> None:
+        steps = ConversionStepLedger.from_requested(("sprites",))
+        steps = steps.start("sprites").complete("sprites")
         outcome = ConversionOutcome(
             state="partial",
-            converters=ConversionCounts(requested=1, executed=1, completed=1),
+            steps=steps,
             resources=ConversionCounts(
                 requested=2,
                 executed=2,
@@ -184,11 +227,156 @@ class ConversionOutcomeTests(unittest.TestCase):
 
         self.assertEqual(outcome.to_dict()["state"], "partial")
         self.assertEqual(
+            outcome.to_dict()["steps"],
+            {
+                "requested": ["sprites"],
+                "executed": ["sprites"],
+                "completed": ["sprites"],
+                "skipped": [],
+                "failed": [],
+            },
+        )
+        self.assertEqual(
             outcome.summary_line(),
             "GM2Godot conversion outcome: partial; "
             "converters[requested=1, executed=1, completed=1, skipped=0, failed=0]; "
             "resources[requested=2, executed=2, completed=1, skipped=1, failed=0]",
         )
+
+
+class ConversionStepLedgerTests(unittest.TestCase):
+    def test_transitions_are_immutable_and_derive_names_and_counts(self) -> None:
+        requested = ConversionStepLedger.from_requested(
+            ("sprites", "objects", "rooms")
+        )
+        sprites_active = requested.start("sprites")
+        sprites_complete = sprites_active.complete("sprites")
+        objects_active = sprites_complete.start("objects")
+        objects_failed = objects_active.fail("objects")
+
+        self.assertEqual(requested.executed, ())
+        self.assertEqual(sprites_active.active_step, "sprites")
+        self.assertEqual(sprites_complete.completed, ("sprites",))
+        self.assertEqual(objects_failed.failed, ("objects",))
+        self.assertIsNone(objects_failed.active_step)
+        self.assertEqual(objects_failed.skipped, ("rooms",))
+        self.assertEqual(
+            objects_failed.counts,
+            ConversionCounts(
+                requested=3,
+                executed=2,
+                completed=1,
+                skipped=1,
+                failed=1,
+            ),
+        )
+
+    def test_serializes_names_in_plan_order(self) -> None:
+        ledger = ConversionStepLedger.from_requested(("sprites", "objects"))
+        ledger = ledger.start("sprites").complete("sprites")
+
+        self.assertEqual(
+            ledger.to_dict(),
+            {
+                "requested": ["sprites", "objects"],
+                "executed": ["sprites"],
+                "completed": ["sprites"],
+                "skipped": ["objects"],
+                "failed": [],
+            },
+        )
+
+    def test_rejects_invalid_names_and_duplicate_plan_entries(self) -> None:
+        for invalid_name in ("", cast(str, 1), cast(str, True)):
+            with self.subTest(invalid_name=invalid_name):
+                with self.assertRaises((TypeError, ValueError)):
+                    ConversionStepLedger.from_requested((invalid_name,))
+
+        with self.assertRaises(ValueError):
+            ConversionStepLedger.from_requested(("sprites", "sprites"))
+
+    def test_rejects_state_that_violates_plan_invariants(self) -> None:
+        invalid_states = (
+            {"requested": ("sprites", "objects"), "executed": ("objects",)},
+            {
+                "requested": ("sprites", "objects"),
+                "executed": ("sprites", "objects"),
+                "completed": ("objects", "sprites"),
+            },
+            {
+                "requested": ("sprites",),
+                "executed": ("sprites",),
+                "completed": ("sprites",),
+                "failed": ("sprites",),
+            },
+            {
+                "requested": ("sprites", "objects"),
+                "executed": ("sprites", "objects"),
+            },
+            {
+                "requested": ("sprites", "objects"),
+                "executed": ("sprites", "objects"),
+                "completed": ("objects",),
+            },
+            {
+                "requested": ("sprites", "objects"),
+                "executed": ("sprites", "objects"),
+                "failed": ("sprites",),
+            },
+            {
+                "requested": ("sprites", "objects"),
+                "executed": ("sprites", "objects"),
+                "failed": ("sprites", "objects"),
+            },
+        )
+
+        for state in invalid_states:
+            with self.subTest(state=state):
+                with self.assertRaises(ValueError):
+                    ConversionStepLedger(**state)
+
+    def test_start_requires_the_next_plan_step_and_no_active_step(self) -> None:
+        ledger = ConversionStepLedger.from_requested(("sprites", "objects"))
+
+        with self.assertRaises(ValueError):
+            ledger.start("objects")
+
+        active = ledger.start("sprites")
+        with self.assertRaises(ValueError):
+            active.start("objects")
+
+    def test_complete_and_fail_require_the_active_step(self) -> None:
+        ledger = ConversionStepLedger.from_requested(("sprites",))
+
+        with self.assertRaises(ValueError):
+            ledger.complete("sprites")
+        with self.assertRaises(ValueError):
+            ledger.fail("sprites")
+
+        active = ledger.start("sprites")
+        with self.assertRaises(ValueError):
+            active.complete("objects")
+        with self.assertRaises(ValueError):
+            active.fail("objects")
+
+    def test_transitions_are_strictly_non_idempotent(self) -> None:
+        completed = (
+            ConversionStepLedger.from_requested(("sprites",))
+            .start("sprites")
+            .complete("sprites")
+        )
+        failed = (
+            ConversionStepLedger.from_requested(("sprites",))
+            .start("sprites")
+            .fail("sprites")
+        )
+
+        with self.assertRaises(ValueError):
+            completed.start("sprites")
+        with self.assertRaises(ValueError):
+            completed.complete("sprites")
+        with self.assertRaises(ValueError):
+            failed.fail("sprites")
 
 
 class ResourceOutcomeTrackerTests(unittest.TestCase):

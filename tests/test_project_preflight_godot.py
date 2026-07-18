@@ -11,6 +11,7 @@ from pathlib import Path
 from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.project_godot import GodotProjectFile
+from tests.conversion_outcome_helpers import completed_conversion_step_ledger
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -55,11 +56,7 @@ class ProjectPreflightGodotTests(unittest.TestCase):
             )
             expected_outcome = ConversionOutcome(
                 state="partial",
-                converters=ConversionCounts(
-                    requested=15,
-                    executed=15,
-                    completed=15,
-                ),
+                steps=completed_conversion_step_ledger(),
                 resources=ConversionCounts(
                     requested=4,
                     executed=4,

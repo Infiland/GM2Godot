@@ -80,6 +80,25 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertTrue((PROJECT_ROOT / "tests" / "test_golden_conversion.py").is_file())
         self.assertTrue((PROJECT_ROOT / "tests" / "test_cli.py").is_file())
 
+    def test_unit_workflow_runs_artifact_transactions_on_windows(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        content = workflow.read_text(encoding="utf-8")
+        windows_job = content[content.index("  windows-artifact-transactions:"):]
+
+        self.assertIn("runs-on: windows-latest", windows_job)
+        self.assertIn("python-version: '3.12'", windows_job)
+        self.assertIn("pip install -r requirements.txt", windows_job)
+        for module in (
+            "tests.test_conversion_outcome",
+            "tests.test_conversion_manifest",
+            "tests.test_diagnostics",
+            "tests.test_architecture_policy",
+            "tests.test_converter",
+            "tests.test_cli",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(module, windows_job)
+
     def test_godot_workflows_pin_exact_supported_version(self) -> None:
         workflow_names = ("godot-smoke.yml", "tcc-conversion-test.yml")
 

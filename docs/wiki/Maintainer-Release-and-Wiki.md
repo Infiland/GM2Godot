@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.13 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.14 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -8,7 +8,7 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, and publishes the GitHub release/tag. Every new release must use a new version.
+`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, generates `SHA256SUMS` from those four final payloads, and publishes all five assets with the GitHub release/tag. Every new release must use a new version.
 
 Publication-capable push and manual-dispatch runs share one concurrency group across refs, covering the exact remote-tag check, builds, and publication. Pull-request validation remains independent. The active publisher is not cancelled and one additional publisher may remain pending; GitHub's default concurrency behavior can replace that pending run if a third publisher arrives, and it does not guarantee FIFO ordering. When the surviving waiter starts, it rechecks the exact remote tag. A present tag makes the run an intentional no-op; an absent tag after a clean prepublication failure lets it try the normal build and publication path. The release action is also configured not to overwrite same-named asset collisions.
 
@@ -41,7 +41,8 @@ Before merging:
 After merging:
 
 - [ ] Confirm the tag points to the intended `main` commit.
-- [ ] Confirm the release is neither draft nor prerelease and all expected assets are present.
+- [ ] Confirm the release is neither draft nor prerelease and has exactly five unique, non-empty assets: the four platform payloads and `SHA256SUMS`.
+- [ ] Download all five assets, run `sha256sum --check --strict SHA256SUMS`, and confirm each payload digest also matches the hexadecimal value after the `sha256:` prefix in GitHub's `assets[].digest` field.
 - [ ] Confirm post-merge tests, exact-LTS conversions, Godot smoke, and release jobs pass.
 - [ ] If `docs/wiki/` changed, publish the exact merged pages and verify the live Wiki before closing the documentation issue. Record the merged source SHA and published Wiki SHA on the issue before closing it.
 

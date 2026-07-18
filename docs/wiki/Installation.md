@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.13 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.14 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -18,9 +18,23 @@ Download the asset for your operating system from [GitHub Releases](https://gith
 | macOS | `GM2Godot-macos.dmg` or `GM2Godot-macos.zip` | Open the DMG and copy `GM2Godot.app` to Applications, or extract the ZIP and launch the app. |
 | Linux | `GM2Godot-linux.zip` | Extract the archive and run `./GM2Godot`. If the executable bit was lost during download or extraction, run `chmod +x GM2Godot` once. |
 
+### Verify a release download
+
+Releases starting with 0.7.14 include `SHA256SUMS`, with one SHA-256 digest for each of the four platform payloads. To verify the complete release, download all four payloads and `SHA256SUMS` into one directory, then run one of these commands from that directory:
+
+```bash
+# Linux
+sha256sum --check --strict SHA256SUMS
+
+# macOS
+shasum -a 256 -c SHA256SUMS
+```
+
+On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in PowerShell and compare the result with the named `GM2Godot-windows.zip` line in `SHA256SUMS`. The manifest verifies the integrity of the published bytes; it is not a signature or proof of publisher identity.
+
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.13`.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.14`.
 
 ## Run from source
 
@@ -70,6 +84,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.13`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.7.14`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

@@ -56,6 +56,595 @@ jobs:
 
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
+  existing-release-integrity:
+    needs: get-version
+    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Verify existing tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.get-version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          for required in gh python sha256sum cmp; do
+            if ! command -v "$required" >/dev/null 2>&1; then
+              echo "::error::Required existing-release audit tool is unavailable: $required" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "${GH_TOKEN:-}" || -z "${GITHUB_REPOSITORY:-}" || -z "${RELEASE_TAG:-}" ]]; then
+            echo "::error::Existing-release audit is missing GH_TOKEN, GITHUB_REPOSITORY, or RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          umask 077
+          audit_root="$(mktemp -d)"
+          if [[ -z "$audit_root" || ! -d "$audit_root" || -L "$audit_root" ]]; then
+            echo "::error::Unable to create a fresh existing-release audit directory." >&2
+            exit 1
+          fi
+          cleanup() {
+            find "$audit_root" -depth -delete
+          }
+          trap cleanup EXIT
+          downloads="$audit_root/downloads"
+          mkdir -- "$downloads"
+
+          query_pages() {
+            local endpoint="$1"
+            local destination="$2"
+            local description="$3"
+            local api_status=0
+            gh api --method GET --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$endpoint" >"$destination" || api_status=$?
+            if (( api_status != 0 )); then
+              echo "::error::Authenticated ${description} query failed for ${RELEASE_TAG} (gh exit ${api_status})." >&2
+              exit "$api_status"
+            fi
+          }
+
+          query_object() {
+            local endpoint="$1"
+            local destination="$2"
+            local description="$3"
+            local api_status=0
+            gh api --method GET \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$endpoint" >"$destination" || api_status=$?
+            if (( api_status != 0 )); then
+              echo "::error::Authenticated ${description} query failed for ${RELEASE_TAG} (gh exit ${api_status})." >&2
+              exit "$api_status"
+            fi
+          }
+
+          select_release_id() {
+            python - "$1" "$RELEASE_TAG" "$GITHUB_REPOSITORY" <<'PY'
+          import json
+          import sys
+
+          path, exact_tag, repository = sys.argv[1:]
+          try:
+              with open(path, encoding="utf-8") as handle:
+                  pages = json.load(handle)
+          except (OSError, json.JSONDecodeError) as error:
+              print(f"::error::Unable to parse release listing: {error}", file=sys.stderr)
+              raise SystemExit(1)
+
+          if not isinstance(pages, list):
+              print("::error::Release listing was not a JSON array of pages.", file=sys.stderr)
+              raise SystemExit(1)
+
+          matches = []
+          for page_number, page in enumerate(pages, start=1):
+              if not isinstance(page, list):
+                  print(
+                      f"::error::Release page {page_number} was not a JSON array.",
+                      file=sys.stderr,
+                  )
+                  raise SystemExit(1)
+              for release in page:
+                  if not isinstance(release, dict):
+                      print(
+                          f"::error::Release page {page_number} contained a non-object entry.",
+                          file=sys.stderr,
+                      )
+                      raise SystemExit(1)
+                  tag_name = release.get("tag_name")
+                  if not isinstance(tag_name, str) or not tag_name:
+                      print(
+                          f"::error::Release page {page_number} contained an entry without "
+                          "a non-empty string tag_name.",
+                          file=sys.stderr,
+                      )
+                      raise SystemExit(1)
+                  if tag_name == exact_tag:
+                      matches.append(release)
+
+          if len(matches) != 1:
+              print(
+                  f"::error::Expected exactly one release for {exact_tag}; found {len(matches)}.",
+                  file=sys.stderr,
+              )
+              for release in matches:
+                  print(
+                      "matching release: "
+                      f"id={release.get('id')!r} draft={release.get('draft')!r} "
+                      f"prerelease={release.get('prerelease')!r} "
+                      f"url={release.get('html_url')!r}",
+                      file=sys.stderr,
+                  )
+              raise SystemExit(1)
+
+          release_id = matches[0].get("id")
+          release_url = matches[0].get("html_url")
+          if type(release_id) is not int or release_id <= 0:
+              print(
+                  f"::error::Exact release for {exact_tag} has an invalid id: {release_id!r}.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          expected_url = f"https://github.com/{repository}/releases/tag/{exact_tag}"
+          if release_url != expected_url:
+              print(
+                  f"::error::Exact release for {exact_tag} has invalid URL "
+                  f"{release_url!r}; expected {expected_url!r} (id={release_id}).",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          print(
+              f"Existing release candidate: id={release_id} url={release_url}",
+              file=sys.stderr,
+          )
+          print(release_id)
+          PY
+          }
+
+          validate_snapshot() {
+            python - "$1" "$2" "$3" "$RELEASE_TAG" "$GITHUB_REPOSITORY" "$4" "$5" <<'PY'
+          import json
+          import re
+          import sys
+          from datetime import datetime
+          from pathlib import Path
+
+          (
+              release_path,
+              assets_path,
+              tag_path,
+              exact_tag,
+              repository,
+              plan_path,
+              receipt_path,
+          ) = sys.argv[1:]
+          expected_names = (
+              "GM2Godot-linux.zip",
+              "GM2Godot-macos.dmg",
+              "GM2Godot-macos.zip",
+              "GM2Godot-windows.zip",
+              "SHA256SUMS",
+          )
+          digest_pattern = re.compile(r"sha256:[0-9a-f]{64}\Z")
+          object_sha_pattern = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+
+
+          def fail(message: str) -> None:
+              print(f"::error::{message}", file=sys.stderr)
+              raise SystemExit(1)
+
+
+          def load_json(path: str, description: str):
+              try:
+                  with open(path, encoding="utf-8") as handle:
+                      return json.load(handle)
+              except (OSError, json.JSONDecodeError) as error:
+                  fail(f"Unable to parse {description}: {error}")
+
+
+          release_pages = load_json(release_path, "release listing")
+          if not isinstance(release_pages, list):
+              fail("Release listing was not a JSON array of pages.")
+          matches = []
+          for page_number, page in enumerate(release_pages, start=1):
+              if not isinstance(page, list):
+                  fail(f"Release page {page_number} was not a JSON array.")
+              for release in page:
+                  if not isinstance(release, dict):
+                      fail(f"Release page {page_number} contained a non-object entry.")
+                  tag_name = release.get("tag_name")
+                  if not isinstance(tag_name, str) or not tag_name:
+                      fail(
+                          f"Release page {page_number} contained an entry without "
+                          "a non-empty string tag_name."
+                      )
+                  if tag_name == exact_tag:
+                      matches.append(release)
+          if len(matches) != 1:
+              fail(f"Expected exactly one release for {exact_tag}; found {len(matches)}.")
+
+          release = matches[0]
+          release_id = release.get("id")
+          release_url = release.get("html_url")
+          diagnostic = f"id={release_id!r} url={release_url!r}"
+          if type(release_id) is not int or release_id <= 0:
+              fail(f"Exact release for {exact_tag} has an invalid id ({diagnostic}).")
+          expected_release_url = (
+              f"https://github.com/{repository}/releases/tag/{exact_tag}"
+          )
+          if release_url != expected_release_url:
+              fail(
+                  f"Exact release for {exact_tag} has an invalid URL; expected "
+                  f"{expected_release_url!r} ({diagnostic})."
+              )
+          if release.get("draft") is not False:
+              fail(f"Exact release for {exact_tag} is draft ({diagnostic}).")
+          if release.get("prerelease") is not False:
+              fail(f"Exact release for {exact_tag} is a prerelease ({diagnostic}).")
+          published_at = release.get("published_at")
+          if not isinstance(published_at, str) or not published_at:
+              fail(f"Exact release for {exact_tag} is not published ({diagnostic}).")
+          try:
+              published_timestamp = datetime.fromisoformat(
+                  published_at[:-1] + "+00:00" if published_at.endswith("Z") else published_at
+              )
+          except ValueError:
+              fail(
+                  f"Exact release for {exact_tag} has malformed published_at "
+                  f"{published_at!r} ({diagnostic})."
+              )
+          if published_timestamp.tzinfo is None:
+              fail(
+                  f"Exact release for {exact_tag} has a timezone-free published_at "
+                  f"({diagnostic})."
+              )
+
+          asset_pages = load_json(assets_path, "release asset listing")
+          if not isinstance(asset_pages, list):
+              fail(
+                  "Release asset listing was not a JSON array of pages "
+                  f"({diagnostic})."
+              )
+          assets = []
+          for page_number, page in enumerate(asset_pages, start=1):
+              if not isinstance(page, list):
+                  fail(
+                      f"Release asset page {page_number} was not a JSON array "
+                      f"({diagnostic})."
+                  )
+              for asset in page:
+                  if not isinstance(asset, dict):
+                      fail(
+                          f"Release asset page {page_number} contained a non-object "
+                          f"entry ({diagnostic})."
+                      )
+                  assets.append(asset)
+
+          names = [asset.get("name") for asset in assets]
+          if len(assets) != len(expected_names) or sorted(names, key=repr) != sorted(
+              expected_names
+          ):
+              fail(
+                  f"Exact release has invalid asset inventory: {names!r}; expected "
+                  f"exactly {list(expected_names)!r} ({diagnostic})."
+              )
+
+          normalized_assets = []
+          seen_ids = set()
+          for expected_name in expected_names:
+              matching_assets = [
+                  asset for asset in assets if asset.get("name") == expected_name
+              ]
+              if len(matching_assets) != 1:
+                  fail(
+                      f"Release {release_id} has {len(matching_assets)} assets named "
+                      f"{expected_name!r}; expected one."
+                  )
+              asset = matching_assets[0]
+              asset_id = asset.get("id")
+              state = asset.get("state")
+              size = asset.get("size")
+              digest = asset.get("digest")
+              asset_diagnostic = (
+                  f"release_id={release_id} release_url={release_url!r} "
+                  f"asset={expected_name!r} id={asset_id!r}"
+              )
+              if type(asset_id) is not int or asset_id <= 0:
+                  fail(f"Invalid asset id ({asset_diagnostic}).")
+              if asset_id in seen_ids:
+                  fail(f"Duplicate asset id ({asset_diagnostic}).")
+              seen_ids.add(asset_id)
+              if state != "uploaded":
+                  fail(f"Asset is not uploaded: state={state!r} ({asset_diagnostic}).")
+              if type(size) is not int or size <= 0:
+                  fail(f"Asset is empty or has invalid size={size!r} ({asset_diagnostic}).")
+              if not isinstance(digest, str) or not digest_pattern.fullmatch(digest):
+                  fail(f"Asset has an invalid SHA-256 digest={digest!r} ({asset_diagnostic}).")
+              normalized_assets.append(
+                  {
+                      "digest": digest,
+                      "id": asset_id,
+                      "name": expected_name,
+                      "size": size,
+                      "state": state,
+                  }
+              )
+
+          tag_ref = load_json(tag_path, "exact tag reference")
+          if not isinstance(tag_ref, dict):
+              fail("Exact tag response was not a JSON object.")
+          if tag_ref.get("ref") != f"refs/tags/{exact_tag}":
+              fail(
+                  f"Exact tag response had invalid ref={tag_ref.get('ref')!r}; "
+                  f"expected refs/tags/{exact_tag}."
+              )
+          tag_object = tag_ref.get("object")
+          if not isinstance(tag_object, dict):
+              fail("Exact tag response did not contain an object receipt.")
+          object_type = tag_object.get("type")
+          object_sha = tag_object.get("sha")
+          if object_type not in {"commit", "tag"}:
+              fail(f"Exact tag response had invalid object type={object_type!r}.")
+          if not isinstance(object_sha, str) or not object_sha_pattern.fullmatch(
+              object_sha
+          ):
+              fail(f"Exact tag response had invalid object sha={object_sha!r}.")
+
+          receipt = {
+              "assets": normalized_assets,
+              "release": {
+                  "draft": False,
+                  "html_url": release_url,
+                  "id": release_id,
+                  "prerelease": False,
+                  "published_at": published_at,
+                  "tag_name": exact_tag,
+              },
+              "tag_ref": {
+                  "object_sha": object_sha,
+                  "object_type": object_type,
+                  "ref": f"refs/tags/{exact_tag}",
+              },
+          }
+          Path(plan_path).write_text(
+              "".join(
+                  f"{release_id}\t{release_url}\t{asset['id']}\t{asset['name']}\t"
+                  f"{asset['size']}\t{asset['digest']}\n"
+                  for asset in normalized_assets
+              ),
+              encoding="utf-8",
+          )
+          Path(receipt_path).write_text(
+              json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          print(
+              f"Existing release snapshot: id={release_id} url={release_url} "
+              f"assets={len(normalized_assets)} tag_object={object_type}:{object_sha}"
+          )
+          PY
+          }
+
+          capture_snapshot() {
+            local snapshot_name="$1"
+            local release_pages="$audit_root/${snapshot_name}-releases.json"
+            local asset_pages="$audit_root/${snapshot_name}-assets.json"
+            local tag_response="$audit_root/${snapshot_name}-tag.json"
+            local plan="$audit_root/${snapshot_name}-assets.tsv"
+            local receipt="$audit_root/${snapshot_name}-receipt.json"
+            local release_id
+
+            query_pages \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              "$release_pages" \
+              "release-list"
+            if ! release_id="$(select_release_id "$release_pages")"; then
+              echo "::error::Release listing could not identify one exact release for ${RELEASE_TAG}." >&2
+              exit 1
+            fi
+            query_pages \
+              "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+              "$asset_pages" \
+              "release-asset"
+            query_object \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+              "$tag_response" \
+              "tag-ref"
+            validate_snapshot \
+              "$release_pages" \
+              "$asset_pages" \
+              "$tag_response" \
+              "$plan" \
+              "$receipt"
+          }
+
+          capture_snapshot initial
+          initial_plan="$audit_root/initial-assets.tsv"
+          audit_release_id=""
+          audit_release_url=""
+          while IFS=$'\t' read -r release_id release_url asset_id asset_name expected_size expected_digest; do
+            if [[ -z "$audit_release_id" ]]; then
+              audit_release_id="$release_id"
+              audit_release_url="$release_url"
+            elif [[ "$audit_release_id" != "$release_id" || "$audit_release_url" != "$release_url" ]]; then
+              echo "::error::Existing-release download plan contains inconsistent release identities." >&2
+              exit 1
+            fi
+            destination="$downloads/$asset_name"
+            if [[ -e "$destination" || -L "$destination" ]]; then
+              echo "::error::Existing-release download path already exists: asset=${asset_name} release_id=${release_id} release_url=${release_url}" >&2
+              exit 1
+            fi
+            download_status=0
+            gh api --method GET \
+              -H 'Accept: application/octet-stream' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              >"$destination" || download_status=$?
+            if (( download_status != 0 )); then
+              echo "::error::Failed to download existing release asset=${asset_name} id=${asset_id} release_id=${release_id} release_url=${release_url} (gh exit ${download_status})." >&2
+              exit "$download_status"
+            fi
+            if [[ ! -f "$destination" || -L "$destination" ]]; then
+              echo "::error::Downloaded asset is not a direct regular file: asset=${asset_name} release_id=${release_id} release_url=${release_url}" >&2
+              exit 1
+            fi
+          done < "$initial_plan"
+          if [[ -z "$audit_release_id" || -z "$audit_release_url" ]]; then
+            echo "::error::Existing-release download plan did not contain a release identity." >&2
+            exit 1
+          fi
+
+          python - "$initial_plan" "$downloads" <<'PY'
+          import hashlib
+          import os
+          import re
+          import stat
+          import sys
+          from pathlib import Path
+
+          plan_path = Path(sys.argv[1])
+          downloads = Path(sys.argv[2])
+          payload_names = (
+              "GM2Godot-linux.zip",
+              "GM2Godot-macos.dmg",
+              "GM2Godot-macos.zip",
+              "GM2Godot-windows.zip",
+          )
+          expected_names = payload_names + ("SHA256SUMS",)
+          manifest_pattern = re.compile(
+              rb"([0-9a-f]{64})  (GM2Godot-(?:linux|macos|windows)\.(?:zip|dmg))\n"
+          )
+
+
+          def fail(message: str) -> None:
+              print(f"::error::{message}", file=sys.stderr)
+              raise SystemExit(1)
+
+
+          metadata = {}
+          release_identity = None
+          try:
+              plan_lines = plan_path.read_text(encoding="utf-8").splitlines()
+          except OSError as error:
+              fail(f"Unable to read asset audit plan: {error}")
+          for line in plan_lines:
+              fields = line.split("\t")
+              if len(fields) != 6:
+                  fail("Asset audit plan contained a malformed record.")
+              release_id, release_url, asset_id, name, size_text, digest = fields
+              current_identity = (release_id, release_url)
+              if release_identity is None:
+                  release_identity = current_identity
+              elif release_identity != current_identity:
+                  fail("Asset audit plan contained inconsistent release identities.")
+              if name in metadata:
+                  fail(f"Asset audit plan repeated {name!r}.")
+              try:
+                  size = int(size_text)
+              except ValueError:
+                  fail(f"Asset audit plan had invalid size for {name!r}.")
+              metadata[name] = (asset_id, size, digest)
+          if tuple(metadata) != expected_names:
+              fail(f"Asset audit plan had unexpected inventory: {list(metadata)!r}.")
+          if release_identity is None:
+              fail("Asset audit plan did not contain a release identity.")
+          release_id, release_url = release_identity
+          failure_context = (
+              f"release_id={release_id} release_url={release_url}"
+          )
+
+
+          def fail_asset(message: str) -> None:
+              fail(f"{message} ({failure_context}).")
+
+          local_digests = {}
+          for name in expected_names:
+              path = downloads / name
+              try:
+                  if path.is_symlink():
+                      fail_asset(
+                          f"Downloaded asset is not a direct regular file: {name!r}"
+                      )
+                  with path.open("rb") as handle:
+                      file_stat = os.fstat(handle.fileno())
+                      if not stat.S_ISREG(file_stat.st_mode):
+                          fail_asset(
+                              f"Downloaded asset is not a direct regular file: {name!r}"
+                          )
+                      _, expected_size, expected_digest = metadata[name]
+                      if file_stat.st_size != expected_size:
+                          fail_asset(
+                              f"Downloaded asset size mismatch for {name!r}: "
+                              f"API={expected_size} local={file_stat.st_size}"
+                          )
+                      local_digest = hashlib.file_digest(handle, "sha256").hexdigest()
+              except OSError as error:
+                  fail_asset(f"Unable to read downloaded asset {name!r}: {error}")
+              if f"sha256:{local_digest}" != expected_digest:
+                  fail_asset(
+                      f"Downloaded asset digest mismatch for {name!r}: "
+                      f"API={expected_digest} local=sha256:{local_digest}"
+                  )
+              local_digests[name] = local_digest
+
+          try:
+              manifest = (downloads / "SHA256SUMS").read_bytes()
+          except OSError as error:
+              fail_asset(f"Unable to parse SHA256SUMS: {error}")
+          matches = []
+          offset = 0
+          while offset < len(manifest):
+              match = manifest_pattern.match(manifest, offset)
+              if match is None:
+                  fail_asset(f"SHA256SUMS is not canonical at byte offset {offset}")
+              matches.append(
+                  (match.group(2).decode("ascii"), match.group(1).decode("ascii"))
+              )
+              offset = match.end()
+          if tuple(name for name, _ in matches) != payload_names:
+              fail_asset(
+                  "SHA256SUMS must contain exactly the four payloads in canonical "
+                  f"order; found {[name for name, _ in matches]!r}"
+              )
+          for name, manifest_digest in matches:
+              api_digest = metadata[name][2].removeprefix("sha256:")
+              if manifest_digest != api_digest or manifest_digest != local_digests[name]:
+                  fail_asset(
+                      f"SHA256SUMS digest mismatch for {name!r}: "
+                      f"manifest={manifest_digest} API={api_digest} "
+                      f"local={local_digests[name]}"
+                  )
+          PY
+
+          checksum_status=0
+          (
+            cd "$downloads"
+            sha256sum --check --strict SHA256SUMS
+          ) || checksum_status=$?
+          if (( checksum_status != 0 )); then
+            echo "::error::Strict SHA256SUMS verification failed for release_id=${audit_release_id} release_url=${audit_release_url} (sha256sum exit ${checksum_status})." >&2
+            exit "$checksum_status"
+          fi
+
+          capture_snapshot final
+          if ! cmp -s \
+            "$audit_root/initial-receipt.json" \
+            "$audit_root/final-receipt.json"; then
+            echo "::error::Release, asset, or exact-tag state changed during the read-only audit." >&2
+            echo "initial receipt:" >&2
+            sed 's/^/  /' "$audit_root/initial-receipt.json" >&2
+            echo "final receipt:" >&2
+            sed 's/^/  /' "$audit_root/final-receipt.json" >&2
+            exit 1
+          fi
+          echo "Existing release integrity verified for ${RELEASE_TAG}; build and publication remain skipped."
+
   release-state-preflight:
     needs: get-version
     if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'

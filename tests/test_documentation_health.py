@@ -196,6 +196,21 @@ class TestDocumentationHealth(unittest.TestCase):
         self.assertIn("[tool.ruff.lint]", pyproject)
         self.assertIn('"F82"', pyproject)
 
+    def test_dependabot_updates_only_github_actions_weekly(self) -> None:
+        dependabot = (
+            PROJECT_ROOT / ".github" / "dependabot.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            dependabot,
+            'version: 2\n'
+            'updates:\n'
+            '  - package-ecosystem: "github-actions"\n'
+            '    directory: "/"\n'
+            '    schedule:\n'
+            '      interval: "weekly"\n',
+        )
+
     def test_external_workflow_actions_are_immutable_and_node24_native(
         self,
     ) -> None:

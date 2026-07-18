@@ -11,6 +11,13 @@ on:
     paths:
       - 'src/version.py'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('gm2godot-release-pr-{0}', github.run_id) || 'gm2godot-release-publisher' }}
+  cancel-in-progress: false
+
 jobs:
   get-version:
     runs-on: ubuntu-latest
@@ -49,9 +56,112 @@ jobs:
 
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
-  build:
+  release-state-preflight:
     needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check for incomplete release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.get-version.outputs.version }}
+          RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS: '1'
+        run: |
+          set -euo pipefail
+
+          for required in gh python; do
+            if ! command -v "$required" >/dev/null 2>&1; then
+              echo "::error::Required release-preflight tool is unavailable: $required" >&2
+              exit 1
+            fi
+          done
+          if [[ -z "${GH_TOKEN:-}" || -z "${GITHUB_REPOSITORY:-}" || -z "${RELEASE_TAG:-}" ]]; then
+            echo "::error::Release preflight is missing GH_TOKEN, GITHUB_REPOSITORY, or RELEASE_TAG." >&2
+            exit 1
+          fi
+
+          release_pages="$(mktemp)"
+          trap 'rm -f "$release_pages"' EXIT
+
+          for attempt in 1 2 3; do
+            api_status=0
+            gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              >"$release_pages" || api_status=$?
+            if (( api_status != 0 )); then
+              echo "::error::Authenticated release-state query failed for ${RELEASE_TAG} (gh exit ${api_status}); refusing to publish." >&2
+              exit "$api_status"
+            fi
+
+            parse_status=0
+            release_matches="$(python - "$release_pages" "$RELEASE_TAG" <<'PY'
+          import json
+          import sys
+
+          path, exact_tag = sys.argv[1:]
+          try:
+              with open(path, encoding="utf-8") as handle:
+                  pages = json.load(handle)
+          except (OSError, json.JSONDecodeError) as error:
+              print(f"Unable to parse release listing: {error}", file=sys.stderr)
+              raise SystemExit(1)
+
+          if not isinstance(pages, list):
+              print("Release listing was not a JSON array of pages.", file=sys.stderr)
+              raise SystemExit(1)
+
+          for page_number, page in enumerate(pages, start=1):
+              if not isinstance(page, list):
+                  print(f"Release page {page_number} was not a JSON array.", file=sys.stderr)
+                  raise SystemExit(1)
+              for release in page:
+                  if not isinstance(release, dict):
+                      print(
+                          f"Release page {page_number} contained a non-object entry.",
+                          file=sys.stderr,
+                      )
+                      raise SystemExit(1)
+                  tag_name = release.get("tag_name")
+                  if not isinstance(tag_name, str) or not tag_name:
+                      print(
+                          f"Release page {page_number} contained an entry without "
+                          "a non-empty string tag_name.",
+                          file=sys.stderr,
+                      )
+                      raise SystemExit(1)
+                  if tag_name != exact_tag:
+                      continue
+
+                  assets = release.get("assets")
+                  asset_count = len(assets) if isinstance(assets, list) else "unknown"
+                  print(
+                      f"id={release.get('id')} draft={release.get('draft')} "
+                      f"prerelease={release.get('prerelease')} assets={asset_count} "
+                      f"url={release.get('html_url')}"
+                  )
+          PY
+          )" || parse_status=$?
+            if (( parse_status != 0 )); then
+              echo "::error::Release-state response could not be validated; refusing to publish ${RELEASE_TAG}." >&2
+              exit "$parse_status"
+            fi
+            if [[ -n "$release_matches" ]]; then
+              echo "::error::Exact release state already exists for ${RELEASE_TAG} while its tag ref is absent. Refusing automatic reuse; inspect and clean it manually before rerunning." >&2
+              printf '%s\n' "$release_matches" >&2
+              exit 1
+            fi
+            if (( attempt < 3 )); then
+              sleep "$RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS"
+            fi
+          done
+
+  build:
+    needs: [get-version, release-state-preflight]
+    if: ${{ !cancelled() && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && (github.event_name == 'pull_request' || needs.release-state-preflight.result == 'success') }}
     strategy:
       matrix:
         include:
@@ -151,8 +261,8 @@ jobs:
             GM2Godot-${{ matrix.name }}.dmg
 
   release:
-    needs: [get-version, build]
-    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'
+    needs: [get-version, release-state-preflight, build]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -186,6 +296,7 @@ jobs:
           tag_name: v${{ needs.get-version.outputs.version }}
           name: GM2Godot v${{ needs.get-version.outputs.version }}
           generate_release_notes: true
+          overwrite_files: false
           files: |
             artifacts/GM2Godot-windows/GM2Godot-windows.zip
             artifacts/GM2Godot-macos/GM2Godot-macos.zip

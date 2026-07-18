@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -55,6 +57,7 @@ EXTERNAL_FIXTURE_REPOSITORIES = (
         "https://github.com/WuffMakesGames/Adding.git",
     ),
 )
+RELEASE_PREFLIGHT_TEST_TAG = "v999.123.456"
 
 
 def _godot_env_lines(content: str) -> tuple[str, ...]:
@@ -194,6 +197,110 @@ def _run_release_tag_check(
     return subprocess.run(
         ["bash", "-c", script],
         cwd=checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def _run_release_state_preflight(
+    content: str,
+    root: Path,
+    response_text: str | tuple[str, ...],
+    *,
+    gh_exit: int = 0,
+    token: str | None = "test-token",
+    install_gh: bool = True,
+    install_python: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    script = _workflow_run_script(content, "Check for incomplete release state")
+    tools_dir = root / "tools"
+    tools_dir.mkdir()
+    response_texts = (response_text,) if isinstance(response_text, str) else response_text
+    if not response_texts:
+        raise ValueError("Release-preflight response sequence cannot be empty")
+    response_paths: list[Path] = []
+    for index, current_response in enumerate(response_texts, start=1):
+        response_path = root / f"release-pages-{index}.json"
+        response_path.write_text(current_response, encoding="utf-8")
+        response_paths.append(response_path)
+    call_log = root / "gh-calls.txt"
+
+    if install_gh:
+        fake_gh = tools_dir / "gh"
+        fake_gh.write_text(
+            f"#!{sys.executable}\n"
+            """from pathlib import Path
+import os
+import sys
+
+expected = [
+    "api",
+    "--paginate",
+    "--slurp",
+    "-H",
+    "Accept: application/vnd.github+json",
+    "-H",
+    "X-GitHub-Api-Version: 2026-03-10",
+    "repos/Infiland/GM2Godot/releases?per_page=100",
+]
+if sys.argv[1:] != expected:
+    print(f"unexpected gh arguments: {sys.argv[1:]!r}", file=sys.stderr)
+    raise SystemExit(97)
+if os.environ.get("GH_TOKEN") != "test-token":
+    print("fake gh did not receive the expected GH_TOKEN", file=sys.stderr)
+    raise SystemExit(98)
+call_log = Path(os.environ["FAKE_GH_CALL_LOG"])
+call_number = 0
+if call_log.exists():
+    call_number = len(call_log.read_text(encoding="utf-8").splitlines())
+response_paths = os.environ["FAKE_GH_RESPONSES"].split(os.pathsep)
+response_path = response_paths[min(call_number, len(response_paths) - 1)]
+with call_log.open("a", encoding="utf-8") as handle:
+    handle.write("call\\n")
+sys.stdout.write(
+    Path(response_path).read_text(encoding="utf-8")
+)
+raise SystemExit(int(os.environ["FAKE_GH_EXIT"]))
+""",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(0o755)
+
+    fake_sleep = tools_dir / "sleep"
+    fake_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_sleep.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "FAKE_GH_CALL_LOG": str(call_log),
+            "FAKE_GH_EXIT": str(gh_exit),
+            "FAKE_GH_RESPONSES": os.pathsep.join(map(str, response_paths)),
+            "GITHUB_REPOSITORY": "Infiland/GM2Godot",
+            "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
+            "RELEASE_TAG": RELEASE_PREFLIGHT_TEST_TAG,
+        }
+    )
+    if token is None:
+        environment.pop("GH_TOKEN", None)
+    else:
+        environment["GH_TOKEN"] = token
+    if install_gh and install_python:
+        environment["PATH"] = os.pathsep.join(
+            (
+                str(tools_dir),
+                str(Path(sys.executable).parent),
+                environment.get("PATH", ""),
+            )
+        )
+    else:
+        environment["PATH"] = str(tools_dir)
+
+    return subprocess.run(
+        ["/bin/bash", "-c", script],
+        cwd=root,
         check=False,
         capture_output=True,
         text=True,
@@ -414,6 +521,244 @@ class TestCIWorkflows(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_release_state_preflight_allows_only_prefixed_tags_across_pages(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages: list[list[dict[str, object]]] = [
+            [
+                {
+                    "id": 1,
+                    "tag_name": f"{RELEASE_PREFLIGHT_TEST_TAG}0",
+                    "draft": True,
+                    "prerelease": False,
+                    "assets": [],
+                    "html_url": "https://example.invalid/prefix",
+                }
+            ],
+            [
+                {
+                    "id": 2,
+                    "tag_name": f"{RELEASE_PREFLIGHT_TEST_TAG}-rc1",
+                    "draft": False,
+                    "prerelease": True,
+                    "assets": [],
+                    "html_url": "https://example.invalid/prerelease",
+                }
+            ],
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_release_state_preflight(
+                content,
+                root,
+                json.dumps(release_pages),
+            )
+            calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, "call\ncall\ncall\n")
+        self.assertNotIn("Exact release state already exists", result.stderr)
+
+    def test_release_state_preflight_rejects_exact_partial_draft_on_later_page(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        release_pages: list[list[dict[str, object]]] = [
+            [
+                {
+                    "id": 1,
+                    "tag_name": f"{RELEASE_PREFLIGHT_TEST_TAG}0",
+                    "draft": False,
+                    "prerelease": False,
+                    "assets": [],
+                    "html_url": "https://example.invalid/prefix",
+                }
+            ],
+            [
+                {
+                    "id": 726,
+                    "tag_name": RELEASE_PREFLIGHT_TEST_TAG,
+                    "draft": True,
+                    "prerelease": False,
+                    "assets": [{"id": 9, "name": "GM2Godot-linux.zip"}],
+                    "html_url": "https://example.invalid/partial-draft",
+                }
+            ],
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_release_state_preflight(
+                content,
+                root,
+                json.dumps(release_pages),
+            )
+            calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, "call\n")
+        self.assertIn(
+            f"Exact release state already exists for {RELEASE_PREFLIGHT_TEST_TAG}",
+            result.stderr,
+        )
+        self.assertIn("while its tag ref is absent", result.stderr)
+        self.assertIn(
+            "id=726 draft=True prerelease=False assets=1 "
+            "url=https://example.invalid/partial-draft",
+            result.stderr,
+        )
+
+    def test_release_state_preflight_rechecks_after_initial_absence(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        responses = (
+            json.dumps([[]]),
+            json.dumps(
+                [
+                    [
+                        {
+                            "id": 727,
+                            "tag_name": RELEASE_PREFLIGHT_TEST_TAG,
+                            "draft": True,
+                            "prerelease": False,
+                            "assets": [],
+                            "html_url": "https://example.invalid/delayed-draft",
+                        }
+                    ]
+                ]
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_release_state_preflight(
+                content,
+                root,
+                responses,
+            )
+            calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, "call\ncall\n")
+        self.assertIn(
+            f"Exact release state already exists for {RELEASE_PREFLIGHT_TEST_TAG}",
+            result.stderr,
+        )
+        self.assertIn("id=727 draft=True", result.stderr)
+
+    def test_release_state_preflight_fails_closed_on_api_error(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_release_state_preflight(
+                content,
+                root,
+                json.dumps([[{"tag_name": RELEASE_PREFLIGHT_TEST_TAG}]]),
+                gh_exit=42,
+            )
+            calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 42)
+        self.assertEqual(calls, "call\n")
+        self.assertIn(
+            "Authenticated release-state query failed for "
+            f"{RELEASE_PREFLIGHT_TEST_TAG} (gh exit 42)",
+            result.stderr,
+        )
+        self.assertNotIn("Exact release state already exists", result.stderr)
+
+    def test_release_state_preflight_fails_closed_on_malformed_json(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            result = _run_release_state_preflight(content, root, "{not-json")
+            calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, "call\n")
+        self.assertIn("Unable to parse release listing", result.stderr)
+        self.assertIn(
+            "Release-state response could not be validated",
+            result.stderr,
+        )
+
+    def test_release_state_preflight_fails_closed_on_invalid_schema(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        invalid_responses = {
+            "top-level object": "{}",
+            "page object": "[{}]",
+            "non-object release": "[[42]]",
+            "missing tag name": "[[{}]]",
+            "empty tag name": '[[{"tag_name": ""}]]',
+            "non-string tag name": '[[{"tag_name": 123}]]',
+        }
+
+        for case, response_text in invalid_responses.items():
+            with self.subTest(case=case):
+                with tempfile.TemporaryDirectory() as temp_directory:
+                    root = Path(temp_directory)
+                    result = _run_release_state_preflight(
+                        content,
+                        root,
+                        response_text,
+                    )
+                    calls = (root / "gh-calls.txt").read_text(encoding="utf-8")
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, "call\n")
+                self.assertIn(
+                    "Release-state response could not be validated",
+                    result.stderr,
+                )
+
+    def test_release_state_preflight_requires_token_and_gh(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_token = _run_release_state_preflight(
+                content,
+                Path(temp_directory),
+                "[]",
+                token=None,
+            )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_gh = _run_release_state_preflight(
+                content,
+                Path(temp_directory),
+                "[]",
+                install_gh=False,
+            )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            missing_python = _run_release_state_preflight(
+                content,
+                Path(temp_directory),
+                "[]",
+                install_python=False,
+            )
+
+        self.assertNotEqual(missing_token.returncode, 0)
+        self.assertIn("Release preflight is missing GH_TOKEN", missing_token.stderr)
+        self.assertNotEqual(missing_gh.returncode, 0)
+        self.assertIn(
+            "Required release-preflight tool is unavailable: gh",
+            missing_gh.stderr,
+        )
+        self.assertNotEqual(missing_python.returncode, 0)
+        self.assertIn(
+            "Required release-preflight tool is unavailable: python",
+            missing_python.stderr,
+        )
+
     def test_release_jobs_require_authoritative_remote_tag_absence(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
         content = workflow.read_text(encoding="utf-8")
@@ -427,6 +772,18 @@ class TestCIWorkflows(unittest.TestCase):
         release_job_conditions = [
             line for line in release_job.splitlines() if line.startswith("    if: ")
         ]
+        build_guard = (
+            "${{ !cancelled() && needs.get-version.result == 'success' && "
+            f"{absence_guard} && (github.event_name == 'pull_request' || "
+            "needs.release-state-preflight.result == 'success') }}"
+        )
+        release_guard = (
+            "${{ !cancelled() && github.event_name != 'pull_request' && "
+            "needs.get-version.result == 'success' && "
+            f"{absence_guard} && "
+            "needs.release-state-preflight.result == 'success' && "
+            "needs.build.result == 'success' }}"
+        )
 
         self.assertIn("set -euo pipefail", script)
         self.assertIn(
@@ -435,10 +792,117 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn('tag_ref="refs/tags/v${{ steps.version.outputs.version }}"', script)
         self.assertNotIn("git rev-parse", script)
-        self.assertEqual(build_job_conditions, [f"    if: {absence_guard}"])
+        self.assertEqual(build_job_conditions, [f"    if: {build_guard}"])
         self.assertEqual(
             release_job_conditions,
-            [f"    if: github.event_name != 'pull_request' && {absence_guard}"],
+            [f"    if: {release_guard}"],
+        )
+
+    def test_release_publication_guards_cover_the_complete_workflow(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text(encoding="utf-8")
+        tag_check_marker = "      - name: Check if tag already exists\n"
+        preflight_marker = "      - name: Check for incomplete release state\n"
+        build_marker = "\n  build:\n"
+        get_version_job = content[
+            content.index("  get-version:"):content.index(
+                "  release-state-preflight:"
+            )
+        ]
+        preflight_job = content[
+            content.index("  release-state-preflight:"):content.index(build_marker)
+        ]
+        preflight_metadata = content[
+            content.index(preflight_marker):content.index(
+                "        run: |\n",
+                content.index(preflight_marker),
+            )
+        ]
+        release_job = content[content.index("  release:"):]
+        build_job = content[content.index(build_marker):content.index("  release:")]
+        preflight_script = _workflow_run_script(
+            content,
+            "Check for incomplete release state",
+        )
+        preflight_job_conditions = [
+            line.strip()
+            for line in preflight_job.splitlines()
+            if line.startswith("    if: ")
+        ]
+        preflight_step_conditions = [
+            line.strip()
+            for line in preflight_metadata.splitlines()
+            if line.strip().startswith("if: ")
+        ]
+        create_release_step = release_job[
+            release_job.index("      - name: Create release\n"):
+        ]
+
+        self.assertIn("permissions:\n  contents: read", content)
+        self.assertIn(
+            "concurrency:\n"
+            "  group: ${{ github.event_name == 'pull_request' && "
+            "format('gm2godot-release-pr-{0}', github.run_id) || "
+            "'gm2godot-release-publisher' }}\n"
+            "  cancel-in-progress: false",
+            content,
+        )
+        self.assertNotIn("\n  queue:", content)
+        self.assertLess(content.index(tag_check_marker), content.index(preflight_marker))
+        self.assertLess(content.index(preflight_marker), content.index(build_marker))
+        self.assertNotIn("    permissions:", get_version_job)
+        self.assertNotIn("write-all", get_version_job)
+        self.assertNotIn("gh api", get_version_job)
+        self.assertIn("permissions:\n      contents: write", preflight_job)
+        self.assertNotIn("actions/checkout", preflight_job)
+        self.assertNotIn("      - uses:", preflight_job)
+        self.assertNotIn("pip install", preflight_job)
+        self.assertEqual(content.count("contents: write"), 2)
+        self.assertEqual(
+            preflight_job_conditions,
+            [
+                "if: github.event_name != 'pull_request' && "
+                "needs.get-version.outputs.tag_exists == 'false'"
+            ],
+        )
+        self.assertEqual(preflight_step_conditions, [])
+        self.assertNotIn("continue-on-error:", preflight_metadata)
+        self.assertEqual(content.count(preflight_marker), 1)
+        self.assertEqual(content.count("gh api --paginate --slurp"), 1)
+        self.assertIn(
+            "needs: [get-version, release-state-preflight]",
+            build_job,
+        )
+        self.assertNotIn("always()", build_job)
+        self.assertIn(
+            "needs: [get-version, release-state-preflight, build]",
+            release_job,
+        )
+        self.assertNotIn("always()", release_job)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", preflight_metadata)
+        self.assertIn(
+            "RELEASE_TAG: v${{ needs.get-version.outputs.version }}",
+            preflight_metadata,
+        )
+        self.assertIn(
+            "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS: '1'",
+            preflight_metadata,
+        )
+        self.assertIn("gh api --paginate --slurp", preflight_script)
+        self.assertNotIn("jq", preflight_script)
+        self.assertIn("permissions:\n      contents: write", release_job)
+        self.assertIn(
+            "uses: softprops/action-gh-release@"
+            "3d0d9888cb7fd7b750713d6e236d1fcb99157228",
+            create_release_step,
+        )
+        self.assertEqual(
+            [
+                line.strip()
+                for line in create_release_step.splitlines()
+                if "overwrite_files:" in line
+            ],
+            ["overwrite_files: false"],
         )
 
     def test_unit_workflow_runs_discovery_for_golden_and_threshold_gates(self) -> None:

@@ -56,11 +56,17 @@ jobs:
 
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
+  release-state-preflight:
+    needs: get-version
+    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Check for incomplete release state
-        if: github.event_name != 'pull_request' && steps.check_tag.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v${{ steps.version.outputs.version }}
+          RELEASE_TAG: v${{ needs.get-version.outputs.version }}
           RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS: '1'
         run: |
           set -euo pipefail
@@ -154,8 +160,8 @@ jobs:
           done
 
   build:
-    needs: get-version
-    if: needs.get-version.outputs.tag_exists == 'false'
+    needs: [get-version, release-state-preflight]
+    if: ${{ !cancelled() && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && (github.event_name == 'pull_request' || needs.release-state-preflight.result == 'success') }}
     strategy:
       matrix:
         include:
@@ -255,8 +261,8 @@ jobs:
             GM2Godot-${{ matrix.name }}.dmg
 
   release:
-    needs: [get-version, build]
-    if: github.event_name != 'pull_request' && needs.get-version.outputs.tag_exists == 'false'
+    needs: [get-version, release-state-preflight, build]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

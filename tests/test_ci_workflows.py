@@ -772,6 +772,18 @@ class TestCIWorkflows(unittest.TestCase):
         release_job_conditions = [
             line for line in release_job.splitlines() if line.startswith("    if: ")
         ]
+        build_guard = (
+            "${{ !cancelled() && needs.get-version.result == 'success' && "
+            f"{absence_guard} && (github.event_name == 'pull_request' || "
+            "needs.release-state-preflight.result == 'success') }}"
+        )
+        release_guard = (
+            "${{ !cancelled() && github.event_name != 'pull_request' && "
+            "needs.get-version.result == 'success' && "
+            f"{absence_guard} && "
+            "needs.release-state-preflight.result == 'success' && "
+            "needs.build.result == 'success' }}"
+        )
 
         self.assertIn("set -euo pipefail", script)
         self.assertIn(
@@ -780,10 +792,10 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn('tag_ref="refs/tags/v${{ steps.version.outputs.version }}"', script)
         self.assertNotIn("git rev-parse", script)
-        self.assertEqual(build_job_conditions, [f"    if: {absence_guard}"])
+        self.assertEqual(build_job_conditions, [f"    if: {build_guard}"])
         self.assertEqual(
             release_job_conditions,
-            [f"    if: github.event_name != 'pull_request' && {absence_guard}"],
+            [f"    if: {release_guard}"],
         )
 
     def test_release_publication_guards_cover_the_complete_workflow(self) -> None:
@@ -792,6 +804,14 @@ class TestCIWorkflows(unittest.TestCase):
         tag_check_marker = "      - name: Check if tag already exists\n"
         preflight_marker = "      - name: Check for incomplete release state\n"
         build_marker = "\n  build:\n"
+        get_version_job = content[
+            content.index("  get-version:"):content.index(
+                "  release-state-preflight:"
+            )
+        ]
+        preflight_job = content[
+            content.index("  release-state-preflight:"):content.index(build_marker)
+        ]
         preflight_metadata = content[
             content.index(preflight_marker):content.index(
                 "        run: |\n",
@@ -799,11 +819,17 @@ class TestCIWorkflows(unittest.TestCase):
             )
         ]
         release_job = content[content.index("  release:"):]
+        build_job = content[content.index(build_marker):content.index("  release:")]
         preflight_script = _workflow_run_script(
             content,
             "Check for incomplete release state",
         )
-        preflight_conditions = [
+        preflight_job_conditions = [
+            line.strip()
+            for line in preflight_job.splitlines()
+            if line.startswith("    if: ")
+        ]
+        preflight_step_conditions = [
             line.strip()
             for line in preflight_metadata.splitlines()
             if line.strip().startswith("if: ")
@@ -824,16 +850,38 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertNotIn("\n  queue:", content)
         self.assertLess(content.index(tag_check_marker), content.index(preflight_marker))
         self.assertLess(content.index(preflight_marker), content.index(build_marker))
+        self.assertNotIn("    permissions:", get_version_job)
+        self.assertNotIn("write-all", get_version_job)
+        self.assertNotIn("gh api", get_version_job)
+        self.assertIn("permissions:\n      contents: write", preflight_job)
+        self.assertNotIn("actions/checkout", preflight_job)
+        self.assertNotIn("      - uses:", preflight_job)
+        self.assertNotIn("pip install", preflight_job)
+        self.assertEqual(content.count("contents: write"), 2)
         self.assertEqual(
-            preflight_conditions,
+            preflight_job_conditions,
             [
                 "if: github.event_name != 'pull_request' && "
-                "steps.check_tag.outputs.exists == 'false'"
+                "needs.get-version.outputs.tag_exists == 'false'"
             ],
         )
+        self.assertEqual(preflight_step_conditions, [])
+        self.assertNotIn("continue-on-error:", preflight_metadata)
+        self.assertEqual(content.count(preflight_marker), 1)
+        self.assertEqual(content.count("gh api --paginate --slurp"), 1)
+        self.assertIn(
+            "needs: [get-version, release-state-preflight]",
+            build_job,
+        )
+        self.assertNotIn("always()", build_job)
+        self.assertIn(
+            "needs: [get-version, release-state-preflight, build]",
+            release_job,
+        )
+        self.assertNotIn("always()", release_job)
         self.assertIn("GH_TOKEN: ${{ github.token }}", preflight_metadata)
         self.assertIn(
-            "RELEASE_TAG: v${{ steps.version.outputs.version }}",
+            "RELEASE_TAG: v${{ needs.get-version.outputs.version }}",
             preflight_metadata,
         )
         self.assertIn(

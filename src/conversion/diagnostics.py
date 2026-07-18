@@ -642,7 +642,11 @@ def _verify_report_target_state(
         or _path_is_redirected(path, path_stat)
         or not stat.S_ISREG(path_stat.st_mode)
         or _file_fingerprint(path_stat) != expected.fingerprint
-        or stat.S_IMODE(path_stat.st_mode) != expected.mode
+        or expected.mode is None
+        or not _report_modes_match(
+            stat.S_IMODE(path_stat.st_mode),
+            expected.mode,
+        )
     ):
         raise OSError(f"Diagnostic report changed during publication: {path}")
 
@@ -678,6 +682,23 @@ def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
     )
 
 
+def _file_fingerprints_match(
+    actual: FileFingerprint,
+    expected: FileFingerprint,
+) -> bool:
+    """Compare stable file metadata, allowing Windows timestamp divergence.
+
+    Native Windows can report different ``ctime_ns`` values for the same file
+    through a path ``lstat`` and a held descriptor ``fstat``. Device, inode,
+    exact size, and ``mtime_ns`` remain mandatory there. Callers use this only
+    for descriptor parity; path-to-path transaction guards remain exact.
+    POSIX retains exact metadata checks.
+    """
+    if _WINDOWS_READONLY_FILE_ATTRIBUTES:
+        return actual[:4] == expected[:4]
+    return actual == expected
+
+
 def _sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -702,10 +723,20 @@ def _read_report_bytes(path: str, expected: _ReportTargetState) -> bytes:
         if (
             not stat.S_ISREG(opened_before.st_mode)
             or not stat.S_ISREG(path_before.st_mode)
-            or _file_fingerprint(opened_before) != expected.fingerprint
+            or not _file_fingerprints_match(
+                _file_fingerprint(opened_before),
+                expected.fingerprint,
+            )
             or _file_fingerprint(path_before) != expected.fingerprint
-            or stat.S_IMODE(opened_before.st_mode) != expected.mode
-            or stat.S_IMODE(path_before.st_mode) != expected.mode
+            or expected.mode is None
+            or not _report_modes_match(
+                stat.S_IMODE(opened_before.st_mode),
+                expected.mode,
+            )
+            or not _report_modes_match(
+                stat.S_IMODE(path_before.st_mode),
+                expected.mode,
+            )
         ):
             raise OSError(f"Diagnostic report changed while reading it: {path}")
         with os.fdopen(file_descriptor, "rb") as report_file:
@@ -713,8 +744,14 @@ def _read_report_bytes(path: str, expected: _ReportTargetState) -> bytes:
             content = report_file.read()
             opened_after = os.fstat(report_file.fileno())
         if (
-            _file_fingerprint(opened_after) != expected.fingerprint
-            or stat.S_IMODE(opened_after.st_mode) != expected.mode
+            not _file_fingerprints_match(
+                _file_fingerprint(opened_after),
+                expected.fingerprint,
+            )
+            or not _report_modes_match(
+                stat.S_IMODE(opened_after.st_mode),
+                expected.mode,
+            )
         ):
             raise OSError(f"Diagnostic report changed while reading it: {path}")
     finally:
@@ -799,7 +836,8 @@ def _current_state_matching_receipt(
         current.fingerprint is None
         or current.identity != expected.identity
         or current.fingerprint[2] != expected.stat[2]
-        or current.mode != expected.mode
+        or current.mode is None
+        or not _report_modes_match(current.mode, expected.mode)
     ):
         raise OSError(f"Diagnostic report changed since publication: {path}")
     content = _read_report_bytes(path, current)
@@ -891,15 +929,16 @@ def _stage_report_bytes(
         staged_state = _report_target_state(staged_path)
         if (
             staged_state.identity != staged_identity
-            or staged_state.mode != expected_mode
             or staged_state.fingerprint is None
+            or staged_state.mode is None
+            or not _report_modes_match(staged_state.mode, expected_mode)
         ):
             raise OSError(f"Staged diagnostic report changed: {staged_path}")
         temporary_report = _TemporaryReport(
             path=staged_path,
             fingerprint=DiagnosticReportFingerprint(
                 stat=staged_state.fingerprint,
-                mode=expected_mode,
+                mode=staged_state.mode,
                 sha256=_sha256_bytes(content),
             ),
             destination_mode=destination_mode,
@@ -1077,7 +1116,8 @@ def _verify_temporary_report(
     state = _report_target_state(selected_path)
     if (
         state.identity != report.fingerprint.identity
-        or state.mode != report.fingerprint.mode
+        or state.mode is None
+        or not _report_modes_match(state.mode, report.fingerprint.mode)
     ):
         raise OSError(f"Staged diagnostic report changed: {selected_path}")
     content = _read_report_bytes(selected_path, state)
@@ -1085,14 +1125,18 @@ def _verify_temporary_report(
         raise OSError(
             f"Staged diagnostic report content changed: {selected_path}"
         )
-    if state.fingerprint is None or state.mode is None:
+    if state.fingerprint is None:
         raise AssertionError("A verified temporary report must be present.")
     current = DiagnosticReportFingerprint(
         stat=state.fingerprint,
         mode=state.mode,
         sha256=report.fingerprint.sha256,
     )
-    if path is None and current != report.fingerprint:
+    if path is None and (
+        current.stat != report.fingerprint.stat
+        or not _report_modes_match(current.mode, report.fingerprint.mode)
+        or current.sha256 != report.fingerprint.sha256
+    ):
         raise OSError(f"Staged diagnostic report changed: {selected_path}")
     return current
 
@@ -1103,31 +1147,20 @@ def _verify_expected_report(
     exact: DiagnosticReportFingerprint | None,
 ) -> None:
     if exact is not None:
-        if state != _target_state_from_fingerprint(exact):
+        exact_state = _target_state_from_fingerprint(exact)
+        if (
+            state.fingerprint != exact_state.fingerprint
+            or state.mode is None
+            or exact_state.mode is None
+            or not _report_modes_match(state.mode, exact_state.mode)
+        ):
             raise ValueError("Exact diagnostic report receipt does not match state.")
         if _WINDOWS_READONLY_FILE_ATTRIBUTES:
             _current_state_matching_receipt(path, exact)
         else:
             _verify_report_fingerprint(path, exact)
     else:
-        if (
-            _WINDOWS_READONLY_FILE_ATTRIBUTES
-            and state.fingerprint is not None
-            and state.mode is not None
-        ):
-            current = _report_target_state(path)
-            if (
-                current.fingerprint is None
-                or current.identity != state.identity
-                or current.fingerprint[2] != state.fingerprint[2]
-                or current.mode is None
-                or not _report_modes_match(current.mode, state.mode)
-            ):
-                raise OSError(
-                    f"Diagnostic report changed during publication: {path}"
-                )
-        else:
-            _verify_report_target_state(path, state)
+        _verify_report_target_state(path, state)
 
 
 def _publish_staged_report(
@@ -1862,7 +1895,8 @@ def _read_temporary_report(report: _TemporaryReport) -> bytes:
     state = _report_target_state(report.path)
     if (
         state.identity != report.fingerprint.identity
-        or state.mode != report.fingerprint.mode
+        or state.mode is None
+        or not _report_modes_match(state.mode, report.fingerprint.mode)
     ):
         raise OSError(f"Staged diagnostic report changed: {report.path}")
     content = _read_report_bytes(report.path, state)

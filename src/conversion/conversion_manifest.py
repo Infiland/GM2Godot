@@ -703,7 +703,10 @@ def _read_artifact_bytes(path: str, expected: _ArtifactTargetState) -> bytes:
         path_stat = os.lstat(path)
         if (
             not stat.S_ISREG(open_stat_before.st_mode)
-            or _file_fingerprint(open_stat_before) != expected.fingerprint
+            or not _file_fingerprints_match(
+                _file_fingerprint(open_stat_before),
+                expected.fingerprint,
+            )
             or _file_fingerprint(path_stat) != expected.fingerprint
         ):
             raise OSError(
@@ -713,7 +716,10 @@ def _read_artifact_bytes(path: str, expected: _ArtifactTargetState) -> bytes:
             file_descriptor = -1
             content = artifact_file.read()
             open_stat_after = os.fstat(artifact_file.fileno())
-        if _file_fingerprint(open_stat_after) != expected.fingerprint:
+        if not _file_fingerprints_match(
+            _file_fingerprint(open_stat_after),
+            expected.fingerprint,
+        ):
             raise OSError(f"Conversion artifact changed while reading it: {path}")
     finally:
         if file_descriptor >= 0:
@@ -931,8 +937,14 @@ def _read_verified_temporary_artifact(
             or (opened_after.st_dev, opened_after.st_ino) != artifact.identity
             or stat.S_IMODE(opened_after.st_mode) != expected_mode
             or stat.S_IMODE(path_after.st_mode) != expected_mode
-            or _file_fingerprint(opened_after) != fingerprint_before
-            or _file_fingerprint(path_after) != fingerprint_before
+            or not _file_fingerprints_match(
+                _file_fingerprint(opened_after),
+                fingerprint_before,
+            )
+            or not _file_fingerprints_match(
+                _file_fingerprint(path_after),
+                fingerprint_before,
+            )
             or _sha256_bytes(content) != artifact.sha256
         ):
             raise OSError(
@@ -1556,6 +1568,28 @@ def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
         path_stat.st_mtime_ns,
         path_stat.st_ctime_ns,
     )
+
+
+def _file_fingerprints_match(
+    actual: FileFingerprint,
+    expected: FileFingerprint,
+) -> bool:
+    """Compare stable metadata without trusting Windows ctime parity.
+
+    Native Windows can expose different ``st_ctime_ns`` values for the same
+    file through path and descriptor stat calls. Identity, exact size, and
+    modification time remain mandatory there. Callers use this compatibility
+    comparison only for descriptor parity or SHA-256-backed staged content;
+    path-to-path transaction guards remain exact. POSIX comparisons remain
+    fully exact.
+    """
+    if _uses_windows_file_fingerprint_semantics():
+        return actual[:4] == expected[:4]
+    return actual == expected
+
+
+def _uses_windows_file_fingerprint_semantics() -> bool:
+    return os.name == "nt"
 
 
 def _generated_file_kind(relative_path: str) -> str:

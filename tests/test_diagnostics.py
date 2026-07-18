@@ -20,6 +20,7 @@ from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
     DiagnosticCollector,
+    DiagnosticReportFingerprint,
     capture_conversion_diagnostic_reports,
     invalidate_conversion_diagnostic_reports,
     publish_conversion_diagnostic_reports,
@@ -209,6 +210,194 @@ class TestDiagnosticCollector(unittest.TestCase):
                 )
                 if os.name != "nt":
                     self.assertEqual(captured.mode, expected_mode)
+
+    def test_windows_descriptor_io_accepts_ctime_only_fingerprint_drift(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report_path = os.path.join(tmp_dir, "diagnostic.json")
+            report_content = b'{"stable": true}\n'
+            with open(report_path, "wb") as report_file:
+                report_file.write(report_content)
+            target_state = cast(
+                Callable[[str], object],
+                getattr(diagnostics_module, "_report_target_state"),
+            )(report_path)
+            read_report = cast(
+                Callable[[str, object], bytes],
+                getattr(diagnostics_module, "_read_report_bytes"),
+            )
+            real_fingerprint = cast(
+                Callable[[os.stat_result], tuple[int, int, int, int, int]],
+                getattr(diagnostics_module, "_file_fingerprint"),
+            )
+            fingerprint_reads = 0
+
+            def drift_timestamps(
+                path_stat: os.stat_result,
+            ) -> tuple[int, int, int, int, int]:
+                nonlocal fingerprint_reads
+                fingerprint_reads += 1
+                fingerprint = real_fingerprint(path_stat)
+                if fingerprint_reads in (1, 3):
+                    return (*fingerprint[:4], fingerprint[4] + fingerprint_reads)
+                return fingerprint
+
+            with (
+                patch.object(
+                    diagnostics_module,
+                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+                    True,
+                ),
+                patch(
+                    "src.conversion.diagnostics._file_fingerprint",
+                    side_effect=drift_timestamps,
+                ),
+            ):
+                self.assertEqual(
+                    read_report(report_path, target_state),
+                    report_content,
+                )
+
+            self.assertEqual(fingerprint_reads, 4)
+
+    def test_windows_target_state_keeps_exact_path_ctime_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report_path = os.path.join(tmp_dir, "diagnostic.json")
+            with open(report_path, "wb") as report_file:
+                report_file.write(b'{"stable": true}\n')
+            target_state = cast(
+                Callable[[str], object],
+                getattr(diagnostics_module, "_report_target_state"),
+            )(report_path)
+            verify_target_state = cast(
+                Callable[[str, object], None],
+                getattr(diagnostics_module, "_verify_report_target_state"),
+            )
+            real_fingerprint = cast(
+                Callable[[os.stat_result], tuple[int, int, int, int, int]],
+                getattr(diagnostics_module, "_file_fingerprint"),
+            )
+
+            def path_ctime_drift(
+                path_stat: os.stat_result,
+            ) -> tuple[int, int, int, int, int]:
+                fingerprint = real_fingerprint(path_stat)
+                return (*fingerprint[:4], fingerprint[4] + 1)
+
+            with (
+                patch.object(
+                    diagnostics_module,
+                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+                    True,
+                ),
+                patch(
+                    "src.conversion.diagnostics._file_fingerprint",
+                    side_effect=path_ctime_drift,
+                ),
+                self.assertRaisesRegex(OSError, "changed during publication"),
+            ):
+                verify_target_state(report_path, target_state)
+
+    def test_fingerprint_comparator_relaxes_only_windows_ctime(self) -> None:
+        fingerprints_match = cast(
+            Callable[
+                [
+                    tuple[int, int, int, int, int],
+                    tuple[int, int, int, int, int],
+                ],
+                bool,
+            ],
+            getattr(diagnostics_module, "_file_fingerprints_match"),
+        )
+        expected = (11, 22, 33, 44, 55)
+        ctime_drift = (11, 22, 33, 44, 555)
+        mtime_drift = (11, 22, 33, 444, 55)
+
+        with patch.object(
+            diagnostics_module,
+            "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+            True,
+        ):
+            self.assertTrue(fingerprints_match(ctime_drift, expected))
+            self.assertFalse(fingerprints_match(mtime_drift, expected))
+            self.assertFalse(
+                fingerprints_match((111, 22, 33, 44, 555), expected)
+            )
+            self.assertFalse(
+                fingerprints_match((11, 222, 33, 44, 555), expected)
+            )
+            self.assertFalse(
+                fingerprints_match((11, 22, 333, 44, 555), expected)
+            )
+
+        with patch.object(
+            diagnostics_module,
+            "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+            False,
+        ):
+            self.assertFalse(fingerprints_match(ctime_drift, expected))
+
+    def test_windows_rejects_identity_size_mtime_content_and_mode_drift(
+        self,
+    ) -> None:
+        verify_fingerprint = cast(
+            Callable[[str, DiagnosticReportFingerprint], None],
+            getattr(diagnostics_module, "_verify_report_fingerprint"),
+        )
+        for drift in ("identity", "size", "mtime", "content", "mode"):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as tmp_dir:
+                with patch.object(
+                    diagnostics_module,
+                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+                    True,
+                ):
+                    receipt = DiagnosticCollector().publish_reports(tmp_dir)
+                    report_path = receipt.json_path
+                    fingerprint = receipt.json_report
+                    with open(report_path, "rb") as report_file:
+                        content = report_file.read()
+                    report_mode = stat.S_IMODE(os.stat(report_path).st_mode)
+
+                    if drift == "identity":
+                        replacement_path = f"{report_path}.replacement"
+                        with open(replacement_path, "wb") as replacement_file:
+                            replacement_file.write(content)
+                        os.chmod(replacement_path, report_mode)
+                        os.replace(replacement_path, report_path)
+                    elif drift == "size":
+                        with open(report_path, "ab") as report_file:
+                            report_file.write(b"x")
+                    elif drift == "mtime":
+                        report_stat = os.stat(report_path)
+                        os.utime(
+                            report_path,
+                            ns=(
+                                report_stat.st_atime_ns,
+                                report_stat.st_mtime_ns + 1_000_000_000,
+                            ),
+                        )
+                    elif drift == "content":
+                        with open(report_path, "r+b") as report_file:
+                            report_file.write(
+                                bytes((content[0] ^ 1,))
+                            )
+                        current_stat = os.stat(report_path)
+                        fingerprint = replace(
+                            fingerprint,
+                            stat=(
+                                current_stat.st_dev,
+                                current_stat.st_ino,
+                                current_stat.st_size,
+                                current_stat.st_mtime_ns,
+                                current_stat.st_ctime_ns,
+                            ),
+                        )
+                    else:
+                        os.chmod(report_path, report_mode ^ stat.S_IWRITE)
+
+                    with self.assertRaises(OSError):
+                        verify_fingerprint(report_path, fingerprint)
 
     def test_snapshot_refuses_redirected_or_nonregular_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -560,6 +749,70 @@ class TestDiagnosticCollector(unittest.TestCase):
                 changed_mode,
             )
             self.assertTrue(os.path.isfile(receipt.markdown_path))
+
+    def test_windows_restore_publication_boundary_rejects_same_size_tamper(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            baseline = capture_conversion_diagnostic_reports(tmp_dir)
+            receipt = DiagnosticCollector().publish_reports(tmp_dir)
+            with open(receipt.json_path, "rb") as report_file:
+                published_json = report_file.read()
+            with open(receipt.markdown_path, "rb") as report_file:
+                published_markdown = report_file.read()
+            tampered_json = bytes((published_json[0] ^ 1,)) + published_json[1:]
+            real_stage_existing = cast(
+                Callable[[str, object], object],
+                getattr(diagnostics_module, "_stage_existing_report"),
+            )
+            json_tampered = False
+
+            def tamper_after_json_backup(
+                path: str,
+                expected: object,
+            ) -> object:
+                nonlocal json_tampered
+                backup = real_stage_existing(path, expected)
+                if path == receipt.json_path and not json_tampered:
+                    json_tampered = True
+                    report_stat = os.stat(path)
+                    with open(path, "r+b") as report_file:
+                        report_file.write(tampered_json)
+                        report_file.flush()
+                        os.fsync(report_file.fileno())
+                    os.utime(
+                        path,
+                        ns=(
+                            report_stat.st_atime_ns,
+                            report_stat.st_mtime_ns + 1_000_000_000,
+                        ),
+                    )
+                return backup
+
+            with (
+                patch.object(
+                    diagnostics_module,
+                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
+                    True,
+                ),
+                patch(
+                    "src.conversion.diagnostics._stage_existing_report",
+                    side_effect=tamper_after_json_backup,
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "changed"):
+                    restore_conversion_diagnostic_reports(
+                        tmp_dir,
+                        baseline,
+                        receipt,
+                    )
+
+            self.assertTrue(json_tampered)
+            with open(receipt.json_path, "rb") as report_file:
+                self.assertEqual(report_file.read(), tampered_json)
+            with open(receipt.markdown_path, "rb") as report_file:
+                self.assertEqual(report_file.read(), published_markdown)
+            self.assertNotEqual(tampered_json, published_json)
 
     def test_restore_refuses_snapshot_content_that_does_not_match_fingerprint(
         self,

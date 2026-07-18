@@ -37,7 +37,25 @@ class TestConversionManifest(unittest.TestCase):
         self.temp_dir = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.temp_dir)
+        shutil.rmtree(
+            self.temp_dir,
+            onexc=self._retry_windows_read_only_cleanup,
+        )
+
+    @staticmethod
+    def _retry_windows_read_only_cleanup(
+        function: Callable[..., object],
+        path: str,
+        error: BaseException,
+    ) -> None:
+        if not isinstance(error, PermissionError):
+            raise error
+        path_stat = os.lstat(path)
+        path_mode = stat.S_IMODE(path_stat.st_mode)
+        if not stat.S_ISREG(path_stat.st_mode) or path_mode & stat.S_IWRITE:
+            raise error
+        os.chmod(path, path_mode | stat.S_IWRITE)
+        function(path)
 
     def test_convert_emits_deterministic_manifest_with_source_and_path_metadata(self) -> None:
         godot_dir = self.temp_dir / "godot"
@@ -1435,6 +1453,179 @@ class TestConversionManifest(unittest.TestCase):
             ],
             [],
         )
+
+    def test_windows_file_fingerprint_match_ignores_only_ctime(self) -> None:
+        fingerprints_match = cast(
+            Callable[
+                [tuple[int, int, int, int, int], tuple[int, int, int, int, int]],
+                bool,
+            ],
+            getattr(conversion_manifest_module, "_file_fingerprints_match"),
+        )
+        baseline = (11, 22, 33, 44, 55)
+        ctime_only_drift = (11, 22, 33, 44, 99)
+        real_drift = {
+            "device": (12, 22, 33, 44, 55),
+            "inode": (11, 23, 33, 44, 55),
+            "size": (11, 22, 34, 44, 55),
+            "mtime": (11, 22, 33, 45, 55),
+        }
+
+        with patch(
+            "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+            return_value=True,
+        ):
+            self.assertTrue(fingerprints_match(ctime_only_drift, baseline))
+            for field, fingerprint in real_drift.items():
+                with self.subTest(field=field):
+                    self.assertFalse(fingerprints_match(fingerprint, baseline))
+
+        with patch(
+            "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+            return_value=False,
+        ):
+            self.assertFalse(fingerprints_match(ctime_only_drift, baseline))
+
+    def test_windows_target_state_keeps_exact_path_ctime_guard(self) -> None:
+        artifact_path = self.temp_dir / "artifact.json"
+        artifact_path.write_bytes(b"stable artifact\n")
+        target_state = cast(
+            Callable[[str], object],
+            getattr(conversion_manifest_module, "_artifact_target_state"),
+        )(str(artifact_path))
+        verify_target_state = cast(
+            Callable[[str, object], None],
+            getattr(conversion_manifest_module, "_verify_artifact_target_state"),
+        )
+        real_fingerprint = cast(
+            Callable[[os.stat_result], tuple[int, int, int, int, int]],
+            getattr(conversion_manifest_module, "_file_fingerprint"),
+        )
+
+        def path_ctime_drift(
+            path_stat: os.stat_result,
+        ) -> tuple[int, int, int, int, int]:
+            fingerprint = real_fingerprint(path_stat)
+            return (*fingerprint[:4], fingerprint[4] + 1)
+
+        with (
+            patch(
+                "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+                return_value=True,
+            ),
+            patch(
+                "src.conversion.conversion_manifest._file_fingerprint",
+                side_effect=path_ctime_drift,
+            ),
+            self.assertRaisesRegex(OSError, "changed during publication"),
+        ):
+            verify_target_state(str(artifact_path), target_state)
+
+    def test_windows_temporary_verification_accepts_ctime_only_divergence(
+        self,
+    ) -> None:
+        stage_artifact = cast(
+            Callable[..., Any],
+            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
+        )
+        verify_artifact = cast(
+            Callable[..., None],
+            getattr(conversion_manifest_module, "_verify_temporary_artifact"),
+        )
+        file_fingerprint = cast(
+            Callable[[os.stat_result], tuple[int, int, int, int, int]],
+            getattr(conversion_manifest_module, "_file_fingerprint"),
+        )
+        artifact = stage_artifact(
+            str(self.temp_dir / "artifact.json"),
+            b"stable artifact\n",
+            mode=None,
+            suffix=".tmp",
+        )
+        fingerprint_call = 0
+
+        def ctime_divergent_fingerprint(
+            path_stat: os.stat_result,
+        ) -> tuple[int, int, int, int, int]:
+            nonlocal fingerprint_call
+            fingerprint_call += 1
+            fingerprint = file_fingerprint(path_stat)
+            return (*fingerprint[:4], fingerprint[4] + fingerprint_call)
+
+        try:
+            with (
+                patch(
+                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+                    return_value=True,
+                ),
+                patch(
+                    "src.conversion.conversion_manifest._file_fingerprint",
+                    side_effect=ctime_divergent_fingerprint,
+                ),
+            ):
+                verify_artifact(artifact)
+
+            fingerprint_call = 0
+            with (
+                patch(
+                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+                    return_value=False,
+                ),
+                patch(
+                    "src.conversion.conversion_manifest._file_fingerprint",
+                    side_effect=ctime_divergent_fingerprint,
+                ),
+                self.assertRaisesRegex(OSError, "content changed"),
+            ):
+                verify_artifact(artifact)
+        finally:
+            Path(artifact.path).unlink(missing_ok=True)
+
+    def test_windows_temporary_verification_rejects_content_and_mode_drift(
+        self,
+    ) -> None:
+        stage_artifact = cast(
+            Callable[..., Any],
+            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
+        )
+        verify_artifact = cast(
+            Callable[..., None],
+            getattr(conversion_manifest_module, "_verify_temporary_artifact"),
+        )
+        original_content = b"original\n"
+        artifact = stage_artifact(
+            str(self.temp_dir / "artifact.json"),
+            original_content,
+            mode=None,
+            suffix=".tmp",
+        )
+        artifact_path = Path(artifact.path)
+
+        try:
+            artifact_path.write_bytes(b"tampered\n")
+            with (
+                patch(
+                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+                    return_value=True,
+                ),
+                self.assertRaisesRegex(OSError, "content changed"),
+            ):
+                verify_artifact(artifact)
+
+            artifact_path.write_bytes(original_content)
+            tampered_mode = artifact.staged_mode ^ stat.S_IWRITE
+            os.chmod(artifact_path, tampered_mode)
+            with (
+                patch(
+                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
+                    return_value=True,
+                ),
+                self.assertRaisesRegex(OSError, "artifact changed"),
+            ):
+                verify_artifact(artifact)
+        finally:
+            os.chmod(artifact_path, artifact.staged_mode | stat.S_IWRITE)
+            artifact_path.unlink(missing_ok=True)
 
     def test_windows_read_only_artifact_pair_is_replaced_without_read_only_temps(
         self,

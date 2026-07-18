@@ -819,6 +819,20 @@ def _policy_modes_match(actual: int, expected: int) -> bool:
     return actual == expected
 
 
+def _policy_fingerprints_match(
+    actual: FileFingerprint,
+    expected: FileFingerprint,
+) -> bool:
+    if _is_windows_platform():
+        # Windows path-stat and open-handle implementations can expose
+        # different st_ctime values for the same file. Keep the stable
+        # identity, size, and mtime guards. Callers use this only for
+        # descriptor parity or exact-content/SHA-backed staged files;
+        # path-to-path transaction guards remain exact.
+        return actual[:4] == expected[:4]
+    return actual == expected
+
+
 def _replaceable_policy_mode(mode: int) -> int:
     if not _is_windows_platform():
         return mode
@@ -928,7 +942,10 @@ def _read_policy_target_bytes(path: str, expected: _PolicyTargetState) -> bytes:
         path_before = os.lstat(path)
         if (
             not stat.S_ISREG(opened_before.st_mode)
-            or _file_fingerprint(opened_before) != expected.fingerprint
+            or not _policy_fingerprints_match(
+                _file_fingerprint(opened_before),
+                expected.fingerprint,
+            )
             or _file_fingerprint(path_before) != expected.fingerprint
         ):
             raise OSError(f"Architecture-policy report changed while reading: {path}")
@@ -936,7 +953,10 @@ def _read_policy_target_bytes(path: str, expected: _PolicyTargetState) -> bytes:
             file_descriptor = -1
             content = report_file.read()
             opened_after = os.fstat(report_file.fileno())
-        if _file_fingerprint(opened_after) != expected.fingerprint:
+        if not _policy_fingerprints_match(
+            _file_fingerprint(opened_after),
+            expected.fingerprint,
+        ):
             raise OSError(f"Architecture-policy report changed while reading: {path}")
     finally:
         if file_descriptor >= 0:
@@ -1075,8 +1095,14 @@ def _read_staged_policy_file(
                     expected_mode,
                 )
             )
-            or _file_fingerprint(opened_after) != fingerprint_before
-            or _file_fingerprint(path_after) != fingerprint_before
+            or not _policy_fingerprints_match(
+                _file_fingerprint(opened_after),
+                fingerprint_before,
+            )
+            or not _policy_fingerprints_match(
+                _file_fingerprint(path_after),
+                fingerprint_before,
+            )
             or content != staged.content
             or _sha256_bytes(content) != staged.sha256
         ):

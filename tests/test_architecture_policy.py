@@ -32,6 +32,21 @@ def _write_text(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
+def _remove_readonly_test_path(
+    function: Callable[..., object],
+    path: str,
+    error: BaseException,
+) -> None:
+    if not isinstance(error, PermissionError):
+        raise error
+    path_stat = os.lstat(path)
+    path_mode = stat.S_IMODE(path_stat.st_mode)
+    if not stat.S_ISREG(path_stat.st_mode) or path_mode & stat.S_IWRITE:
+        raise error
+    os.chmod(path, path_mode | stat.S_IWRITE)
+    function(path)
+
+
 class TestArchitecturePolicy(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = Path(tempfile.mkdtemp())
@@ -41,6 +56,9 @@ class TestArchitecturePolicy(unittest.TestCase):
         self.godot_dir.mkdir()
 
     def tearDown(self) -> None:
+        if os.name == "nt":
+            shutil.rmtree(self.temp_dir, onexc=_remove_readonly_test_path)
+            return
         shutil.rmtree(self.temp_dir)
 
     def assertPolicyModeEqual(self, actual: int, expected: int) -> None:
@@ -163,6 +181,191 @@ class TestArchitecturePolicy(unittest.TestCase):
             stat.S_IMODE(report_path.stat().st_mode),
             previous_mode,
         )
+
+    def test_windows_staged_io_accepts_only_ctime_drift_across_stat_apis(
+        self,
+    ) -> None:
+        report_path = self.godot_dir / ARCHITECTURE_POLICY_RELATIVE_PATH
+        report_path.parent.mkdir(parents=True)
+        stage_policy = cast(
+            Callable[..., object],
+            getattr(architecture_policy_module, "_stage_policy_bytes"),
+        )
+        verify_staged = cast(
+            Callable[[object], None],
+            getattr(architecture_policy_module, "_verify_staged_policy_file"),
+        )
+        staged = stage_policy(
+            str(report_path),
+            b'{"staged": "ctime drift"}\n',
+            mode=None,
+            suffix=".tmp",
+        )
+        real_fingerprint = cast(
+            Callable[[os.stat_result], tuple[int, int, int, int, int]],
+            getattr(architecture_policy_module, "_file_fingerprint"),
+        )
+        fingerprint_calls = 0
+
+        def ctime_drifting_fingerprint(
+            path_stat: os.stat_result,
+        ) -> tuple[int, int, int, int, int]:
+            nonlocal fingerprint_calls
+            fingerprint_calls += 1
+            fingerprint = real_fingerprint(path_stat)
+            return (
+                *fingerprint[:4],
+                fingerprint[4] + fingerprint_calls,
+            )
+
+        try:
+            with (
+                patch(
+                    "src.conversion.architecture_policy._is_windows_platform",
+                    return_value=True,
+                ),
+                patch(
+                    "src.conversion.architecture_policy._file_fingerprint",
+                    side_effect=ctime_drifting_fingerprint,
+                ),
+            ):
+                verify_staged(staged)
+
+            self.assertEqual(fingerprint_calls, 3)
+            fingerprint_calls = 0
+            with (
+                patch(
+                    "src.conversion.architecture_policy._is_windows_platform",
+                    return_value=False,
+                ),
+                patch(
+                    "src.conversion.architecture_policy._file_fingerprint",
+                    side_effect=ctime_drifting_fingerprint,
+                ),
+                self.assertRaisesRegex(OSError, "content changed"),
+            ):
+                verify_staged(staged)
+        finally:
+            Path(cast(str, getattr(staged, "path"))).unlink(missing_ok=True)
+
+        fingerprints_match = cast(
+            Callable[
+                [
+                    tuple[int, int, int, int, int],
+                    tuple[int, int, int, int, int],
+                ],
+                bool,
+            ],
+            getattr(architecture_policy_module, "_policy_fingerprints_match"),
+        )
+        original = (1, 2, 3, 4, 5)
+        ctime_only_drift = (1, 2, 3, 4, 50)
+        mtime_only_drift = (1, 2, 3, 40, 5)
+        identity_drift = (10, 20, 3, 4, 5)
+        size_drift = (1, 2, 30, 4, 5)
+        with patch(
+            "src.conversion.architecture_policy._is_windows_platform",
+            return_value=True,
+        ):
+            self.assertTrue(fingerprints_match(original, ctime_only_drift))
+            self.assertFalse(fingerprints_match(original, mtime_only_drift))
+            self.assertFalse(fingerprints_match(original, identity_drift))
+            self.assertFalse(fingerprints_match(original, size_drift))
+        with patch(
+            "src.conversion.architecture_policy._is_windows_platform",
+            return_value=False,
+        ):
+            self.assertFalse(fingerprints_match(original, ctime_only_drift))
+
+    def test_windows_target_state_keeps_exact_path_ctime_guard(self) -> None:
+        report_path = self.godot_dir / ARCHITECTURE_POLICY_RELATIVE_PATH
+        report_path.parent.mkdir(parents=True)
+        report_path.write_bytes(b'{"stable": true}\n')
+        target_state = cast(
+            Callable[[str], object],
+            getattr(architecture_policy_module, "_policy_target_state"),
+        )(str(report_path))
+        verify_target_state = cast(
+            Callable[[str, object], None],
+            getattr(architecture_policy_module, "_verify_policy_target_state"),
+        )
+        real_fingerprint = cast(
+            Callable[[os.stat_result], tuple[int, int, int, int, int]],
+            getattr(architecture_policy_module, "_file_fingerprint"),
+        )
+
+        def path_ctime_drift(
+            path_stat: os.stat_result,
+        ) -> tuple[int, int, int, int, int]:
+            fingerprint = real_fingerprint(path_stat)
+            return (*fingerprint[:4], fingerprint[4] + 1)
+
+        with (
+            patch(
+                "src.conversion.architecture_policy._is_windows_platform",
+                return_value=True,
+            ),
+            patch(
+                "src.conversion.architecture_policy._file_fingerprint",
+                side_effect=path_ctime_drift,
+            ),
+            self.assertRaisesRegex(OSError, "report changed"),
+        ):
+            verify_target_state(str(report_path), target_state)
+
+    def test_windows_receipt_guard_rejects_identity_size_content_and_mode_changes(
+        self,
+    ) -> None:
+        self._write_minimal_project()
+        verify_receipt = cast(
+            Callable[[object], None],
+            getattr(architecture_policy_module, "_verify_policy_receipt"),
+        )
+
+        for case in ("identity", "size", "content", "mode"):
+            with self.subTest(case=case):
+                godot_dir = self.temp_dir / f"windows-guard-{case}"
+                godot_dir.mkdir()
+                receipt = publish_architecture_policy_report(
+                    str(self.gm_dir),
+                    str(godot_dir),
+                    target_platform="windows",
+                    enabled_converters=["rooms"],
+                )
+                report_path = Path(receipt.path)
+                if case == "identity":
+                    replacement_path = report_path.with_suffix(".replacement")
+                    replacement_path.write_bytes(receipt.content)
+                    replacement_path.chmod(receipt.mode)
+                    os.replace(replacement_path, report_path)
+                elif case == "size":
+                    report_path.write_bytes(receipt.content + b"x")
+                elif case == "content":
+                    report_path.write_bytes(b"X" + receipt.content[1:])
+                    current_stat = report_path.stat()
+                    receipt = replace(
+                        receipt,
+                        fingerprint=(
+                            current_stat.st_dev,
+                            current_stat.st_ino,
+                            current_stat.st_size,
+                            current_stat.st_mtime_ns,
+                        ),
+                    )
+                else:
+                    report_path.chmod(receipt.mode ^ stat.S_IWUSR)
+
+                with (
+                    patch(
+                        "src.conversion.architecture_policy._is_windows_platform",
+                        return_value=True,
+                    ),
+                    self.assertRaisesRegex(
+                        OSError,
+                        "no longer matches its publication receipt",
+                    ),
+                ):
+                    verify_receipt(receipt)
 
     def test_mocked_windows_readonly_report_publishes_restores_and_cleans(
         self,

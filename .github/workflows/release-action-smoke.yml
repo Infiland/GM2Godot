@@ -106,21 +106,41 @@ jobs:
 
       - name: Reject invalid local assets before GitHub API access
         env:
-          GITHUB_TOKEN: gm2godot-release-smoke-invalid-token
-          GITHUB_REF: refs/heads/main
-          GITHUB_REF_TYPE: branch
-          GITHUB_EVENT_NAME: push
-          RELEASE_TAG: v0.0.0
-          RELEASE_NAME: GM2Godot v0.0.0
-          RELEASE_TARGET_SHA: ${{ github.sha }}
-          RELEASE_ASSET_ROOT: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_RECEIPT_PATH: release-receipt/release-publisher.json
-          RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS: '0'
+          SMOKE_TARGET_SHA: ${{ github.sha }}
+          SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
 
           set +e
-          publisher_output="$(python3 scripts/release_publisher.py 2>&1)"
+          publisher_output="$(
+            python3 - <<'PY' 2>&1
+          import os
+          from scripts import release_publisher
+
+          synthetic_environment = dict(os.environ)
+          synthetic_environment.update(
+              {
+                  "GITHUB_API_URL": "https://api.github.com",
+                  "GITHUB_EVENT_NAME": "push",
+                  "GITHUB_REF": "refs/heads/main",
+                  "GITHUB_REF_TYPE": "branch",
+                  "GITHUB_REPOSITORY": os.environ["GITHUB_REPOSITORY"],
+                  "GITHUB_RUN_ATTEMPT": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "GITHUB_RUN_ID": os.environ["GITHUB_RUN_ID"],
+                  "GITHUB_SERVER_URL": "https://github.com",
+                  "GITHUB_SHA": os.environ["SMOKE_TARGET_SHA"],
+                  "GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token",
+                  "RELEASE_ASSET_ROOT": os.environ["SMOKE_ASSET_ROOT"],
+                  "RELEASE_NAME": "GM2Godot v0.0.0",
+                  "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
+                  "RELEASE_RECEIPT_PATH": "release-receipt/release-publisher.json",
+                  "RELEASE_TAG": "v0.0.0",
+                  "RELEASE_TARGET_SHA": os.environ["SMOKE_TARGET_SHA"],
+              }
+          )
+          raise SystemExit(release_publisher.main(synthetic_environment))
+          PY
+          )"
           publisher_status=$?
           set -e
           if (( publisher_status == 0 )); then

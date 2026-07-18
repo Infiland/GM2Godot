@@ -844,11 +844,11 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, content)
         self.assertIn(
-            "RELEASE_ASSET_ROOT: __gm2godot_release_smoke_missing__/"
+            "SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/"
             "${{ github.run_id }}-${{ github.run_attempt }}",
             content,
         )
-        self.assertIn("RELEASE_TAG: v0.0.0", content)
+        self.assertIn('"RELEASE_TAG": "v0.0.0"', content)
 
     def test_release_action_smoke_reuses_production_action_pins(self) -> None:
         release = (
@@ -1098,13 +1098,16 @@ class TestCIWorkflows(unittest.TestCase):
         ]
 
         for required in (
-            "GITHUB_TOKEN: gm2godot-release-smoke-invalid-token",
-            "GITHUB_REF: refs/heads/main",
-            "GITHUB_REF_TYPE: branch",
-            "GITHUB_EVENT_NAME: push",
-            "RELEASE_TARGET_SHA: ${{ github.sha }}",
-            "RELEASE_RECEIPT_PATH: release-receipt/release-publisher.json",
-            "python3 scripts/release_publisher.py",
+            "SMOKE_TARGET_SHA: ${{ github.sha }}",
+            "SMOKE_ASSET_ROOT: __gm2godot_release_smoke_missing__/",
+            "from scripts import release_publisher",
+            '"GITHUB_REF": "refs/heads/main"',
+            '"GITHUB_REF_TYPE": "branch"',
+            '"GITHUB_EVENT_NAME": "push"',
+            '"GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token"',
+            '"RELEASE_TARGET_SHA": os.environ["SMOKE_TARGET_SHA"]',
+            '"RELEASE_ASSET_ROOT": os.environ["SMOKE_ASSET_ROOT"]',
+            "release_publisher.main(synthetic_environment)",
             'publisher_output" != *"Cannot open regular release asset"*',
             'receipt.get("stage") != "failed"',
             'failure.get("phase") != "seal-assets"',
@@ -1118,6 +1121,11 @@ class TestCIWorkflows(unittest.TestCase):
             "softprops/action-gh-release",
             "continue-on-error:",
             "gh api",
+            "python3 scripts/release_publisher.py",
+            "\n          GITHUB_TOKEN:",
+            "\n          GITHUB_REF:",
+            "\n          GITHUB_REF_TYPE:",
+            "\n          GITHUB_EVENT_NAME:",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, publisher_step)
@@ -1138,24 +1146,29 @@ class TestCIWorkflows(unittest.TestCase):
                 script_directory / "release_publisher.py",
             )
             environment = os.environ.copy()
+            for variable in (
+                "GITHUB_TOKEN",
+                "RELEASE_ASSET_ROOT",
+                "RELEASE_NAME",
+                "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS",
+                "RELEASE_RECEIPT_PATH",
+                "RELEASE_TAG",
+                "RELEASE_TARGET_SHA",
+            ):
+                environment.pop(variable, None)
             environment.update(
                 {
                     "GITHUB_API_URL": "https://api.github.com",
-                    "GITHUB_EVENT_NAME": "push",
-                    "GITHUB_REF": "refs/heads/main",
+                    "GITHUB_EVENT_NAME": "pull_request",
+                    "GITHUB_REF": "refs/pull/756/merge",
                     "GITHUB_REF_TYPE": "branch",
                     "GITHUB_REPOSITORY": "Infiland/GM2Godot",
                     "GITHUB_RUN_ATTEMPT": "2",
                     "GITHUB_RUN_ID": "12345",
                     "GITHUB_SERVER_URL": "https://github.com",
                     "GITHUB_SHA": "a" * 40,
-                    "GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token",
-                    "RELEASE_ASSET_ROOT": "missing-assets",
-                    "RELEASE_NAME": "GM2Godot v0.0.0",
-                    "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
-                    "RELEASE_RECEIPT_PATH": "release-receipt/release-publisher.json",
-                    "RELEASE_TAG": "v0.0.0",
-                    "RELEASE_TARGET_SHA": "a" * 40,
+                    "SMOKE_ASSET_ROOT": "missing-assets",
+                    "SMOKE_TARGET_SHA": "a" * 40,
                 }
             )
             result = subprocess.run(

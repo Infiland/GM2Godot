@@ -5,7 +5,7 @@ import stat
 import tempfile
 from collections.abc import Iterable
 from enum import Enum
-from typing import Any
+from typing import Any, Callable, cast
 
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.type_defs import StrPath
@@ -14,6 +14,7 @@ from src.conversion.type_defs import StrPath
 DEFAULT_GODOT_PROJECT_NAME = "GM2Godot Project"
 GODOT_PROJECT_FILENAME = "project.godot"
 MANAGED_OUTPUT_DIRECTORIES: tuple[str, ...] = (
+    os.path.join("addons", "gm2godot_extensions"),
     "fonts",
     "gm2godot",
     "included_files",
@@ -71,12 +72,15 @@ def inspect_godot_project_destination(
     except OSError as error:
         raise _destination_io_error(destination, "inspect", error) from error
 
-    if stat.S_ISLNK(destination_stat.st_mode):
+    if _path_is_redirected(destination, destination_stat):
         raise ConversionPreflightError(
             "GM2GD-CONVERT-DESTINATION-SYMLINK",
-            f"Refusing to convert through a symbolic-link destination: {destination}",
+            f"Refusing to convert through a redirected destination: {destination}",
             destination_path=destination,
-            workaround="Choose the real destination directory instead of a symbolic link.",
+            workaround=(
+                "Choose the real destination directory instead of a symbolic link "
+                "or junction."
+            ),
         )
     if not stat.S_ISDIR(destination_stat.st_mode):
         raise ConversionPreflightError(
@@ -180,9 +184,10 @@ def _verify_destination_identity(
     except OSError as error:
         raise _destination_io_error(destination, "verify", error) from error
 
-    destination_changed = stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISDIR(
-        path_stat.st_mode
-    )
+    destination_changed = _path_is_redirected(
+        destination,
+        path_stat,
+    ) or not stat.S_ISDIR(path_stat.st_mode)
     if directory_fd is not None:
         try:
             open_stat = os.fstat(directory_fd)
@@ -255,7 +260,7 @@ def _validate_managed_output_paths(destination: str) -> None:
         path_stat = _managed_path_stat(destination, path)
         if path_stat is None:
             continue
-        if stat.S_ISLNK(path_stat.st_mode):
+        if _path_is_redirected(path, path_stat):
             raise _managed_output_symlink_error(destination, path)
         _validate_managed_path_containment(
             destination,
@@ -273,30 +278,53 @@ def _validate_managed_output_paths(destination: str) -> None:
             raise _managed_output_hardlink_error(destination, path)
 
     for relative_path in MANAGED_OUTPUT_DIRECTORIES:
-        root = os.path.join(destination_absolute, relative_path)
-        root_stat = _managed_path_stat(destination, root)
-        if root_stat is None:
-            continue
-        if stat.S_ISLNK(root_stat.st_mode):
-            raise _managed_output_symlink_error(destination, root)
+        _validate_managed_output_directory(
+            destination,
+            destination_absolute,
+            destination_real,
+            relative_path,
+        )
+
+
+def _validate_managed_output_directory(
+    destination: str,
+    destination_absolute: str,
+    destination_real: str,
+    relative_path: str,
+) -> None:
+    """Validate a managed root and its ancestors without walking sibling trees."""
+    components = tuple(
+        component
+        for component in relative_path.replace("\\", "/").split("/")
+        if component
+    )
+    current_path = destination_absolute
+    for index, component in enumerate(components):
+        current_path = os.path.join(current_path, component)
+        path_stat = _managed_path_stat(destination, current_path)
+        if path_stat is None:
+            return
+        if _path_is_redirected(current_path, path_stat):
+            raise _managed_output_symlink_error(destination, current_path)
         _validate_managed_path_containment(
             destination,
             destination_absolute,
             destination_real,
-            root,
+            current_path,
         )
-        if not stat.S_ISDIR(root_stat.st_mode):
+        if not stat.S_ISDIR(path_stat.st_mode):
             raise _invalid_managed_output_error(
                 destination,
-                root,
+                current_path,
                 "it is not a directory",
             )
-        _validate_managed_output_tree(
-            destination,
-            destination_absolute,
-            destination_real,
-            root,
-        )
+        if index == len(components) - 1:
+            _validate_managed_output_tree(
+                destination,
+                destination_absolute,
+                destination_real,
+                current_path,
+            )
 
 
 def _validate_managed_output_tree(
@@ -320,7 +348,7 @@ def _validate_managed_output_tree(
                             f"inspect managed output path {path!r} in",
                             error,
                         ) from error
-                    if stat.S_ISLNK(path_stat.st_mode):
+                    if _path_is_redirected(path, path_stat):
                         raise _managed_output_symlink_error(destination, path)
                     _validate_managed_path_containment(
                         destination,
@@ -364,6 +392,17 @@ def _managed_path_stat(
         ) from error
 
 
+def _path_is_redirected(path: str, path_stat: os.stat_result) -> bool:
+    """Return whether a path is a symbolic link or Windows junction."""
+    if stat.S_ISLNK(path_stat.st_mode):
+        return True
+    junction_candidate: object = getattr(os.path, "isjunction", None)
+    if not callable(junction_candidate):
+        return False
+    junction_checker = cast(Callable[[str], bool], junction_candidate)
+    return junction_checker(path)
+
+
 def _validate_managed_path_containment(
     destination: str,
     destination_absolute: str,
@@ -400,11 +439,11 @@ def _managed_output_symlink_error(
 ) -> ConversionPreflightError:
     return ConversionPreflightError(
         "GM2GD-CONVERT-MANAGED-OUTPUT-SYMLINK",
-        f"Refusing to convert through a symbolic link in managed output: {path}",
+        f"Refusing to convert through a redirected managed output path: {path}",
         destination_path=destination,
         workaround=(
-            "Remove symbolic links from GM2Godot-managed output locations or choose "
-            "another destination."
+            "Remove symbolic links and junctions from GM2Godot-managed output "
+            "locations or choose another destination."
         ),
     )
 

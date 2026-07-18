@@ -5,8 +5,10 @@ import os
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from typing import NotRequired, TypeAlias, TypedDict, Unpack, cast
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -18,6 +20,7 @@ from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
 )
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
@@ -112,6 +115,19 @@ class TestSoundConverterBasic(unittest.TestCase):
         import_path = os.path.join(self.godot_dir, "sounds", "jump", "jump.wav.import")
         self.assertTrue(os.path.isfile(import_path),
                         f"Expected {import_path} to exist after conversion")
+
+    def test_resource_outcome_counts_logical_sounds(self):
+        _make_sound_yy(self.gm_dir, "second")
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result().resources
+
+        self.assertEqual(counts.requested, 2)
+        self.assertEqual(counts.executed, 2)
+        self.assertEqual(counts.completed, 2)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
 
     def test_import_file_wav_content(self):
         converter = self._make_converter()
@@ -438,6 +454,74 @@ class TestSoundConverterAudioGroupMap(unittest.TestCase):
         self.assertIn("ok", exported)
         self.assertNotIn("ghost", exported)
 
+    def test_map_write_failure_does_not_report_sound_completion(self) -> None:
+        _make_sound_yy(self.gm_dir, "snd_music")
+        _make_sound_yy(self.gm_dir, "snd_click")
+        converter = self._make_converter()
+
+        with patch.object(
+            converter,
+            "_write_audio_group_map",
+            side_effect=OSError("map write failed"),
+        ):
+            with self.assertRaisesRegex(OSError, "map write failed"):
+                converter.convert_all()
+
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+        self.assertEqual(
+            converter.conversion_step_result(
+                cancelled=False,
+                finalize_unfinished_as="failed",
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                failed=2,
+            ),
+        )
+
+    def test_cancellation_before_map_publication_skips_unfinished_sound(self) -> None:
+        _make_sound_yy(self.gm_dir, "snd_cancelled")
+        running = threading.Event()
+        running.set()
+        converter = self._make_converter(conversion_running=running.is_set)
+        original_process_sound = converter._process_sound
+
+        def process_then_cancel(yy_path: str):
+            result = original_process_sound(yy_path)
+            running.clear()
+            return result
+
+        with patch.object(
+            converter,
+            "_process_sound",
+            side_effect=process_then_cancel,
+        ):
+            converter.convert_all()
+
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sounds",
+                    "audio_group_map.json",
+                )
+            )
+        )
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+
 
 class TestSoundConverterVolumeConversion(unittest.TestCase):
     """Test the volume-to-dB static method."""
@@ -618,6 +702,164 @@ class TestSoundConverterSourcePathContainment(unittest.TestCase):
         )
 
         self.assertEqual(converter.find_sound_files(), [referenced_yy])
+
+    def test_duplicate_manifest_sound_reference_is_converted_once(self) -> None:
+        _make_sound_yy(self.gm_dir, "snd_duplicate")
+        duplicate_path = "sounds/snd_duplicate/snd_duplicate.yy"
+        self._write_yyp(
+            [
+                ("snd_duplicate", duplicate_path),
+                ("snd_duplicate_alias", duplicate_path),
+            ]
+        )
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result(
+            finalize_unfinished_as=None,
+        ).resources
+
+        self.assertEqual(counts.requested, 1)
+        self.assertEqual(counts.executed, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
+
+    def test_missing_only_declared_sound_is_requested_and_skipped(self) -> None:
+        self._write_yyp(
+            [("snd_missing", "sounds/snd_missing/snd_missing.yy")]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOUND-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == "snd_missing"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                "Skipping manifest-declared GameMaker sound 'snd_missing'"
+                in log
+                for log in self.logs
+            )
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "sounds",
+                    "audio_group_map.json",
+                )
+            )
+        )
+
+    def test_safe_and_missing_declared_sounds_have_strict_counts(self) -> None:
+        _make_sound_yy(self.gm_dir, "snd_safe")
+        self._write_yyp(
+            [
+                ("snd_safe", "sounds/snd_safe/snd_safe.yy"),
+                ("snd_missing", "sounds/snd_missing/snd_missing.yy"),
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "sounds",
+                    "snd_safe",
+                    "snd_safe.wav",
+                )
+            )
+        )
+        map_path = os.path.join(
+            self.godot_dir,
+            "sounds",
+            "audio_group_map.json",
+        )
+        with open(map_path, encoding="utf-8") as map_file:
+            audio_group_map = cast(dict[str, str], json.load(map_file))
+        self.assertEqual(
+            audio_group_map,
+            {
+                "format_version": 1,
+                "sounds": {"snd_safe": "audiogroup_default"},
+            },
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOUND-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == "snd_missing"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_rejected_declared_sound_is_requested_and_skipped(self) -> None:
+        cross_family_yy = os.path.join(
+            self.gm_dir,
+            "objects",
+            "snd_rejected",
+            "snd_rejected.yy",
+        )
+        os.makedirs(os.path.dirname(cross_family_yy))
+        with open(cross_family_yy, "w", encoding="utf-8") as yy_file:
+            json.dump(MINIMAL_SOUND_YY, yy_file)
+        self._write_yyp(
+            [
+                (
+                    "snd_rejected",
+                    "sounds/../objects/snd_rejected/snd_rejected.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                skipped=1,
+            ),
+        )
+        diagnostic_codes = {
+            diagnostic.code for diagnostic in diagnostics.diagnostics()
+        }
+        self.assertIn("GM2GD-SOURCE-PATH-REJECTED", diagnostic_codes)
+        self.assertIn("GM2GD-SOUND-SOURCE-UNAVAILABLE", diagnostic_codes)
 
     def test_rejects_cross_family_manifest_resource_after_normalization(
         self,

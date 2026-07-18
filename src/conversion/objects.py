@@ -5,7 +5,8 @@ import re
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Mapping, Sequence
-from typing import TypedDict, cast
+from dataclasses import dataclass
+from typing import Literal, TypedDict, cast
 
 from src.localization import get_localized
 from src.conversion.asset_registry import AssetRegistryConverter
@@ -48,7 +49,10 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.script_generator import (
@@ -115,7 +119,7 @@ class ParsedObject(TypedDict):
 
 
 class ObjectProcessResult(TypedDict):
-    success: bool
+    status: Literal["completed", "skipped", "failed"]
     name: str
     has_sprite: bool
     sprite_name: str | None
@@ -127,6 +131,21 @@ class ObjectEventSource(TypedDict):
     source_path: str
     source: str
     inherited_event_call: str | None
+
+
+@dataclass(frozen=True)
+class _DeclaredObjectResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _ManifestObjectPlan:
+    requested_names: tuple[str, ...]
+    available_subfolders: dict[str, str]
+    skipped_names: tuple[str, ...]
 
 
 def _event_source_filenames(mapping: EventMapping) -> tuple[str, ...]:
@@ -303,72 +322,175 @@ class ObjectConverter(BaseConverter):
         Returns None if the .yyp file cannot be found or parsed, allowing
         the caller to fall back to converting all objects on disk.
         """
+        plan = self._plan_manifest_objects()
+        if plan is None:
+            return None
+        return dict(plan.available_subfolders)
+
+    def _declared_object_resources(
+        self,
+    ) -> tuple[_DeclaredObjectResource, ...] | None:
+        """Return base objects selected by a valid YYP, including rejected paths."""
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
-        manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
+        self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="object",
             include_project_sources=True,
         )
-        try:
-            if manifest.yyp_path is None:
-                return None
-            yyp_source = self._resolve_discovered_project_source(
-                manifest.yyp_path,
-                resource_type="project",
-                field="projectFile",
-            )
-            if yyp_source is None:
-                return None
-            if any(
-                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
-                for diagnostic in manifest.diagnostics
-            ):
-                raise TypeError("GameMaker project root must be an object")
-            data = manifest.raw_data
-
-            valid_objects: dict[str, str] = {}
-            for index, resource in enumerate(cast(list[JsonDict], data.get('resources', []))):
-                res_id = cast(JsonDict, resource.get('id', {}))
-                raw_path = res_id.get('path', '')
-                if not isinstance(raw_path, str):
-                    continue
-                field = f"resources[{index}].id.path"
-                if field in manifest_rejected_fields:
-                    continue
-                path = raw_path.replace('\\', '/')
-                if path.startswith('objects/'):
-                    raw_name = res_id.get('name', '')
-                    name = (
-                        raw_name
-                        if isinstance(raw_name, str) and raw_name
-                        else os.path.splitext(os.path.basename(path))[0]
-                    )
-                    if not name:
-                        continue
-                    resolved_path = self._resolve_project_source(
-                        path,
-                        owner_source_path=yyp_source.source_path,
-                        resource=name,
-                        resource_type="object",
-                        field=field,
-                    )
-                    if resolved_path is None or not self._source_has_resource_kind(
-                        resolved_path,
-                        "objects",
-                        rejected_path=path,
-                        owner_source_path=yyp_source.source_path,
-                        resource=name,
-                        field=field,
-                    ):
-                        continue
-                    yy_path = resolved_path.filesystem_path
-                    self._object_source_paths[name] = resolved_path.source_path
-                    valid_objects[name] = self._get_subfolder_from_yy(yy_path)
-
-            return valid_objects
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-            self._safe_log(get_localized("Console_Convertor_Objects_YYPFilterWarning"))
+        if manifest.yyp_path is None or any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        ):
+            if manifest.yyp_path is not None:
+                self._safe_log(
+                    get_localized("Console_Convertor_Objects_YYPFilterWarning")
+                )
             return None
+
+        declared: dict[str, _DeclaredObjectResource] = {}
+        for resource in manifest.find_resources(kind="objects"):
+            if not resource.name:
+                continue
+            field = (
+                f"{resource.source.field_path}.id.path"
+                if resource.source is not None and resource.source.field_path
+                else "resources[].id.path"
+            )
+            declared.setdefault(
+                resource.name,
+                _DeclaredObjectResource(
+                    name=resource.name,
+                    source_path=resource.path,
+                    owner_source_path=manifest.yyp_path,
+                    manifest_field=field,
+                ),
+            )
+
+        for diagnostic in manifest.diagnostics:
+            if (
+                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
+                or not diagnostic.resource
+                or not self._manifest_diagnostic_is_object(diagnostic)
+            ):
+                continue
+            declared.setdefault(
+                diagnostic.resource,
+                _DeclaredObjectResource(
+                    name=diagnostic.resource,
+                    source_path=None,
+                    owner_source_path=(
+                        diagnostic.source.path
+                        if diagnostic.source is not None
+                        else manifest.yyp_path
+                    ),
+                    manifest_field=(
+                        diagnostic.source.field_path
+                        if diagnostic.source is not None
+                        else None
+                    ),
+                ),
+            )
+
+        return tuple(declared.values())
+
+    @staticmethod
+    def _manifest_diagnostic_is_object(
+        diagnostic: ProjectManifestDiagnostic,
+    ) -> bool:
+        resource_kind = diagnostic.resource_kind
+        resource_type = diagnostic.resource_type
+        return (
+            isinstance(resource_kind, str)
+            and resource_kind.casefold() == "objects"
+        ) or (
+            isinstance(resource_type, str)
+            and resource_type.casefold() in {"object", "gmobject"}
+        )
+
+    def _plan_manifest_objects(self) -> _ManifestObjectPlan | None:
+        """Resolve declared objects without dropping unavailable declarations."""
+        declared_resources = self._declared_object_resources()
+        if declared_resources is None:
+            return None
+
+        available_subfolders: dict[str, str] = {}
+        skipped_names: list[str] = []
+        for resource in declared_resources:
+            if resource.source_path is None:
+                self._report_unavailable_declared_object(
+                    resource,
+                    reason="its manifest source path was rejected",
+                )
+                skipped_names.append(resource.name)
+                continue
+
+            resolved = self._resolve_project_source(
+                resource.source_path,
+                owner_source_path=resource.owner_source_path,
+                resource=resource.name,
+                resource_type="object",
+                field=resource.manifest_field,
+            )
+            if resolved is None or not self._source_has_resource_kind(
+                resolved,
+                "objects",
+                rejected_path=resource.source_path,
+                owner_source_path=resource.owner_source_path or self.gm_project_path,
+                resource=resource.name,
+                field=resource.manifest_field or "object.yy",
+            ):
+                self._report_unavailable_declared_object(
+                    resource,
+                    reason="its manifest source path is unavailable",
+                )
+                skipped_names.append(resource.name)
+                continue
+            if not os.path.isfile(resolved.filesystem_path):
+                self._report_unavailable_declared_object(
+                    resource,
+                    reason=f"metadata is missing at {resolved.source_path!r}",
+                )
+                skipped_names.append(resource.name)
+                continue
+
+            self._object_source_paths[resource.name] = resolved.source_path
+            available_subfolders[resource.name] = self._get_subfolder_from_yy(
+                resolved.filesystem_path
+            )
+
+        return _ManifestObjectPlan(
+            requested_names=tuple(resource.name for resource in declared_resources),
+            available_subfolders=available_subfolders,
+            skipped_names=tuple(skipped_names),
+        )
+
+    def _report_unavailable_declared_object(
+        self,
+        resource: _DeclaredObjectResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker object "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-OBJECT-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="object",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker object .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
 
     def _source_has_resource_kind(
         self,
@@ -729,12 +851,18 @@ class ObjectConverter(BaseConverter):
                 )
 
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
-            if mapping is not None and not self._event_mapping_paths_are_contained(
-                owner_source_path,
-                object_name,
-                mapping,
-                field=f"eventList[{index}].sourceFile",
+            if (
+                event.get("isDnD") is True
+                and mapping is not None
+                and not self._event_mapping_paths_are_contained(
+                    owner_source_path,
+                    object_name,
+                    mapping,
+                    field=f"eventList[{index}].sourceFile",
+                )
             ):
+                # DnD events do not consume adjacent GML, but malformed event
+                # metadata must not flow into generated function names.
                 continue
             events.append(event)
         return events
@@ -1003,17 +1131,36 @@ class ObjectConverter(BaseConverter):
         direct_reference_names: set[str] | None = None,
         enum_values: Mapping[str, Mapping[str, int]] | None = None,
         macro_values: Mapping[str, str] | None = None,
-    ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap]]:
+    ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap], bool]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
+        has_event_blocker = False
         instance_variables: set[str] = set(project_script_instance_variables or set())
         inherited_functions = inherited_event_functions or set()
         source_entries: list[ObjectEventSource] = []
         asset_name_set = set(asset_names or set())
 
-        for event in event_list or []:
+        for event_index, event in enumerate(event_list or []):
+            if event.get("isDnD") is True:
+                continue
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
             if mapping is None or not mapping.gml_filename:
+                continue
+
+            manifest_entry = f"eventList[{event_index}].sourceFile"
+            if not self._event_mapping_paths_are_contained(
+                object_source_path,
+                object_name,
+                mapping,
+                field=manifest_entry,
+            ):
+                has_event_blocker = True
+                self._record_rejected_event_source(
+                    object_name,
+                    object_source_path,
+                    mapping,
+                    manifest_entry=manifest_entry,
+                )
                 continue
 
             source_path = self._event_source_path(
@@ -1026,15 +1173,22 @@ class ObjectConverter(BaseConverter):
                     object_name,
                     object_source_path,
                     mapping,
+                    manifest_entry=manifest_entry,
                 )
+                has_event_blocker = True
                 continue
 
             try:
                 with open(source_path, 'r', encoding='utf-8') as f:
                     source = f.read()
-            except OSError:
-                self._safe_log(
-                    f"Warning: Could not read GameMaker event code file: {source_path}"
+            except OSError as exc:
+                has_event_blocker = True
+                self._record_unreadable_event_source(
+                    object_name,
+                    source_path,
+                    mapping,
+                    exc,
+                    manifest_entry=manifest_entry,
                 )
                 continue
 
@@ -1103,6 +1257,7 @@ class ObjectConverter(BaseConverter):
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
             except GMLTranspileError as exc:
+                has_event_blocker = True
                 message = (
                     "Warning: Could not transpile GameMaker event code for "
                     f"{object_name}/{mapping.gml_filename}: {exc}"
@@ -1120,7 +1275,7 @@ class ObjectConverter(BaseConverter):
                     )
                 self._safe_log(message)
 
-        return code_bodies, instance_variables, source_maps
+        return code_bodies, instance_variables, source_maps, has_event_blocker
 
     def _event_source_path(
         self,
@@ -1143,32 +1298,100 @@ class ObjectConverter(BaseConverter):
         object_name: str,
         object_source_path: str,
         mapping: EventMapping,
+        *,
+        manifest_entry: str,
     ) -> None:
-        if not mapping.gml_filename.startswith("Collision_"):
-            return
         filenames = _event_source_filenames(mapping)
-        owner_directory = os.path.dirname(object_source_path).replace(os.sep, "/")
+        owner_directory = posixpath.dirname(object_source_path.replace("\\", "/"))
         message = (
-            "Warning: Missing GameMaker collision event code file for "
+            "Warning: Missing GameMaker event code file for "
             f"{object_name}/{mapping.godot_func}; looked for {', '.join(filenames)}"
         )
         if self.diagnostics is not None:
             self.diagnostics.add(
                 "warning",
-                "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE",
+                (
+                    "GM2GD-OBJECT-MISSING-COLLISION-EVENT-SOURCE"
+                    if mapping.gml_filename.startswith("Collision_")
+                    else "GM2GD-OBJECT-EVENT-SOURCE-MISSING"
+                ),
                 message,
                 source_path=(
-                    f"{owner_directory}/{filenames[0]}"
+                    posixpath.join(owner_directory, filenames[0])
                     if filenames
                     else object_source_path
                 ),
                 resource=object_name,
                 resource_type="object",
                 event=mapping.godot_func,
-                workaround="Add the missing GameMaker collision event GML file or remove the stale event metadata.",
+                manifest_entry=manifest_entry,
+                workaround=(
+                    "Restore the declared GameMaker event GML file or remove "
+                    "the stale event metadata. A deliberately empty event "
+                    "should retain its readable zero-byte GML file."
+                ),
             )
-        with self._lock:
-            self.log_callback(message)
+        self._safe_log(message)
+
+    def _record_rejected_event_source(
+        self,
+        object_name: str,
+        object_source_path: str,
+        mapping: EventMapping,
+        *,
+        manifest_entry: str,
+    ) -> None:
+        filenames = _event_source_filenames(mapping)
+        message = (
+            "Warning: Rejected GameMaker event code source for "
+            f"{object_name}/{mapping.godot_func}; looked for {', '.join(filenames)}"
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-OBJECT-EVENT-SOURCE-REJECTED",
+                message,
+                source_path=object_source_path,
+                resource=object_name,
+                resource_type="object",
+                event=mapping.godot_func,
+                manifest_entry=manifest_entry,
+                workaround=(
+                    "Use the canonical GameMaker event filename beside the "
+                    "declaring object .yy file."
+                ),
+            )
+        self._safe_log(message)
+
+    def _record_unreadable_event_source(
+        self,
+        object_name: str,
+        source_path: str,
+        mapping: EventMapping,
+        error: OSError,
+        *,
+        manifest_entry: str,
+    ) -> None:
+        message = (
+            "Warning: Could not read GameMaker event code file for "
+            f"{object_name}/{mapping.godot_func}: {source_path}: {error}"
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-OBJECT-EVENT-SOURCE-READ",
+                message,
+                source_path=self._diagnostic_source_path(source_path),
+                resource=object_name,
+                resource_type="object",
+                event=mapping.godot_func,
+                manifest_entry=manifest_entry,
+                workaround=(
+                    "Restore a readable GameMaker event GML file before "
+                    "converting this object."
+                ),
+            )
+        self._safe_log(message)
 
     def _record_event_source_diagnostics(
         self,
@@ -1337,7 +1560,13 @@ class ObjectConverter(BaseConverter):
 
         parsed = self._parse_object_yy(object_name, object_source_path)
         if parsed is None:
-            return {"success": False, "name": object_name, "has_sprite": False, "sprite_name": None, "event_count": 0}
+            return {
+                "status": "failed",
+                "name": object_name,
+                "has_sprite": False,
+                "sprite_name": None,
+                "event_count": 0,
+            }
 
         sprite_name = parsed["sprite_name"]
         sprite_source_path = parsed["sprite_source_path"]
@@ -1391,7 +1620,12 @@ class ObjectConverter(BaseConverter):
         object_dir = os.path.dirname(tscn_path)
         script_res_path = self._object_script_res_path(object_name, subfolder)
 
-        code_bodies, instance_variables, event_source_maps = self._load_event_code_bodies(
+        (
+            code_bodies,
+            instance_variables,
+            event_source_maps,
+            has_event_blocker,
+        ) = self._load_event_code_bodies(
             object_name,
             parsed["source_path"],
             event_list,
@@ -1407,6 +1641,18 @@ class ObjectConverter(BaseConverter):
             enum_values=enum_values,
             macro_values=macro_values,
         )
+        if has_event_blocker:
+            # An object is one logical resource. Publishing a script with only
+            # the events with available, readable, supported GML would make the
+            # generated scene look complete while silently dropping behavior.
+            return {
+                "status": "skipped",
+                "name": object_name,
+                "has_sprite": sprite_name is not None,
+                "sprite_name": sprite_name,
+                "event_count": len(event_list),
+            }
+
         script_content = generate_script_content(
             event_list,
             code_bodies=code_bodies,
@@ -1447,8 +1693,39 @@ class ObjectConverter(BaseConverter):
             f.write(script_content)
         self._write_object_source_map(gd_path, script_content, code_bodies, event_source_maps)
 
-        return {"success": True, "name": object_name, "has_sprite": sprite_name is not None,
-                "sprite_name": sprite_name, "event_count": len(event_list)}
+        return {
+            "status": "completed",
+            "name": object_name,
+            "has_sprite": sprite_name is not None,
+            "sprite_name": sprite_name,
+            "event_count": len(event_list),
+        }
+
+    def _process_requested_object(
+        self,
+        object_name: str,
+        subfolder: str = "",
+        sprite_scene_paths: Mapping[str, str] | None = None,
+        asset_names: set[str] | None = None,
+        project_script_instance_variables: set[str] | None = None,
+        enum_values: Mapping[str, Mapping[str, int]] | None = None,
+        macro_values: Mapping[str, str] | None = None,
+        object_source_path: str | None = None,
+    ) -> ObjectProcessResult | None:
+        """Process one requested object while preserving cancellation state."""
+        if not self.conversion_running():
+            return None
+        self._resource_started(object_name)
+        return self._process_object(
+            object_name,
+            subfolder,
+            sprite_scene_paths,
+            asset_names,
+            project_script_instance_variables,
+            enum_values,
+            macro_values,
+            object_source_path,
+        )
 
     def _write_object_source_map(
         self,
@@ -1470,33 +1747,31 @@ class ObjectConverter(BaseConverter):
     def convert_objects(self) -> None:
         os.makedirs(self.godot_objects_path, exist_ok=True)
 
+        manifest_plan = self._plan_manifest_objects()
         gm_objects_path = os.path.join(self.gm_project_path, 'objects')
-        resolved_objects_root = self._resolve_discovered_project_source(
-            gm_objects_path,
-            resource_type="object",
-            field="objectsDirectory",
-        )
-        if (
-            resolved_objects_root is None
-            or not os.path.isdir(resolved_objects_root.filesystem_path)
-        ):
-            self.log_callback(get_localized("Console_Convertor_Objects_Error_NotFound"))
-            return
-
-        write_gml_runtime(self.godot_project_path)
-
-        valid_names = self._get_valid_object_names()
         object_names: list[str] = []
         object_subfolders: dict[str, str] = {}
-        if valid_names is not None:
-            for name, subfolder in valid_names.items():
-                source_path = self._object_source_paths.get(name)
-                resolved = self._resolve_object_yy_source(name, source_path)
-                if resolved is None or not os.path.isfile(resolved.filesystem_path):
-                    continue
-                object_names.append(name)
-                object_subfolders[name] = subfolder
+        requested_names: list[str] = []
+        skipped_names: list[str] = []
+        if manifest_plan is not None:
+            requested_names.extend(manifest_plan.requested_names)
+            skipped_names.extend(manifest_plan.skipped_names)
+            object_names.extend(manifest_plan.available_subfolders)
+            object_subfolders.update(manifest_plan.available_subfolders)
         else:
+            resolved_objects_root = self._resolve_discovered_project_source(
+                gm_objects_path,
+                resource_type="object",
+                field="objectsDirectory",
+            )
+            if (
+                resolved_objects_root is None
+                or not os.path.isdir(resolved_objects_root.filesystem_path)
+            ):
+                self.log_callback(
+                    get_localized("Console_Convertor_Objects_Error_NotFound")
+                )
+                return
             for name in os.listdir(resolved_objects_root.filesystem_path):
                 object_directory = self._resolve_discovered_project_source(
                     os.path.join(resolved_objects_root.filesystem_path, name),
@@ -1537,10 +1812,18 @@ class ObjectConverter(BaseConverter):
                 object_subfolders[name] = self._get_subfolder_from_yy(
                     yy_source.filesystem_path
                 )
+            requested_names.extend(object_names)
+
+        for object_name in requested_names:
+            self._resource_requested(object_name)
+        for object_name in skipped_names:
+            self._resource_skipped(object_name)
 
         if not object_names:
             self.log_callback(get_localized("Console_Convertor_Objects_Complete"))
             return
+
+        write_gml_runtime(self.godot_project_path)
 
         total = len(object_names)
         processed = 0
@@ -1554,11 +1837,16 @@ class ObjectConverter(BaseConverter):
         project_script_instance_variables = self._get_project_script_instance_variables(asset_names)
         enum_values = self._get_project_enum_values()
         macro_values = self._get_project_macro_values()
+        cancelled = False
+        completed_objects: set[str] = set()
+        skipped_objects: set[str] = set()
+        failed_objects: set[str] = set()
+        first_error: Exception | None = None
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
                 executor.submit(
-                    self._process_object,
+                    self._process_requested_object,
                     name,
                     object_subfolders.get(name, ""),
                     sprite_scene_paths,
@@ -1571,14 +1859,22 @@ class ObjectConverter(BaseConverter):
                 for name in object_names
             }
             for future in as_completed(futures_map):
-                result = future.result()
+                object_name = futures_map[future]
+                try:
+                    result = future.result()
+                except Exception as error:
+                    failed_objects.add(object_name)
+                    if first_error is None:
+                        first_error = error
+                    continue
                 if result is None:
-                    self.log_callback(get_localized("Console_Convertor_Objects_Stopped"))
-                    return
+                    cancelled = True
+                    continue
 
                 processed += 1
 
-                if result["success"]:
+                if result["status"] == "completed":
+                    completed_objects.add(object_name)
                     if self.compact_logging:
                         self._safe_log_progress(result["name"], processed, total)
                     else:
@@ -1589,10 +1885,28 @@ class ObjectConverter(BaseConverter):
                         else:
                             self._safe_log(get_localized("Console_Convertor_Objects_Converted").format(
                                 object_name=result["name"], event_count=result["event_count"]))
+                elif result["status"] == "skipped":
+                    skipped_objects.add(object_name)
+                else:
+                    failed_objects.add(object_name)
 
                 self._safe_progress(int(processed / total * 100))
+
+        for object_name in sorted(completed_objects):
+            self._resource_completed(object_name)
+        for object_name in sorted(skipped_objects):
+            self._resource_skipped(object_name)
+        for object_name in sorted(failed_objects):
+            self._resource_failed(object_name)
+
+        if first_error is not None:
+            raise first_error
+        if cancelled:
+            self.log_callback(get_localized("Console_Convertor_Objects_Stopped"))
+            return
 
         self.log_callback(get_localized("Console_Convertor_Objects_Complete"))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_objects()

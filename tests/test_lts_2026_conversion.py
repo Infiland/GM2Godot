@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.godot_validation import (
     GodotValidationReport,
@@ -94,6 +95,8 @@ class FixtureSpec:
     expected_ide_version: str
     expected_script_count: int
     expected_resource_type_counts: tuple[tuple[str, int], ...]
+    expected_outcome_state: str
+    expected_skipped_resources: int
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,7 @@ class FixtureResult:
     source_path: Path
     godot_path: Path
     source_script_names: frozenset[str]
+    outcome: ConversionOutcome
     manifest: dict[str, Any]
     diagnostics: dict[str, Any]
     primary_script_entries: tuple[dict[str, Any], ...]
@@ -116,6 +120,8 @@ class FixtureResult:
             "ide_version": source_project["ide_version"],
             "source_script_count": len(self.source_script_names),
             "generated_script_count": len(self.primary_script_entries),
+            "conversion_outcome": self.outcome.state,
+            "conversion_skipped_resource_count": self.outcome.resources.skipped,
             "conversion_warning_count": diagnostic_summary["warning"],
             "conversion_error_count": diagnostic_summary["error"],
             "godot_status": self.validation.status,
@@ -134,6 +140,8 @@ FIXTURE_SPECS = (
         project_filename="snap.yyp",
         expected_ide_version="2026.0.0.15",
         expected_script_count=76,
+        expected_outcome_state="partial",
+        expected_skipped_resources=1,
         expected_resource_type_counts=(
             ("included_file", 1),
             ("object", 19),
@@ -148,6 +156,8 @@ FIXTURE_SPECS = (
         project_filename="Adding.yyp",
         expected_ide_version="2026.0.0.16",
         expected_script_count=4,
+        expected_outcome_state="partial",
+        expected_skipped_resources=1,
         expected_resource_type_counts=(
             ("object", 1),
             ("room", 1),
@@ -230,7 +240,19 @@ def _convert_fixture(
         conversion_running=conversion_running,
         compact_logging=True,
     )
-    converter.convert(str(source_path), "windows", str(godot_path), settings)
+    outcome = cast(
+        ConversionOutcome,
+        converter.convert(str(source_path), "windows", str(godot_path), settings),
+    )
+    if (
+        outcome.state != spec.expected_outcome_state
+        or outcome.resources.skipped != spec.expected_skipped_resources
+        or outcome.resources.failed != 0
+    ):
+        raise AssertionError(
+            f"{spec.name} fixture conversion outcome was unexpected:\n"
+            + outcome.summary_line()
+        )
 
     manifest = _load_json(godot_path / "gm2godot" / "conversion_manifest.json")
     diagnostics = _load_json(godot_path / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
@@ -249,6 +271,7 @@ def _convert_fixture(
         source_path=source_path,
         godot_path=godot_path,
         source_script_names=source_script_names,
+        outcome=outcome,
         manifest=manifest,
         diagnostics=diagnostics,
         primary_script_entries=_primary_script_entries(manifest),
@@ -325,6 +348,25 @@ class TestLTS2026Conversion(unittest.TestCase):
         source_project = cast(dict[str, Any], result.manifest["source_project"])
         resources = cast(list[dict[str, Any]], result.manifest["resources"])
         self.assertEqual(source_project["ide_version"], spec.expected_ide_version)
+        self.assertEqual(result.outcome.state, spec.expected_outcome_state)
+        self.assertEqual(
+            result.outcome.resources.skipped,
+            spec.expected_skipped_resources,
+        )
+        self.assertEqual(result.outcome.resources.failed, 0)
+        self.assertEqual(
+            result.outcome.resources.requested,
+            result.outcome.resources.completed
+            + result.outcome.resources.skipped,
+        )
+        self.assertFalse((result.godot_path / "icon.png").exists())
+        self.assertTrue(
+            any(
+                "icon" in log.casefold() and "not found" in log.casefold()
+                for log in result.logs
+            ),
+            result.logs,
+        )
         self.assertEqual(len(result.source_script_names), spec.expected_script_count)
         self.assertEqual(len(result.primary_script_entries), spec.expected_script_count)
         self.assertEqual(

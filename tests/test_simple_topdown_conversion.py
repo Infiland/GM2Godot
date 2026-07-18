@@ -14,6 +14,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
 
@@ -78,7 +79,15 @@ class TestSimpleTopDownConversion(unittest.TestCase):
             conversion_running=conversion_running,
             compact_logging=True,
         )
-        converter.convert(cls.project_path, "windows", cls.godot_dir, settings)
+        outcome = cast(
+            ConversionOutcome,
+            converter.convert(cls.project_path, "windows", cls.godot_dir, settings),
+        )
+        if outcome.state != "success":
+            raise AssertionError(
+                "SimpleTopDown conversion did not complete successfully:\n"
+                + outcome.summary_line()
+            )
 
     @classmethod
     def tearDownClass(cls) -> None:

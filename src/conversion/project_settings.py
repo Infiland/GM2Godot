@@ -1,8 +1,10 @@
+import json
 import os
 import shutil
 import re
+from dataclasses import dataclass
 from PIL import Image
-from typing import Optional, List
+from typing import Literal, Optional, List, TypeAlias
 
 # Import localization manager
 from src.localization import get_localized
@@ -15,6 +17,22 @@ from src.conversion.project_manifest import (
 )
 from src.conversion.project_godot import GodotProjectFile, atomic_rewrite_text, format_godot_string
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
+
+
+ProjectOperationState: TypeAlias = Literal["completed", "skipped", "failed"]
+
+
+@dataclass(frozen=True)
+class ProjectOperationResult:
+    """Structured result for one logical project-level conversion operation."""
+
+    state: ProjectOperationState
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        """Keep legacy truthiness checks useful for direct callers."""
+        return self.state == "completed"
+
 
 class ProjectSettingsConverter(BaseConverter):
     def __init__(self, gm_project_path: str, godot_project_path: str,
@@ -37,7 +55,10 @@ class ProjectSettingsConverter(BaseConverter):
         self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
 
-    def convert_icon(self) -> bool:
+    def convert_icon(self) -> ProjectOperationResult:
+        if not self.conversion_running():
+            return ProjectOperationResult("skipped", "Conversion was cancelled.")
+
         requested_icon_path = os.path.join(
             self.gm_project_path,
             'options',
@@ -57,18 +78,20 @@ class ProjectSettingsConverter(BaseConverter):
             if fallback_icon is None:
                 self.log_callback(get_localized("Console_Convertor_Icon_Error_DirectoryNotFound").format(
                     gm_icon_path=requested_icon_path))
-                return False
+                return ProjectOperationResult("skipped", "No GameMaker icon was available.")
             gm_icon_path, icon_platform = fallback_icon
 
         icon_files = self._contained_icon_files(gm_icon_path, icon_platform)
 
         if not (icon_files):
             self.log_callback(get_localized("Console_Convertor_Icon_Error_FileNotFound"))
-            return False
+            return ProjectOperationResult("skipped", "No GameMaker icon was available.")
 
         icon_name, source_icon = icon_files[0]
             
         try:
+            if not self.conversion_running():
+                return ProjectOperationResult("skipped", "Conversion was cancelled.")
             shutil.copy2(source_icon, godot_ico_path)
             self.log_callback(get_localized("Console_Convertor_Icon_Copied").format(icon_files=icon_name))
 
@@ -87,10 +110,10 @@ class ProjectSettingsConverter(BaseConverter):
                     "res://icon.png",
                 )
         
-            return True
+            return ProjectOperationResult("completed")
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Error_IconGeneric").format(error=str(e)))
-            return False
+            return ProjectOperationResult("failed", str(e))
 
     def _find_fallback_icon_path(self) -> tuple[str, str] | None:
         """Search other platforms for an icon directory when the selected platform has none."""
@@ -183,16 +206,24 @@ class ProjectSettingsConverter(BaseConverter):
             return None
         return None
 
-    def update_project_name(self) -> None:
+    def update_project_name(self) -> ProjectOperationResult:
+        if not self.conversion_running():
+            return ProjectOperationResult("skipped", "Conversion was cancelled.")
+
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
             self.log_callback(get_localized("Console_Error_MissingGodotFile"))
-            return
+            return ProjectOperationResult("failed", "project.godot is missing.")
 
         try:
             gm_project_name = self.get_gm_project_name()
             if gm_project_name:
+                if not self.conversion_running():
+                    return ProjectOperationResult(
+                        "skipped",
+                        "Conversion was cancelled.",
+                    )
                 updated = GodotProjectFile(project_godot_path).set_setting(
                     "application",
                     "config/name",
@@ -200,22 +231,40 @@ class ProjectSettingsConverter(BaseConverter):
                 )
                 if updated:
                     self.log_callback(get_localized("Console_Convertor_Settings_UpdatedName").format(gm_project_name=gm_project_name))
+                return ProjectOperationResult(
+                    "completed" if updated else "failed",
+                    "" if updated else "project.godot could not be updated.",
+                )
             else:
                 self.log_callback(get_localized("Console_Convertor_Settings_Error_Name_GM"))
+                return ProjectOperationResult(
+                    "skipped",
+                    "The GameMaker project name is unavailable.",
+                )
 
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_NameGeneric").format(error=str(e)))
+            return ProjectOperationResult("failed", str(e))
 
-    def update_project_settings(self) -> None:
+    def update_project_settings(self) -> ProjectOperationResult:
+        if not self.conversion_running():
+            return ProjectOperationResult("skipped", "Conversion was cancelled.")
+
+        source_result = self._project_options_source_result()
+        if source_result.state != "completed":
+            self._safe_log(source_result.reason)
+            return source_result
+
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
             self.log_callback(get_localized("Console_Error_MissingGodotFile"))
-            return
+            return ProjectOperationResult("failed", "project.godot is missing.")
 
         try:
             with open(project_godot_path, 'r', encoding='utf-8') as file:
                 content = file.read()
+            original_content = content
 
             for gm_option, platform, godot_section, godot_setting, value_kind in self._project_setting_mappings():
                 option = self.project_manifest.get_option(gm_option, platform)
@@ -236,12 +285,17 @@ class ProjectSettingsConverter(BaseConverter):
             ):
                 self._safe_log(f"{diagnostic.severity.title()}: {diagnostic.message}")
 
-            atomic_rewrite_text(project_godot_path, content)
+            if not self.conversion_running():
+                return ProjectOperationResult("skipped", "Conversion was cancelled.")
+            if content != original_content:
+                atomic_rewrite_text(project_godot_path, content)
 
             self.log_callback(get_localized("Console_Convertor_Settings_Updated"))
+            return ProjectOperationResult("completed")
             
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_Settings_Error_NotUpdated").format(error=str(e)))
+            return ProjectOperationResult("failed", str(e))
 
     def update_godot_setting(
         self,
@@ -290,6 +344,134 @@ class ProjectSettingsConverter(BaseConverter):
             return []
         self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Found").format(audio_group_names=', '.join(audio_group_names)))
         return audio_group_names
+
+    def _manifest_source_result(self) -> ProjectOperationResult:
+        if self.project_manifest.yyp_path is None:
+            return ProjectOperationResult(
+                "skipped",
+                "GameMaker project metadata is unavailable because no .yyp was found.",
+            )
+        if any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in self.project_manifest.diagnostics
+        ):
+            return ProjectOperationResult(
+                "skipped",
+                "GameMaker project metadata is unavailable because the .yyp is malformed.",
+            )
+        return ProjectOperationResult("completed")
+
+    def _project_options_source_result(self) -> ProjectOperationResult:
+        manifest_result = self._manifest_source_result()
+        if manifest_result.state != "completed":
+            return manifest_result
+
+        platforms = tuple(
+            dict.fromkeys(
+                platform
+                for _option, platform, _section, _setting, _kind
+                in self._project_setting_mappings()
+            )
+        )
+        candidate_paths: list[str] = []
+        try:
+            for platform in platforms:
+                directory = os.path.join(self.gm_project_path, "options", platform)
+                resolved_directory = self._resolve_discovered_project_source(
+                    directory,
+                    owner_source_path=f"options/{platform}",
+                    resource=platform,
+                    resource_type="project_options",
+                    field="options directory",
+                )
+                if resolved_directory is None:
+                    return ProjectOperationResult(
+                        "skipped",
+                        "GameMaker options metadata contains a rejected source path.",
+                    )
+                if not os.path.isdir(resolved_directory.filesystem_path):
+                    continue
+                for filename in sorted(os.listdir(resolved_directory.filesystem_path)):
+                    if not filename.casefold().endswith(".yy"):
+                        continue
+                    candidate_path = os.path.join(
+                        resolved_directory.filesystem_path,
+                        filename,
+                    )
+                    resolved_candidate = self._resolve_discovered_project_source(
+                        candidate_path,
+                        owner_source_path=f"options/{platform}",
+                        resource=platform,
+                        resource_type="project_options",
+                        field="options metadata file",
+                    )
+                    if resolved_candidate is None:
+                        return ProjectOperationResult(
+                            "skipped",
+                            "GameMaker options metadata contains a rejected source path.",
+                        )
+                    candidate_paths.append(resolved_candidate.filesystem_path)
+        except OSError as error:
+            return ProjectOperationResult("failed", str(error))
+
+        if not candidate_paths:
+            has_loaded_options = any(
+                option.platform.casefold() in {
+                    platform.casefold() for platform in platforms
+                }
+                for option in self.project_manifest.options
+            )
+            if has_loaded_options:
+                return ProjectOperationResult("completed")
+            return ProjectOperationResult(
+                "skipped",
+                "No GameMaker main or target-platform options metadata was found.",
+            )
+
+        for candidate_path in candidate_paths:
+            try:
+                with open(candidate_path, "r", encoding="utf-8") as options_file:
+                    source = options_file.read()
+            except OSError as error:
+                return ProjectOperationResult("failed", str(error))
+            try:
+                raw_data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return ProjectOperationResult(
+                    "skipped",
+                    f"GameMaker options metadata is malformed: {candidate_path}",
+                )
+            if not isinstance(raw_data, dict):
+                return ProjectOperationResult(
+                    "skipped",
+                    f"GameMaker options metadata is malformed: {candidate_path}",
+                )
+
+        return ProjectOperationResult("completed")
+
+    def _audio_groups_source_result(self) -> ProjectOperationResult:
+        manifest_result = self._manifest_source_result()
+        if manifest_result.state != "completed":
+            return manifest_result
+
+        missing = object()
+        raw_groups = self.project_manifest.raw_data.get("AudioGroups", missing)
+        if raw_groups is missing:
+            return ProjectOperationResult(
+                "skipped",
+                "GameMaker AudioGroups metadata is unavailable.",
+            )
+        if not isinstance(raw_groups, (list, dict)):
+            return ProjectOperationResult(
+                "skipped",
+                "GameMaker AudioGroups metadata is malformed.",
+            )
+        if raw_groups and not self.project_manifest.audio_group_names():
+            return ProjectOperationResult(
+                "skipped",
+                "GameMaker AudioGroups metadata does not contain valid group names.",
+            )
+        return ProjectOperationResult("completed")
 
     def _project_setting_mappings(self) -> list[tuple[str, str, str, str, str]]:
         return [
@@ -448,11 +630,27 @@ class ProjectSettingsConverter(BaseConverter):
         escaped = value_text.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 
-    def generate_audio_bus_layout(self) -> None:
-        audio_groups = self.read_audio_groups()
+    def generate_audio_bus_layout(self) -> ProjectOperationResult:
+        if not self.conversion_running():
+            return ProjectOperationResult("skipped", "Conversion was cancelled.")
+
+        source_result = self._audio_groups_source_result()
+        if source_result.state != "completed":
+            self._safe_log(source_result.reason)
+            return source_result
+
+        audio_groups = self.project_manifest.audio_group_names()
+        if audio_groups:
+            self.log_callback(
+                get_localized("Console_Convertor_AudioBus_Group_Found").format(
+                    audio_group_names=", ".join(audio_groups)
+                )
+            )
         bus_layout_path = os.path.join(self.godot_project_path, 'default_bus_layout.tres')
 
         try:
+            if not self.conversion_running():
+                return ProjectOperationResult("skipped", "Conversion was cancelled.")
             with open(bus_layout_path, 'w', encoding='utf-8') as file:
                 file.write('[gd_resource type="AudioBusLayout" format=3 uid="uid://cvoahc3k1xyrn"]\n\n')
                 file.write('[resource]\n')
@@ -477,13 +675,44 @@ class ProjectSettingsConverter(BaseConverter):
                     file.write(f'bus/{i}/volume_db = 0.0\n')
                     file.write(f'bus/{i}/send = "Master"\n')
 
-            self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Generated").format(audio_groups_num=len(audio_groups)))
-            self.log_callback(f"Generated default_bus_layout.tres with {len(audio_groups)} audio buses.")
+            generated_bus_count = max(1, len(audio_groups))
+            self.log_callback(get_localized("Console_Convertor_AudioBus_Group_Generated").format(audio_groups_num=generated_bus_count))
+            self.log_callback(f"Generated default_bus_layout.tres with {generated_bus_count} audio buses.")
+            return ProjectOperationResult("completed")
         except Exception as e:
             self.log_callback(get_localized("Console_Convertor_AudioBus_Error_GroupNotGenerated").format(error=str(e)))
+            return ProjectOperationResult("failed", str(e))
 
     def convert_all(self) -> None:
-        self.convert_icon()
-        self.update_project_name()
-        self.update_project_settings()
-        self.generate_audio_bus_layout()
+        self._reset_resource_outcomes()
+        operations = (
+            ("game_icon", self.convert_icon),
+            ("project_name", self.update_project_name),
+            ("project_settings", self.update_project_settings),
+            ("audio_buses", self.generate_audio_bus_layout),
+        )
+
+        # Keep tracking at the legacy orchestration boundary. The main Converter
+        # invokes these operations individually and accounts for each structured
+        # result itself, so the operation methods must remain untracked.
+        for operation_key, _operation in operations:
+            self._resource_requested(operation_key)
+
+        for operation_key, operation in operations:
+            if not self.conversion_running():
+                self._resource_skipped(operation_key)
+                continue
+
+            self._resource_started(operation_key)
+            try:
+                result = operation()
+            except Exception:
+                self._resource_failed(operation_key)
+                raise
+
+            if result.state == "completed":
+                self._resource_completed(operation_key)
+            elif result.state == "skipped":
+                self._resource_skipped(operation_key)
+            else:
+                self._resource_failed(operation_key)

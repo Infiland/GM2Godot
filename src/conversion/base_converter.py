@@ -5,9 +5,13 @@ import os
 import re
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from src.localization import get_localized
+from src.conversion.conversion_outcome import (
+    ConversionStepResult,
+    ResourceOutcomeTracker,
+)
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.project_manifest import GameMakerProjectManifest
@@ -40,6 +44,65 @@ class BaseConverter(ABC):
         self.max_workers = max_workers or os.cpu_count() or 1
         self.diagnostics = diagnostics
         self._lock = threading.Lock()
+        self._resource_outcomes = ResourceOutcomeTracker()
+
+    def _reset_resource_outcomes(self) -> None:
+        """Start a fresh resource-outcome run for a reusable converter."""
+        with self._lock:
+            self._resource_outcomes = ResourceOutcomeTracker()
+
+    def _resource_requested(self, key: str) -> None:
+        """Record a resource selected for this converter run."""
+        with self._lock:
+            self._resource_outcomes.request(key)
+
+    def _resource_started(self, key: str) -> None:
+        """Record the start of a requested resource conversion."""
+        with self._lock:
+            self._resource_outcomes.start(key)
+
+    def _resource_completed(self, key: str) -> None:
+        """Record a successfully completed resource conversion."""
+        with self._lock:
+            self._resource_outcomes.complete(key)
+
+    def _resource_skipped(self, key: str) -> None:
+        """Record a requested resource that produced no converted output."""
+        with self._lock:
+            self._resource_outcomes.skip(key)
+
+    def _resource_failed(self, key: str) -> None:
+        """Record a resource conversion that failed."""
+        with self._lock:
+            self._resource_outcomes.fail(key)
+
+    def _conversion_step_result(
+        self,
+        cancelled: bool | None = None,
+        finalize_unfinished_as: Literal["skipped", "failed"] | None = "skipped",
+    ) -> ConversionStepResult:
+        """Return this converter's resource counts and cancellation state."""
+        was_cancelled = (
+            not self.conversion_running()
+            if cancelled is None
+            else cancelled
+        )
+        with self._lock:
+            resources = self._resource_outcomes.counts(
+                finalize_unfinished_as=finalize_unfinished_as,
+            )
+        return ConversionStepResult(resources=resources, cancelled=was_cancelled)
+
+    def conversion_step_result(
+        self,
+        cancelled: bool | None = None,
+        finalize_unfinished_as: Literal["skipped", "failed"] | None = "skipped",
+    ) -> ConversionStepResult:
+        """Expose resource outcomes after a legacy ``convert_all()`` call."""
+        return self._conversion_step_result(
+            cancelled=cancelled,
+            finalize_unfinished_as=finalize_unfinished_as,
+        )
 
     def _safe_log(self, message: str) -> None:
         """Thread-safe wrapper for log_callback. Use in multi-threaded converters."""
@@ -245,6 +308,7 @@ class BaseConverter(ABC):
             "audio_group": "audiogroups",
             "font": "fonts",
             "included_file": "datafiles",
+            "note": "notes",
             "object": "objects",
             "particle_system": "particlesystems",
             "path": "paths",

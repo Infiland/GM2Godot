@@ -1,17 +1,22 @@
 # pyright: reportPrivateUsage=false
 
+import json
 import os
+import posixpath
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
@@ -67,6 +72,313 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
         for name in ("test.txt", "config.ini", "data.csv"):
             expected = os.path.join(self.godot_dir, "included_files", name)
             self.assertTrue(os.path.isfile(expected), f"Expected {expected}")
+
+    def test_malformed_yyp_retains_disk_discovery_fallback(self):
+        with open(
+            os.path.join(self.gm_dir, "Malformed.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            project_file.write("{")
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "included_files",
+                    "test.txt",
+                )
+            )
+        )
+
+    def test_legacy_yyp_without_included_files_retains_disk_fallback(self):
+        with open(
+            os.path.join(self.gm_dir, "LegacyShape.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump({"resources": []}, project_file)
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    "included_files",
+                    "test.txt",
+                )
+            )
+        )
+
+    def test_resource_outcome_counts_logical_included_files(self):
+        datafiles_dir = os.path.join(self.gm_dir, "datafiles")
+        with open(os.path.join(datafiles_dir, "second.txt"), "w", encoding="utf-8") as f:
+            f.write("second")
+        converter = self._make_converter()
+
+        converter.convert_all()
+        counts = converter.conversion_step_result().resources
+
+        self.assertEqual(counts.requested, 2)
+        self.assertEqual(counts.executed, 2)
+        self.assertEqual(counts.completed, 2)
+        self.assertEqual(counts.skipped, 0)
+        self.assertEqual(counts.failed, 0)
+
+    def test_repeated_conversion_restarts_resource_outcomes(self):
+        converter = self._make_converter()
+
+        converter.convert_all()
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_repeated_conversion_accounts_for_the_current_resource_set(self):
+        converter = self._make_converter()
+        converter.convert_all()
+        with open(
+            os.path.join(self.gm_dir, "datafiles", "second.txt"),
+            "w",
+            encoding="utf-8",
+        ) as source_file:
+            source_file.write("second")
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=2, executed=2, completed=2),
+        )
+
+
+class TestIncludedFilesManifestAccounting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.datafiles_dir = os.path.join(self.gm_dir, "datafiles")
+        os.makedirs(self.datafiles_dir)
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_yyp(self, files: list[tuple[str, str]]) -> None:
+        with open(
+            os.path.join(self.gm_dir, "IncludedPaths.yyp"),
+            "w",
+            encoding="utf-8",
+        ) as project_file:
+            json.dump(
+                {
+                    "IncludedFiles": [
+                        {
+                            "name": name,
+                            "filePath": posixpath.dirname(path),
+                        }
+                        for name, path in files
+                    ]
+                },
+                project_file,
+            )
+
+    def _make_converter(
+        self,
+        diagnostics: DiagnosticCollector | None = None,
+    ) -> IncludedFilesConverter:
+        return IncludedFilesConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+            max_workers=1,
+        )
+
+    def test_missing_only_declared_file_makes_conversion_partial(self) -> None:
+        self._write_yyp(
+            [("missing.txt", "datafiles/config/missing.txt")]
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        included_files_enabled = MagicMock()
+        included_files_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"included_files": included_files_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "missing.txt")
+        self.assertEqual(unavailable[0].source_path, "IncludedPaths.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "IncludedFiles[0].filePath",
+        )
+
+    def test_safe_missing_and_disk_only_file_have_strict_counts(self) -> None:
+        safe_source = os.path.join(self.datafiles_dir, "config", "safe.txt")
+        os.makedirs(os.path.dirname(safe_source))
+        with open(safe_source, "w", encoding="utf-8") as source_file:
+            source_file.write("safe")
+        with open(
+            os.path.join(self.datafiles_dir, "orphan.txt"),
+            "w",
+            encoding="utf-8",
+        ) as source_file:
+            source_file.write("orphan")
+        self._write_yyp(
+            [
+                ("safe.txt", "datafiles/config/safe.txt"),
+                ("missing.txt", "datafiles/config/missing.txt"),
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=3,
+                executed=2,
+                completed=2,
+                skipped=1,
+            ),
+        )
+        safe_output = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "config",
+            "safe.txt",
+        )
+        with open(safe_output, "r", encoding="utf-8") as output_file:
+            self.assertEqual(output_file.read(), "safe")
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "included_files",
+                    "config",
+                    "missing.txt",
+                )
+            )
+        )
+        disk_only_output = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "orphan.txt",
+        )
+        with open(disk_only_output, "r", encoding="utf-8") as output_file:
+            self.assertEqual(output_file.read(), "orphan")
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "missing.txt")
+
+    def test_duplicate_exact_manifest_file_is_accounted_once(self) -> None:
+        source_path = os.path.join(self.datafiles_dir, "once.txt")
+        with open(source_path, "w", encoding="utf-8") as source_file:
+            source_file.write("once")
+        declaration = ("once.txt", "datafiles/once.txt")
+        self._write_yyp([declaration, declaration])
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_manifest_declared_yy_payload_is_copied(self) -> None:
+        source_path = os.path.join(self.datafiles_dir, "payload.yy")
+        with open(source_path, "w", encoding="utf-8") as source_file:
+            source_file.write("included payload")
+        self._write_yyp([("payload.yy", "datafiles/payload.yy")])
+
+        self._make_converter().convert_all()
+
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.yy",
+        )
+        with open(output_path, "r", encoding="utf-8") as output_file:
+            self.assertEqual(output_file.read(), "included payload")
+
+    def test_rejected_declared_file_is_requested_and_skipped(self) -> None:
+        self._write_yyp(
+            [
+                (
+                    "rejected.txt",
+                    "datafiles/../../outside/rejected.txt",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        diagnostic_codes = {
+            diagnostic.code for diagnostic in diagnostics.diagnostics()
+        }
+        self.assertIn("GM2GD-SOURCE-PATH-REJECTED", diagnostic_codes)
+        self.assertIn(
+            "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE",
+            diagnostic_codes,
+        )
 
 
 class TestIncludedFilesConverterNestedDirs(unittest.TestCase):

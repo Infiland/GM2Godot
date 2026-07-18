@@ -6,15 +6,20 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from collections.abc import Callable
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.project_godot import prepare_godot_project_destination
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.project_settings import ProjectSettingsConverter
+from src.conversion.project_settings import (
+    ProjectOperationResult,
+    ProjectSettingsConverter,
+)
 
 SAMPLE_YYP = """\
 {
@@ -73,6 +78,201 @@ class TestGetGmProjectName(unittest.TestCase):
         self.assertIsNone(name)
 
 
+class TestConvertAllOutcomeAccounting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(
+        self,
+        conversion_running: Callable[[], bool] | None = None,
+    ) -> ProjectSettingsConverter:
+        running = (
+            conversion_running
+            if conversion_running is not None
+            else lambda: True
+        )
+        return ProjectSettingsConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+            conversion_running=running,
+        )
+
+    def test_all_completed_operations_are_reported_once(self) -> None:
+        converter = self._make_converter()
+        completed = ProjectOperationResult("completed")
+
+        with (
+            patch.object(converter, "convert_icon", return_value=completed),
+            patch.object(converter, "update_project_name", return_value=completed),
+            patch.object(converter, "update_project_settings", return_value=completed),
+            patch.object(
+                converter,
+                "generate_audio_bus_layout",
+                return_value=completed,
+            ),
+        ):
+            converter.convert_all()
+
+        first = converter.conversion_step_result(finalize_unfinished_as=None)
+        second = converter.conversion_step_result(finalize_unfinished_as=None)
+        self.assertEqual(first, second)
+        self.assertFalse(first.cancelled)
+        self.assertEqual(
+            first.resources,
+            ConversionCounts(requested=4, executed=4, completed=4),
+        )
+
+    def test_repeated_convert_all_starts_a_fresh_outcome_run(self) -> None:
+        converter = self._make_converter()
+        completed = ProjectOperationResult("completed")
+
+        with (
+            patch.object(
+                converter,
+                "convert_icon",
+                side_effect=(
+                    completed,
+                    ProjectOperationResult("skipped", "missing icon"),
+                ),
+            ) as convert_icon,
+            patch.object(
+                converter,
+                "update_project_name",
+                side_effect=(completed, completed),
+            ) as update_project_name,
+            patch.object(
+                converter,
+                "update_project_settings",
+                side_effect=(
+                    completed,
+                    ProjectOperationResult("failed", "write failed"),
+                ),
+            ) as update_project_settings,
+            patch.object(
+                converter,
+                "generate_audio_bus_layout",
+                side_effect=(
+                    completed,
+                    ProjectOperationResult("skipped", "missing groups"),
+                ),
+            ) as generate_audio_bus_layout,
+        ):
+            converter.convert_all()
+            first = converter.conversion_step_result(finalize_unfinished_as=None)
+            converter.convert_all()
+            second = converter.conversion_step_result(finalize_unfinished_as=None)
+
+        self.assertEqual(
+            first.resources,
+            ConversionCounts(requested=4, executed=4, completed=4),
+        )
+        self.assertEqual(
+            second.resources,
+            ConversionCounts(
+                requested=4,
+                executed=4,
+                completed=1,
+                skipped=2,
+                failed=1,
+            ),
+        )
+        for operation in (
+            convert_icon,
+            update_project_name,
+            update_project_settings,
+            generate_audio_bus_layout,
+        ):
+            self.assertEqual(operation.call_count, 2)
+            operation.assert_called_with()
+
+    def test_mixed_operation_states_preserve_terminal_counts(self) -> None:
+        converter = self._make_converter()
+
+        with (
+            patch.object(
+                converter,
+                "convert_icon",
+                return_value=ProjectOperationResult("completed"),
+            ),
+            patch.object(
+                converter,
+                "update_project_name",
+                return_value=ProjectOperationResult("skipped", "missing name"),
+            ),
+            patch.object(
+                converter,
+                "update_project_settings",
+                return_value=ProjectOperationResult("failed", "write failed"),
+            ),
+            patch.object(
+                converter,
+                "generate_audio_bus_layout",
+                return_value=ProjectOperationResult("completed"),
+            ),
+        ):
+            converter.convert_all()
+
+        result = converter.conversion_step_result(finalize_unfinished_as=None)
+        self.assertFalse(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=4,
+                executed=4,
+                completed=2,
+                skipped=1,
+                failed=1,
+            ),
+        )
+
+    def test_mid_run_cancellation_skips_unstarted_operations(self) -> None:
+        running = {"value": True}
+        converter = self._make_converter(lambda: running["value"])
+
+        def cancel_during_name_update() -> ProjectOperationResult:
+            running["value"] = False
+            return ProjectOperationResult("skipped", "Conversion was cancelled.")
+
+        with (
+            patch.object(
+                converter,
+                "convert_icon",
+                return_value=ProjectOperationResult("completed"),
+            ) as convert_icon,
+            patch.object(
+                converter,
+                "update_project_name",
+                side_effect=cancel_during_name_update,
+            ) as update_project_name,
+            patch.object(converter, "update_project_settings") as update_settings,
+            patch.object(converter, "generate_audio_bus_layout") as generate_buses,
+        ):
+            converter.convert_all()
+
+        result = converter.conversion_step_result(finalize_unfinished_as=None)
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=4,
+                executed=2,
+                completed=1,
+                skipped=3,
+            ),
+        )
+        convert_icon.assert_called_once_with()
+        update_project_name.assert_called_once_with()
+        update_settings.assert_not_called()
+        generate_buses.assert_not_called()
+
+
 class TestUpdateProjectName(unittest.TestCase):
     """Test ProjectSettingsConverter.update_project_name()."""
 
@@ -104,7 +304,7 @@ class TestUpdateProjectName(unittest.TestCase):
 
     def test_updates_name_in_project_godot(self) -> None:
         converter = self._make_converter()
-        converter.update_project_name()
+        self.assertTrue(converter.update_project_name())
 
         with open(self.project_godot, "r", encoding="utf-8") as f:
             content = f.read()
@@ -115,7 +315,7 @@ class TestUpdateProjectName(unittest.TestCase):
     def test_missing_project_godot_no_crash(self) -> None:
         os.remove(self.project_godot)
         converter = self._make_converter()
-        converter.update_project_name()  # should not raise
+        self.assertFalse(converter.update_project_name())
         self.assertTrue(len(self.logs) > 0)
 
     def test_updates_only_application_name_when_other_section_has_same_key(self) -> None:
@@ -158,11 +358,28 @@ class TestUpdateProjectName(unittest.TestCase):
             "src.conversion.project_godot.os.replace",
             side_effect=OSError("injected replace failure"),
         ):
-            self._make_converter().update_project_name()
+            self.assertFalse(self._make_converter().update_project_name())
 
         with open(self.project_godot, "rb") as project_file:
             self.assertEqual(project_file.read(), original)
         self.assertTrue(any("injected replace failure" in log for log in self.logs))
+
+    def test_cancellation_after_name_lookup_does_not_mutate_project(self) -> None:
+        running = MagicMock(side_effect=(True, False))
+        converter = ProjectSettingsConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(message),
+            conversion_running=running,
+        )
+
+        with patch(
+            "src.conversion.project_settings.GodotProjectFile.set_setting"
+        ) as set_setting:
+            result = converter.update_project_name()
+
+        self.assertEqual(result.state, "skipped")
+        set_setting.assert_not_called()
 
 
 class TestReadAudioGroups(unittest.TestCase):
@@ -201,6 +418,81 @@ class TestReadAudioGroups(unittest.TestCase):
         converter = self._make_converter()
         groups = converter.read_audio_groups()
         self.assertEqual(groups, [])
+
+
+class TestGenerateAudioBusLayout(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.yyp_path = os.path.join(self.gm_dir, "Game.yyp")
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _make_converter(self) -> ProjectSettingsConverter:
+        return ProjectSettingsConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(message),
+            conversion_running=lambda: True,
+        )
+
+    def test_missing_audio_groups_is_skipped_without_writing_fallback(self) -> None:
+        with open(self.yyp_path, "w", encoding="utf-8") as project_file:
+            json.dump({"%Name": "No Audio Metadata"}, project_file)
+
+        result = self._make_converter().generate_audio_bus_layout()
+
+        self.assertEqual(result.state, "skipped")
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "default_bus_layout.tres"))
+        )
+
+    def test_malformed_audio_groups_is_skipped_without_writing_fallback(self) -> None:
+        with open(self.yyp_path, "w", encoding="utf-8") as project_file:
+            json.dump(
+                {"%Name": "Malformed Audio Metadata", "AudioGroups": "invalid"},
+                project_file,
+            )
+
+        result = self._make_converter().generate_audio_bus_layout()
+
+        self.assertEqual(result.state, "skipped")
+        self.assertFalse(
+            os.path.exists(os.path.join(self.godot_dir, "default_bus_layout.tres"))
+        )
+
+    def test_explicit_empty_audio_groups_generates_master_bus(self) -> None:
+        with open(self.yyp_path, "w", encoding="utf-8") as project_file:
+            json.dump({"%Name": "Empty Audio Metadata", "AudioGroups": []}, project_file)
+
+        result = self._make_converter().generate_audio_bus_layout()
+
+        self.assertEqual(result.state, "completed")
+        with open(
+            os.path.join(self.godot_dir, "default_bus_layout.tres"),
+            "r",
+            encoding="utf-8",
+        ) as bus_file:
+            content = bus_file.read()
+        self.assertIn('bus/0/name = "Master"', content)
+
+    def test_write_failure_is_structured_as_failed(self) -> None:
+        with open(self.yyp_path, "w", encoding="utf-8") as project_file:
+            json.dump({"%Name": "Audio", "AudioGroups": []}, project_file)
+        converter = self._make_converter()
+
+        with patch(
+            "src.conversion.project_settings.open",
+            create=True,
+            side_effect=OSError("disk full"),
+        ):
+            result = converter.generate_audio_bus_layout()
+
+        self.assertEqual(result.state, "failed")
+        self.assertIn("disk full", result.reason)
 
 
 class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
@@ -310,6 +602,92 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
 
         self.assertIn('renderer/rendering_method="gl_compatibility"', rendering)
         self.assertIn("textures/canvas_textures/default_texture_filter=1", rendering)
+
+    def test_missing_options_is_skipped_without_rewriting_project(self) -> None:
+        shutil.rmtree(os.path.join(self.gm_dir, "options"))
+        with open(self.project_godot, "rb") as project_file:
+            original = project_file.read()
+
+        result = self._make_converter().update_project_settings()
+
+        self.assertEqual(result.state, "skipped")
+        with open(self.project_godot, "rb") as project_file:
+            self.assertEqual(project_file.read(), original)
+
+    def test_malformed_options_is_skipped_without_rewriting_project(self) -> None:
+        with open(
+            os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"),
+            "w",
+            encoding="utf-8",
+        ) as options_file:
+            options_file.write("{not json")
+        with open(self.project_godot, "rb") as project_file:
+            original = project_file.read()
+
+        result = self._make_converter().update_project_settings()
+
+        self.assertEqual(result.state, "skipped")
+        with open(self.project_godot, "rb") as project_file:
+            self.assertEqual(project_file.read(), original)
+
+    def test_options_read_failure_is_structured_as_failed(self) -> None:
+        converter = self._make_converter()
+
+        with patch(
+            "src.conversion.project_settings.os.listdir",
+            side_effect=OSError("permission denied"),
+        ):
+            result = converter.update_project_settings()
+
+        self.assertEqual(result.state, "failed")
+        self.assertIn("permission denied", result.reason)
+
+    def test_options_symlink_outside_project_is_skipped_without_reading(self) -> None:
+        main_options = os.path.join(
+            self.gm_dir,
+            "options",
+            "main",
+            "options_main.yy",
+        )
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside_options = os.path.join(outside_dir, "outside.yy")
+            with open(outside_options, "w", encoding="utf-8") as options_file:
+                options_file.write('{"option_game_speed":999}')
+            os.unlink(main_options)
+            try:
+                os.symlink(outside_options, main_options)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Symbolic links are unavailable: {error}")
+            with open(self.project_godot, "rb") as project_file:
+                original = project_file.read()
+
+            result = self._make_converter().update_project_settings()
+
+        self.assertEqual(result.state, "skipped")
+        with open(self.project_godot, "rb") as project_file:
+            self.assertEqual(project_file.read(), original)
+        self.assertTrue(any("Rejected GameMaker source path" in log for log in self.logs))
+
+    def test_valid_empty_options_is_a_completed_no_op(self) -> None:
+        for platform in ("main", "windows"):
+            with open(
+                os.path.join(
+                    self.gm_dir,
+                    "options",
+                    platform,
+                    f"options_{platform}.yy",
+                ),
+                "w",
+                encoding="utf-8",
+            ) as options_file:
+                options_file.write("{}")
+        converter = self._make_converter()
+
+        with patch("src.conversion.project_settings.atomic_rewrite_text") as rewrite:
+            result = converter.update_project_settings()
+
+        self.assertEqual(result.state, "completed")
+        rewrite.assert_not_called()
 
     @unittest.skipUnless(os.environ.get("GODOT_BIN"), "GODOT_BIN is not set")
     def test_godot_reads_generated_settings_at_canonical_project_settings_paths(self) -> None:

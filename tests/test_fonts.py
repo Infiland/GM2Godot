@@ -5,9 +5,10 @@ import os
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from typing import TypeAlias
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -18,6 +19,8 @@ from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
 )
+from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 
 
@@ -121,10 +124,102 @@ class TestFontConverterSystemFont(unittest.TestCase):
 
     def test_creates_tres_file(self):
         converter = self._make_converter()
-        converter.convert_all()
+        result = converter.convert_all()
         expected = os.path.join(self.godot_dir, "fonts", "fnt_test.tres")
+        self.assertIsNone(result)
         self.assertTrue(os.path.isfile(expected),
                         f"Expected {expected} to exist after conversion")
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+
+    def test_failed_font_does_not_hide_safe_sibling_completion(self):
+        bad_font_path = _make_font_yy(self.gm_dir, "fnt_bad")
+        with open(bad_font_path, "w", encoding="utf-8") as bad_font_file:
+            bad_font_file.write("{ malformed font")
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(self.godot_dir, "fonts", "fnt_test.tres")
+            )
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
+
+    def test_cancellation_leaves_font_for_inherited_finalization(self):
+        running = threading.Event()
+        running.set()
+        converter = FontConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            conversion_running=running.is_set,
+        )
+
+        def cancel_font(_yy_path: str) -> None:
+            running.clear()
+
+        with patch.object(converter, "_process_font", side_effect=cancel_font):
+            converter.convert_all()
+
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+
+    def test_worker_exception_marks_font_failed_after_safe_sibling_settles(self):
+        _make_font_yy(self.gm_dir, "fnt_raises")
+        converter = self._make_converter()
+
+        def process_font(yy_path: str) -> str:
+            if yy_path.endswith("fnt_raises.yy"):
+                raise RuntimeError("font worker failed")
+            return "fnt_test"
+
+        with patch.object(converter, "_process_font", side_effect=process_font):
+            with self.assertRaisesRegex(RuntimeError, "font worker failed"):
+                converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                failed=1,
+            ),
+        )
 
     def test_tres_content(self):
         converter = self._make_converter()
@@ -467,6 +562,164 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         self.assertEqual(
             rejected[0].manifest_entry,
             "resources[0].id.path",
+        )
+
+    def test_missing_only_declared_font_makes_conversion_partial(self) -> None:
+        self._write_yyp(
+            [("fnt_missing", "fonts/fnt_missing/fnt_missing.yy")]
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        fonts_enabled = MagicMock()
+        fonts_enabled.get.return_value = True
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"fonts": fonts_enabled},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-FONT-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "fnt_missing")
+        self.assertEqual(unavailable[0].source_path, "FontPaths.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    def test_safe_and_missing_declared_fonts_have_strict_counts(
+        self,
+        _find_system_font: Mock,
+    ) -> None:
+        safe_yy = self._write_font_at(
+            "fonts/fnt_safe/fnt_safe.yy",
+            "fnt_safe",
+            {"fontName": "SafeFontFamily"},
+        )
+        self._write_yyp(
+            [
+                ("fnt_safe", "fonts/fnt_safe/fnt_safe.yy"),
+                ("fnt_missing", "fonts/fnt_missing/fnt_missing.yy"),
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(converter.find_font_files(), [safe_yy])
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            "fonts",
+            "fnt_safe.tres",
+        )
+        with open(output_path, "r", encoding="utf-8") as output_file:
+            self.assertIn("SafeFontFamily", output_file.read())
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-FONT-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1)
+        self.assertEqual(unavailable[0].resource, "fnt_missing")
+        self.assertEqual(unavailable[0].source_path, "FontPaths.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[1].id.path",
+        )
+
+    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    def test_duplicate_exact_manifest_font_reference_is_accounted_once(
+        self,
+        _find_system_font: Mock,
+    ) -> None:
+        self._write_font_at(
+            "fonts/fnt_once/fnt_once.yy",
+            "fnt_once",
+        )
+        reference = ("fnt_once", "fonts/fnt_once/fnt_once.yy")
+        self._write_yyp([reference, reference])
+        converter = self._make_converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+
+    def test_rejected_only_declared_font_is_requested_and_skipped(self) -> None:
+        self._write_yyp(
+            [
+                (
+                    "fnt_rejected",
+                    "fonts/../../outside/fnt_rejected/fnt_rejected.yy",
+                )
+            ]
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._make_converter(diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+                and diagnostic.resource == "fnt_rejected"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+        self.assertTrue(
+            any(
+                diagnostic.code == "GM2GD-FONT-SOURCE-UNAVAILABLE"
+                and diagnostic.resource == "fnt_rejected"
+                for diagnostic in diagnostics.diagnostics()
+            )
         )
 
     @patch("src.conversion.fonts._find_system_font", return_value=None)

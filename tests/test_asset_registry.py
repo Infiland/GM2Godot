@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
+import threading
 import unittest
 from typing import Iterable, cast
 from unittest.mock import patch
@@ -21,6 +23,8 @@ from src.conversion.asset_registry import (
     _ProjectResource,
 )
 from src.conversion.animation_curve_registry import ANIMATION_CURVE_REGISTRY_RELATIVE_PATH
+from src.conversion.converter import Converter
+from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
@@ -28,6 +32,7 @@ from src.conversion.extension_registry import (
 )
 from src.conversion.fonts import FontConverter
 from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
+from src.conversion.type_defs import JsonDict, StrPath
 
 
 def _write_json(path: str, data: dict[str, object]) -> None:
@@ -77,6 +82,11 @@ def _minimal_yy(
     if extra:
         data.update(extra)
     return data
+
+
+class _EnabledSetting:
+    def get(self) -> bool:
+        return True
 
 
 class TestAssetRegistryConverter(unittest.TestCase):
@@ -447,6 +457,502 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ],
         )
 
+    def test_timeline_action_scripts_use_collision_safe_stable_paths(self) -> None:
+        timeline_values = {
+            "tl-one": 11,
+            "tl_one": 22,
+        }
+        _write_yyp(
+            self.gm_dir,
+            [("timelines", name) for name in reversed(tuple(timeline_values))],
+        )
+        for name, value in timeline_values.items():
+            self._write_resource(
+                "timelines",
+                name,
+                "GMTimeline",
+                "folders/Timelines.yy",
+                {"momentList": [{"moment": 1, "eventFile": "Moment_1.gml"}]},
+            )
+            _write_file(
+                os.path.join(
+                    self.gm_dir,
+                    "timelines",
+                    name,
+                    "Moment_1.gml",
+                ),
+                f"timeline_value = {value};\n",
+            )
+
+        converter = self._converter()
+        entries = converter.build_entries()
+        script_paths = {
+            entry.name: cast(
+                list[dict[str, list[dict[str, str]]]],
+                cast(JsonDict, entry.metadata)["moments"],
+            )[0]["actions"][0]["script_path"]
+            for entry in entries
+        }
+
+        self.assertEqual(
+            script_paths,
+            {
+                "tl-one": "res://gm2godot/timelines/tl_one_1.gd",
+                "tl_one": "res://gm2godot/timelines/tl_one_2_1.gd",
+            },
+        )
+        self.assertEqual(
+            len({path.casefold() for path in script_paths.values()}),
+            len(timeline_values),
+        )
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=2,
+            ),
+        )
+        for name, value in timeline_values.items():
+            output_path = os.path.join(
+                self.godot_dir,
+                *script_paths[name].removeprefix("res://").split("/"),
+            )
+            with open(output_path, "r", encoding="utf-8") as script_file:
+                self.assertIn(
+                    'GMRuntime.gml_variable_instance_set(_gm_instance, '
+                    f'"timeline_value", {value})',
+                    script_file.read(),
+                )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        for script_path in script_paths.values():
+            self.assertIn(f'"script_path": "{script_path}"', registry)
+
+        _write_yyp(
+            self.gm_dir,
+            [("timelines", name) for name in timeline_values],
+        )
+        reordered_entries = self._converter().build_entries()
+        reordered_paths = {
+            entry.name: cast(
+                list[dict[str, list[dict[str, str]]]],
+                cast(JsonDict, entry.metadata)["moments"],
+            )[0]["actions"][0]["script_path"]
+            for entry in reordered_entries
+        }
+        self.assertEqual(reordered_paths, script_paths)
+
+    def test_derived_registries_preserve_normalized_name_collisions(self) -> None:
+        declarations = (
+            ("paths", "path-one"),
+            ("paths", "path_one"),
+            ("animcurves", "curve-one"),
+            ("animcurves", "curve_one"),
+        )
+        _write_yyp(self.gm_dir, reversed(declarations))
+        self._write_resource(
+            "paths",
+            "path-one",
+            "GMPath",
+            "folders/Paths.yy",
+            {"points": [{"x": 11, "y": 1}]},
+        )
+        self._write_resource(
+            "paths",
+            "path_one",
+            "GMPath",
+            "folders/Paths.yy",
+            {"points": [{"x": 22, "y": 2}]},
+        )
+        self._write_resource(
+            "animcurves",
+            "curve-one",
+            "GMAnimationCurve",
+            "folders/Animation Curves.yy",
+            {
+                "channels": [
+                    {"name": "hyphen_channel", "points": [{"x": 0, "y": 11}]}
+                ]
+            },
+        )
+        self._write_resource(
+            "animcurves",
+            "curve_one",
+            "GMAnimationCurve",
+            "folders/Animation Curves.yy",
+            {
+                "channels": [
+                    {
+                        "name": "underscore_channel",
+                        "points": [{"x": 0, "y": 22}],
+                    }
+                ]
+            },
+        )
+
+        converter = self._converter()
+        entries = converter.build_entries()
+        path_entries = {
+            entry.name: entry
+            for entry in entries
+            if entry.kind == "paths"
+        }
+        path_destinations = {
+            name: entry.godot_path
+            for name, entry in path_entries.items()
+        }
+
+        self.assertEqual(
+            path_destinations,
+            {
+                "path-one": "res://paths/path_one/path_one.tscn",
+                "path_one": "res://paths/path_one_2/path_one_2.tscn",
+            },
+        )
+        self.assertEqual(
+            len({path.casefold() for path in path_destinations.values()}),
+            2,
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=4,
+                executed=4,
+                completed=4,
+            ),
+        )
+        for name, expected_x in (("path-one", 11), ("path_one", 22)):
+            output_path = os.path.join(
+                self.godot_dir,
+                *path_destinations[name].removeprefix("res://").split("/"),
+            )
+            with open(output_path, "r", encoding="utf-8") as scene_file:
+                scene = scene_file.read()
+            self.assertIn(f'[node name="{name}" type="Path2D"]', scene)
+            self.assertIn(f'"x": {expected_x}.0', scene)
+
+        with open(
+            os.path.join(
+                self.godot_dir,
+                ANIMATION_CURVE_REGISTRY_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as curve_registry_file:
+            curve_registry = curve_registry_file.read()
+        self.assertIn('"name": "curve-one"', curve_registry)
+        self.assertIn('"name": "curve_one"', curve_registry)
+        self.assertIn('"name": "hyphen_channel"', curve_registry)
+        self.assertIn('"name": "underscore_channel"', curve_registry)
+
+        _write_yyp(self.gm_dir, declarations)
+        reordered_paths = {
+            entry.name: entry.godot_path
+            for entry in self._converter().build_entries()
+            if entry.kind == "paths"
+        }
+        self.assertEqual(reordered_paths, path_destinations)
+
+    def test_extension_stubs_use_collision_safe_selected_paths(self) -> None:
+        extension_names = ("Ext-One", "Ext_One")
+        _write_yyp(
+            self.gm_dir,
+            [("extensions", name) for name in reversed(extension_names)],
+        )
+        for index, name in enumerate(extension_names, start=1):
+            self._write_resource(
+                "extensions",
+                name,
+                "GMExtension",
+                "folders/Extensions.yy",
+                {
+                    "files": [
+                        {
+                            "filename": f"extension_{index}.dll",
+                            "functions": [
+                                {
+                                    "name": f"extension_call_{index}",
+                                    "argCount": 0,
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+
+        converter = self._converter()
+        entries = converter.build_entries()
+        extension_entries = {
+            entry.name: entry
+            for entry in entries
+            if entry.kind == "extensions"
+        }
+        stub_paths = {
+            name: entry.godot_path
+            for name, entry in extension_entries.items()
+        }
+
+        self.assertEqual(
+            stub_paths,
+            {
+                "Ext-One": (
+                    "res://addons/gm2godot_extensions/ext_one/"
+                    "ext_one_extension.gd"
+                ),
+                "Ext_One": (
+                    "res://addons/gm2godot_extensions/ext_one_2/"
+                    "ext_one_2_extension.gd"
+                ),
+            },
+        )
+        self.assertEqual(
+            len({path.casefold() for path in stub_paths.values()}),
+            len(extension_names),
+        )
+        for name, entry in extension_entries.items():
+            metadata = cast(JsonDict, entry.metadata)
+            self.assertEqual(metadata["stub_path"], stub_paths[name])
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=2,
+            ),
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as report_file:
+            report = cast(JsonDict, json.load(report_file))
+        report_paths = {
+            cast(str, stub["extension"]): cast(str, stub["path"])
+            for stub in cast(list[JsonDict], report["stubs"])
+        }
+        self.assertEqual(report_paths, stub_paths)
+
+        for name in extension_names:
+            output_path = os.path.join(
+                self.godot_dir,
+                *stub_paths[name].removeprefix("res://").split("/"),
+            )
+            with open(output_path, "r", encoding="utf-8") as script_file:
+                self.assertIn(
+                    f"# GameMaker extension: {name}",
+                    script_file.read(),
+                )
+            with open(
+                os.path.join(os.path.dirname(output_path), "plugin.cfg"),
+                "r",
+                encoding="utf-8",
+            ) as plugin_file:
+                self.assertIn(
+                    f'script="{os.path.basename(output_path)}"',
+                    plugin_file.read(),
+                )
+
+        _write_yyp(
+            self.gm_dir,
+            [("extensions", name) for name in extension_names],
+        )
+        reordered_paths = {
+            entry.name: entry.godot_path
+            for entry in self._converter().build_entries()
+            if entry.kind == "extensions"
+        }
+        self.assertEqual(reordered_paths, stub_paths)
+
+    def test_valid_yyp_excludes_orphan_extension_auxiliary_outputs(self) -> None:
+        _write_yyp(self.gm_dir, [])
+        self._write_resource(
+            "extensions",
+            "OrphanSDK",
+            "GMExtension",
+            "folders/Extensions.yy",
+            {
+                "files": [
+                    {
+                        "filename": "orphan.dll",
+                        "functions": [{"name": "orphan_call", "argCount": 0}],
+                    }
+                ]
+            },
+        )
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertNotIn("OrphanSDK", registry_file.read())
+        with open(
+            os.path.join(
+                self.godot_dir,
+                EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as report_file:
+            report = cast(JsonDict, json.load(report_file))
+        self.assertEqual(report["extensions"], [])
+        self.assertEqual(report["stubs"], [])
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "addons",
+                    "gm2godot_extensions",
+                    "orphansdk",
+                )
+            )
+        )
+
+    def test_extension_selection_matches_manifest_path_case_portably(self) -> None:
+        extension_name = "ExtCase"
+        self._write_resource(
+            "extensions",
+            extension_name,
+            "GMExtension",
+            "folders/Extensions.yy",
+            {
+                "files": [
+                    {
+                        "filename": "case.dll",
+                        "functions": [{"name": "case_call", "argCount": 0}],
+                    }
+                ]
+            },
+        )
+        declared_path = "extensions/extcase/extcase.yy"
+        if not os.path.isfile(os.path.join(self.gm_dir, *declared_path.split("/"))):
+            self.skipTest("Host filesystem does not resolve case-mismatched paths")
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": extension_name,
+                            "path": declared_path,
+                        }
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        converter = self._converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        report_path = os.path.join(
+            self.godot_dir,
+            EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+        )
+        with open(report_path, "r", encoding="utf-8") as report_file:
+            report = cast(JsonDict, json.load(report_file))
+        stubs = cast(list[JsonDict], report["stubs"])
+        self.assertEqual(len(stubs), 1)
+        stub_path = cast(str, stubs[0]["path"])
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    *stub_path.removeprefix("res://").split("/"),
+                )
+            )
+        )
+
+    def test_case_sensitive_extension_sources_remain_distinct(self) -> None:
+        case_probe = os.path.join(self.gm_dir, "CaseSensitivityProbe")
+        os.mkdir(case_probe)
+        case_sensitive = not os.path.exists(case_probe.lower())
+        os.rmdir(case_probe)
+        if not case_sensitive:
+            self.skipTest("Host filesystem is case-insensitive")
+
+        extension_names = ("CaseExt", "caseext")
+        _write_yyp(
+            self.gm_dir,
+            [("extensions", name) for name in extension_names],
+        )
+        for name in extension_names:
+            self._write_resource(
+                "extensions",
+                name,
+                "GMExtension",
+                "folders/Extensions.yy",
+                {
+                    "files": [
+                        {
+                            "filename": f"{name}.dll",
+                            "functions": [
+                                {"name": f"{name}_call", "argCount": 0}
+                            ],
+                        }
+                    ]
+                },
+            )
+        converter = self._converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=2, executed=2, completed=2),
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as report_file:
+            report = cast(JsonDict, json.load(report_file))
+        stubs = cast(list[JsonDict], report["stubs"])
+        self.assertEqual(
+            {cast(str, stub["extension"]) for stub in stubs},
+            set(extension_names),
+        )
+        self.assertEqual(
+            len({cast(str, stub["path"]).casefold() for stub in stubs}),
+            2,
+        )
+
     def test_timeline_rejects_uncontained_source_fields_without_losing_actions(self) -> None:
         _write_yyp(self.gm_dir, [("timelines", "tl_paths")])
         timeline_directory = os.path.join(
@@ -511,7 +1017,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
             converter = self._converter(diagnostics=diagnostics)
             with patch("builtins.open", wraps=open) as tracked_open:
                 entry = converter.build_entries()[0]
-                converter._write_timeline_action_scripts((entry,))
+                completeness = converter._write_timeline_action_scripts((entry,))
 
             outside_accesses = [
                 call
@@ -522,6 +1028,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 == os.path.realpath(outside_source)
             ]
             self.assertEqual(outside_accesses, [])
+            self.assertEqual(
+                completeness,
+                {("tl_paths", "timelines/tl_paths/tl_paths.yy"): False},
+            )
             with open(outside_source, "r", encoding="utf-8") as outside_file:
                 self.assertEqual(outside_file.read(), outside_contents)
 
@@ -575,6 +1085,134 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(
             [diagnostic.manifest_entry for diagnostic in rejected],
             [field for _frame, field, _case_name in expected_cases],
+        )
+
+    def test_timeline_transpile_failure_is_skipped_and_omits_script_path(self) -> None:
+        _write_yyp(self.gm_dir, [("timelines", "tl_blocked")])
+        self._write_resource(
+            "timelines",
+            "tl_blocked",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {"momentList": [{"moment": 3, "eventFile": "Moment_3.gml"}]},
+        )
+        source_path = os.path.join(
+            self.gm_dir,
+            "timelines",
+            "tl_blocked",
+            "Moment_3.gml",
+        )
+        _write_file(source_path, "if (\n")
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        timeline_script_path = os.path.join(
+            self.godot_dir,
+            "gm2godot",
+            "timelines",
+            "tl_blocked_3.gd",
+        )
+        self.assertFalse(os.path.exists(timeline_script_path))
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry_script = registry_file.read()
+        self.assertNotIn(
+            '"script_path": "res://gm2godot/timelines/tl_blocked_3.gd"',
+            registry_script,
+        )
+        transpile_failures = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-TRANSPILE"
+        ]
+        self.assertEqual(len(transpile_failures), 1)
+        self.assertEqual(transpile_failures[0].source_path, source_path)
+        self.assertEqual(transpile_failures[0].line, 1)
+        self.assertEqual(transpile_failures[0].column, 5)
+        self.assertEqual(transpile_failures[0].resource, "tl_blocked")
+        self.assertEqual(transpile_failures[0].resource_type, "timeline")
+        self.assertEqual(transpile_failures[0].event, "moment 3")
+
+    def test_safe_timeline_completes_when_other_source_cannot_be_read(self) -> None:
+        _write_yyp(
+            self.gm_dir,
+            [
+                ("timelines", "tl_blocked"),
+                ("timelines", "tl_safe"),
+            ],
+        )
+        self._write_resource(
+            "timelines",
+            "tl_blocked",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {"momentList": [{"moment": 2, "eventFile": "Moment_2.gml"}]},
+        )
+        self._write_resource(
+            "timelines",
+            "tl_safe",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {"momentList": [{"moment": 4, "eventFile": "Moment_4.gml"}]},
+        )
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "timelines",
+                "tl_safe",
+                "Moment_4.gml",
+            ),
+            "score += 1;\n",
+        )
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        safe_script_path = os.path.join(
+            self.godot_dir,
+            "gm2godot",
+            "timelines",
+            "tl_safe_4.gd",
+        )
+        blocked_script_path = os.path.join(
+            self.godot_dir,
+            "gm2godot",
+            "timelines",
+            "tl_blocked_2.gd",
+        )
+        self.assertTrue(os.path.isfile(safe_script_path))
+        self.assertFalse(os.path.exists(blocked_script_path))
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry_script = registry_file.read()
+        self.assertIn(
+            '"script_path": "res://gm2godot/timelines/tl_safe_4.gd"',
+            registry_script,
+        )
+        self.assertNotIn(
+            '"script_path": "res://gm2godot/timelines/tl_blocked_2.gd"',
+            registry_script,
         )
 
     def test_timeline_disk_discovery_skips_directory_link_outside_project(self) -> None:
@@ -1630,7 +2268,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "function saveending() { loadending(); }\n",
         )
 
-        entries = self._converter().build_entries()
+        converter = self._converter()
+        entries = converter.build_entries()
         by_name = {entry.name: entry for entry in entries}
 
         self.assertIn("ending", by_name)
@@ -1651,6 +2290,1018 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 "script_asset": "ending",
                 "script_source_path": "scripts/ending/ending.yy",
             },
+        )
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            registry_path,
+            os.path.join(self.godot_dir, ASSET_REGISTRY_RELATIVE_PATH),
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+
+    def test_missing_only_manifest_asset_makes_converter_outcome_partial(
+        self,
+    ) -> None:
+        _write_yyp(self.gm_dir, [("sprites", "s_missing")])
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+            max_workers=1,
+        )
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"asset_registry": _EnabledSetting()},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.converters,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in converter.diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "s_missing")
+        self.assertEqual(unavailable[0].resource_type, "sprite")
+        self.assertEqual(unavailable[0].source_path, "AssetRegistryTest.yyp")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "resources[0].id.path",
+        )
+
+    def test_safe_missing_and_orphan_manifest_assets_have_strict_counts(
+        self,
+    ) -> None:
+        _write_yyp(
+            self.gm_dir,
+            [
+                ("sprites", "s_safe"),
+                ("sprites", "s_missing"),
+            ],
+        )
+        self._write_resource(
+            "sprites",
+            "s_safe",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        self._write_resource(
+            "sprites",
+            "s_orphan",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                completed=1,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "s_safe"', registry)
+        self.assertNotIn('"name": "s_missing"', registry)
+        self.assertNotIn('"name": "s_orphan"', registry)
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "s_missing")
+
+    def test_malformed_derived_registry_metadata_is_skipped_not_completed(
+        self,
+    ) -> None:
+        declarations = (
+            ("paths", "path_malformed"),
+            ("animcurves", "curve_malformed"),
+            ("extensions", "ExtensionMalformed"),
+        )
+        _write_yyp(self.gm_dir, declarations)
+        for kind, name in declarations:
+            _write_file(
+                os.path.join(self.gm_dir, kind, name, name + ".yy"),
+                "{ malformed json",
+            )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=3, skipped=3),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertNotIn("path_malformed", registry)
+        self.assertNotIn("curve_malformed", registry)
+        self.assertNotIn("ExtensionMalformed", registry)
+
+        with open(
+            os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH),
+            "r",
+            encoding="utf-8",
+        ) as path_registry_file:
+            self.assertNotIn("path_malformed", path_registry_file.read())
+        with open(
+            os.path.join(
+                self.godot_dir,
+                ANIMATION_CURVE_REGISTRY_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as curve_registry_file:
+            self.assertNotIn("curve_malformed", curve_registry_file.read())
+        with open(
+            os.path.join(
+                self.godot_dir,
+                EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as extension_report_file:
+            extension_report = json.load(extension_report_file)
+        self.assertEqual(extension_report["extensions"], [])
+
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            {
+                (diagnostic.resource, diagnostic.resource_type)
+                for diagnostic in unavailable
+            },
+            {
+                ("path_malformed", "path"),
+                ("curve_malformed", "animation_curve"),
+                ("ExtensionMalformed", "extension"),
+            },
+        )
+
+    def test_empty_derived_registry_metadata_is_valid(self) -> None:
+        declarations = (
+            ("paths", "path_empty"),
+            ("animcurves", "curve_empty"),
+            ("extensions", "ExtensionEmpty"),
+        )
+        _write_yyp(self.gm_dir, declarations)
+        for kind, name in declarations:
+            _write_file(
+                os.path.join(self.gm_dir, kind, name, name + ".yy"),
+                "{}\n",
+            )
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=3,
+                executed=3,
+                completed=3,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "path_empty"', registry)
+        self.assertIn('"name": "curve_empty"', registry)
+        self.assertIn('"name": "ExtensionEmpty"', registry)
+
+        with open(
+            os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH),
+            "r",
+            encoding="utf-8",
+        ) as path_registry_file:
+            self.assertIn('"name": "path_empty"', path_registry_file.read())
+        with open(
+            os.path.join(
+                self.godot_dir,
+                ANIMATION_CURVE_REGISTRY_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as curve_registry_file:
+            self.assertIn('"name": "curve_empty"', curve_registry_file.read())
+        with open(
+            os.path.join(
+                self.godot_dir,
+                EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            ),
+            "r",
+            encoding="utf-8",
+        ) as extension_report_file:
+            extension_report = json.load(extension_report_file)
+        self.assertEqual(
+            [entry["name"] for entry in extension_report["extensions"]],
+            ["ExtensionEmpty"],
+        )
+
+    def test_metadata_read_race_is_skipped_not_completed(self) -> None:
+        _write_yyp(self.gm_dir, [("paths", "path_disappears")])
+        path_metadata = os.path.join(
+            self.gm_dir,
+            "paths",
+            "path_disappears",
+            "path_disappears.yy",
+        )
+        _write_json(
+            path_metadata,
+            _minimal_yy(
+                "path_disappears",
+                "GMPath",
+                "folders/Paths.yy",
+            ),
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+        original_read = AssetRegistryConverter._read_yy_file
+
+        def remove_before_read(
+            active_converter: AssetRegistryConverter,
+            yy_path: StrPath,
+        ) -> JsonDict | None:
+            os.unlink(os.fspath(yy_path))
+            return original_read(active_converter, yy_path)
+
+        with patch.object(
+            AssetRegistryConverter,
+            "_read_yy_file",
+            new=remove_before_read,
+        ):
+            converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "path_disappears")
+
+    def test_rejected_and_cross_family_declarations_are_skipped(self) -> None:
+        cross_family_path = os.path.join(
+            self.gm_dir,
+            "objects",
+            "scr_cross_family",
+            "scr_cross_family.yy",
+        )
+        _write_json(
+            cross_family_path,
+            _minimal_yy(
+                "scr_cross_family",
+                "GMObject",
+                "folders/Objects.yy",
+            ),
+        )
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "s_rejected",
+                            "path": (
+                                "sprites/../../outside/s_rejected/"
+                                "s_rejected.yy"
+                            ),
+                        },
+                        "resourceType": "GMSprite",
+                    },
+                    {
+                        "id": {
+                            "name": "scr_cross_family",
+                            "path": (
+                                "scripts/../objects/scr_cross_family/"
+                                "scr_cross_family.yy"
+                            ),
+                        },
+                        "resourceType": "GMScript",
+                    },
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=2, skipped=2),
+        )
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in unavailable},
+            {"s_rejected", "scr_cross_family"},
+        )
+        self.assertTrue(
+            all(
+                diagnostic.source_path == "AssetRegistryTest.yyp"
+                for diagnostic in unavailable
+            )
+        )
+        source_rejections = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
+        ]
+        self.assertEqual(
+            {diagnostic.resource for diagnostic in source_rejections},
+            {"s_rejected", "scr_cross_family"},
+        )
+
+    def test_duplicate_missing_manifest_declaration_is_accounted_once(
+        self,
+    ) -> None:
+        declaration = ("sprites", "s_missing")
+        _write_yyp(self.gm_dir, [declaration, declaration])
+        converter = self._converter()
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, skipped=1),
+        )
+
+    def test_valid_manifest_included_files_are_strictly_accounted(self) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "safe.json",
+                        "path": "datafiles/config/safe.json",
+                    },
+                    {
+                        "name": "missing.json",
+                        "path": "datafiles/config/missing.json",
+                    },
+                    {
+                        "name": "safe.json",
+                        "path": "datafiles/config/safe.json",
+                    },
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "datafiles",
+                "config",
+                "safe.json",
+            ),
+            "safe\n",
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "datafiles", "orphan.json"),
+            "orphan\n",
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=3,
+                executed=2,
+                completed=2,
+                skipped=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "config/safe.json"', registry)
+        self.assertNotIn('"name": "config/missing.json"', registry)
+        self.assertIn('"name": "orphan.json"', registry)
+        unavailable = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+        ]
+        self.assertEqual(len(unavailable), 1, unavailable)
+        self.assertEqual(unavailable[0].resource, "config/missing.json")
+        self.assertEqual(unavailable[0].resource_type, "included_file")
+        self.assertEqual(
+            unavailable[0].manifest_entry,
+            "IncludedFiles[1].path",
+        )
+
+    def test_current_gamemaker_file_path_directory_combines_payload_name(
+        self,
+    ) -> None:
+        _write_json(
+            os.path.join(self.gm_dir, "AssetRegistryTest.yyp"),
+            {
+                "resources": [],
+                "IncludedFiles": [
+                    {
+                        "name": "safe.json",
+                        "filePath": "datafiles/config",
+                    }
+                ],
+                "RoomOrderNodes": [],
+                "resourceType": "GMProject",
+            },
+        )
+        _write_file(
+            os.path.join(
+                self.gm_dir,
+                "datafiles",
+                "config",
+                "safe.json",
+            ),
+            "safe\n",
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            registry = registry_file.read()
+        self.assertIn('"name": "config/safe.json"', registry)
+        self.assertFalse(
+            any(
+                diagnostic.code
+                == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+                for diagnostic in diagnostics.diagnostics()
+            )
+        )
+
+    def test_no_yyp_keeps_contained_disk_fallback_accounting(self) -> None:
+        self._write_resource(
+            "sprites",
+            "s_fallback",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        converter = self._converter()
+
+        entries = converter.build_entries()
+
+        self.assertEqual([entry.name for entry in entries], ["s_fallback"])
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(),
+        )
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertIn('"name": "s_fallback"', registry_file.read())
+
+    def test_output_exception_fails_every_logical_registry_resource(self) -> None:
+        _write_yyp(
+            self.gm_dir,
+            [("sprites", "s_player"), ("objects", "o_player")],
+        )
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        self._write_resource(
+            "objects",
+            "o_player",
+            "GMObject",
+            "folders/Objects.yy",
+        )
+        converter = self._converter()
+
+        with patch(
+            "src.conversion.asset_registry.write_path_registry",
+            side_effect=RuntimeError("path registry failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "path registry failed"):
+                converter.convert_all()
+
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        self.assertFalse(os.path.exists(registry_path))
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                failed=2,
+            ),
+        )
+
+    def test_later_output_exception_preserves_previous_registry(self) -> None:
+        _write_yyp(self.gm_dir, [("sprites", "s_player")])
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        converter = self._converter()
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        _write_file(registry_path, "previous registry\n")
+        os.chmod(registry_path, 0o640)
+
+        with patch(
+            "src.conversion.asset_registry.write_animation_curve_registry",
+            side_effect=RuntimeError("animation registry failed"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "animation registry failed",
+            ):
+                converter.convert_all()
+
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertEqual(registry_file.read(), "previous registry\n")
+        self.assertEqual(stat.S_IMODE(os.stat(registry_path).st_mode), 0o640)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                failed=1,
+            ),
+        )
+
+    def _auxiliary_output_path(self, output_kind: str) -> str:
+        if output_kind == "group_report":
+            return os.path.join(
+                self.godot_dir,
+                GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
+            )
+        return os.path.join(
+            self.godot_dir,
+            "gm2godot",
+            "timelines",
+            "tl_output_1.gd",
+        )
+
+    def _publish_auxiliary_output(self, output_kind: str) -> None:
+        converter = self._converter()
+        if output_kind == "group_report":
+            converter._write_group_compatibility_report((), (), ())
+            return
+        source_path = os.path.join(
+            self.gm_dir,
+            "timelines",
+            "tl_output",
+            "Moment_1.gml",
+        )
+        _write_file(source_path, "timeline_value = 1;\n")
+        self.assertTrue(
+            converter._write_timeline_action_script(
+                "tl_output",
+                1,
+                "timelines/tl_output/tl_output.yy",
+                "timelines/tl_output/Moment_1.gml",
+                "res://gm2godot/timelines/tl_output_1.gd",
+                set(),
+            )
+        )
+
+    def test_auxiliary_outputs_refuse_final_symlinks_without_mutating_referents(
+        self,
+    ) -> None:
+        for output_kind in ("group_report", "timeline_script"):
+            with self.subTest(output_kind=output_kind):
+                output_path = self._auxiliary_output_path(output_kind)
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                external_path = os.path.join(
+                    self.gm_dir,
+                    f"outside_{output_kind}.txt",
+                )
+                _write_file(external_path, "external sentinel\n")
+                try:
+                    os.symlink(external_path, output_path)
+                except (NotImplementedError, OSError) as error:
+                    self.skipTest(f"Symbolic links are unavailable: {error}")
+
+                with self.assertRaisesRegex(OSError, "non-regular asset registry"):
+                    self._publish_auxiliary_output(output_kind)
+
+                self.assertTrue(os.path.islink(output_path))
+                with open(external_path, "r", encoding="utf-8") as external_file:
+                    self.assertEqual(external_file.read(), "external sentinel\n")
+                os.unlink(output_path)
+
+    def test_auxiliary_outputs_replace_hardlinks_without_mutating_referents(
+        self,
+    ) -> None:
+        for output_kind in ("group_report", "timeline_script"):
+            with self.subTest(output_kind=output_kind):
+                output_path = self._auxiliary_output_path(output_kind)
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                external_path = os.path.join(
+                    self.gm_dir,
+                    f"hardlink_{output_kind}.txt",
+                )
+                _write_file(external_path, "external sentinel\n")
+                try:
+                    os.link(external_path, output_path)
+                except (NotImplementedError, OSError) as error:
+                    self.skipTest(f"Hard links are unavailable: {error}")
+                external_inode = os.stat(external_path).st_ino
+
+                self._publish_auxiliary_output(output_kind)
+
+                with open(external_path, "r", encoding="utf-8") as external_file:
+                    self.assertEqual(external_file.read(), "external sentinel\n")
+                self.assertNotEqual(os.stat(output_path).st_ino, external_inode)
+                os.unlink(output_path)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO creation is unavailable")
+    def test_auxiliary_outputs_refuse_fifos_without_opening_them(self) -> None:
+        for output_kind in ("group_report", "timeline_script"):
+            with self.subTest(output_kind=output_kind):
+                output_path = self._auxiliary_output_path(output_kind)
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                os.mkfifo(output_path)
+
+                with self.assertRaisesRegex(OSError, "non-regular asset registry"):
+                    self._publish_auxiliary_output(output_kind)
+
+                self.assertTrue(
+                    stat.S_ISFIFO(os.lstat(output_path).st_mode),
+                )
+                os.unlink(output_path)
+
+    def test_timeline_output_refuses_redirected_managed_ancestor(self) -> None:
+        external_root = os.path.join(self.gm_dir, "outside_timeline_output")
+        os.makedirs(os.path.join(external_root, "timelines"))
+        managed_root = os.path.join(self.godot_dir, "gm2godot")
+        try:
+            os.symlink(external_root, managed_root)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        for force_fallback in (False, True):
+            with self.subTest(force_fallback=force_fallback):
+                patcher = (
+                    patch(
+                        "src.conversion.asset_registry._confined_asset_output_supported",
+                        return_value=False,
+                    )
+                    if force_fallback
+                    else patch(
+                        "src.conversion.asset_registry._confined_asset_output_supported",
+                        wraps=None,
+                    )
+                )
+                if force_fallback:
+                    with patcher:
+                        with self.assertRaisesRegex(
+                            OSError,
+                            "redirected asset-registry output directory",
+                        ):
+                            self._publish_auxiliary_output("timeline_script")
+                else:
+                    with self.assertRaisesRegex(
+                        OSError,
+                        "redirected asset-registry output directory",
+                    ):
+                        self._publish_auxiliary_output("timeline_script")
+
+                self.assertEqual(os.listdir(os.path.join(external_root, "timelines")), [])
+
+    def test_atomic_registry_publish_failure_preserves_previous_file(self) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        registry_directory = os.path.dirname(registry_path)
+        _write_file(registry_path, "previous registry\n")
+        os.chmod(registry_path, 0o640)
+
+        for patched_name, error_message in (
+            ("os.fsync", "stage failed"),
+            ("os.replace", "publish failed"),
+        ):
+            with self.subTest(patched_name=patched_name):
+                with patch(
+                    f"src.conversion.asset_registry.{patched_name}",
+                    side_effect=OSError(error_message),
+                ):
+                    with self.assertRaisesRegex(OSError, error_message):
+                        AssetRegistryConverter._atomic_write_text(
+                            registry_path,
+                            "replacement registry\n",
+                        )
+
+                with open(registry_path, "r", encoding="utf-8") as registry_file:
+                    self.assertEqual(registry_file.read(), "previous registry\n")
+                self.assertEqual(
+                    stat.S_IMODE(os.stat(registry_path).st_mode),
+                    0o640,
+                )
+                staged_prefix = f".{os.path.basename(registry_path)}."
+                self.assertFalse(
+                    any(
+                        name.startswith(staged_prefix)
+                        for name in os.listdir(registry_directory)
+                    )
+                )
+
+    def test_atomic_registry_publish_uses_umask_safe_and_stable_modes(self) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+
+        AssetRegistryConverter._atomic_write_text(registry_path, "first\n")
+
+        if os.name != "nt":
+            self.assertEqual(
+                stat.S_IMODE(os.stat(registry_path).st_mode),
+                0o600,
+            )
+        os.chmod(registry_path, 0o600)
+
+        AssetRegistryConverter._atomic_write_text(registry_path, "second\n")
+
+        self.assertEqual(stat.S_IMODE(os.stat(registry_path).st_mode), 0o600)
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertEqual(registry_file.read(), "second\n")
+
+    def test_atomic_registry_writer_does_not_require_os_fchmod(self) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+
+        with patch.object(
+            os,
+            "fchmod",
+            side_effect=AssertionError("os.fchmod must not be called"),
+            create=True,
+        ):
+            AssetRegistryConverter._atomic_write_text(registry_path, "first\n")
+            os.chmod(registry_path, 0o640)
+            AssetRegistryConverter._atomic_write_text(registry_path, "second\n")
+
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertEqual(registry_file.read(), "second\n")
+        if os.name != "nt":
+            self.assertEqual(
+                stat.S_IMODE(os.stat(registry_path).st_mode),
+                0o640,
+            )
+
+    def test_atomic_registry_replaces_hardlink_without_mutating_referent(
+        self,
+    ) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        external_path = os.path.join(self.gm_dir, "external_registry.gd")
+        _write_file(external_path, "external sentinel\n")
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        try:
+            os.link(external_path, registry_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Hard links are unavailable: {error}")
+
+        AssetRegistryConverter._atomic_write_text(registry_path, "replacement\n")
+
+        with open(external_path, "r", encoding="utf-8") as external_file:
+            self.assertEqual(external_file.read(), "external sentinel\n")
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertEqual(registry_file.read(), "replacement\n")
+        self.assertNotEqual(
+            os.stat(external_path).st_ino,
+            os.stat(registry_path).st_ino,
+        )
+
+    def test_atomic_registry_refuses_symlinked_output_directory(self) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        external_directory = os.path.join(self.gm_dir, "external_registry")
+        os.makedirs(external_directory)
+        try:
+            os.symlink(
+                external_directory,
+                os.path.dirname(registry_path),
+            )
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        with self.assertRaisesRegex(
+            OSError,
+            "redirected asset-registry output directory",
+        ):
+            AssetRegistryConverter._atomic_write_text(
+                registry_path,
+                "replacement\n",
+            )
+
+        self.assertEqual(os.listdir(external_directory), [])
+
+    def test_atomic_registry_refuses_mocked_windows_junction_output_directory(
+        self,
+    ) -> None:
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        registry_directory = os.path.dirname(registry_path)
+        os.makedirs(registry_directory)
+        normalized_registry_directory = os.path.normcase(
+            os.path.abspath(registry_directory)
+        )
+
+        def is_mock_junction(path: str) -> bool:
+            return (
+                os.path.normcase(os.path.abspath(path))
+                == normalized_registry_directory
+            )
+
+        with patch.object(
+            os.path,
+            "isjunction",
+            side_effect=is_mock_junction,
+            create=True,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "redirected asset-registry output directory",
+            ):
+                AssetRegistryConverter._atomic_write_text(
+                    registry_path,
+                    "replacement\n",
+                )
+
+        self.assertEqual(os.listdir(registry_directory), [])
+
+    def test_cancellation_during_entry_build_does_not_publish_partial_registry(
+        self,
+    ) -> None:
+        _write_yyp(
+            self.gm_dir,
+            [("sprites", "s_player"), ("objects", "o_player")],
+        )
+        self._write_resource(
+            "sprites",
+            "s_player",
+            "GMSprite",
+            "folders/Sprites.yy",
+        )
+        self._write_resource(
+            "objects",
+            "o_player",
+            "GMObject",
+            "folders/Objects.yy",
+        )
+        running_checks = 0
+
+        def conversion_running() -> bool:
+            nonlocal running_checks
+            running_checks += 1
+            return running_checks == 1
+
+        converter = AssetRegistryConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda _value: None,
+            conversion_running=conversion_running,
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+
+        self.assertEqual(converter.convert_all(), registry_path)
+
+        self.assertFalse(os.path.exists(registry_path))
+        with self.assertRaises(ValueError):
+            converter.conversion_step_result(finalize_unfinished_as=None)
+        result = converter.conversion_step_result()
+        self.assertTrue(result.cancelled)
+        self.assertEqual(
+            result.resources,
+            ConversionCounts(
+                requested=2,
+                executed=1,
+                skipped=2,
+            ),
+        )
+
+    def test_empty_registry_reports_zero_logical_resources(self) -> None:
+        converter = self._converter()
+
+        registry_path = converter.convert_all()
+
+        self.assertEqual(
+            registry_path,
+            os.path.join(self.godot_dir, ASSET_REGISTRY_RELATIVE_PATH),
+        )
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(),
         )
 
     def test_script_function_assets_follow_selected_macro_configuration(self) -> None:

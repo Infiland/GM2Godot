@@ -3,6 +3,7 @@ from typing import Protocol, cast
 
 from PySide6.QtCore import QObject, Signal
 
+from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import Converter
 from src.gui.setting_value import SettingValue
 
@@ -14,7 +15,7 @@ class _ConverterProtocol(Protocol):
         gm_platform: str,
         godot_path: str,
         settings: dict[str, SettingValue],
-    ) -> None:
+    ) -> ConversionOutcome:
         ...
 
 

@@ -98,6 +98,18 @@ def write_conversion_manifest(
     return manifest_path
 
 
+def invalidate_conversion_manifest(godot_project_path: str) -> None:
+    """Remove a manifest that can no longer describe the current output."""
+    manifest_path = os.path.join(
+        godot_project_path,
+        CONVERSION_MANIFEST_RELATIVE_PATH,
+    )
+    try:
+        os.unlink(manifest_path)
+    except FileNotFoundError:
+        return
+
+
 def build_conversion_manifest(
     gm_project_path: str,
     godot_project_path: str,

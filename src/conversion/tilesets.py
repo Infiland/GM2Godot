@@ -6,6 +6,7 @@ import json
 import shutil
 import posixpath
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict, cast
 
 from src.localization import get_localized
@@ -67,6 +68,14 @@ class TilesetFailure(TypedDict):
 TilesetResult = TilesetSuccess | TilesetFailure
 
 
+@dataclass(frozen=True)
+class _DeclaredTilesetResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str
+    manifest_field: str
+
+
 class TileSetConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
@@ -80,6 +89,7 @@ class TileSetConverter(BaseConverter):
         self.godot_tilesets_path = os.path.join(self.godot_project_path, 'tilesets')
         self._tileset_output_paths: dict[str, str] = {}
         self._tileset_source_paths: dict[str, str] = {}
+        self._yyp_declared_tilesets: dict[str, _DeclaredTilesetResource] = {}
 
     def _get_valid_tileset_names(self) -> dict[str, str] | None:
         """Parse the .yyp project file and return a dict of tileset name -> subfolder.
@@ -88,81 +98,123 @@ class TileSetConverter(BaseConverter):
         the caller to fall back to converting all tilesets on disk.
         """
         self._tileset_source_paths = {}
+        self._yyp_declared_tilesets = {}
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         manifest_rejected_fields = self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="tileset",
             include_project_sources=True,
         )
-        try:
-            if manifest.yyp_path is None:
-                return None
-            yyp_source = self._resolve_discovered_project_source(
-                manifest.yyp_path,
-                resource_type="project",
-                field="projectFile",
-            )
-            if yyp_source is None:
-                return None
-            if any(
-                diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
-                for diagnostic in manifest.diagnostics
-            ):
-                raise TypeError("GameMaker project root must be an object")
-            data = manifest.raw_data
-
-            valid_tilesets: dict[str, str] = {}
-            resources = data.get('resources', [])
-            if not isinstance(resources, list):
-                return valid_tilesets
-            for index, resource in enumerate(cast(list[object], resources)):
-                if not isinstance(resource, dict):
-                    continue
-                raw_id = cast(JsonDict, resource).get('id', {})
-                if not isinstance(raw_id, dict):
-                    continue
-                res_id = cast(JsonDict, raw_id)
-                raw_path = res_id.get('path', '')
-                if not isinstance(raw_path, str):
-                    continue
-                field = f"resources[{index}].id.path"
-                if field in manifest_rejected_fields:
-                    continue
-                path = raw_path.replace('\\', '/')
-                if path.partition('/')[0].casefold() == 'tilesets':
-                    raw_name = res_id.get('name', '')
-                    name = (
-                        raw_name
-                        if isinstance(raw_name, str) and raw_name
-                        else os.path.splitext(os.path.basename(path))[0]
-                    )
-                    if not name:
-                        continue
-                    resolved_path = self._resolve_project_source(
-                        path,
-                        owner_source_path=yyp_source.source_path,
-                        resource=name,
-                        resource_type="tileset",
-                        field=field,
-                    )
-                    if resolved_path is None or not self._source_has_resource_kind(
-                        resolved_path,
-                        "tilesets",
-                        rejected_path=path,
-                        owner_source_path=yyp_source.source_path,
-                        resource=name,
-                        field=field,
-                    ):
-                        continue
-                    yy_path = resolved_path.filesystem_path
-                    if not os.path.isfile(yy_path):
-                        continue
-                    self._tileset_source_paths[name] = resolved_path.source_path
-                    valid_tilesets[name] = self._get_subfolder_from_yy(yy_path)
-
-            return valid_tilesets
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        if manifest.yyp_path is None or any(
+            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
+            for diagnostic in manifest.diagnostics
+        ):
             return None
+        yyp_source = self._resolve_discovered_project_source(
+            manifest.yyp_path,
+            resource_type="project",
+            field="projectFile",
+        )
+        if yyp_source is None:
+            return None
+
+        valid_tilesets: dict[str, str] = {}
+        resources = manifest.raw_data.get('resources', [])
+        if not isinstance(resources, list):
+            return valid_tilesets
+        for index, resource in enumerate(cast(list[object], resources)):
+            if not isinstance(resource, dict):
+                continue
+            resource_data = cast(JsonDict, resource)
+            raw_id = resource_data.get('id', {})
+            if not isinstance(raw_id, dict):
+                continue
+            res_id = cast(JsonDict, raw_id)
+            raw_path = res_id.get('path', '')
+            path = raw_path.replace('\\', '/') if isinstance(raw_path, str) else ""
+            resource_type = resource_data.get('resourceType')
+            id_resource_type = res_id.get('resourceType')
+            is_tileset = (
+                path.partition('/')[0].casefold() == 'tilesets'
+                or resource_type == "GMTileSet"
+                or id_resource_type == "GMTileSet"
+            )
+            if not is_tileset:
+                continue
+
+            raw_name = res_id.get('name', '')
+            name = (
+                raw_name
+                if isinstance(raw_name, str) and raw_name
+                else os.path.splitext(os.path.basename(path))[0]
+            )
+            if not name:
+                continue
+            field = f"resources[{index}].id.path"
+            self._yyp_declared_tilesets.setdefault(
+                name,
+                _DeclaredTilesetResource(
+                    name=name,
+                    source_path=raw_path if isinstance(raw_path, str) else None,
+                    owner_source_path=yyp_source.source_path,
+                    manifest_field=field,
+                ),
+            )
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            if field in manifest_rejected_fields:
+                continue
+            resolved_path = self._resolve_project_source(
+                path,
+                owner_source_path=yyp_source.source_path,
+                resource=name,
+                resource_type="tileset",
+                field=field,
+            )
+            if resolved_path is None or not self._source_has_resource_kind(
+                resolved_path,
+                "tilesets",
+                rejected_path=path,
+                owner_source_path=yyp_source.source_path,
+                resource=name,
+                field=field,
+            ):
+                continue
+            yy_path = resolved_path.filesystem_path
+            if not os.path.isfile(yy_path):
+                continue
+            self._tileset_source_paths[name] = resolved_path.source_path
+            valid_tilesets[name] = self._get_subfolder_from_yy(yy_path)
+
+        return valid_tilesets
+
+    def _report_unavailable_declared_tileset(
+        self,
+        resource: _DeclaredTilesetResource,
+        *,
+        reason: str,
+    ) -> None:
+        message = (
+            "Warning: Skipping manifest-declared GameMaker tileset "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-TILESET-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="tileset",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker tileset .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
 
     def _source_has_resource_kind(
         self,
@@ -774,6 +826,32 @@ class TileSetConverter(BaseConverter):
 
         return {"success": True, "name": tileset_name, "tileset_data": tileset_data}
 
+    def _process_tileset_with_outcome(
+        self,
+        tileset_name: str,
+        subfolder: str = "",
+        tileset_source_path: str | None = None,
+    ) -> TilesetResult | None:
+        if not self.conversion_running():
+            return None
+        self._resource_started(tileset_name)
+        try:
+            result = self._process_tileset(
+                tileset_name,
+                subfolder,
+                tileset_source_path,
+            )
+        except Exception:
+            self._resource_failed(tileset_name)
+            raise
+        if result is None:
+            self._resource_skipped(tileset_name)
+        elif result["success"]:
+            self._resource_completed(tileset_name)
+        else:
+            self._resource_failed(tileset_name)
+        return result
+
     def _warn_preserved_metadata(self, tileset_name: str, tileset_data: TilesetData) -> None:
         preserved_features: list[str] = []
         if tileset_data["tileAnimationFrames"]:
@@ -799,31 +877,72 @@ class TileSetConverter(BaseConverter):
         os.makedirs(self.godot_project_path, exist_ok=True)
         os.makedirs(self.godot_tilesets_path, exist_ok=True)
 
-        resolved_tilesets_root = self._resolve_discovered_project_source(
-            os.path.join(self.gm_project_path, 'tilesets'),
-            resource_type="tileset",
-            field="tilesets directory",
-        )
-        if (
-            resolved_tilesets_root is None
-            or not os.path.isdir(resolved_tilesets_root.filesystem_path)
-        ):
-            self.log_callback(get_localized("Console_Convertor_Tilesets_Error_NotFound").format(
-                gm_project_path=self.gm_project_path))
-            return
-
         tileset_names: list[str] = []
         tileset_subfolders: dict[str, str] = {}
         valid_names = self._get_valid_tileset_names()
         if valid_names is not None:
+            declared_names = set(self._yyp_declared_tilesets) | set(valid_names)
+            for name in sorted(declared_names):
+                self._resource_requested(name)
+
+            unavailable_names = declared_names - set(valid_names)
+            for name in sorted(unavailable_names):
+                resource = self._yyp_declared_tilesets.get(
+                    name,
+                    _DeclaredTilesetResource(
+                        name=name,
+                        source_path=None,
+                        owner_source_path=self.gm_project_path,
+                        manifest_field="resources[].id.path",
+                    ),
+                )
+                reason = (
+                    f"metadata is missing or unavailable at {resource.source_path!r}"
+                    if resource.source_path
+                    else "its manifest source path was rejected or is unavailable"
+                )
+                self._report_unavailable_declared_tileset(
+                    resource,
+                    reason=reason,
+                )
+                self._resource_skipped(name)
+
             for name, subfolder in valid_names.items():
                 source_path = self._tileset_source_paths.get(name)
                 resolved = self._resolve_tileset_yy_source(name, source_path)
                 if resolved is None or not os.path.isfile(resolved.filesystem_path):
+                    resource = self._yyp_declared_tilesets.get(
+                        name,
+                        _DeclaredTilesetResource(
+                            name=name,
+                            source_path=source_path,
+                            owner_source_path=self.gm_project_path,
+                            manifest_field="resources[].id.path",
+                        ),
+                    )
+                    self._report_unavailable_declared_tileset(
+                        resource,
+                        reason=(
+                            "its metadata became unavailable before conversion"
+                        ),
+                    )
+                    self._resource_skipped(name)
                     continue
                 tileset_names.append(name)
                 tileset_subfolders[name] = subfolder
         else:
+            resolved_tilesets_root = self._resolve_discovered_project_source(
+                os.path.join(self.gm_project_path, 'tilesets'),
+                resource_type="tileset",
+                field="tilesets directory",
+            )
+            if (
+                resolved_tilesets_root is None
+                or not os.path.isdir(resolved_tilesets_root.filesystem_path)
+            ):
+                self.log_callback(get_localized("Console_Convertor_Tilesets_Error_NotFound").format(
+                    gm_project_path=self.gm_project_path))
+                return
             for entry in os.listdir(resolved_tilesets_root.filesystem_path):
                 entry_path = os.path.join(
                     resolved_tilesets_root.filesystem_path,
@@ -870,6 +989,8 @@ class TileSetConverter(BaseConverter):
                 tileset_subfolders[entry] = self._get_subfolder_from_yy(
                     resolved_yy.filesystem_path
                 )
+            for tileset_name in tileset_names:
+                self._resource_requested(tileset_name)
 
         if not tileset_names:
             self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
@@ -887,7 +1008,7 @@ class TileSetConverter(BaseConverter):
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map: dict[Future[TilesetResult | None], str] = {
                 executor.submit(
-                    self._process_tileset,
+                    self._process_tileset_with_outcome,
                     name,
                     tileset_subfolders.get(name, ""),
                     self._tileset_source_paths.get(name),
@@ -919,6 +1040,7 @@ class TileSetConverter(BaseConverter):
         self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_tilesets()
 
 

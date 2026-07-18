@@ -5,7 +5,8 @@ import os
 import posixpath
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TypedDict, cast
+from dataclasses import dataclass
+from typing import Literal, TypedDict, cast
 
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
@@ -23,6 +24,7 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.room_creation_code import (
+    CreationCodeMetadata,
     CreationCodeSourceResolver,
     ROOM_EXECUTION_ORDER,
     instance_creation_order_names,
@@ -130,11 +132,23 @@ def _iter_room_effect_layers(layers: object) -> list[JsonDict]:
 
 
 class RoomProcessResult(TypedDict):
-    success: bool
+    status: Literal["completed", "skipped"]
     name: str
     width: object
     height: object
     scene_path: str
+
+
+@dataclass(frozen=True)
+class _DeclaredRoomResource:
+    name: str
+    source_path: str | None
+    owner_source_path: str | None
+    manifest_field: str | None
+
+
+class _RoomCreationCodeBlocked(Exception):
+    """Stop one room when declared creation code cannot be converted safely."""
 
 
 class RoomConverter(BaseConverter):
@@ -171,6 +185,97 @@ class RoomConverter(BaseConverter):
             max_workers=self.max_workers,
             diagnostics=self.diagnostics,
         ).build()
+
+    def _declared_room_resources(
+        self,
+        index: GameMakerResourceIndex,
+    ) -> tuple[_DeclaredRoomResource, ...] | None:
+        """Return rooms selected by a valid YYP, including rejected paths."""
+        manifest = index.project_manifest
+        if index.yyp_data is None or manifest is None:
+            return None
+
+        raw_resources = manifest.raw_data.get("resources", [])
+        if not isinstance(raw_resources, list):
+            return ()
+
+        declared: dict[str, _DeclaredRoomResource] = {}
+        for resource_index, raw_resource in enumerate(
+            cast(list[object], raw_resources)
+        ):
+            if not isinstance(raw_resource, dict):
+                continue
+            resource = cast(JsonDict, raw_resource)
+            raw_resource_id = resource.get("id")
+            if not isinstance(raw_resource_id, dict):
+                continue
+            resource_id = cast(JsonDict, raw_resource_id)
+            raw_path = resource_id.get("path")
+            normalized_path = (
+                raw_path.replace("\\", "/")
+                if isinstance(raw_path, str)
+                else ""
+            )
+            resource_type = resource.get("resourceType")
+            id_resource_type = resource_id.get("resourceType")
+            is_room = (
+                normalized_path.partition("/")[0].casefold() == "rooms"
+                or resource_type == "GMRoom"
+                or id_resource_type == "GMRoom"
+            )
+            if not is_room:
+                continue
+
+            raw_name = resource_id.get("name")
+            name = (
+                raw_name
+                if isinstance(raw_name, str) and raw_name
+                else os.path.splitext(os.path.basename(normalized_path))[0]
+            )
+            if not name:
+                continue
+            field = f"resources[{resource_index}].id.path"
+            declared.setdefault(
+                name,
+                _DeclaredRoomResource(
+                    name=name,
+                    source_path=raw_path if isinstance(raw_path, str) else None,
+                    owner_source_path=manifest.yyp_path,
+                    manifest_field=field,
+                ),
+            )
+
+        return tuple(declared.values())
+
+    def _report_unavailable_declared_room(
+        self,
+        resource: _DeclaredRoomResource,
+    ) -> None:
+        if resource.source_path is None:
+            reason = "its manifest source path was rejected"
+        else:
+            reason = f"metadata is unavailable at {resource.source_path!r}"
+        message = (
+            "Warning: Skipping manifest-declared GameMaker room "
+            f"{resource.name!r} because {reason}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-ROOM-SOURCE-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(
+                    resource.owner_source_path
+                ),
+                resource=resource.name,
+                resource_type="room",
+                manifest_entry=resource.manifest_field,
+                workaround=(
+                    "Restore the declared GameMaker room .yy metadata inside "
+                    "the project root or remove the stale YYP declaration."
+                ),
+            )
+        self._safe_log(message)
 
     def _generate_room_scene(
         self,
@@ -288,14 +393,27 @@ class RoomConverter(BaseConverter):
             source_resolver=source_resolver,
         )
         room_creation_body: str | None = None
-        if room_creation_code.has_code and room_creation_code.exists:
-            room_creation_body = self._transpile_creation_code(
-                room_creation_code.source_path,
-                room.name,
-                "room creation code",
-                asset_names=asset_names,
-                top_level_global_scope=True,
-            )
+        has_creation_code_blocker = False
+        if room_creation_code.has_code:
+            try:
+                self._require_creation_code_source(
+                    room_creation_code,
+                    room_name=room.name,
+                    event="room creation code",
+                    missing_message=(
+                        "Warning: Missing GameMaker room creation code file for room "
+                        f"{room.name}: {room_creation_code.source_path}"
+                    ),
+                )
+                room_creation_body = self._transpile_creation_code(
+                    room_creation_code.source_path,
+                    room.name,
+                    "room creation code",
+                    asset_names=asset_names,
+                    top_level_global_scope=True,
+                )
+            except _RoomCreationCodeBlocked:
+                has_creation_code_blocker = True
 
         instance_methods: list[InstanceCreationCodeMethod] = []
         used_method_names: dict[str, int] = {}
@@ -306,33 +424,81 @@ class RoomConverter(BaseConverter):
                 gm_project_path=self.gm_project_path,
                 source_resolver=source_resolver,
             )
-            if not creation_code.has_code or not creation_code.exists:
+            if not creation_code.has_code:
                 continue
             instance_name = _instance_name(instance)
+            event = f"instance creation code for {instance_name}"
+            try:
+                self._require_creation_code_source(
+                    creation_code,
+                    room_name=room.name,
+                    event=event,
+                    missing_message=(
+                        "Warning: Missing GameMaker instance creation code file for "
+                        f"room {room.name}, instance {instance_name}: "
+                        f"{creation_code.source_path}"
+                    ),
+                )
+                body = self._transpile_creation_code(
+                    creation_code.source_path,
+                    room.name,
+                    event,
+                    asset_names=asset_names,
+                    self_expression="_gm_instance",
+                    other_expression="GMRuntime.gml_instance_noone()",
+                    instance_target="_gm_instance",
+                )
+            except _RoomCreationCodeBlocked:
+                has_creation_code_blocker = True
+                continue
             method_name = self._unique_instance_creation_method_name(
                 instance_name,
                 used_method_names,
             )
-            body = self._transpile_creation_code(
-                creation_code.source_path,
-                room.name,
-                f"instance creation code for {instance_name}",
-                asset_names=asset_names,
-                self_expression="_gm_instance",
-                other_expression="GMRuntime.gml_instance_noone()",
-                instance_target="_gm_instance",
-            )
-            if body is None:
-                continue
             instance_methods.append({
                 "source_path": creation_code.source_path,
                 "method_name": method_name,
                 "body": body,
             })
 
+        if has_creation_code_blocker:
+            raise _RoomCreationCodeBlocked(
+                f"Declared creation code blocked room {room.name}"
+            )
         if room_creation_body is None and not instance_methods:
             return None
         return self._render_room_script(room_creation_body, instance_methods)
+
+    def _require_creation_code_source(
+        self,
+        metadata: CreationCodeMetadata,
+        *,
+        room_name: str,
+        event: str,
+        missing_message: str,
+    ) -> None:
+        if metadata.exists:
+            return
+        if metadata.path_rejected:
+            raise _RoomCreationCodeBlocked(
+                f"Rejected declared {event} source for room {room_name}"
+            )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-ROOM-CREATION-MISSING",
+                missing_message,
+                source_path=metadata.source_path or None,
+                resource=room_name,
+                resource_type="room",
+                event=event,
+                workaround=(
+                    "Restore the declared GameMaker creation-code source or remove "
+                    "the stale creation-code declaration before converting this room."
+                ),
+            )
+        self._safe_log(missing_message)
+        raise _RoomCreationCodeBlocked(missing_message)
 
     def _transpile_creation_code(
         self,
@@ -345,19 +511,36 @@ class RoomConverter(BaseConverter):
         self_expression: str = "self",
         other_expression: str = "other",
         instance_target: str | None = None,
-    ) -> str | None:
+    ) -> str:
         try:
             with open(source_path, "r", encoding="utf-8") as f:
                 source = f.read()
-        except OSError:
-            self._safe_log(
-                "Warning: Could not read GameMaker {label} for room {room}: {path}".format(
+        except OSError as exc:
+            message = (
+                "Warning: Could not read GameMaker {label} for room {room}: "
+                "{path}: {error}".format(
                     label=label,
                     room=room_name,
                     path=source_path,
+                    error=exc,
                 )
             )
-            return None
+            if self.diagnostics is not None:
+                self.diagnostics.add(
+                    "warning",
+                    "GM2GD-ROOM-CREATION-READ",
+                    message,
+                    source_path=source_path,
+                    resource=room_name,
+                    resource_type="room",
+                    event=label,
+                    workaround=(
+                        "Restore readable GameMaker creation-code source before "
+                        "converting this room."
+                    ),
+                )
+            self._safe_log(message)
+            raise _RoomCreationCodeBlocked(message) from exc
 
         try:
             return transpile_gml_code(
@@ -372,7 +555,7 @@ class RoomConverter(BaseConverter):
                 instance_target=instance_target,
             )
         except GMLTranspileError as exc:
-            self._safe_log(
+            message = (
                 "Warning: Could not transpile GameMaker {label} for room {room}: {path}: {error}".format(
                     label=label,
                     room=room_name,
@@ -380,7 +563,23 @@ class RoomConverter(BaseConverter):
                     error=exc,
                 )
             )
-            return None
+            if self.diagnostics is not None:
+                self.diagnostics.add_transpile_failure(
+                    message,
+                    source_path=source_path,
+                    line=exc.line,
+                    column=exc.column,
+                    resource=room_name,
+                    resource_type="room",
+                    event=label,
+                    workaround=(
+                        "Split or rewrite unsupported GML for this creation-code "
+                        "source, or add the missing runtime/API support tracked by "
+                        "the linked issue."
+                    ),
+                )
+            self._safe_log(message)
+            raise _RoomCreationCodeBlocked(message) from exc
 
     def _render_room_script(
         self,
@@ -552,11 +751,22 @@ class RoomConverter(BaseConverter):
             return source_cache[cache_key]
 
         output_path = self._room_output_path(room)
-        room_script = self._generate_room_script(
-            room,
-            resource_index,
-            resolve_creation_code_source,
-        )
+        width = room.room_settings.get("Width", 1024)
+        height = room.room_settings.get("Height", 768)
+        try:
+            room_script = self._generate_room_script(
+                room,
+                resource_index,
+                resolve_creation_code_source,
+            )
+        except _RoomCreationCodeBlocked:
+            return {
+                "status": "skipped",
+                "name": room.name,
+                "width": width,
+                "height": height,
+                "scene_path": room.godot_path,
+            }
         room_script_resource_path: str | None = None
         if room_script is not None:
             room_script_resource_path = _room_script_resource_path(room)
@@ -575,15 +785,35 @@ class RoomConverter(BaseConverter):
                 )
             )
 
-        width = room.room_settings.get("Width", 1024)
-        height = room.room_settings.get("Height", 768)
         return {
-            "success": True,
+            "status": "completed",
             "name": room.name,
             "width": width,
             "height": height,
             "scene_path": room.godot_path,
         }
+
+    def _process_room_with_outcome(
+        self,
+        room: IndexedRoom,
+        resource_index: GameMakerResourceIndex | None = None,
+    ) -> RoomProcessResult | None:
+        if not self.conversion_running():
+            return None
+        self._resource_requested(room.name)
+        self._resource_started(room.name)
+        try:
+            result = self._process_room(room, resource_index)
+        except Exception:
+            self._resource_failed(room.name)
+            raise
+        if result is None:
+            self._resource_skipped(room.name)
+        elif result["status"] == "completed":
+            self._resource_completed(room.name)
+        else:
+            self._resource_skipped(room.name)
+        return result
 
     def _set_startup_scene(
         self, index: GameMakerResourceIndex, generated_scene_paths: dict[str, str]
@@ -620,6 +850,19 @@ class RoomConverter(BaseConverter):
     def convert_rooms(self) -> None:
         index = self._build_resource_index()
         rooms = index.ordered_rooms()
+        declared_rooms = self._declared_room_resources(index)
+        if declared_rooms is None:
+            for room in rooms:
+                self._resource_requested(room.name)
+        else:
+            available_names = {room.name for room in rooms}
+            for resource in declared_rooms:
+                self._resource_requested(resource.name)
+                if resource.name in available_names:
+                    continue
+                self._report_unavailable_declared_room(resource)
+                self._resource_skipped(resource.name)
+
         if not rooms:
             self._set_startup_scene(index, {})
             self.log_callback("Room conversion completed.")
@@ -633,7 +876,7 @@ class RoomConverter(BaseConverter):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map = {
-                executor.submit(self._process_room, room, index): room.name
+                executor.submit(self._process_room_with_outcome, room, index): room.name
                 for room in rooms
             }
             for future in as_completed(futures_map):
@@ -643,7 +886,7 @@ class RoomConverter(BaseConverter):
                     return
 
                 processed += 1
-                if result["success"]:
+                if result["status"] == "completed":
                     generated_scene_paths[result["name"]] = result["scene_path"]
                     if self.compact_logging:
                         self._safe_log_progress(result["name"], processed, total)
@@ -662,6 +905,7 @@ class RoomConverter(BaseConverter):
         self.log_callback("Room conversion completed.")
 
     def convert_all(self) -> None:
+        self._reset_resource_outcomes()
         self.convert_rooms()
 
     def _write_room_runtime_script(self) -> None:

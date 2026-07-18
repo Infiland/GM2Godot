@@ -35,6 +35,8 @@ REPRESENTATIVE_OUTPUTS = (
     "default_bus_layout.tres",
     "gm2godot/gml_asset_registry.gd",
     "gm2godot/gml_runtime.gd",
+    "icon.ico",
+    "icon.png",
     "included_files/config/defaults.json",
     "objects/o_physics_box/o_physics_box.tscn",
     "paths/path_patrol/path_patrol.tscn",
@@ -72,6 +74,10 @@ def _read_json_object(path: Path) -> dict[str, object]:
 
 def _materialize_core_binary_assets(project_path: Path) -> None:
     """Add valid sprite and sound payloads to the text-only matrix fixture copy."""
+    icon_path = project_path / "options" / "linux" / "icons" / "icon.ico"
+    icon_path.parent.mkdir(parents=True)
+    Image.new("RGBA", (32, 32), (35, 95, 190, 255)).save(icon_path, "ICO")
+
     frame_id = "11111111-2222-3333-4444-555555555555"
     layer_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     sprite_yy_path = project_path / "sprites" / "spr_checker" / "spr_checker.yy"
@@ -312,6 +318,7 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
             'run/main_scene="res://rooms/r_child/r_child.tscn"',
             project_content,
         )
+        self.assertIn('config/icon="res://icon.png"', project_content)
 
         included_source = source_project / "datafiles" / "config" / "defaults.json"
         included_output = destination / "included_files" / "config" / "defaults.json"

@@ -1,0 +1,180 @@
+name: Release Action Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-action-smoke.yml'
+
+permissions: {}
+
+jobs:
+  upload-sentinel:
+    name: Upload deterministic sentinel
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_digest: ${{ steps.upload_sentinel.outputs['artifact-digest'] }}
+    steps:
+      - name: Create sentinel
+        run: |
+          set -euo pipefail
+          mkdir -p sentinel
+          printf 'GM2Godot release action smoke\n' \
+            > sentinel/release-action-sentinel.txt
+
+      - name: Upload sentinel
+        id: upload_sentinel
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-action-smoke
+          path: sentinel/release-action-sentinel.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-sentinel:
+    name: Download and verify sentinel
+    needs: upload-sentinel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified sentinel archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-action-smoke
+          path: raw-artifacts/release-action-smoke
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Verify sentinel archive and bytes
+        env:
+          EXPECTED_ARCHIVE_SHA256: ${{ needs.upload-sentinel.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+
+          archive=raw-artifacts/release-action-smoke/release-action-smoke.zip
+          if [[ ! -s "$archive" ]]; then
+            echo "::error::Missing or empty sentinel archive: $archive" >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Upload action returned an invalid artifact digest." >&2
+            exit 1
+          fi
+
+          actual_archive_sha256="$(sha256sum "$archive")"
+          actual_archive_sha256="${actual_archive_sha256%% *}"
+          if [[ "$actual_archive_sha256" != "$EXPECTED_ARCHIVE_SHA256" ]]; then
+            echo "::error::Downloaded archive differs from the uploaded artifact." >&2
+            exit 1
+          fi
+
+          archive_entries="$(unzip -Z1 "$archive")"
+          if [[ "$archive_entries" != "release-action-sentinel.txt" ]]; then
+            echo "::error::Unexpected sentinel archive layout: $archive_entries" >&2
+            exit 1
+          fi
+
+          unzip -p "$archive" release-action-sentinel.txt \
+            > release-action-sentinel.txt
+          printf '%s  %s\n' \
+            f1efea0ac477ea11ec0fe4d13d9bfdcc2908ed8a6e2c71b91952388c1aaf48e6 \
+            release-action-sentinel.txt \
+            | sha256sum --check --strict -
+          if ! cmp -s \
+            <(printf 'GM2Godot release action smoke\n') \
+            release-action-sentinel.txt; then
+            echo "::error::Sentinel bytes changed during the artifact round-trip." >&2
+            exit 1
+          fi
+
+  publisher-startup:
+    name: publisher-startup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Load publisher and reject before GitHub API access
+        id: publisher_startup
+        continue-on-error: true
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        env:
+          GITHUB_TOKEN: gm2godot-release-smoke-invalid-token
+        with:
+          repository: github/gm2godot-release-smoke-never-create
+          token: gm2godot-release-smoke-invalid-token
+          tag_name: gm2godot-release-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          files: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist
+          fail_on_unmatched_files: true
+          overwrite_files: false
+
+      - name: Assert the publisher rejected the probe
+        if: ${{ always() }}
+        env:
+          PUBLISHER_OUTCOME: ${{ steps.publisher_startup.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$PUBLISHER_OUTCOME" != "failure" ]]; then
+            echo "::error::Publisher unexpectedly crossed its local rejection boundary (outcome: $PUBLISHER_OUTCOME)." >&2
+            exit 1
+          fi
+
+  publisher-startup-receipt:
+    name: publisher-startup-receipt
+    if: ${{ always() }}
+    needs: publisher-startup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Verify the action-originated publisher rejection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXPECTED_PATTERN: __gm2godot_release_smoke_missing__/${{ github.run_id }}-${{ github.run_attempt }}/must-not-exist
+        run: |
+          set -euo pipefail
+
+          jobs_endpoint="repos/${REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100"
+          job_ids="$(
+            gh api \
+              --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "$jobs_endpoint" \
+              --jq '.jobs[] | select(.name == "publisher-startup") | .id'
+          )"
+          job_count="$(printf '%s\n' "$job_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          if [[ "$job_count" -ne 1 ]]; then
+            echo "::error::Expected exactly one publisher-startup job; found $job_count." >&2
+            exit 1
+          fi
+          job_id="$(printf '%s\n' "$job_ids" | sed -n '1p')"
+
+          log_file="$RUNNER_TEMP/publisher-startup.log"
+          downloaded=false
+          for retry in 1 2 3 4 5; do
+            if gh api \
+              --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${REPOSITORY}/actions/jobs/${job_id}/logs" \
+              > "$log_file"; then
+              downloaded=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$downloaded" != "true" ]]; then
+            echo "::error::Publisher job log was unavailable after bounded retries." >&2
+            exit 1
+          fi
+
+          if ! grep -Fq \
+            "Pattern '$EXPECTED_PATTERN' does not match any files." \
+            "$log_file"; then
+            echo "::error::The pinned action did not emit its expected startup diagnostic." >&2
+            exit 1
+          fi

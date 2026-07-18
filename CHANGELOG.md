@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.12 - 2026-07-18
+
+- Added a pull-request-only release-action smoke that round-trips and verifies a deterministic artifact through the production pins, then proves the release publisher loaded and stopped at a credentialless pre-network boundary without changing tags or releases.
+
 ## 0.7.11 - 2026-07-18
 
 - Enabled weekly Dependabot checks for SHA-pinned GitHub Actions while preserving immutable references and their same-line release-version comments.

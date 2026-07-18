@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.11 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.12 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-18
 
@@ -15,6 +15,8 @@ Publication-capable push and manual-dispatch runs share one concurrency group ac
 When the exact remote tag is absent, the workflow uses an authenticated, paginated release query before any platform build and repeats the negative check to reduce listing-consistency risk. GitHub returns drafts only to a push-capable token, so this check runs in a separate non-PR job with `contents: write`; that job does not check out or execute repository code. Any exact-tag release object observed by those checks—including a draft, partial, or unexpectedly published release—fails closed with identifying details rather than being reused or changed automatically. An API, authentication, pagination, or response-validation failure also stops publication. Record the diagnostic and run URL, inspect the tag, release, and expected asset inventory, then have a maintainer clean up the inconsistent state explicitly before dispatching a new run. Preserve a completed release and its asset IDs and digests. If the exact remote tag already exists, the workflow remains the #722 no-op path; that path is not a complete release-integrity audit. The concurrency group serializes this workflow's publishers, not an external UI/API publisher that changes release state after the last preflight query.
 
 The release workflow is canonical at [`.github/workflows/release.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml).
+
+Pull requests that change the release workflow or its dedicated smoke workflow run [`.github/workflows/release-action-smoke.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release-action-smoke.yml). The smoke is independent of the project version and remote tag state. It verifies a deterministic cross-job artifact round-trip through the exact production upload/download pins, starts the exact publisher pin with no write permission or usable credential, stops it locally on a guaranteed-missing file before GitHub API access, and verifies the action-originated diagnostic from a separate read-only receipt job.
 
 ## Versioned-change checklist
 

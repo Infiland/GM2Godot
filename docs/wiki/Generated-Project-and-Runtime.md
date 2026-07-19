@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.30 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -207,7 +207,7 @@ The exact schemas and transaction rules are defined by [`conversion_manifest.py`
 
 ### Anchored report publication confinement
 
-`architecture_policy.json` and the `conversion_diagnostics.json` / `.md` pair are staged, backed up, published, rolled back, recovered and cleaned through one destination-directory binding retained for each complete operation. Diagnostic snapshots and publication receipts bind both the report root and its exact `gm2godot/` child. An explicit external report root that does not exist is created one component at a time through its verified parent; each new directory entry crosses the parent durability barrier before creation descends further.
+`architecture_policy.json`, the `conversion_diagnostics.json` / `.md` pair, and the four CLI static compatibility reports are staged, backed up, published, rolled back, recovered and cleaned through one destination-directory binding retained for each complete operation. Diagnostic snapshots and publication receipts bind both the report root and its exact `gm2godot/` child. The static set commits `gml_manual_scope.md`, `gml_api_compatibility.md`, `platform_capability_report.json`, then `platform_capability_report.md`; ordinary failures restore every prior byte and exact mode rather than invalidating the set. An explicit external report root that does not exist is created one component at a time through its verified parent; each new directory entry crosses the parent durability barrier before creation descends further.
 
 On POSIX hosts with the required APIs, every child lookup and namespace mutation is relative to a no-follow directory descriptor and durability barriers call `fsync()` on that retained descriptor. Replacing the visible `gm2godot/` path therefore makes publication fail, but cannot redirect capture, restore, invalidation, cleanup or rollback into the replacement directory.
 

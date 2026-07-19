@@ -7,13 +7,13 @@ import os
 import signal
 import stat
 import sys
-import tempfile
 import threading
 from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
 from types import FrameType
 from typing import Sequence, TypedDict, cast
 
+from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
@@ -44,6 +44,14 @@ from src.version import get_version
 
 DEFAULT_CONVERSION_GROUPS = ("assets", "project", "wip")
 _NON_CONVERTER_SETTING_KEYS = frozenset({"sound_group_folders"})
+_STATIC_REPORT_DIRECTORY = "gm2godot"
+_STATIC_REPORT_DIRECTORY_DESCRIPTION = "CLI static report directory"
+_STATIC_REPORT_FILENAMES = (
+    "gml_manual_scope.md",
+    "gml_api_compatibility.md",
+    "platform_capability_report.json",
+    "platform_capability_report.md",
+)
 
 
 class ConverterInventory(TypedDict):
@@ -1187,249 +1195,45 @@ def _print_converter_inventory(output_format: str) -> None:
 
 
 def _write_static_reports(report_dir: str, target_platform: str | None = None) -> None:
-    report_root = os.path.join(report_dir, "gm2godot")
-    report_filenames = (
-        "gml_manual_scope.md",
-        "gml_api_compatibility.md",
-        "platform_capability_report.json",
-        "platform_capability_report.md",
+    reports = (
+        (_STATIC_REPORT_FILENAMES[0], render_gml_manual_scope_markdown()),
+        (_STATIC_REPORT_FILENAMES[1], _render_api_compatibility_markdown()),
+        (
+            _STATIC_REPORT_FILENAMES[2],
+            json.dumps(
+                generate_platform_capability_report(target_platform),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        ),
+        (
+            _STATIC_REPORT_FILENAMES[3],
+            render_platform_capability_markdown(target_platform),
+        ),
     )
-    report_root_identity = _ensure_static_report_root(report_root)
-    try:
-        reports = (
-            (report_filenames[0], render_gml_manual_scope_markdown()),
-            (report_filenames[1], _render_api_compatibility_markdown()),
-            (
-                report_filenames[2],
-                json.dumps(
-                    generate_platform_capability_report(target_platform),
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-            ),
-            (
-                report_filenames[3],
-                render_platform_capability_markdown(target_platform),
-            ),
-        )
-    except BaseException as render_error:
-        _invalidate_static_report_set(
-            report_root,
-            report_filenames,
-            report_root_identity,
-            render_error,
-        )
-        raise
-    _publish_static_report_texts(
-        report_root,
-        reports,
-        expected_root_identity=report_root_identity,
-    )
+    _publish_static_report_texts(report_dir, reports)
 
 
 def _publish_static_report_texts(
-    report_root: str,
+    report_dir: str,
     reports: Sequence[tuple[str, str]],
-    *,
-    expected_root_identity: tuple[int, int] | None = None,
 ) -> None:
-    """Publish a complete report set or invalidate every report in the set."""
-    report_root_identity = (
-        expected_root_identity
-        if expected_root_identity is not None
-        else _ensure_static_report_root(report_root)
+    """Publish the complete report set while preserving its exact prior state."""
+    specs = tuple(
+        ArtifactSpec(filename, content.encode("utf-8"))
+        for filename, content in reports
     )
-    report_filenames = tuple(filename for filename, _content in reports)
-    staged_paths: dict[str, str] = {}
-    try:
-        _verify_static_report_root(report_root, report_root_identity)
-        existing_modes = {
-            filename: _existing_static_report_mode(
-                os.path.join(report_root, filename)
-            )
-            for filename in report_filenames
-        }
-        for filename, content in reports:
-            _verify_static_report_root(report_root, report_root_identity)
-            staged_paths[filename] = _stage_static_report_text(
-                report_root,
-                filename,
-                content,
-                existing_mode=existing_modes[filename],
-                expected_root_identity=report_root_identity,
-            )
-
-        for filename in report_filenames:
-            _verify_static_report_root(report_root, report_root_identity)
-            report_path = os.path.join(report_root, filename)
-            _existing_static_report_mode(report_path)
-            os.replace(staged_paths[filename], report_path)
-            del staged_paths[filename]
-        _verify_static_report_root(report_root, report_root_identity)
-    except BaseException as publish_error:
-        for staged_path in staged_paths.values():
-            _unlink_static_report_temp(
-                staged_path,
-                publish_error,
-                report_root=report_root,
-                expected_root_identity=report_root_identity,
-            )
-        _invalidate_static_report_set(
-            report_root,
-            report_filenames,
-            report_root_identity,
-            publish_error,
-        )
-        raise
-
-
-def _ensure_static_report_root(report_root: str) -> tuple[int, int]:
-    try:
-        report_root_stat = os.stat(report_root, follow_symlinks=False)
-    except FileNotFoundError:
-        try:
-            os.makedirs(report_root, exist_ok=True)
-        except FileExistsError:
-            pass
-        report_root_stat = os.stat(report_root, follow_symlinks=False)
-
-    is_junction = getattr(os.path, "isjunction", None)
-    redirected = stat.S_ISLNK(report_root_stat.st_mode) or (
-        callable(is_junction) and is_junction(report_root)
-    )
-    if redirected or not stat.S_ISDIR(report_root_stat.st_mode):
-        raise OSError(
-            "Refusing to use redirected or non-directory static report root: "
-            f"{report_root}"
-        )
-    return (report_root_stat.st_dev, report_root_stat.st_ino)
-
-
-def _verify_static_report_root(
-    report_root: str,
-    expected_identity: tuple[int, int],
-) -> None:
-    try:
-        report_root_stat = os.stat(report_root, follow_symlinks=False)
-    except OSError as error:
-        raise OSError(f"Static report root changed: {report_root}") from error
-    is_junction = getattr(os.path, "isjunction", None)
-    redirected = stat.S_ISLNK(report_root_stat.st_mode) or (
-        callable(is_junction) and is_junction(report_root)
-    )
-    if (
-        redirected
-        or not stat.S_ISDIR(report_root_stat.st_mode)
-        or (report_root_stat.st_dev, report_root_stat.st_ino)
-        != expected_identity
-    ):
-        raise OSError(f"Static report root changed: {report_root}")
-
-
-def _existing_static_report_mode(report_path: str) -> int | None:
-    try:
-        report_stat = os.stat(report_path, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-    if stat.S_ISREG(report_stat.st_mode):
-        return stat.S_IMODE(report_stat.st_mode)
-    if stat.S_ISLNK(report_stat.st_mode):
-        return None
-    raise OSError(f"Refusing to replace non-regular static report: {report_path}")
-
-
-def _stage_static_report_text(
-    report_root: str,
-    filename: str,
-    content: str,
-    *,
-    existing_mode: int | None,
-    expected_root_identity: tuple[int, int],
-) -> str:
-    file_descriptor, staged_path = tempfile.mkstemp(
-        dir=report_root,
-        prefix=f".{filename}.",
-        suffix=".tmp",
-    )
-    try:
-        staged_file = os.fdopen(
-            file_descriptor,
-            "w",
-            encoding="utf-8",
-            newline="",
-        )
-        file_descriptor = -1
-        with staged_file:
-            staged_file.write(content)
-            staged_file.flush()
-            fchmod = getattr(os, "fchmod", None)
-            if existing_mode is not None and callable(fchmod):
-                fchmod(staged_file.fileno(), existing_mode)
-            os.fsync(staged_file.fileno())
-        return staged_path
-    except BaseException as publish_error:
-        if file_descriptor >= 0:
-            try:
-                os.close(file_descriptor)
-            except OSError as close_error:
-                publish_error.add_note(
-                    f"Static report staging descriptor cleanup failed: {close_error}"
-                )
-        _unlink_static_report_temp(
-            staged_path,
-            publish_error,
-            report_root=report_root,
-            expected_root_identity=expected_root_identity,
-        )
-        raise
-
-
-def _unlink_static_report_temp(
-    path: str,
-    publish_error: BaseException,
-    *,
-    report_root: str | None = None,
-    expected_root_identity: tuple[int, int] | None = None,
-) -> None:
-    try:
-        if report_root is not None and expected_root_identity is not None:
-            _verify_static_report_root(report_root, expected_root_identity)
-        os.unlink(path)
-    except FileNotFoundError:
-        pass
-    except OSError as cleanup_error:
-        publish_error.add_note(
-            f"Static report temporary-file cleanup failed: {cleanup_error}"
-        )
-
-
-def _invalidate_static_report_set(
-    report_root: str,
-    filenames: Sequence[str],
-    expected_root_identity: tuple[int, int],
-    publish_error: BaseException,
-) -> None:
-    """Remove final report entries without following links or a replaced root."""
-    for filename in filenames:
-        report_path = os.path.join(report_root, filename)
-        try:
-            _verify_static_report_root(report_root, expected_root_identity)
-            report_stat = os.stat(report_path, follow_symlinks=False)
-            if not (
-                stat.S_ISREG(report_stat.st_mode)
-                or stat.S_ISLNK(report_stat.st_mode)
-            ):
-                raise OSError(
-                    f"Refusing to invalidate non-regular static report: {report_path}"
-                )
-            os.unlink(report_path)
-        except FileNotFoundError:
-            pass
-        except OSError as cleanup_error:
-            publish_error.add_note(
-                f"Static report-set invalidation failed: {cleanup_error}"
-            )
+    with ByteArtifactTransaction.open(
+        os.path.abspath(report_dir),
+        _STATIC_REPORT_DIRECTORY,
+        create=True,
+        create_root=True,
+        description=_STATIC_REPORT_DIRECTORY_DESCRIPTION,
+    ) as transaction:
+        receipts = transaction.publish_specs(specs)
+        if any(receipt is None for receipt in receipts):
+            raise AssertionError("Published static reports must all be present.")
 
 
 def _render_api_compatibility_markdown() -> str:

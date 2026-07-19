@@ -151,6 +151,75 @@ class TestCLIReports(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_dir)
 
+    def _write_static_report_baseline(
+        self,
+        report_root: str,
+    ) -> dict[str, tuple[bytes, int]]:
+        os.makedirs(report_root, exist_ok=True)
+        baseline: dict[str, tuple[bytes, int]] = {}
+        modes = (0o600, 0o640, 0o644, 0o660)
+        for index, (filename, mode) in enumerate(
+            zip(self._STATIC_REPORT_FILENAMES, modes, strict=True)
+        ):
+            content = f"previous static report {index}\n".encode()
+            path = os.path.join(report_root, filename)
+            with open(path, "wb") as report_file:
+                report_file.write(content)
+            os.chmod(path, mode)
+            baseline[filename] = (content, stat.S_IMODE(os.stat(path).st_mode))
+        return baseline
+
+    def _assert_static_report_baseline(
+        self,
+        report_root: str,
+        baseline: dict[str, tuple[bytes, int]],
+    ) -> None:
+        for filename, (expected_content, expected_mode) in baseline.items():
+            path = os.path.join(report_root, filename)
+            with open(path, "rb") as report_file:
+                self.assertEqual(report_file.read(), expected_content)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), expected_mode)
+
+    def _assert_no_static_report_transaction_debris(self, report_root: str) -> None:
+        self.assertFalse(
+            any(
+                entry.endswith(
+                    (".tmp", ".backup", ".recovery", ".tombstone")
+                )
+                for entry in os.listdir(report_root)
+            )
+        )
+
+    def _static_report_directory_snapshot(
+        self,
+        report_root: str,
+    ) -> dict[str, tuple[int, int, int, bytes]]:
+        snapshot: dict[str, tuple[int, int, int, bytes]] = {}
+        for entry in os.listdir(report_root):
+            path = os.path.join(report_root, entry)
+            path_stat = os.stat(path, follow_symlinks=False)
+            with open(path, "rb") as report_file:
+                content = report_file.read()
+            snapshot[entry] = (
+                path_stat.st_dev,
+                path_stat.st_ino,
+                stat.S_IMODE(path_stat.st_mode),
+                content,
+            )
+        return snapshot
+
+    def _publish_static_reports(
+        self,
+        report_dir: str,
+        target_platform: str | None = None,
+    ) -> None:
+        writer = cast(
+            Callable[[str, str | None], None],
+            getattr(cli, "_write_static_reports"),
+        )
+        writer(report_dir, target_platform)
+
     def _convert_args(self, *extra: str) -> list[str]:
         return [
             "convert",
@@ -351,19 +420,45 @@ class TestCLIReports(unittest.TestCase):
                 0o600,
             )
 
-    def test_static_report_publication_does_not_require_fchmod(self) -> None:
+    def test_static_report_modes_do_not_require_fchmod(self) -> None:
         report_dir = os.path.join(self.temp_dir, "no-fchmod-reports")
+        report_root = os.path.join(report_dir, "gm2godot")
+        baseline = self._write_static_report_baseline(report_root)
 
         with (
-            patch.object(cli.os, "fchmod", None, create=True),
+            patch(
+                "src.conversion.anchored_artifacts.os.fchmod",
+                None,
+                create=True,
+            ),
             patch.object(DiagnosticCollector, "write_reports"),
         ):
             exit_code = cli.main(["report", "--report-dir", report_dir])
 
         self.assertEqual(exit_code, 0)
-        report_root = os.path.join(report_dir, "gm2godot")
+        if os.name != "nt":
+            for filename, (_content, expected_mode) in baseline.items():
+                self.assertEqual(
+                    stat.S_IMODE(
+                        os.stat(os.path.join(report_root, filename)).st_mode
+                    ),
+                    expected_mode,
+                )
+
+        new_report_dir = os.path.join(self.temp_dir, "new-no-fchmod-reports")
+        with patch(
+            "src.conversion.anchored_artifacts.os.fchmod",
+            None,
+            create=True,
+        ):
+            self._publish_static_reports(new_report_dir)
+
+        new_report_root = os.path.join(new_report_dir, "gm2godot")
         for filename in self._STATIC_REPORT_FILENAMES:
-            self.assertTrue(os.path.isfile(os.path.join(report_root, filename)))
+            path = os.path.join(new_report_root, filename)
+            self.assertTrue(os.path.isfile(path))
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 
     @unittest.skipIf(os.name == "nt", "POSIX permission bits are required")
     def test_new_static_report_permissions_remain_private_under_umask(self) -> None:
@@ -382,7 +477,7 @@ class TestCLIReports(unittest.TestCase):
                 0o600,
             )
 
-    def test_static_report_replaces_symlink_without_touching_outside_file(self) -> None:
+    def test_static_report_refuses_symlink_without_touching_outside_file(self) -> None:
         report_dir = os.path.join(self.temp_dir, "symlink-reports")
         report_root = os.path.join(report_dir, "gm2godot")
         os.makedirs(report_root)
@@ -395,14 +490,12 @@ class TestCLIReports(unittest.TestCase):
         except (NotImplementedError, OSError) as error:
             self.skipTest(f"symlink creation unavailable: {error}")
 
-        exit_code = cli.main(["report", "--report-dir", report_dir])
+        with self.assertRaisesRegex(OSError, "non-regular artifact"):
+            cli.main(["report", "--report-dir", report_dir])
 
-        self.assertEqual(exit_code, 0)
-        self.assertFalse(os.path.islink(report_path))
+        self.assertTrue(os.path.islink(report_path))
         with open(outside_path, "r", encoding="utf-8") as outside_file:
             self.assertEqual(outside_file.read(), "do not overwrite\n")
-        with open(report_path, "r", encoding="utf-8") as report_file:
-            self.assertIn("GML Manual Scope Coverage", report_file.read())
 
     def test_static_report_refuses_symlink_report_root(self) -> None:
         report_dir = os.path.join(self.temp_dir, "symlink-root-reports")
@@ -415,7 +508,7 @@ class TestCLIReports(unittest.TestCase):
         except (NotImplementedError, OSError) as error:
             self.skipTest(f"symlink creation unavailable: {error}")
 
-        with self.assertRaisesRegex(OSError, "static report root"):
+        with self.assertRaisesRegex(OSError, "redirected"):
             cli.main(["report", "--report-dir", report_dir])
 
         self.assertTrue(os.path.islink(report_root))
@@ -432,7 +525,7 @@ class TestCLIReports(unittest.TestCase):
             return_value=True,
             create=True,
         ):
-            with self.assertRaisesRegex(OSError, "static report root"):
+            with self.assertRaisesRegex(OSError, "redirected"):
                 cli.main(["report", "--report-dir", report_dir])
 
         self.assertEqual(os.listdir(report_root), [])
@@ -444,7 +537,7 @@ class TestCLIReports(unittest.TestCase):
         with open(report_root, "w", encoding="utf-8") as report_root_file:
             report_root_file.write("not a report directory\n")
 
-        with self.assertRaisesRegex(OSError, "static report root"):
+        with self.assertRaises(OSError):
             cli.main(["report", "--report-dir", report_dir])
 
         with open(report_root, "r", encoding="utf-8") as report_root_file:
@@ -457,7 +550,7 @@ class TestCLIReports(unittest.TestCase):
         report_root = os.path.join(report_dir, "gm2godot")
         os.mkfifo(report_root)
 
-        with self.assertRaisesRegex(OSError, "static report root"):
+        with self.assertRaises(OSError):
             cli.main(["report", "--report-dir", report_dir])
 
         self.assertTrue(
@@ -493,23 +586,16 @@ class TestCLIReports(unittest.TestCase):
         )
         os.makedirs(non_regular_path)
 
-        with self.assertRaisesRegex(OSError, "non-regular static report"):
+        with self.assertRaisesRegex(OSError, "non-regular artifact"):
             cli.main(["report", "--report-dir", report_dir])
 
         self.assertTrue(os.path.isdir(non_regular_path))
         self.assertEqual(os.listdir(report_root), ["gml_api_compatibility.md"])
 
-    def test_static_report_renderer_failure_invalidates_previous_set(self) -> None:
+    def test_static_report_renderer_failure_preserves_previous_set(self) -> None:
         report_dir = os.path.join(self.temp_dir, "render-failure-reports")
         report_root = os.path.join(report_dir, "gm2godot")
-        os.makedirs(report_root)
-        for filename in self._STATIC_REPORT_FILENAMES:
-            with open(
-                os.path.join(report_root, filename),
-                "w",
-                encoding="utf-8",
-            ) as report_file:
-                report_file.write("previous report\n")
+        baseline = self._write_static_report_baseline(report_root)
 
         with patch(
             "src.cli._render_api_compatibility_markdown",
@@ -518,101 +604,179 @@ class TestCLIReports(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "static report rendering failed"):
                 cli.main(["report", "--report-dir", report_dir])
 
-        self.assertEqual(os.listdir(report_root), [])
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
 
-    def test_static_report_staging_failure_invalidates_entire_set_and_cleans_temps(
+    def test_static_report_staging_failure_preserves_previous_set_and_cleans_temps(
         self,
     ) -> None:
         report_dir = os.path.join(self.temp_dir, "stage-failure-reports")
         report_root = os.path.join(report_dir, "gm2godot")
-        os.makedirs(report_root)
-        for index, filename in enumerate(self._STATIC_REPORT_FILENAMES):
-            content = f"previous {index}\n"
-            with open(
-                os.path.join(report_root, filename),
-                "w",
-                encoding="utf-8",
-            ) as report_file:
-                report_file.write(content)
-
-        real_mkstemp = tempfile.mkstemp
-        stage_calls = 0
+        baseline = self._write_static_report_baseline(report_root)
 
         def fail_second_stage(
-            suffix: str | None = None,
-            prefix: str | None = None,
-            dir: str | os.PathLike[str] | None = None,
-            text: bool = False,
-        ) -> tuple[int, str]:
-            nonlocal stage_calls
-            if suffix == ".tmp":
-                stage_calls += 1
-                if stage_calls == 2:
-                    raise OSError("static report staging failed")
-            return real_mkstemp(
-                suffix=suffix,
-                prefix=prefix,
-                dir=dir,
-                text=text,
-            )
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            if (
+                phase == "before_stage"
+                and name == self._STATIC_REPORT_FILENAMES[1]
+            ):
+                raise OSError("static report staging failed")
 
-        with patch("src.cli.tempfile.mkstemp", side_effect=fail_second_stage):
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=fail_second_stage,
+        ):
             with self.assertRaisesRegex(OSError, "static report staging failed"):
-                cli.main(["report", "--report-dir", report_dir])
+                self._publish_static_reports(report_dir)
 
-        self.assertEqual(os.listdir(report_root), [])
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
 
-    def test_static_report_replace_failure_invalidates_entire_set_and_cleans_temps(
+    def test_static_report_commit_failure_restores_previous_set_and_modes(
         self,
     ) -> None:
-        report_dir = os.path.join(self.temp_dir, "replace-failure-reports")
+        report_dir = os.path.join(self.temp_dir, "commit-failure-reports")
         report_root = os.path.join(report_dir, "gm2godot")
-        os.makedirs(report_root)
-        for index, filename in enumerate(self._STATIC_REPORT_FILENAMES):
-            report_path = os.path.join(report_root, filename)
-            content = f"previous {index}\n"
-            mode = (0o600, 0o640, 0o644, 0o660)[index]
-            with open(report_path, "w", encoding="utf-8") as report_file:
-                report_file.write(content)
-            os.chmod(report_path, mode)
+        baseline = self._write_static_report_baseline(report_root)
 
-        failed_target = os.path.join(
-            report_root,
-            "gml_api_compatibility.md",
-        )
-        real_replace = os.replace
+        def fail_second_commit(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            if (
+                phase == "before_commit"
+                and name == self._STATIC_REPORT_FILENAMES[1]
+            ):
+                raise OSError("static report commit failed")
 
-        def fail_second_publish(source: str, destination: str) -> None:
-            if source.endswith(".tmp") and destination == failed_target:
-                raise OSError("static report publish failed")
-            real_replace(source, destination)
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=fail_second_commit,
+        ):
+            with self.assertRaisesRegex(OSError, "static report commit failed"):
+                self._publish_static_reports(report_dir)
 
-        with patch("src.cli.os.replace", side_effect=fail_second_publish):
-            with self.assertRaisesRegex(OSError, "static report publish failed"):
-                cli.main(["report", "--report-dir", report_dir])
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
 
-        self.assertEqual(os.listdir(report_root), [])
+    def test_static_report_sync_failure_restores_previous_set(self) -> None:
+        report_dir = os.path.join(self.temp_dir, "sync-failure-reports")
+        report_root = os.path.join(report_dir, "gm2godot")
+        baseline = self._write_static_report_baseline(report_root)
 
-    def test_static_report_interrupt_after_replace_invalidates_entire_set(
+        def fail_second_sync(
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
+        ) -> None:
+            if phase == (
+                "before_commit_"
+                f"{self._STATIC_REPORT_FILENAMES[1]}_durability"
+            ):
+                raise OSError("static report sync failed")
+
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=fail_second_sync,
+        ):
+            with self.assertRaisesRegex(OSError, "static report sync failed"):
+                self._publish_static_reports(report_dir)
+
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
+
+    def test_static_report_interrupt_after_commit_restores_previous_set(
         self,
     ) -> None:
-        report_dir = os.path.join(self.temp_dir, "replace-interrupt-reports")
+        report_dir = os.path.join(self.temp_dir, "commit-interrupt-reports")
         report_root = os.path.join(report_dir, "gm2godot")
-        published_path = os.path.join(report_root, "gml_manual_scope.md")
-        real_replace = os.replace
+        baseline = self._write_static_report_baseline(report_root)
+        interrupted = False
 
-        def interrupt_after_publish(source: str, destination: str) -> None:
-            real_replace(source, destination)
-            if destination == published_path:
+        def interrupt_after_commit(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal interrupted
+            if (
+                not interrupted
+                and phase == "after_commit"
+                and name == self._STATIC_REPORT_FILENAMES[0]
+            ):
+                interrupted = True
                 raise KeyboardInterrupt
 
-        with patch("src.cli.os.replace", side_effect=interrupt_after_publish):
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=interrupt_after_commit,
+        ):
             with self.assertRaises(KeyboardInterrupt):
-                cli.main(["report", "--report-dir", report_dir])
+                self._publish_static_reports(report_dir)
 
-        self.assertEqual(os.listdir(report_root), [])
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
 
-    def test_static_report_failure_invalidates_links_without_mutating_referents(
+    def test_static_report_final_validation_failure_restores_previous_set(
+        self,
+    ) -> None:
+        report_dir = os.path.join(self.temp_dir, "validation-failure-reports")
+        report_root = os.path.join(report_dir, "gm2godot")
+        baseline = self._write_static_report_baseline(report_root)
+        real_receipt = cli.ByteArtifactTransaction.receipt
+
+        def fail_last_receipt(
+            transaction: Any,
+            name: str,
+            staged: Any,
+        ) -> Any:
+            if name == self._STATIC_REPORT_FILENAMES[-1]:
+                raise OSError("static report final validation failed")
+            return real_receipt(transaction, name, staged)
+
+        with patch.object(
+            cli.ByteArtifactTransaction,
+            "receipt",
+            new=fail_last_receipt,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "static report final validation failed",
+            ):
+                self._publish_static_reports(report_dir)
+
+        self._assert_static_report_baseline(report_root, baseline)
+        self._assert_no_static_report_transaction_debris(report_root)
+
+    def test_static_reports_commit_and_sync_in_declared_order(self) -> None:
+        report_dir = os.path.join(self.temp_dir, "ordered-reports")
+        commits: list[str] = []
+        durability: list[str] = []
+
+        def record_order(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            if phase == "before_commit" and name is not None:
+                commits.append(name)
+            if phase == "before_durability" and name is not None:
+                durability.append(name)
+
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=record_order,
+        ):
+            self._publish_static_reports(report_dir)
+
+        self.assertEqual(commits, list(self._STATIC_REPORT_FILENAMES))
+        self.assertEqual(durability, list(self._STATIC_REPORT_FILENAMES))
+
+    def test_static_report_refuses_linked_baseline_without_mutating_referents(
         self,
     ) -> None:
         report_dir = os.path.join(self.temp_dir, "linked-failure-reports")
@@ -643,18 +807,228 @@ class TestCLIReports(unittest.TestCase):
             ) as report_file:
                 report_file.write("old report\n")
 
-        with patch(
-            "src.cli.os.replace",
-            side_effect=OSError("static report publish failed"),
-        ):
-            with self.assertRaisesRegex(OSError, "static report publish failed"):
-                cli.main(["report", "--report-dir", report_dir])
+        with self.assertRaisesRegex(OSError, "non-regular artifact"):
+            self._publish_static_reports(report_dir)
 
-        self.assertEqual(os.listdir(report_root), [])
+        self.assertTrue(
+            os.path.islink(
+                os.path.join(report_root, self._STATIC_REPORT_FILENAMES[0])
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(report_root, self._STATIC_REPORT_FILENAMES[1])
+            )
+        )
         with open(symlink_referent, "r", encoding="utf-8") as outside_file:
             self.assertEqual(outside_file.read(), "symlink sentinel\n")
         with open(hardlink_referent, "r", encoding="utf-8") as outside_file:
             self.assertEqual(outside_file.read(), "hardlink sentinel\n")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory relocation required")
+    def test_static_reports_never_mutate_physical_replacement_at_each_phase(
+        self,
+    ) -> None:
+        per_target_phases = (
+            "before_stage",
+            "before_backup",
+            "before_commit",
+            "before_durability",
+        )
+        cases = tuple(
+            (phase, filename)
+            for phase in per_target_phases
+            for filename in self._STATIC_REPORT_FILENAMES
+        ) + (
+            ("before_sync", None),
+            ("before_cleanup", None),
+        )
+
+        for index, (selected_phase, selected_name) in enumerate(cases):
+            with self.subTest(phase=selected_phase, name=selected_name):
+                report_dir = os.path.join(
+                    self.temp_dir,
+                    f"physical-replacement-{index}",
+                )
+                report_root = os.path.join(report_dir, "gm2godot")
+                parked_root = os.path.join(report_dir, "gm2godot.parked")
+                self._write_static_report_baseline(report_root)
+                swapped = False
+                replacement_before: dict[
+                    str,
+                    tuple[int, int, int, bytes],
+                ] = {}
+
+                def replace_report_directory(
+                    phase: str,
+                    directory_path: str,
+                    name: str | None,
+                ) -> None:
+                    nonlocal swapped, replacement_before
+                    if (
+                        swapped
+                        or phase != selected_phase
+                        or name != selected_name
+                        or os.path.abspath(directory_path)
+                        != os.path.abspath(report_root)
+                    ):
+                        return
+                    swapped = True
+                    os.rename(report_root, parked_root)
+                    os.makedirs(report_root)
+                    for filename in self._STATIC_REPORT_FILENAMES:
+                        with open(
+                            os.path.join(report_root, filename),
+                            "wb",
+                        ) as replacement_file:
+                            replacement_file.write(
+                                f"replacement {filename}\n".encode()
+                            )
+                    with open(
+                        os.path.join(report_root, "unrelated-sentinel.txt"),
+                        "wb",
+                    ) as sentinel_file:
+                        sentinel_file.write(b"do not mutate\n")
+                    with open(
+                        os.path.join(
+                            report_root,
+                            ".gml_manual_scope.md.collision.backup",
+                        ),
+                        "wb",
+                    ) as collision_file:
+                        collision_file.write(b"collision\n")
+                    replacement_before = self._static_report_directory_snapshot(
+                        report_root
+                    )
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts."
+                        "_before_anchored_artifact_phase",
+                        side_effect=replace_report_directory,
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    self._publish_static_reports(report_dir)
+
+                self.assertTrue(swapped)
+                self.assertEqual(
+                    self._static_report_directory_snapshot(report_root),
+                    replacement_before,
+                )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory relocation required")
+    def test_static_report_rollback_stays_bound_after_physical_replacement(
+        self,
+    ) -> None:
+        report_dir = os.path.join(self.temp_dir, "rollback-replacement")
+        report_root = os.path.join(report_dir, "gm2godot")
+        parked_root = os.path.join(report_dir, "gm2godot.parked")
+        self._write_static_report_baseline(report_root)
+        publication_failed = False
+        swapped = False
+        replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+
+        def fail_then_replace_for_rollback(
+            phase: str,
+            directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal publication_failed, swapped, replacement_before
+            if (
+                not publication_failed
+                and phase == "after_commit"
+                and name == self._STATIC_REPORT_FILENAMES[1]
+            ):
+                publication_failed = True
+                raise OSError("static report post-commit failure")
+            if (
+                not publication_failed
+                or swapped
+                or phase != "before_rollback"
+                or os.path.abspath(directory_path)
+                != os.path.abspath(report_root)
+            ):
+                return
+            swapped = True
+            os.rename(report_root, parked_root)
+            os.makedirs(report_root)
+            for filename in self._STATIC_REPORT_FILENAMES:
+                with open(
+                    os.path.join(report_root, filename),
+                    "wb",
+                ) as replacement_file:
+                    replacement_file.write(
+                        f"rollback replacement {filename}\n".encode()
+                    )
+            with open(
+                os.path.join(report_root, "unrelated-sentinel.txt"),
+                "wb",
+            ) as sentinel_file:
+                sentinel_file.write(b"do not mutate\n")
+            replacement_before = self._static_report_directory_snapshot(
+                report_root
+            )
+
+        with (
+            patch(
+                "src.conversion.anchored_artifacts."
+                "_before_anchored_artifact_phase",
+                side_effect=fail_then_replace_for_rollback,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "static report post-commit failure",
+            ) as raised,
+        ):
+            self._publish_static_reports(report_dir)
+
+        self.assertTrue(swapped)
+        self.assertEqual(
+            self._static_report_directory_snapshot(report_root),
+            replacement_before,
+        )
+        self.assertTrue(
+            any(
+                "verified recovery artifact preserved" in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+
+    @unittest.skipUnless(os.name == "nt", "native Windows handles required")
+    def test_static_report_windows_binding_blocks_directory_relocation(self) -> None:
+        report_dir = os.path.join(self.temp_dir, "windows-binding")
+        report_root = os.path.join(report_dir, "gm2godot")
+        parked_root = os.path.join(report_dir, "gm2godot.parked")
+        self._write_static_report_baseline(report_root)
+        relocation_checked = False
+
+        def attempt_relocation(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal relocation_checked
+            if (
+                relocation_checked
+                or phase != "before_stage"
+                or name != self._STATIC_REPORT_FILENAMES[0]
+            ):
+                return
+            relocation_checked = True
+            with self.assertRaises(OSError):
+                os.rename(report_root, parked_root)
+
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=attempt_relocation,
+        ):
+            self._publish_static_reports(report_dir)
+
+        self.assertTrue(relocation_checked)
+        self.assertFalse(os.path.exists(parked_root))
+        for filename in self._STATIC_REPORT_FILENAMES:
+            self.assertTrue(os.path.isfile(os.path.join(report_root, filename)))
 
     def test_version_flag_prints_current_version(self) -> None:
         output = io.StringIO()
@@ -926,21 +1300,28 @@ class TestCLIReports(unittest.TestCase):
         for filename in self._STATIC_REPORT_FILENAMES:
             self.assertTrue(os.path.isfile(os.path.join(static_report_root, filename)))
 
-    def test_convert_static_report_replace_failure_cleans_temp_and_fails_outcome(
+    def test_convert_static_report_commit_failure_cleans_temp_and_fails_outcome(
         self,
     ) -> None:
         outcome = _success_outcome()
-        report_dir = os.path.join(self.temp_dir, "static-replace-failure")
+        report_dir = os.path.join(self.temp_dir, "static-commit-failure")
         report_root = os.path.join(report_dir, "gm2godot")
-        failed_target = os.path.join(report_root, "gml_api_compatibility.md")
-        real_replace = os.replace
 
-        def fail_static_replace(source: str, destination: str) -> None:
-            if source.endswith(".tmp") and destination == failed_target:
-                raise OSError("static report replace failed")
-            real_replace(source, destination)
+        def fail_static_commit(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            if (
+                phase == "before_commit"
+                and name == self._STATIC_REPORT_FILENAMES[1]
+            ):
+                raise OSError("static report commit failed")
 
-        with patch("src.cli.os.replace", side_effect=fail_static_replace):
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=fail_static_commit,
+        ):
             exit_code, stdout, stderr = self._run_stubbed_convert(
                 _OutcomeConverterStub(outcome),
                 "--report-dir",
@@ -949,7 +1330,7 @@ class TestCLIReports(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("GM2Godot conversion outcome: failed", stdout)
-        self.assertIn("static report replace failed", stderr)
+        self.assertIn("static report commit failed", stderr)
         for filename in self._STATIC_REPORT_FILENAMES:
             self.assertFalse(os.path.lexists(os.path.join(report_root, filename)))
         self.assertFalse(

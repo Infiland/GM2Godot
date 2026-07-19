@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Callable, cast
 from unittest.mock import patch
 
+from src.conversion import anchored_artifacts as anchored_artifacts_module
 from src.conversion import architecture_policy as architecture_policy_module
+from src.conversion.anchored_artifacts import ByteArtifactTransaction
 from src.conversion.architecture_policy import (
     ARCHITECTURE_POLICY_RELATIVE_PATH,
     build_architecture_policy_report,
@@ -30,6 +32,31 @@ def _write_json(path: Path, value: object) -> None:
 def _write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
+
+
+def _lstat_at(path: str | bytes, *, dir_fd: int | None) -> os.stat_result:
+    return os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _lexists_at(path: str | bytes, *, dir_fd: int | None) -> bool:
+    try:
+        _lstat_at(path, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _directory_snapshot(path: Path) -> dict[str, tuple[int, int, int, bytes]]:
+    snapshot: dict[str, tuple[int, int, int, bytes]] = {}
+    for child in path.iterdir():
+        child_stat = child.lstat()
+        snapshot[child.name] = (
+            child_stat.st_dev,
+            child_stat.st_ino,
+            stat.S_IMODE(child_stat.st_mode),
+            child.read_bytes(),
+        )
+    return snapshot
 
 
 def _remove_readonly_test_path(
@@ -187,23 +214,21 @@ class TestArchitecturePolicy(unittest.TestCase):
     ) -> None:
         report_path = self.godot_dir / ARCHITECTURE_POLICY_RELATIVE_PATH
         report_path.parent.mkdir(parents=True)
-        stage_policy = cast(
-            Callable[..., object],
-            getattr(architecture_policy_module, "_stage_policy_bytes"),
+        transaction = ByteArtifactTransaction.open(
+            str(self.godot_dir),
+            "gm2godot",
+            create=False,
+            description="architecture-policy report directory",
         )
-        verify_staged = cast(
-            Callable[[object], None],
-            getattr(architecture_policy_module, "_verify_staged_policy_file"),
-        )
-        staged = stage_policy(
-            str(report_path),
+        staged = transaction.stage_bytes(
+            report_path.name,
             b'{"staged": "ctime drift"}\n',
             mode=None,
             suffix=".tmp",
         )
         real_fingerprint = cast(
             Callable[[os.stat_result], tuple[int, int, int, int, int]],
-            getattr(architecture_policy_module, "_file_fingerprint"),
+            getattr(anchored_artifacts_module, "_file_fingerprint"),
         )
         fingerprint_calls = 0
 
@@ -221,32 +246,33 @@ class TestArchitecturePolicy(unittest.TestCase):
         try:
             with (
                 patch(
-                    "src.conversion.architecture_policy._is_windows_platform",
+                    "src.conversion.anchored_artifacts._is_windows_platform",
                     return_value=True,
                 ),
                 patch(
-                    "src.conversion.architecture_policy._file_fingerprint",
+                    "src.conversion.anchored_artifacts._file_fingerprint",
                     side_effect=ctime_drifting_fingerprint,
                 ),
             ):
-                verify_staged(staged)
+                transaction.verify_staged(staged)
 
             self.assertEqual(fingerprint_calls, 3)
             fingerprint_calls = 0
             with (
                 patch(
-                    "src.conversion.architecture_policy._is_windows_platform",
+                    "src.conversion.anchored_artifacts._is_windows_platform",
                     return_value=False,
                 ),
                 patch(
-                    "src.conversion.architecture_policy._file_fingerprint",
+                    "src.conversion.anchored_artifacts._file_fingerprint",
                     side_effect=ctime_drifting_fingerprint,
                 ),
                 self.assertRaisesRegex(OSError, "content changed"),
             ):
-                verify_staged(staged)
+                transaction.verify_staged(staged)
         finally:
-            Path(cast(str, getattr(staged, "path"))).unlink(missing_ok=True)
+            transaction.unlink_staged(staged)
+            transaction.__exit__(None, None, None)
 
         fingerprints_match = cast(
             Callable[
@@ -256,7 +282,7 @@ class TestArchitecturePolicy(unittest.TestCase):
                 ],
                 bool,
             ],
-            getattr(architecture_policy_module, "_policy_fingerprints_match"),
+            getattr(anchored_artifacts_module, "fingerprints_match"),
         )
         original = (1, 2, 3, 4, 5)
         ctime_only_drift = (1, 2, 3, 4, 50)
@@ -264,7 +290,7 @@ class TestArchitecturePolicy(unittest.TestCase):
         identity_drift = (10, 20, 3, 4, 5)
         size_drift = (1, 2, 30, 4, 5)
         with patch(
-            "src.conversion.architecture_policy._is_windows_platform",
+            "src.conversion.anchored_artifacts._is_windows_platform",
             return_value=True,
         ):
             self.assertTrue(fingerprints_match(original, ctime_only_drift))
@@ -272,7 +298,7 @@ class TestArchitecturePolicy(unittest.TestCase):
             self.assertFalse(fingerprints_match(original, identity_drift))
             self.assertFalse(fingerprints_match(original, size_drift))
         with patch(
-            "src.conversion.architecture_policy._is_windows_platform",
+            "src.conversion.anchored_artifacts._is_windows_platform",
             return_value=False,
         ):
             self.assertFalse(fingerprints_match(original, ctime_only_drift))
@@ -281,17 +307,9 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path = self.godot_dir / ARCHITECTURE_POLICY_RELATIVE_PATH
         report_path.parent.mkdir(parents=True)
         report_path.write_bytes(b'{"stable": true}\n')
-        target_state = cast(
-            Callable[[str], object],
-            getattr(architecture_policy_module, "_policy_target_state"),
-        )(str(report_path))
-        verify_target_state = cast(
-            Callable[[str, object], None],
-            getattr(architecture_policy_module, "_verify_policy_target_state"),
-        )
         real_fingerprint = cast(
             Callable[[os.stat_result], tuple[int, int, int, int, int]],
-            getattr(architecture_policy_module, "_file_fingerprint"),
+            getattr(anchored_artifacts_module, "_file_fingerprint"),
         )
 
         def path_ctime_drift(
@@ -300,25 +318,35 @@ class TestArchitecturePolicy(unittest.TestCase):
             fingerprint = real_fingerprint(path_stat)
             return (*fingerprint[:4], fingerprint[4] + 1)
 
-        with (
-            patch(
-                "src.conversion.architecture_policy._is_windows_platform",
-                return_value=True,
-            ),
-            patch(
-                "src.conversion.architecture_policy._file_fingerprint",
-                side_effect=path_ctime_drift,
-            ),
-            self.assertRaisesRegex(OSError, "report changed"),
-        ):
-            verify_target_state(str(report_path), target_state)
+        with ByteArtifactTransaction.open(
+            str(self.godot_dir),
+            "gm2godot",
+            create=False,
+            description="architecture-policy report directory",
+        ) as transaction:
+            target_state = transaction.target_state("architecture_policy.json")
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._is_windows_platform",
+                    return_value=True,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=path_ctime_drift,
+                ),
+                self.assertRaisesRegex(OSError, "Artifact changed"),
+            ):
+                transaction.verify_target_state(
+                    "architecture_policy.json",
+                    target_state,
+                )
 
     def test_windows_receipt_guard_rejects_identity_size_content_and_mode_changes(
         self,
     ) -> None:
         self._write_minimal_project()
         verify_receipt = cast(
-            Callable[[object], None],
+            Callable[..., None],
             getattr(architecture_policy_module, "_verify_policy_receipt"),
         )
 
@@ -355,17 +383,23 @@ class TestArchitecturePolicy(unittest.TestCase):
                 else:
                     report_path.chmod(receipt.mode ^ stat.S_IWUSR)
 
-                with (
-                    patch(
-                        "src.conversion.architecture_policy._is_windows_platform",
-                        return_value=True,
-                    ),
-                    self.assertRaisesRegex(
-                        OSError,
-                        "no longer matches its publication receipt",
-                    ),
-                ):
-                    verify_receipt(receipt)
+                with ByteArtifactTransaction.open(
+                    str(godot_dir),
+                    "gm2godot",
+                    create=False,
+                    description="architecture-policy report directory",
+                ) as transaction:
+                    with (
+                        patch(
+                            "src.conversion.anchored_artifacts._is_windows_platform",
+                            return_value=True,
+                        ),
+                        self.assertRaisesRegex(
+                            OSError,
+                            "no longer matches its publication receipt",
+                        ),
+                    ):
+                        verify_receipt(receipt, transaction)
 
     def test_mocked_windows_readonly_report_publishes_restores_and_cleans(
         self,
@@ -377,38 +411,55 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.write_bytes(previous_content)
         report_path.chmod(0o444)
         snapshot = capture_architecture_policy_snapshot(str(self.godot_dir))
-        real_replace = os.replace
+        real_rename = os.rename
         real_unlink = os.unlink
 
-        def windows_replace(source: str, destination: str) -> None:
-            if os.path.lexists(destination):
-                destination_mode = stat.S_IMODE(os.lstat(destination).st_mode)
+        def windows_replace(
+            source: str,
+            destination: str,
+            *,
+            src_dir_fd: int | None = None,
+            dst_dir_fd: int | None = None,
+        ) -> None:
+            if _lexists_at(destination, dir_fd=dst_dir_fd):
+                destination_mode = stat.S_IMODE(
+                    _lstat_at(destination, dir_fd=dst_dir_fd).st_mode
+                )
                 if not destination_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to replace a read-only destination"
                     )
-            real_replace(source, destination)
+            real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
 
-        def windows_unlink(path: str) -> None:
-            if os.path.lexists(path):
-                path_mode = stat.S_IMODE(os.lstat(path).st_mode)
+        def windows_unlink(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            if _lexists_at(path, dir_fd=dir_fd):
+                path_mode = stat.S_IMODE(_lstat_at(path, dir_fd=dir_fd).st_mode)
                 if not path_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to unlink a read-only file"
                     )
-            real_unlink(path)
+            real_unlink(path, dir_fd=dir_fd)
 
         with (
             patch(
-                "src.conversion.architecture_policy._is_windows_platform",
+                "src.conversion.anchored_artifacts._is_windows_platform",
                 return_value=True,
             ),
             patch(
-                "src.conversion.architecture_policy.os.replace",
+                "src.conversion.anchored_artifacts.os.rename",
                 side_effect=windows_replace,
             ),
             patch(
-                "src.conversion.architecture_policy.os.unlink",
+                "src.conversion.anchored_artifacts.os.unlink",
                 side_effect=windows_unlink,
             ),
         ):
@@ -442,39 +493,49 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.parent.mkdir(parents=True)
         report_path.write_bytes(previous_content)
         report_path.chmod(0o444)
-        real_replace = os.replace
         real_unlink = os.unlink
 
-        def fail_report_replace(source: str, destination: str) -> None:
-            if os.path.abspath(destination) == os.path.abspath(report_path):
-                destination_mode = stat.S_IMODE(os.lstat(destination).st_mode)
+        def fail_report_replace(
+            phase: str,
+            directory_path: str,
+            name: str | None,
+        ) -> None:
+            if phase == "before_replace" and name == report_path.name:
+                assert name is not None
+                destination = os.path.join(directory_path, name)
+                destination_mode = stat.S_IMODE(
+                    os.lstat(destination).st_mode
+                )
                 if not destination_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to replace a read-only destination"
                     )
                 raise OSError("injected Windows replacement failure")
-            real_replace(source, destination)
 
-        def windows_unlink(path: str) -> None:
-            if os.path.lexists(path):
-                path_mode = stat.S_IMODE(os.lstat(path).st_mode)
+        def windows_unlink(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            if _lexists_at(path, dir_fd=dir_fd):
+                path_mode = stat.S_IMODE(_lstat_at(path, dir_fd=dir_fd).st_mode)
                 if not path_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to unlink a read-only file"
                     )
-            real_unlink(path)
+            real_unlink(path, dir_fd=dir_fd)
 
         with (
             patch(
-                "src.conversion.architecture_policy._is_windows_platform",
+                "src.conversion.anchored_artifacts._is_windows_platform",
                 return_value=True,
             ),
             patch(
-                "src.conversion.architecture_policy.os.replace",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_report_replace,
             ),
             patch(
-                "src.conversion.architecture_policy.os.unlink",
+                "src.conversion.anchored_artifacts.os.unlink",
                 side_effect=windows_unlink,
             ),
             self.assertRaisesRegex(OSError, "Windows replacement failure"),
@@ -500,64 +561,72 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.parent.mkdir(parents=True)
         report_path.write_bytes(previous_content)
         report_path.chmod(0o444)
-        real_replace = os.replace
+        real_rename = os.rename
         real_unlink = os.unlink
-        real_fsync_directory = cast(
-            Callable[[str, tuple[int, int], str, tuple[int, int]], None],
-            getattr(architecture_policy_module, "_fsync_policy_directory"),
-        )
         fsync_calls = 0
 
-        def windows_replace(source: str, destination: str) -> None:
-            if os.path.lexists(destination):
-                destination_mode = stat.S_IMODE(os.lstat(destination).st_mode)
+        def windows_replace(
+            source: str,
+            destination: str,
+            *,
+            src_dir_fd: int | None = None,
+            dst_dir_fd: int | None = None,
+        ) -> None:
+            if _lexists_at(destination, dir_fd=dst_dir_fd):
+                destination_mode = stat.S_IMODE(
+                    _lstat_at(destination, dir_fd=dst_dir_fd).st_mode
+                )
                 if not destination_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to replace a read-only destination"
                     )
-            real_replace(source, destination)
+            real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
 
-        def windows_unlink(path: str) -> None:
-            if os.path.lexists(path):
-                path_mode = stat.S_IMODE(os.lstat(path).st_mode)
+        def windows_unlink(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            if _lexists_at(path, dir_fd=dir_fd):
+                path_mode = stat.S_IMODE(_lstat_at(path, dir_fd=dir_fd).st_mode)
                 if not path_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to unlink a read-only file"
                     )
-            real_unlink(path)
+            real_unlink(path, dir_fd=dir_fd)
 
         def fail_first_directory_fsync(
-            godot_project_path: str,
-            root_identity: tuple[int, int],
-            artifact_directory: str,
-            directory_identity: tuple[int, int],
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
         ) -> None:
             nonlocal fsync_calls
+            if phase != "before_durability":
+                return
             fsync_calls += 1
             if fsync_calls == 1:
                 raise OSError("injected Windows directory fsync failure")
-            real_fsync_directory(
-                godot_project_path,
-                root_identity,
-                artifact_directory,
-                directory_identity,
-            )
 
         with (
             patch(
-                "src.conversion.architecture_policy._is_windows_platform",
+                "src.conversion.anchored_artifacts._is_windows_platform",
                 return_value=True,
             ),
             patch(
-                "src.conversion.architecture_policy.os.replace",
+                "src.conversion.anchored_artifacts.os.rename",
                 side_effect=windows_replace,
             ),
             patch(
-                "src.conversion.architecture_policy.os.unlink",
+                "src.conversion.anchored_artifacts.os.unlink",
                 side_effect=windows_unlink,
             ),
             patch(
-                "src.conversion.architecture_policy._fsync_policy_directory",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_first_directory_fsync,
             ),
             self.assertRaisesRegex(OSError, "Windows directory fsync failure"),
@@ -579,26 +648,22 @@ class TestArchitecturePolicy(unittest.TestCase):
     ) -> None:
         self._write_minimal_project()
         report_directory = self.godot_dir / "gm2godot"
-        real_fsync = cast(
-            Callable[..., None],
-            getattr(architecture_policy_module, "_fsync_verified_directory"),
-        )
+        real_sync = anchored_artifacts_module.VerifiedDirectory.sync
         root_fsync_failures = 0
 
         def fail_first_root_fsync(
-            path: str,
-            identity: tuple[int, int],
-            *,
-            description: str,
+            binding: anchored_artifacts_module.VerifiedDirectory,
         ) -> None:
             nonlocal root_fsync_failures
-            if os.path.abspath(path) == os.path.abspath(self.godot_dir):
+            if os.path.abspath(binding.path) == os.path.abspath(self.godot_dir):
                 root_fsync_failures += 1
                 raise OSError("injected root fsync failure")
-            real_fsync(path, identity, description=description)
+            real_sync(binding)
 
-        with patch(
-            "src.conversion.architecture_policy._fsync_verified_directory",
+        with patch.object(
+            anchored_artifacts_module.VerifiedDirectory,
+            "sync",
+            autospec=True,
             side_effect=fail_first_root_fsync,
         ):
             with self.assertRaisesRegex(OSError, "root fsync failure"):
@@ -614,18 +679,17 @@ class TestArchitecturePolicy(unittest.TestCase):
         retry_root_fsyncs = 0
 
         def record_retry_root_fsync(
-            path: str,
-            identity: tuple[int, int],
-            *,
-            description: str,
+            binding: anchored_artifacts_module.VerifiedDirectory,
         ) -> None:
             nonlocal retry_root_fsyncs
-            if os.path.abspath(path) == os.path.abspath(self.godot_dir):
+            if os.path.abspath(binding.path) == os.path.abspath(self.godot_dir):
                 retry_root_fsyncs += 1
-            real_fsync(path, identity, description=description)
+            real_sync(binding)
 
-        with patch(
-            "src.conversion.architecture_policy._fsync_verified_directory",
+        with patch.object(
+            anchored_artifacts_module.VerifiedDirectory,
+            "sync",
+            autospec=True,
             side_effect=record_retry_root_fsync,
         ):
             receipt = publish_architecture_policy_report(
@@ -705,13 +769,17 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path = Path(receipt.path)
         real_unlink = os.unlink
 
-        def unlink_report_then_raise(path: str | bytes) -> None:
-            real_unlink(path)
-            if os.path.abspath(path) == os.path.abspath(receipt.path):
+        def unlink_report_then_raise(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            real_unlink(path, dir_fd=dir_fd)
+            if os.path.basename(os.fsdecode(path)) == Path(receipt.path).name:
                 raise OSError("injected post-unlink failure")
 
         with patch(
-            "src.conversion.architecture_policy.os.unlink",
+            "src.conversion.anchored_artifacts.os.unlink",
             side_effect=unlink_report_then_raise,
         ):
             restored_path = restore_architecture_policy_snapshot(
@@ -737,41 +805,36 @@ class TestArchitecturePolicy(unittest.TestCase):
         )
         report_path = Path(receipt.path)
         real_unlink = os.unlink
-        real_fsync_directory = cast(
-            Callable[[str, tuple[int, int], str, tuple[int, int]], None],
-            getattr(architecture_policy_module, "_fsync_policy_directory"),
-        )
         fsync_calls = 0
 
-        def unlink_report_then_raise(path: str | bytes) -> None:
-            real_unlink(path)
-            if os.path.abspath(path) == os.path.abspath(receipt.path):
+        def unlink_report_then_raise(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            real_unlink(path, dir_fd=dir_fd)
+            if os.path.basename(os.fsdecode(path)) == Path(receipt.path).name:
                 raise OSError("injected post-unlink failure")
 
         def fail_first_directory_fsync(
-            godot_project_path: str,
-            root_identity: tuple[int, int],
-            artifact_directory: str,
-            directory_identity: tuple[int, int],
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
         ) -> None:
             nonlocal fsync_calls
+            if phase != "before_durability":
+                return
             fsync_calls += 1
             if fsync_calls == 1:
                 raise OSError("injected restore fsync failure")
-            real_fsync_directory(
-                godot_project_path,
-                root_identity,
-                artifact_directory,
-                directory_identity,
-            )
 
         with (
             patch(
-                "src.conversion.architecture_policy.os.unlink",
+                "src.conversion.anchored_artifacts.os.unlink",
                 side_effect=unlink_report_then_raise,
             ),
             patch(
-                "src.conversion.architecture_policy._fsync_policy_directory",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_first_directory_fsync,
             ),
             self.assertRaisesRegex(OSError, "injected restore fsync failure"),
@@ -871,32 +934,23 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.write_bytes(previous_content)
         report_path.chmod(0o640)
         previous_mode = stat.S_IMODE(report_path.stat().st_mode)
-        real_fsync_directory = cast(
-            Callable[[str, tuple[int, int], str, tuple[int, int]], None],
-            getattr(architecture_policy_module, "_fsync_policy_directory"),
-        )
         fsync_calls = 0
 
         def fail_first_directory_fsync(
-            godot_project_path: str,
-            root_identity: tuple[int, int],
-            artifact_directory: str,
-            directory_identity: tuple[int, int],
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
         ) -> None:
             nonlocal fsync_calls
+            if phase != "before_durability":
+                return
             fsync_calls += 1
             if fsync_calls == 1:
                 raise OSError("injected directory fsync failure")
-            real_fsync_directory(
-                godot_project_path,
-                root_identity,
-                artifact_directory,
-                directory_identity,
-            )
 
         with (
             patch(
-                "src.conversion.architecture_policy._fsync_policy_directory",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_first_directory_fsync,
             ),
             self.assertRaisesRegex(OSError, "injected directory fsync failure"),
@@ -954,14 +1008,18 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.write_bytes(b'{"previous": true}\n')
         real_unlink = os.unlink
 
-        def interrupt_backup_cleanup(path: str | bytes) -> None:
+        def interrupt_backup_cleanup(
+            path: str | bytes,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
             if os.fsdecode(path).endswith(".backup"):
                 raise KeyboardInterrupt("injected cleanup interrupt")
-            real_unlink(path)
+            real_unlink(path, dir_fd=dir_fd)
 
         with (
             patch(
-                "src.conversion.architecture_policy.os.unlink",
+                "src.conversion.anchored_artifacts.os.unlink",
                 side_effect=interrupt_backup_cleanup,
             ),
             self.assertRaisesRegex(KeyboardInterrupt, "cleanup interrupt"),
@@ -985,32 +1043,23 @@ class TestArchitecturePolicy(unittest.TestCase):
             target_platform="linux",
             enabled_converters=["rooms"],
         )
-        real_fsync_directory = cast(
-            Callable[[str, tuple[int, int], str, tuple[int, int]], None],
-            getattr(architecture_policy_module, "_fsync_policy_directory"),
-        )
         fsync_calls = 0
 
         def fail_first_directory_fsync(
-            godot_project_path: str,
-            root_identity: tuple[int, int],
-            artifact_directory: str,
-            directory_identity: tuple[int, int],
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
         ) -> None:
             nonlocal fsync_calls
+            if phase != "before_durability":
+                return
             fsync_calls += 1
             if fsync_calls == 1:
                 raise OSError("injected restore fsync failure")
-            real_fsync_directory(
-                godot_project_path,
-                root_identity,
-                artifact_directory,
-                directory_identity,
-            )
 
         with (
             patch(
-                "src.conversion.architecture_policy._fsync_policy_directory",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_first_directory_fsync,
             ),
             self.assertRaisesRegex(OSError, "injected restore fsync failure"),
@@ -1041,32 +1090,23 @@ class TestArchitecturePolicy(unittest.TestCase):
             enabled_converters=["rooms"],
         )
         original_fingerprint = receipt.fingerprint
-        real_fsync_directory = cast(
-            Callable[[str, tuple[int, int], str, tuple[int, int]], None],
-            getattr(architecture_policy_module, "_fsync_policy_directory"),
-        )
         fsync_calls = 0
 
         def fail_first_directory_fsync(
-            godot_project_path: str,
-            root_identity: tuple[int, int],
-            artifact_directory: str,
-            directory_identity: tuple[int, int],
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
         ) -> None:
             nonlocal fsync_calls
+            if phase != "before_durability":
+                return
             fsync_calls += 1
             if fsync_calls == 1:
                 raise OSError("injected post-mutation restore failure")
-            real_fsync_directory(
-                godot_project_path,
-                root_identity,
-                artifact_directory,
-                directory_identity,
-            )
 
         with (
             patch(
-                "src.conversion.architecture_policy._fsync_policy_directory",
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=fail_first_directory_fsync,
             ),
             self.assertRaisesRegex(OSError, "post-mutation restore failure"),
@@ -1221,6 +1261,186 @@ class TestArchitecturePolicy(unittest.TestCase):
                 target_platform="linux",
                 enabled_converters=["rooms"],
             )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory relocation is required")
+    def test_publish_never_mutates_physical_replacement_at_any_main_phase(
+        self,
+    ) -> None:
+        self._write_minimal_project()
+        phases = (
+            "before_stage",
+            "before_backup",
+            "before_commit",
+            "before_durability",
+            "before_cleanup",
+        )
+        for phase in phases:
+            with self.subTest(phase=phase):
+                godot_dir = self.temp_dir / f"phase-{phase}"
+                report_directory = godot_dir / "gm2godot"
+                report_path = report_directory / "architecture_policy.json"
+                parked = godot_dir / "gm2godot.parked"
+                godot_dir.mkdir()
+                report_directory.mkdir()
+                report_path.write_bytes(b'{"previous": true}\n')
+                replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+                swapped = False
+
+                def replace_directory(
+                    current_phase: str,
+                    directory_path: str,
+                    _name: str | None,
+                ) -> None:
+                    nonlocal replacement_before, swapped
+                    if (
+                        swapped
+                        or current_phase != phase
+                        or os.path.abspath(directory_path)
+                        != os.path.abspath(report_directory)
+                    ):
+                        return
+                    swapped = True
+                    os.rename(report_directory, parked)
+                    report_directory.mkdir()
+                    (report_directory / "architecture_policy.json").write_bytes(
+                        b'{"replacement": true}\n'
+                    )
+                    (report_directory / ".architecture_policy.json.collision.backup").write_bytes(
+                        b"collision\n"
+                    )
+                    (report_directory / "sentinel.txt").write_bytes(b"outside\n")
+                    replacement_before = _directory_snapshot(report_directory)
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=replace_directory,
+                    ),
+                    self.assertRaisesRegex(OSError, "changed"),
+                ):
+                    publish_architecture_policy_report(
+                        str(self.gm_dir),
+                        str(godot_dir),
+                        target_platform="linux",
+                        enabled_converters=["rooms"],
+                    )
+
+                self.assertTrue(swapped)
+                self.assertEqual(
+                    _directory_snapshot(report_directory),
+                    replacement_before,
+                )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory relocation is required")
+    def test_publish_rollback_stays_bound_after_physical_replacement(self) -> None:
+        self._write_minimal_project()
+        report_directory = self.godot_dir / "gm2godot"
+        report_path = report_directory / "architecture_policy.json"
+        parked = self.godot_dir / "gm2godot.parked"
+        report_directory.mkdir()
+        report_path.write_bytes(b'{"previous": true}\n')
+        replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+        swapped = False
+
+        def fail_then_replace(
+            phase: str,
+            directory_path: str,
+            _name: str | None,
+        ) -> None:
+            nonlocal replacement_before, swapped
+            if phase == "after_commit":
+                raise OSError("injected post-commit failure")
+            if phase != "before_rollback" or swapped:
+                return
+            swapped = True
+            os.rename(report_directory, parked)
+            report_directory.mkdir()
+            (report_directory / "architecture_policy.json").write_bytes(
+                b'{"replacement": true}\n'
+            )
+            (report_directory / "sentinel.txt").write_bytes(b"outside\n")
+            replacement_before = _directory_snapshot(report_directory)
+
+        with (
+            patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_then_replace,
+            ),
+            self.assertRaisesRegex(OSError, "post-commit failure") as raised,
+        ):
+            publish_architecture_policy_report(
+                str(self.gm_dir),
+                str(self.godot_dir),
+                target_platform="linux",
+                enabled_converters=["rooms"],
+            )
+
+        self.assertTrue(swapped)
+        self.assertEqual(
+            _directory_snapshot(report_directory),
+            replacement_before,
+        )
+        rollback_notes = [
+            note
+            for note in getattr(raised.exception, "__notes__", ())
+            if "verified recovery artifact preserved" in note
+        ]
+        self.assertEqual(len(rollback_notes), 1)
+        self.assertIn(str(parked), rollback_notes[0])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory relocation is required")
+    def test_restore_stays_bound_after_physical_replacement(self) -> None:
+        self._write_minimal_project()
+        report_directory = self.godot_dir / "gm2godot"
+        report_path = report_directory / "architecture_policy.json"
+        parked = self.godot_dir / "gm2godot.parked"
+        report_directory.mkdir()
+        report_path.write_bytes(b'{"previous": true}\n')
+        snapshot = capture_architecture_policy_snapshot(str(self.godot_dir))
+        receipt = publish_architecture_policy_report(
+            str(self.gm_dir),
+            str(self.godot_dir),
+            target_platform="linux",
+            enabled_converters=["rooms"],
+        )
+        replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+        swapped = False
+
+        def replace_before_snapshot_commit(
+            phase: str,
+            directory_path: str,
+            _name: str | None,
+        ) -> None:
+            nonlocal replacement_before, swapped
+            if phase != "before_commit" or swapped:
+                return
+            swapped = True
+            os.rename(report_directory, parked)
+            report_directory.mkdir()
+            (report_directory / "architecture_policy.json").write_bytes(
+                b'{"replacement": true}\n'
+            )
+            (report_directory / "sentinel.txt").write_bytes(b"outside\n")
+            replacement_before = _directory_snapshot(report_directory)
+
+        with (
+            patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=replace_before_snapshot_commit,
+            ),
+            self.assertRaisesRegex(OSError, "changed"),
+        ):
+            restore_architecture_policy_snapshot(
+                str(self.godot_dir),
+                snapshot,
+                receipt,
+            )
+
+        self.assertTrue(swapped)
+        self.assertEqual(
+            _directory_snapshot(report_directory),
+            replacement_before,
+        )
 
     def test_feature_scan_ignores_gml_file_symlink_outside_project(self) -> None:
         self._write_minimal_project()

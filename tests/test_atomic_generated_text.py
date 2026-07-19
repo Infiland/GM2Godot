@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 from __future__ import annotations
 
+import ctypes
 import os
 import shutil
 import stat
@@ -76,17 +77,49 @@ class TestAtomicGeneratedText(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
     def test_readonly_transaction_replaces_shared_output(self) -> None:
         output_path = self._transaction_path("success")
+        output_directory = os.path.dirname(output_path)
+        transaction_root = os.path.dirname(output_directory)
+        relocated_directory = os.path.join(
+            transaction_root,
+            "relocated-gm2godot",
+        )
+        relocated_root = os.path.join(self.root, "relocated-success")
         self._write(output_path, "previous output\n")
         os.chmod(output_path, stat.S_IREAD)
         previous = self._snapshot(output_path)
+        namespace_pin_checks = 0
 
-        atomic_write_confined_generated_text(
-            output_path,
-            "replacement output\n",
-            confinement_root=os.path.join(self.root, "success"),
-        )
+        def assert_namespace_is_pinned(
+            operation: str,
+            _source: str,
+            _destination: str,
+        ) -> None:
+            nonlocal namespace_pin_checks
+            if operation != "quarantine":
+                return
+            for source, destination in (
+                (output_directory, relocated_directory),
+                (transaction_root, relocated_root),
+            ):
+                with self.assertRaises(OSError):
+                    os.rename(source, destination)
+                namespace_pin_checks += 1
+
+        with patch.object(
+            atomic_generated_text_module,
+            "_before_asset_readonly_transaction_rename",
+            side_effect=assert_namespace_is_pinned,
+        ):
+            atomic_write_confined_generated_text(
+                output_path,
+                "replacement output\n",
+                confinement_root=transaction_root,
+            )
 
         current = self._snapshot(output_path)
+        self.assertEqual(namespace_pin_checks, 2)
+        self.assertFalse(os.path.lexists(relocated_directory))
+        self.assertFalse(os.path.lexists(relocated_root))
         self.assertNotEqual(current[0], previous[0])
         self.assertEqual(current[1], b"replacement output\n")
         self.assertFalse(current[2] & stat.S_IWRITE)
@@ -97,15 +130,33 @@ class TestAtomicGeneratedText(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
     def test_readonly_transaction_failures_restore_original(self) -> None:
-        failure_cases = (
-            "stage-sync",
-            "stage-mode",
-            "quarantine",
-            "publish",
-            "late-validation",
-            "previous-cleanup",
+        failure_cases: tuple[
+            tuple[str, type[BaseException], str, int],
+            ...,
+        ] = (
+            ("stage-sync", OSError, "stage sync failed", 0),
+            ("stage-mode", OSError, "stage mode failed", 1),
+            ("quarantine", OSError, "quarantine failed", 1),
+            ("publish", OSError, "publish failed", 1),
+            (
+                "late-validation",
+                RuntimeError,
+                "late validation failed",
+                2,
+            ),
+            (
+                "previous-cleanup",
+                OSError,
+                "previous cleanup failed",
+                2,
+            ),
         )
-        for failure_case in failure_cases:
+        for (
+            failure_case,
+            expected_error,
+            expected_message,
+            expected_validation_calls,
+        ) in failure_cases:
             with self.subTest(failure_case=failure_case):
                 output_path = self._transaction_path(failure_case)
                 self._write(output_path, "previous output\n")
@@ -170,7 +221,10 @@ class TestAtomicGeneratedText(unittest.TestCase):
                                 side_effect=fail_delete,
                             )
                         )
-                    with self.assertRaises((OSError, RuntimeError)):
+                    with self.assertRaisesRegex(
+                        expected_error,
+                        expected_message,
+                    ):
                         atomic_write_confined_generated_text(
                             output_path,
                             "replacement output\n",
@@ -181,11 +235,47 @@ class TestAtomicGeneratedText(unittest.TestCase):
                             publication_validator=validator,
                         )
 
+                self.assertEqual(validation_calls, expected_validation_calls)
                 self._assert_snapshot(output_path, previous)
                 self.assertEqual(
                     os.listdir(os.path.dirname(output_path)),
                     [os.path.basename(output_path)],
                 )
+
+    def test_windows_rename_request_uses_absolute_path_and_null_root(self) -> None:
+        destination = os.path.join(
+            self.root,
+            "request",
+            "renamed-output-ž.txt",
+        )
+        encoded_destination = os.path.abspath(destination).encode(
+            "utf-16-le",
+            "strict",
+        )
+
+        rename_buffer = (
+            atomic_generated_text_module._windows_asset_rename_request(
+                destination
+            )
+        )
+        rename_info = ctypes.cast(
+            rename_buffer,
+            ctypes.POINTER(
+                atomic_generated_text_module._WindowsFileRenameInfo
+            ),
+        ).contents
+
+        self.assertIsNone(rename_info.RootDirectory)
+        self.assertEqual(rename_info.Operation.Flags, 0)
+        self.assertEqual(rename_info.FileNameLength, len(encoded_destination))
+        self.assertEqual(
+            ctypes.string_at(
+                ctypes.addressof(rename_buffer)
+                + atomic_generated_text_module._WindowsFileRenameInfo.FileName.offset,
+                rename_info.FileNameLength,
+            ),
+            encoded_destination,
+        )
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
     def test_readonly_transaction_preserves_unknown_publish_destination(

@@ -763,10 +763,42 @@ def _windows_asset_transaction_leaf(path: str) -> str:
     return leaf
 
 
+def _windows_asset_rename_request(
+    destination: str,
+) -> ctypes.Array[ctypes.c_char]:
+    _windows_asset_transaction_leaf(destination)
+    encoded_destination = os.path.abspath(destination).encode(
+        "utf-16-le",
+        "strict",
+    )
+    buffer_size = (
+        ctypes.sizeof(_WindowsFileRenameInfo)
+        + len(encoded_destination)
+        + 2
+    )
+    rename_buffer = ctypes.create_string_buffer(buffer_size)
+    rename_info = ctypes.cast(
+        rename_buffer,
+        ctypes.POINTER(_WindowsFileRenameInfo),
+    ).contents
+    rename_info.Operation.Flags = 0
+    # This fully qualified Win32 FILE_RENAME_INFO form requires a null root.
+    # The caller keeps the verified destination directory open without
+    # FILE_SHARE_DELETE while the absolute path is resolved.
+    rename_info.RootDirectory = None
+    rename_info.FileNameLength = len(encoded_destination)
+    ctypes.memmove(
+        ctypes.addressof(rename_buffer) + _WindowsFileRenameInfo.FileName.offset,
+        encoded_destination,
+        len(encoded_destination),
+    )
+    return rename_buffer
+
+
 def _rename_bound_windows_asset_file(
     operation: str,
     bound_file: _WindowsBoundAssetFile,
-    directory_handle: int,
+    _directory_handle: int,
     directory_path: str,
     destination: str,
 ) -> None:
@@ -778,22 +810,7 @@ def _rename_bound_windows_asset_file(
         raise OSError(
             f"Generated asset transaction destination changed: {destination}"
         )
-    leaf = _windows_asset_transaction_leaf(destination)
-    encoded_leaf = leaf.encode("utf-16-le", "strict")
-    buffer_size = ctypes.sizeof(_WindowsFileRenameInfo) + len(encoded_leaf) + 2
-    rename_buffer = ctypes.create_string_buffer(buffer_size)
-    rename_info = ctypes.cast(
-        rename_buffer,
-        ctypes.POINTER(_WindowsFileRenameInfo),
-    ).contents
-    rename_info.Operation.Flags = 0
-    rename_info.RootDirectory = directory_handle
-    rename_info.FileNameLength = len(encoded_leaf)
-    ctypes.memmove(
-        ctypes.addressof(rename_buffer) + _WindowsFileRenameInfo.FileName.offset,
-        encoded_leaf,
-        len(encoded_leaf),
-    )
+    rename_buffer = _windows_asset_rename_request(destination)
     previous_path = bound_file.path
     _before_asset_readonly_transaction_rename(
         operation,
@@ -804,7 +821,7 @@ def _rename_bound_windows_asset_file(
         bound_file.handle,
         _WINDOWS_FILE_RENAME_INFO_CLASS,
         rename_buffer,
-        buffer_size,
+        ctypes.sizeof(rename_buffer),
     ):
         bound_file.path = destination
     else:

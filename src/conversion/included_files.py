@@ -2326,11 +2326,22 @@ def _create_included_output_stage(
         finally:
             os.close(project_fd)
 
-    stage_path = tempfile.mkdtemp(
-        dir=project_path,
-        prefix=_INCLUDED_FILES_STAGE_PREFIX,
-        suffix=".stage",
-    )
+    stage_path = ""
+    for _attempt in range(100):
+        candidate_path = os.path.join(
+            project_path,
+            _INCLUDED_FILES_STAGE_PREFIX
+            + secrets.token_hex(8)
+            + ".stage",
+        )
+        try:
+            os.mkdir(candidate_path, 0o700)
+        except FileExistsError:
+            continue
+        stage_path = candidate_path
+        break
+    if not stage_path:
+        raise OSError("Could not allocate Included Files staging directory")
     stage_identity = _included_directory_identity(stage_path)
     if stage_identity is None:
         raise OSError("Included Files staging directory disappeared")
@@ -3961,6 +3972,16 @@ def _acquire_included_project_lock(
                 "Refusing redirected or aliased Included Files transaction lock: "
                 + lock_path
             )
+        if windows:
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            try:
+                _windows_included_file_locking(file_descriptor, 2)
+            except OSError as error:
+                raise OSError(
+                    "Another GM2Godot conversion is already publishing or "
+                    f"recovering Included Files in {project_path}"
+                ) from error
+            locked = True
         os.lseek(file_descriptor, 0, os.SEEK_SET)
         initial_content = os.read(
             file_descriptor,
@@ -3971,20 +3992,18 @@ def _acquire_included_project_lock(
                 "Refusing an unknown or incomplete file at the reserved Included "
                 f"Files transaction lock path: {lock_path}"
             )
-        os.lseek(file_descriptor, 0, os.SEEK_SET)
-        try:
-            if windows:
-                _windows_included_file_locking(file_descriptor, 2)
-            else:
+        if not windows:
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            try:
                 import fcntl
 
                 fcntl.flock(file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise OSError(
-                "Another GM2Godot conversion is already publishing or "
-                f"recovering Included Files in {project_path}"
-            ) from error
-        locked = True
+            except OSError as error:
+                raise OSError(
+                    "Another GM2Godot conversion is already publishing or "
+                    f"recovering Included Files in {project_path}"
+                ) from error
+            locked = True
 
         os.lseek(file_descriptor, 0, os.SEEK_SET)
         current_content = os.read(

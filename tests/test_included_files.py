@@ -1405,6 +1405,120 @@ IncludedFilesConverter(
                     self.assertEqual(lock_file.read(), existing_content)
                 os.unlink(lock_path)
 
+    def test_modeled_windows_lock_contends_before_reading_locked_byte(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(included_files_module._INCLUDED_FILES_LOCK_CONTENT)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_locking",
+                side_effect=PermissionError("locked byte"),
+            ) as locking,
+            patch.object(
+                included_files_module.os,
+                "read",
+                side_effect=AssertionError("locked byte was read before contention"),
+            ) as read,
+            self.assertRaisesRegex(OSError, "already publishing or recovering"),
+        ):
+            included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+
+        locking.assert_called_once()
+        self.assertEqual(locking.call_args.args[1], 2)
+        read.assert_not_called()
+
+    def test_modeled_windows_unknown_lock_is_unlocked_after_validation(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        existing_content = b"user-owned lock collision\n"
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(existing_content)
+        locking_modes: list[int] = []
+
+        def record_locking(_file_descriptor: int, mode: int) -> None:
+            locking_modes.append(mode)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_locking",
+                side_effect=record_locking,
+            ),
+            self.assertRaisesRegex(OSError, "unknown or incomplete file"),
+        ):
+            included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+
+        self.assertEqual(locking_modes, [2, 0])
+        with open(lock_path, "rb") as lock_file:
+            self.assertEqual(lock_file.read(), existing_content)
+
+    def test_fallback_stage_name_matches_recovery_grammar(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module, "_sync_included_directory"),
+        ):
+            stage_path, _stage_identity = (
+                included_files_module._create_included_output_stage(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        stage_name = os.path.basename(stage_path)
+        self.assertEqual(
+            included_files_module._included_recovery_managed_name(
+                stage_name,
+                prefix=included_files_module._INCLUDED_FILES_STAGE_PREFIX,
+                suffix=".stage",
+                label="stage container",
+            ),
+            stage_name,
+        )
+
     def test_project_lock_initialization_recovers_after_hard_exit(self) -> None:
         interruption_script = """
 import os

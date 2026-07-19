@@ -25,6 +25,15 @@ class TestAnchoredArtifacts(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_dir)
 
+    def assertArtifactModeEqual(self, actual: int, expected: int) -> None:
+        if os.name == "nt":
+            self.assertEqual(
+                bool(actual & stat.S_IWUSR),
+                bool(expected & stat.S_IWUSR),
+            )
+            return
+        self.assertEqual(actual, expected)
+
     def test_capture_binding_does_not_create_missing_directory(self) -> None:
         self.artifact_directory.rmdir()
 
@@ -165,6 +174,9 @@ class TestAnchoredArtifacts(unittest.TestCase):
         self.assertEqual(list(parked.iterdir()), [])
 
     def test_backend_is_selected_before_staging_and_never_downgrades(self) -> None:
+        expected_strategy = (
+            "windows_handle" if os.name == "nt" else "verified_path"
+        )
         with patch(
             "src.conversion.anchored_artifacts._descriptor_relative_supported",
             return_value=False,
@@ -175,14 +187,14 @@ class TestAnchoredArtifacts(unittest.TestCase):
                 create=False,
                 description="test artifact directory",
             ) as transaction:
-                self.assertEqual(transaction.strategy, "verified_path")
+                self.assertEqual(transaction.strategy, expected_strategy)
                 staged = transaction.stage_bytes(
                     "report.json",
                     b"fallback\n",
                     mode=None,
                     suffix=".tmp",
                 )
-                self.assertEqual(transaction.strategy, "verified_path")
+                self.assertEqual(transaction.strategy, expected_strategy)
                 self.assertTrue(Path(staged.path).is_file())
                 self.assertIsNone(transaction.unlink_staged(staged))
 
@@ -282,8 +294,8 @@ class TestAnchoredArtifacts(unittest.TestCase):
 
         self.assertEqual(first.read_bytes(), b"first old\n")
         self.assertEqual(second.read_bytes(), b"second old\n")
-        self.assertEqual(stat.S_IMODE(first.stat().st_mode), 0o640)
-        self.assertEqual(stat.S_IMODE(second.stat().st_mode), 0o600)
+        self.assertArtifactModeEqual(stat.S_IMODE(first.stat().st_mode), 0o640)
+        self.assertArtifactModeEqual(stat.S_IMODE(second.stat().st_mode), 0o600)
         self.assertEqual(
             sorted(path.name for path in self.artifact_directory.iterdir()),
             ["first.json", "second.json"],
@@ -434,7 +446,10 @@ class TestAnchoredArtifacts(unittest.TestCase):
         ]
         self.assertEqual(len(retained), 1)
         self.assertEqual(retained[0].read_bytes(), b"second old\n")
-        self.assertEqual(stat.S_IMODE(retained[0].stat().st_mode), 0o600)
+        self.assertArtifactModeEqual(
+            stat.S_IMODE(retained[0].stat().st_mode),
+            0o600,
+        )
         notes = getattr(raised.exception, "__notes__", ())
         self.assertTrue(
             any("injected second rollback failure" in note for note in notes)
@@ -489,7 +504,10 @@ class TestAnchoredArtifacts(unittest.TestCase):
             transaction.restore_snapshots((snapshot,), (receipt,))
 
         self.assertEqual(target.read_bytes(), b"old\n")
-        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertArtifactModeEqual(
+            stat.S_IMODE(target.stat().st_mode),
+            0o640,
+        )
 
     def test_restore_rejects_changed_receipt_before_staging_or_mutation(self) -> None:
         target = self.artifact_directory / "report.json"

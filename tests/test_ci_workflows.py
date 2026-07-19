@@ -4366,7 +4366,16 @@ class TestCIWorkflows(unittest.TestCase):
             '--constraint "$DEPENDENCY_CONSTRAINT"',
             f"pip=={PIP_VERSION}",
             f"PyInstaller=={PYINSTALLER_VERSION}",
-            '"$VENV_PYTHON" -m PyInstaller --onedir',
+            "readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec",
+            "readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py",
+            "readonly MACOS_METADATA_VERIFIER=scripts/verify_macos_bundle_metadata.py",
+            '"$VENV_PYTHON" -m PyInstaller --clean "$MACOS_BUNDLE_SPEC"',
+            "/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist",
+            '"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER"',
+            '--source-root "$SCRIPT_DIRECTORY"',
+            '--app "$SCRIPT_DIRECTORY/dist/GM2Godot.app"',
+            '--zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip"',
+            '--dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg"',
         ):
             with self.subTest(script="build_macos.sh", required=required):
                 self.assertIn(required, macos)
@@ -4383,6 +4392,14 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertLess(
             macos.index('"$VENV_PYTHON" "$DEPENDENCY_VERIFIER"'),
             macos.index('echo "Cleaning old build artifacts..."'),
+        )
+        self.assertLess(
+            macos.index("hdiutil create"),
+            macos.index('"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER"'),
+        )
+        self.assertLess(
+            macos.index('"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER"'),
+            macos.rindex("\ncleanup_build_temp\n"),
         )
 
         for required in (
@@ -4424,6 +4441,82 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertLess(
             windows.index('"%VENV_PYTHON%" "%DEPENDENCY_VERIFIER%"'),
             windows.index("echo Cleaning up old build files..."),
+        )
+
+    def test_macos_bundle_metadata_is_verified_in_app_zip_and_dmg(self) -> None:
+        release = (
+            PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        release_build = _workflow_job_section(release, "build")
+        non_macos_build = _workflow_run_script(release, "Build executable")
+        metadata_verification = _workflow_run_script(
+            release,
+            "Verify macOS bundle metadata",
+        )
+
+        self.assertIn(
+            "      - name: Build executable\n"
+            "        if: matrix.name != 'macos'\n",
+            release_build,
+        )
+        self.assertIn(
+            "      - name: Build macOS app bundle\n"
+            "        if: matrix.name == 'macos'\n"
+            "        run: python -m PyInstaller --clean "
+            "packaging/macos/GM2Godot.spec\n",
+            release_build,
+        )
+        self.assertEqual(
+            non_macos_build,
+            "if [ \"$RUNNER_OS\" = \"Windows\" ]; then\n"
+            '  SEP=";"\n'
+            "else\n"
+            '  SEP=":"\n'
+            "fi\n"
+            "python -m PyInstaller ${{ matrix.pyinstaller_mode }} \\\n"
+            "  --windowed \\\n"
+            "  --clean \\\n"
+            "  --name GM2Godot \\\n"
+            "  --icon img/Logo.png \\\n"
+            "  --hidden-import markdown2 \\\n"
+            "  --hidden-import PIL \\\n"
+            "  --hidden-import PySide6.QtWidgets \\\n"
+            "  --hidden-import PySide6.QtCore \\\n"
+            "  --hidden-import PySide6.QtGui \\\n"
+            '  --add-data "img${SEP}img" \\\n'
+            '  --add-data "src${SEP}src" \\\n'
+            '  --add-data "Languages${SEP}Languages" \\\n'
+            '  --add-data "Current Language${SEP}." \\\n'
+            "  main.py\n",
+        )
+
+        self.assertIn(
+            "      - name: Verify macOS bundle metadata\n"
+            "        if: matrix.name == 'macos'\n",
+            release_build,
+        )
+        for required in (
+            "/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist",
+            "python -I scripts/verify_macos_bundle_metadata.py",
+            '--source-root "$GITHUB_WORKSPACE"',
+            '--app "$GITHUB_WORKSPACE/dist/GM2Godot.app"',
+            '--zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip"',
+            '--dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg"',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, metadata_verification)
+        self.assertEqual(release_build.count("scripts/verify_macos_bundle_metadata.py"), 1)
+        self.assertLess(
+            release_build.index("      - name: Create macOS DMG\n"),
+            release_build.index("      - name: Verify macOS bundle metadata\n"),
+        )
+        self.assertLess(
+            release_build.index("      - name: Zip release\n"),
+            release_build.index("      - name: Verify macOS bundle metadata\n"),
+        )
+        self.assertLess(
+            release_build.index("      - name: Verify macOS bundle metadata\n"),
+            release_build.index("      - name: Upload macOS artifacts\n"),
         )
 
     def test_windows_build_cleanup_guard_deletes_only_original_owned_directory(

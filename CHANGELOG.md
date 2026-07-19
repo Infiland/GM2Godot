@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.20 - 2026-07-19
+
+- Stamped the macOS app bundle with the stable `land.infi.gm2godot` identifier and exact three-component release version from `src/version.py` for both its short and build versions.
+- Added fail-closed metadata checks for the source `.app`, release ZIP, and DMG so inconsistent, missing, malformed, or placeholder bundle metadata stops artifact publication.
+
 ## 0.7.19 - 2026-07-19
 
 - Pinned the complete CPython 3.12 runtime and tooling dependency graphs for the exact Linux x64, macOS arm64, and Windows x64 release tuples, with native pip-tools generation, self-hosted regeneration, strict installed-distribution receipts, `pip check`, and two fresh empty-cache installs per platform.

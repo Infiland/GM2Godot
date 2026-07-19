@@ -48,13 +48,13 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.19`.
+Current source version: `0.7.20`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.
 When an exact version tag already exists, a release-workflow rerun now audits the published release, exact five-asset inventory, GitHub digests, downloaded bytes, checksum manifest, and stable tag/release receipt before accepting the run as a build-and-publication no-op.
 
-To build a local macOS distributable (`.app` + `.dmg`), run `bash build_macos.sh` from the project root.
+To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_macos.sh` from the project root. The macOS app uses the stable bundle identifier `land.infi.gm2godot`; its short and build versions both match the three-component release version in `src/version.py`.
 
 ## Installation
 

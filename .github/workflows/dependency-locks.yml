@@ -1,0 +1,127 @@
+name: Dependency Locks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/dependency-locks.yml'
+      - 'requirements.txt'
+      - 'requirements-tooling.txt'
+      - 'requirements-lock.in'
+      - 'constraints/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dependency-locks.yml'
+      - 'requirements.txt'
+      - 'requirements-tooling.txt'
+      - 'requirements-lock.in'
+      - 'constraints/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: ${{ matrix.platform }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            architecture: x64
+            python-version: '3.12.13'
+            constraint: requirements-linux-py312.txt
+          - platform: macos-arm64
+            runner: macos-26
+            architecture: arm64
+            python-version: '3.12.10'
+            constraint: requirements-macos-py312.txt
+          - platform: windows-x64
+            runner: windows-2025
+            architecture: x64
+            python-version: '3.12.10'
+            constraint: requirements-windows-py312.txt
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PIP_NO_CACHE_DIR: '1'
+      PIP_ONLY_BINARY: ':all:'
+      GENERATED_DIR: dependency-locks/generated
+      COMMITTED_DIR: constraints
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+
+      - name: Install the lock generator
+        shell: bash
+        env:
+          COMMITTED_CONSTRAINT: ${{ env.COMMITTED_DIR }}/${{ matrix.constraint }}
+        run: |
+          generator_constraint_args=()
+          if [[ -f "$COMMITTED_CONSTRAINT" ]]; then
+            generator_constraint_args=(--constraint "$COMMITTED_CONSTRAINT")
+            echo "Constraining generator dependencies with $COMMITTED_CONSTRAINT"
+          else
+            echo "No committed constraint is available; using exact generator pins for initial bootstrap."
+          fi
+          python -m pip install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            "${generator_constraint_args[@]}" \
+            pip==26.1.2 \
+            pip-tools==7.6.0
+
+      - name: Generate native constraints
+        shell: bash
+        env:
+          GENERATED_CONSTRAINT: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
+          CUSTOM_COMPILE_COMMAND: >-
+            PIP_NO_CACHE_DIR=1 PIP_ONLY_BINARY=:all:
+            python -m piptools compile --resolver=backtracking --strip-extras
+            --allow-unsafe --no-emit-index-url --no-emit-trusted-host
+            --no-emit-find-links --no-emit-options --no-config
+            --output-file=constraints/${{ matrix.constraint }} requirements-lock.in
+        run: |
+          mkdir -p "$GENERATED_DIR"
+          python -m piptools compile \
+            --resolver=backtracking \
+            --strip-extras \
+            --allow-unsafe \
+            --no-emit-index-url \
+            --no-emit-trusted-host \
+            --no-emit-find-links \
+            --no-emit-options \
+            --no-config \
+            --output-file="$GENERATED_CONSTRAINT" \
+            requirements-lock.in
+
+      - name: Upload generated constraints
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-lock-${{ matrix.platform }}-py${{ matrix.python-version }}
+          path: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
+          if-no-files-found: error
+          retention-days: 7
+          archive: true
+
+      - name: Compare committed constraints
+        shell: bash
+        env:
+          GENERATED_CONSTRAINT: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
+          COMMITTED_CONSTRAINT: ${{ env.COMMITTED_DIR }}/${{ matrix.constraint }}
+        run: |
+          if [[ ! -f "$COMMITTED_CONSTRAINT" ]]; then
+            echo "Missing committed constraint: $COMMITTED_CONSTRAINT" >&2
+            echo "Download the dependency-lock-${{ matrix.platform }} artifact and commit it at that path." >&2
+            exit 1
+          fi
+          git diff --no-index --exit-code -- "$COMMITTED_CONSTRAINT" "$GENERATED_CONSTRAINT"

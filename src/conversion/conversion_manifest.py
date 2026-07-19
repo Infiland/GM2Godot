@@ -5,13 +5,11 @@ import json
 import os
 import posixpath
 import stat
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
 
 from src.conversion.anchored_artifacts import (
-    ArtifactSnapshot,
-    ArtifactSpec,
     ByteArtifactTransaction,
     StagedArtifact,
     artifact_sha256,
@@ -24,6 +22,11 @@ from src.conversion.asset_registry import (
 )
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.conversion_plan import build_conversion_plan, conversion_step_map
+from src.conversion.conversion_artifact_generation import (
+    is_conversion_generation_auxiliary,
+    publish_conversion_artifact_generation,
+    recover_conversion_artifact_generation,
+)
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
@@ -114,8 +117,6 @@ def write_conversion_artifacts(
     manifest_content: bytes | None = None
     manifest_asset_converter: AssetRegistryConverter | None = None
     manifest_asset_publication: AssetRegistryPublication | None = None
-    manifest_status: str
-    current_output_status: str
     manifest_digest: str | None = None
     attempt_content: bytes | None = None
     if manifest_outcome is not None:
@@ -137,15 +138,13 @@ def write_conversion_artifacts(
             asset_entries=manifest_asset_publication.entries,
         )
         manifest_content = _serialize_json(manifest_payload)
-        manifest_status = "updated"
-        current_output_status = "verified"
         manifest_digest = artifact_sha256(manifest_content)
         attempt_content = _serialize_json(
             _conversion_attempt_payload(
                 attempt_outcome,
-                manifest_status=manifest_status,
+                manifest_status="updated",
                 manifest_updated=True,
-                current_output_status=current_output_status,
+                current_output_status="verified",
                 manifest_digest=manifest_digest,
             )
         )
@@ -156,37 +155,32 @@ def write_conversion_artifacts(
         create=True,
         description=_ARTIFACT_DIRECTORY_DESCRIPTION,
     ) as transaction:
-        manifest_guard: ArtifactSnapshot | None = None
-        if manifest_outcome is None:
-            manifest_guard = transaction.capture_snapshot(_MANIFEST_FILENAME)
-            if manifest_guard.present:
-                if manifest_guard.content is None:
-                    raise AssertionError(
-                        "A present conversion manifest snapshot must have content."
-                    )
-                manifest_status = "preserved"
-                current_output_status = "unverified"
-                manifest_digest = artifact_sha256(manifest_guard.content)
-            else:
-                manifest_status = "absent"
-                current_output_status = "unavailable"
-                manifest_digest = None
-            attempt_content = _serialize_json(
-                _conversion_attempt_payload(
-                    attempt_outcome,
-                    manifest_status=manifest_status,
-                    manifest_updated=False,
-                    current_output_status=current_output_status,
-                    manifest_digest=manifest_digest,
-                )
-            )
-
+        attempt_publication: bytes | Callable[[bytes | None], bytes]
         if attempt_content is None:
-            raise AssertionError("Conversion attempt content must be serialized.")
-        stale_artifacts = _capture_owned_stale_transaction_artifacts(transaction)
-        specs = [ArtifactSpec(_ATTEMPT_FILENAME, attempt_content)]
-        if manifest_content is not None:
-            specs.append(ArtifactSpec(_MANIFEST_FILENAME, manifest_content))
+
+            def build_attempt_publication(
+                canonical_content: bytes | None,
+            ) -> bytes:
+                manifest_present = canonical_content is not None
+                return _serialize_json(
+                    _conversion_attempt_payload(
+                        attempt_outcome,
+                        manifest_status=("preserved" if manifest_present else "absent"),
+                        manifest_updated=False,
+                        current_output_status=(
+                            "unverified" if manifest_present else "unavailable"
+                        ),
+                        manifest_digest=(
+                            artifact_sha256(canonical_content)
+                            if canonical_content is not None
+                            else None
+                        ),
+                    )
+                )
+
+            attempt_publication = build_attempt_publication
+        else:
+            attempt_publication = attempt_content
 
         def revalidate_before_commit(name: str) -> None:
             if name != _MANIFEST_FILENAME:
@@ -218,21 +212,17 @@ def write_conversion_artifacts(
                 validate_content=True,
             )
 
-        receipts = transaction.publish_specs(
-            tuple(specs),
-            guards=() if manifest_guard is None else (manifest_guard,),
+        publish_conversion_artifact_generation(
+            transaction,
+            attempt_name=_ATTEMPT_FILENAME,
+            manifest_name=_MANIFEST_FILENAME,
+            attempt_content=attempt_publication,
+            manifest_content=manifest_content,
             before_commit=revalidate_before_commit,
             after_commit=revalidate_after_commit,
         )
-        attempt_receipt = receipts[0]
-        if attempt_receipt is None:
-            raise AssertionError("Conversion attempt publication produced no receipt.")
-        manifest_receipt = receipts[1] if len(receipts) == 2 else None
-        if manifest_content is not None and manifest_receipt is None:
-            raise AssertionError("Conversion manifest publication produced no receipt.")
 
-        # A completed attempt supersedes owned attempt leftovers. A canonical
-        # recovery copy remains useful until a later canonical update commits.
+        stale_artifacts = _capture_owned_stale_transaction_artifacts(transaction)
         stale_to_cleanup = {
             name: staged
             for name, staged in stale_artifacts.items()
@@ -240,25 +230,28 @@ def write_conversion_artifacts(
             or manifest_outcome is not None
         }
         transaction.cleanup(stale_to_cleanup)
-
-        # Cleanup may be best-effort after a durable commit, but directory and
-        # receipt drift must never be reported as successful publication.
         transaction.verify_directory()
-        transaction.verify_receipt(attempt_receipt)
-        if manifest_guard is not None:
-            transaction.verify_snapshot(manifest_guard)
-        if manifest_receipt is not None:
-            transaction.verify_receipt(manifest_receipt)
-            if manifest_receipt.sha256 != manifest_digest:
-                raise OSError(
-                    "Published conversion manifest digest does not match the "
-                    "attempt ledger."
-                )
 
     return (
         manifest_path if manifest_outcome is not None else None,
         attempt_path,
     )
+
+
+def recover_conversion_artifacts(godot_project_path: str) -> str | None:
+    """Recover an interrupted attempt/manifest generation, if present."""
+
+    with ByteArtifactTransaction.open(
+        godot_project_path,
+        _ARTIFACT_DIRECTORY,
+        create=False,
+        description=_ARTIFACT_DIRECTORY_DESCRIPTION,
+    ) as transaction:
+        return recover_conversion_artifact_generation(
+            transaction,
+            attempt_name=_ATTEMPT_FILENAME,
+            manifest_name=_MANIFEST_FILENAME,
+        )
 
 
 def build_conversion_manifest(
@@ -576,6 +569,8 @@ def _is_auxiliary_conversion_artifact(relative_path: str) -> bool:
     relative_directory, filename = os.path.split(normalized_path)
     if relative_directory != artifact_directory:
         return False
+    if is_conversion_generation_auxiliary(filename):
+        return True
     return any(
         filename.startswith(f".{artifact_filename}.")
         and filename.endswith((".tmp", ".backup"))

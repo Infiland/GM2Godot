@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -62,11 +62,13 @@ Selecting `--target-platform windows`, for example, does **not** create or valid
 
 The packaged Linux GUI intentionally excludes Qt's optional TIFF image-format plugin because the pinned Qt wheel requests the obsolete `libtiff.so.5` ABI, while Ubuntu 24.04 provides ABI-major 6. GM2Godot's interface loads its committed PNG assets and does not use that Qt plugin; GameMaker sprite and icon conversion continues through Pillow and is unaffected. Ubuntu's `libegl1` and `libgl1` packages remain required because the pinned QtGui library links directly to EGL and GL. The release build fails if the TIFF exclusion drifts or any required Qt GUI/XCB library remains unresolved.
 
-## Conversion concurrency and Included Files recovery
+## Conversion concurrency and recovery generations
 
 Only one GM2Godot converter may recover or publish Included Files for a destination project at a time. A cooperative operating-system lock rejects a second converter; retry it after the active conversion exits. If the process or machine stops during publication, the next conversion uses a durable journal and commit marker to restore the complete previous Included Files root/registry pair or finalize the complete committed pair. Do not delete transaction artifacts by hand: unknown or changed reserved-path content is deliberately preserved and rejected so GM2Godot cannot mistake user data for its own.
 
-This does not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate in the converter lock and may retain open files or cached format-v2 content verification. Close the game and any editor operation that is actively loading Included Files, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/` references across recovered generations.
+The conversion attempt/canonical-manifest pair has its own persistent `.gm2godot-conversion.lock`, durable transaction journal, and generation pointer inside `gm2godot/`. Interruption before the pointer switch restores the complete previous pair; interruption after it verifies and finalizes the complete new pair. The stable public filenames and existing consumer schemas remain unchanged. Recovery records are size-bounded, and malformed, redirected, mounted, hard-linked, replaced, or unknown reserved state is preserved and rejected without following or deleting it.
+
+These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or cached content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
 
 ## Known limitation areas
 

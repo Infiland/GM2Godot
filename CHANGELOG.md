@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.32 - 2026-07-19
+
+- Published `conversion_attempt.json` and the optional canonical `conversion_manifest.json` as one recoverable generation using a durable transaction journal and persistent commit pointer while preserving both stable public paths and JSON schemas.
+- Added a project-local operating-system lock, bounded canonical recovery records, strict legacy digest migration, and fail-closed handling for malformed, redirected, mounted, hard-linked, replaced, or unknown recovery state.
+- Added POSIX and native Windows subprocess hard-exit coverage across every journal, artifact, pointer, rollback, and cleanup decision boundary, plus exact Godot 4.7.1 and GameMaker LTS 2026 compatibility validation.
+
 ## 0.7.31 - 2026-07-19
 
 - Anchored the four CLI static compatibility reports to one shared verified-directory byte-artifact transaction for exact snapshots, private staging, backups, deterministic ordered commits, durability barriers, rollback, cleanup, and final receipt validation.

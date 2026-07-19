@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -2809,9 +2810,13 @@ class TestAssetRegistryConverter(unittest.TestCase):
                     with self.assertRaises(OSError) as raised:
                         with open(path, "r+b"):
                             pass
+                    self.assertIsInstance(
+                        raised.exception,
+                        PermissionError,
+                    )
                     self.assertEqual(
-                        getattr(raised.exception, "winerror", None),
-                        32,
+                        raised.exception.errno,
+                        errno.EACCES,
                     )
                     blocked_paths.append(path)
             return real_read(opened_file)

@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.26 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.27 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -122,6 +122,11 @@ With a binary available, validation asks Godot to import supported asset types a
 | Godot validation is `skipped` | Fix `--godot-bin`/`GODOT_BIN`, check executable permissions, and confirm `--version` reports the official 4.7.1 build. |
 | Godot reports a parse, load, import, or boot error | Open `godot_validation_report.json` and fix the first retained Godot issue. Correlate generated scripts with adjacent `.gmlmap.json` source maps when present, then rerun validation. Boot warnings also fail boot validation. |
 | Converted output runs but differs from GameMaker | Check [Compatibility and Limitations](Compatibility-and-Limitations), `architecture_policy.json`, platform capabilities, and the affected resource/API report. Create the smallest fixture that preserves the mismatch. |
+| Another GM2Godot conversion is already publishing or recovering Included Files | Let the active converter finish, then retry. A leftover lock file is normal and does not itself mean the lock is held; do not delete it. Close any live game or editor operation using Included Files before retrying. |
+| Included Files recovery rejects an invalid journal, commit marker, staging path, or unknown replacement | Preserve the named paths and the full error. GM2Godot intentionally leaves unknown content untouched rather than guessing ownership. Do not delete or rename it until you have backed up the destination and identified whether it is converter-owned; attach the artifacts and diagnostics to a bug report if ownership is unclear. |
+| An Included Files recovery record exceeds the 16 MiB canonical size limit | Preserve the generated project and error. Unknown or oversized reserved-path content is intentionally not parsed or deleted. If the record came from an unusually large valid project, report the Included File count and path shape so the recovery format can be improved without silently raising the parser-memory ceiling. |
+| A hidden `.gm2godot-included-cleanup.*` entry remains after a Windows machine power loss | Do not move it onto either public Included Files path or delete it by guesswork. Windows can replay a completed hidden deletion without replaying the write-through public generation moves; preserve the project and attach the entry plus recovery diagnostics to a bug report so ownership can be verified safely. |
+| A packaged Included File exists on disk but generated file APIs treat it as missing | Format-v2 registries require the exact recorded byte count and SHA-256. Hand edits, an incomplete external copy, or concurrent publication make the packaged candidate unavailable. Close the live game, restore the source input, and rerun conversion so the root and registry are regenerated together. |
 | An old manifest is still present after failure or cancellation | This can be deliberate preservation. Trust the latest attempt ledger's status and digest rules, not the manifest filename alone. |
 | Report or artifact publication fails | Preserve stderr and exception detail, do not treat old reports as current, and retry in a writable local destination after checking permissions and filesystem redirection. Attach both ledgers if they exist. |
 

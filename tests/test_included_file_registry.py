@@ -8,12 +8,37 @@ from src.conversion.included_file_paths import plan_included_file_paths
 from src.conversion.included_file_registry import (
     INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
     build_included_file_registry_entries,
+    render_included_file_registry,
     render_included_file_registry_script,
     write_included_file_registry,
 )
 
 
 class TestIncludedFileRegistry(unittest.TestCase):
+    def test_format_two_registry_binds_emitted_payload_receipts(self) -> None:
+        assignments = plan_included_file_paths(("payload.bin", "missing.txt"))
+        digest = "ab" * 32
+
+        content = render_included_file_registry(
+            assignments,
+            {"payload.bin"},
+            {"payload.bin": (17, digest)},
+        )
+
+        self.assertIn("const FORMAT_VERSION = 2", content)
+        self.assertIn('"byte_count": 17', content)
+        self.assertIn(f'"content_sha256": "{digest}"', content)
+        self.assertIn(
+            "static func gml_included_file_registry_format_version():",
+            content,
+        )
+        with self.assertRaisesRegex(ValueError, "Missing Included File content receipt"):
+            render_included_file_registry(
+                assignments,
+                {"payload.bin"},
+                {},
+            )
+
     def test_entries_preserve_planned_assignments_and_emission_state(self) -> None:
         assignments = plan_included_file_paths(
             (

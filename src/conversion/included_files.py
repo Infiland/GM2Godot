@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import ctypes
 import hashlib
+import json
 import os
 import posixpath
 import secrets
@@ -68,8 +71,37 @@ _PathHandleBinding = tuple[int, int, int, int, int, int]
 _HandleState = tuple[int, int, int, int, int, int, int]
 _IncludedSourceFingerprint = tuple[int, int, int, int, int, int]
 _IncludedSourceDirectoryIdentity = tuple[str, _PathIdentity]
+_IncludedCleanupFileState = tuple[int, str, _PathFingerprint]
 _INCLUDED_FILES_ROOT_NAME = "included_files"
 _INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
+_INCLUDED_FILES_LOCK_NAME = ".gm2godot-included-files.lock"
+_INCLUDED_FILES_LOCK_TEMP_PREFIX = ".gm2godot-included-files-lock."
+_INCLUDED_FILES_LOCK_CLEANUP_PREFIX = ".gm2godot-included-files-lock-cleanup."
+_INCLUDED_FILES_JOURNAL_NAME = ".gm2godot-included-files-transaction.json"
+_INCLUDED_FILES_COMMIT_NAME = ".gm2godot-included-files-commit.json"
+_INCLUDED_FILES_JOURNAL_TEMP_PREFIX = ".gm2godot-included-files-journal."
+_INCLUDED_FILES_COMMIT_TEMP_PREFIX = ".gm2godot-included-files-commit."
+_INCLUDED_FILES_STAGE_MARKER_NAME = ".gm2godot-included-files-stage.json"
+_INCLUDED_FILES_CLEANUP_PREFIX = ".gm2godot-included-cleanup."
+_INCLUDED_FILES_RECOVERY_FORMAT_VERSION = 1
+# Recovery records duplicate tree metadata and registry generations. A
+# representative committed record is about 2 KiB per Included File, so 16 MiB
+# accommodates roughly 8,000 files while keeping adversarial JSON object
+# amplification within a defensible desktop-process memory ceiling.
+_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES = 16 * 1024 * 1024
+_INCLUDED_FILES_LOCK_CONTENT = b"GM2Godot Included Files lock v1\n"
+_WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CONIN$",
+        "CONOUT$",
+    }
+    | {f"COM{suffix}" for suffix in "123456789¹²³"}
+    | {f"LPT{suffix}" for suffix in "123456789¹²³"}
+)
 
 
 @dataclass(frozen=True)
@@ -130,13 +162,57 @@ class _IncludedOutputSetTransaction:
     project_identity: _PathIdentity
     stage_container_path: str
     stage_container_identity: _PathIdentity
+    staged_container_snapshot: _IncludedTreeSnapshot
     staged_root_path: str
     staged_root_snapshot: _IncludedTreeSnapshot
     staged_registry_path: str
     staged_registry_identity: _PathIdentity
+    staged_registry_mode: int
     staged_registry_content: bytes
     previous_root_snapshot: _IncludedTreeSnapshot
     previous_registry_snapshot: _IncludedRegistrySnapshot
+
+
+@dataclass(frozen=True)
+class _IncludedRecoveryJournal:
+    transaction_id: str
+    transaction: _IncludedOutputSetTransaction
+    root_backup_path: str
+    registry_backup_path: str
+    registry_directory_path: str
+    registry_directory_identity: _PathIdentity
+    registry_directory_created: bool
+
+
+@dataclass(frozen=True)
+class _IncludedCommitMarker:
+    transaction_id: str
+    project_identity: _PathIdentity
+    root_identity: _PathIdentity
+    root_snapshot_sha256: str
+    registry_directory_identity: _PathIdentity
+    registry_identity: _PathIdentity
+    registry_content_sha256: str
+
+
+@dataclass
+class _IncludedProjectLock:
+    file_descriptor: int
+    path: str
+    windows: bool
+
+
+def _windows_included_file_locking(
+    file_descriptor: int,
+    mode: int,
+) -> None:
+    import msvcrt
+
+    locking = cast(
+        Callable[[int, int, int], None],
+        getattr(msvcrt, "locking"),
+    )
+    locking(file_descriptor, mode, 1)
 
 
 class _IncludedOutputSetCancelled(Exception):
@@ -155,6 +231,7 @@ _WINDOWS_OPEN_EXISTING = 3
 _WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
 _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+_WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
 
 
 def _included_descriptor_paths_supported() -> bool:
@@ -422,6 +499,125 @@ def _included_output_path_is_redirected(
     return junction_checker(path)
 
 
+def _included_linux_mount_id_from_fd(file_descriptor: int) -> int | None:
+    """Return Linux's mount ID for an open path when procfs exposes it."""
+
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        with open(
+            f"/proc/self/fdinfo/{file_descriptor}",
+            encoding="ascii",
+        ) as fdinfo:
+            mount_id_values = [
+                line.partition(":")[2].strip()
+                for line in fdinfo
+                if line.startswith("mnt_id:")
+            ]
+    except OSError:
+        # Device comparison and ismount remain available on Linux systems that
+        # intentionally run without a mounted/readable procfs.
+        return None
+    if (
+        len(mount_id_values) != 1
+        or not mount_id_values[0].isascii()
+        or not mount_id_values[0].isdigit()
+    ):
+        raise OSError("Could not verify the Included Files Linux mount boundary")
+    return int(mount_id_values[0])
+
+
+def _included_directory_mount_id(
+    path: str,
+    expected_identity: _PathIdentity,
+) -> int | None:
+    """Read a directory mount ID without following a redirected leaf."""
+
+    if not sys.platform.startswith("linux"):
+        return None
+    directory_fd = os.open(path, _DIRECTORY_OPEN_FLAGS)
+    try:
+        if _directory_identity_from_fd(directory_fd) != expected_identity:
+            raise OSError(f"Included Files directory changed: {path}")
+        return _included_linux_mount_id_from_fd(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _verify_included_mount_boundary(
+    path: str,
+    entry_stat: os.stat_result,
+    expected_device: int,
+    expected_mount_id: int | None,
+    opened_descriptor: int,
+) -> int | None:
+    """Reject a managed entry that crosses out of its parent's mount."""
+
+    try:
+        is_mountpoint = os.path.ismount(path)
+    except OSError as error:
+        raise OSError(
+            f"Could not verify the Included Files mount boundary: {path}"
+        ) from error
+    current_mount_id = _included_linux_mount_id_from_fd(opened_descriptor)
+    if (
+        entry_stat.st_dev != expected_device
+        or is_mountpoint
+        or (
+            expected_mount_id is not None
+            and current_mount_id != expected_mount_id
+        )
+    ):
+        raise OSError(
+            "Refusing an Included Files path that crosses a filesystem or "
+            f"mount boundary: {path}"
+        )
+    return current_mount_id
+
+
+def _verify_included_mount_boundary_path(
+    path: str,
+    entry_stat: os.stat_result,
+    expected_device: int,
+    expected_mount_id: int | None,
+    *,
+    expect_directory: bool,
+) -> int | None:
+    """Path fallback for mount checks, using an fd on Linux when available."""
+
+    if not sys.platform.startswith("linux"):
+        return _verify_included_mount_boundary(
+            path,
+            entry_stat,
+            expected_device,
+            expected_mount_id,
+            -1,
+        )
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if expect_directory:
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    file_descriptor = os.open(path, flags)
+    try:
+        opened_stat = os.fstat(file_descriptor)
+        expected_kind = stat.S_ISDIR if expect_directory else stat.S_ISREG
+        if not expected_kind(opened_stat.st_mode) or not os.path.samestat(
+            entry_stat,
+            opened_stat,
+        ):
+            raise OSError(
+                f"Included Files path changed while checking its mount: {path}"
+            )
+        return _verify_included_mount_boundary(
+            path,
+            opened_stat,
+            expected_device,
+            expected_mount_id,
+            file_descriptor,
+        )
+    finally:
+        os.close(file_descriptor)
+
+
 def _included_path_fingerprint(path_stat: os.stat_result) -> _PathFingerprint:
     return (
         path_stat.st_dev,
@@ -502,6 +698,46 @@ def _windows_included_file_read_api() -> Any:
     return kernel32
 
 
+@lru_cache(maxsize=1)
+def _windows_included_transaction_api() -> Any:
+    if os.name != "nt":
+        raise OSError("Windows Included Files transaction APIs are unavailable")
+    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.MoveFileExW.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+    )
+    kernel32.MoveFileExW.restype = ctypes.c_int
+    return kernel32
+
+
+def _windows_included_transaction_error(
+    operation: str,
+    path: str,
+) -> OSError:
+    get_last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
+    format_error = cast(Callable[[int], str], getattr(ctypes, "FormatError"))
+    error_number = get_last_error()
+    return OSError(
+        error_number,
+        f"{operation}: {format_error(error_number).strip()}",
+        path,
+    )
+
+
+def _windows_extended_included_path(path: str) -> str:
+    """Return an absolute Win32 path that does not depend on MAX_PATH policy."""
+
+    absolute_path = os.path.abspath(path)
+    if absolute_path.startswith(("\\\\?\\", "\\\\.\\")):
+        return absolute_path
+    if absolute_path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + absolute_path[2:]
+    return "\\\\?\\" + absolute_path
+
+
 def _open_included_file_validation_stream(
     path: str,
     *,
@@ -527,7 +763,7 @@ def _open_included_file_validation_stream(
 
     kernel32 = _windows_included_file_read_api()
     handle_value = kernel32.CreateFileW(
-        os.path.abspath(path),
+        _windows_extended_included_path(path),
         _WINDOWS_GENERIC_READ,
         _WINDOWS_FILE_SHARE_READ,
         None,
@@ -589,6 +825,9 @@ def _digest_open_included_file(
 def _digest_included_regular_file(
     path: str,
     expected_stat: os.stat_result,
+    *,
+    expected_device: int | None = None,
+    expected_mount_id: int | None = None,
 ) -> str:
     expected_fingerprint = _included_path_fingerprint(expected_stat)
     expected_binding = _included_path_handle_binding(expected_stat)
@@ -604,6 +843,14 @@ def _digest_included_regular_file(
             or _included_path_handle_binding(opened_stat) != expected_binding
         ):
             raise OSError(f"Included Files file changed before hashing: {path}")
+        if expected_device is not None:
+            _verify_included_mount_boundary(
+                path,
+                opened_stat,
+                expected_device,
+                expected_mount_id,
+                opened_file.fileno(),
+            )
         opened_state = _included_handle_state(opened_stat)
         byte_count, content_sha256 = _digest_open_included_file(opened_file)
         current_opened_stat = os.fstat(opened_file.fileno())
@@ -778,6 +1025,9 @@ def _included_regular_file_state_at(
     *,
     allowed_identities: frozenset[_PathIdentity] | None = None,
 ) -> tuple[_PathIdentity, int, bytes] | None:
+    parent_stat = os.fstat(parent_fd)
+    parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+    parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
     path_stat = _included_entry_stat_at(parent_fd, name)
     if path_stat is None:
         return None
@@ -810,6 +1060,13 @@ def _included_regular_file_state_at(
             raise OSError(
                 f"Included Files path changed while reading: {display_path}"
             )
+        _verify_included_mount_boundary(
+            display_path,
+            opened_stat,
+            parent_identity[0],
+            parent_mount_id,
+            file_descriptor,
+        )
         with os.fdopen(file_descriptor, "rb") as opened_file:
             file_descriptor = -1
             content = opened_file.read()
@@ -902,6 +1159,10 @@ def _included_regular_file_state(
         raise OSError(f"Included Files path changed before reading: {path}")
 
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    parent_mount_id = _included_directory_mount_id(
+        parent_path,
+        parent_identities[-1][1],
+    )
     _verify_fallback_directory_ancestors(parent_identities)
     _before_included_fallback_regular_file_open(path)
     file_descriptor = os.open(path, flags)
@@ -912,6 +1173,13 @@ def _included_regular_file_state(
             opened_stat,
         ):
             raise OSError(f"Included Files path changed while reading: {path}")
+        _verify_included_mount_boundary(
+            path,
+            opened_stat,
+            parent_identities[-1][1][0],
+            parent_mount_id,
+            file_descriptor,
+        )
         _verify_fallback_directory_ancestors(parent_identities)
         with os.fdopen(file_descriptor, "rb") as opened_file:
             file_descriptor = -1
@@ -942,6 +1210,9 @@ def _digest_included_regular_file_at(
     name: str,
     expected_stat: os.stat_result,
     display_path: str,
+    *,
+    expected_device: int | None = None,
+    expected_mount_id: int | None = None,
 ) -> str:
     expected_fingerprint = _included_path_fingerprint(expected_stat)
     expected_binding = _included_path_handle_binding(expected_stat)
@@ -959,6 +1230,14 @@ def _digest_included_regular_file_at(
         ):
             raise OSError(
                 f"Included Files file changed before hashing: {display_path}"
+            )
+        if expected_device is not None:
+            _verify_included_mount_boundary(
+                display_path,
+                opened_stat,
+                expected_device,
+                expected_mount_id,
+                file_descriptor,
             )
         opened_state = _included_handle_state(opened_stat)
         with os.fdopen(file_descriptor, "rb") as opened_file:
@@ -992,6 +1271,42 @@ def _digest_included_regular_file_at(
     return content_sha256
 
 
+def _verify_included_regular_file_mount_boundary_at(
+    parent_fd: int,
+    name: str,
+    expected_stat: os.stat_result,
+    display_path: str,
+    expected_device: int,
+    expected_mount_id: int | None,
+) -> None:
+    expected_fingerprint = _included_path_fingerprint(expected_stat)
+    expected_ctime_ns = expected_stat.st_ctime_ns
+    file_descriptor = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+        dir_fd=parent_fd,
+    )
+    try:
+        opened_stat = os.fstat(file_descriptor)
+        if (
+            not stat.S_ISREG(opened_stat.st_mode)
+            or _included_path_fingerprint(opened_stat) != expected_fingerprint
+            or opened_stat.st_ctime_ns != expected_ctime_ns
+        ):
+            raise OSError(
+                f"Included Files file changed while checking its mount: {display_path}"
+            )
+        _verify_included_mount_boundary(
+            display_path,
+            opened_stat,
+            expected_device,
+            expected_mount_id,
+            file_descriptor,
+        )
+    finally:
+        os.close(file_descriptor)
+
+
 def _open_included_tree_directory_at(parent_fd: int, name: str) -> int:
     return os.open(
         name,
@@ -1005,6 +1320,8 @@ def _capture_included_tree_from_fd(
     relative_directory: str,
     display_path: str,
     verify_binding: Callable[[], None],
+    boundary_device: int,
+    boundary_mount_id: int | None,
     *,
     include_content: bool,
 ) -> list[_IncludedTreeEntry]:
@@ -1042,6 +1359,13 @@ def _capture_included_tree_from_fd(
                     raise OSError(
                         f"Included Files directory changed: {entry_path}"
                     )
+                _verify_included_mount_boundary(
+                    entry_path,
+                    child_stat,
+                    boundary_device,
+                    boundary_mount_id,
+                    child_fd,
+                )
 
                 def verify_child_binding() -> None:
                     verify_binding()
@@ -1058,6 +1382,8 @@ def _capture_included_tree_from_fd(
                         relative_path,
                         entry_path,
                         verify_child_binding,
+                        boundary_device,
+                        boundary_mount_id,
                         include_content=include_content,
                     )
                 )
@@ -1076,16 +1402,25 @@ def _capture_included_tree_from_fd(
         elif stat.S_ISREG(entry_stat.st_mode):
             kind = "file"
             ctime_ns = entry_stat.st_ctime_ns
-            content_sha256 = (
-                _digest_included_regular_file_at(
+            if include_content:
+                content_sha256 = _digest_included_regular_file_at(
                     directory_fd,
                     name,
                     entry_stat,
                     entry_path,
+                    expected_device=boundary_device,
+                    expected_mount_id=boundary_mount_id,
                 )
-                if include_content
-                else None
-            )
+            else:
+                _verify_included_regular_file_mount_boundary_at(
+                    directory_fd,
+                    name,
+                    entry_stat,
+                    entry_path,
+                    boundary_device,
+                    boundary_mount_id,
+                )
+                content_sha256 = None
         else:
             raise OSError(
                 f"Refusing non-regular entry in Included Files tree: {entry_path}"
@@ -1110,15 +1445,16 @@ def _capture_included_tree_descriptor(
     include_content: bool,
 ) -> _IncludedTreeSnapshot:
     parent_fd, root_name = _open_pinned_included_parent(root_path)
-    parent_identity = _directory_identity_from_fd(parent_fd)
-    if (
-        expected_parent_identity is not None
-        and parent_identity != expected_parent_identity
-    ):
-        os.close(parent_fd)
-        raise OSError(f"Included Files root parent changed: {root_path}")
-    parent_path = os.path.dirname(os.path.abspath(root_path))
     try:
+        parent_stat = os.fstat(parent_fd)
+        parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+        parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+        if (
+            expected_parent_identity is not None
+            and parent_identity != expected_parent_identity
+        ):
+            raise OSError(f"Included Files root parent changed: {root_path}")
+        parent_path = os.path.dirname(os.path.abspath(root_path))
         root_stat = _included_entry_stat_at(parent_fd, root_name)
         if root_stat is None:
             if _included_directory_identity(parent_path) != parent_identity:
@@ -1138,6 +1474,13 @@ def _capture_included_tree_descriptor(
                 raise OSError(
                     f"Included Files root changed while opening: {root_path}"
                 )
+            root_mount_id = _verify_included_mount_boundary(
+                root_path,
+                opened_root_stat,
+                parent_stat.st_dev,
+                parent_mount_id,
+                root_fd,
+            )
 
             def verify_root_binding() -> None:
                 _verify_included_entry_at(
@@ -1152,6 +1495,8 @@ def _capture_included_tree_descriptor(
                 "",
                 root_path,
                 verify_root_binding,
+                opened_root_stat.st_dev,
+                root_mount_id,
                 include_content=include_content,
             )
         finally:
@@ -1182,8 +1527,9 @@ def _capture_included_tree_fallback(
     *,
     include_content: bool,
 ) -> _IncludedTreeSnapshot:
+    root_parent_path = os.path.dirname(os.path.abspath(root_path))
     root_parent_identities = _capture_fallback_directory_ancestors(
-        os.path.dirname(os.path.abspath(root_path))
+        root_parent_path
     )
     if (
         expected_parent_identity is not None
@@ -1204,12 +1550,31 @@ def _capture_included_tree_fallback(
         )
 
     root_fingerprint = _included_path_fingerprint(root_stat)
+    parent_mount_id = _included_directory_mount_id(
+        root_parent_path,
+        root_parent_identities[-1][1],
+    )
+    root_mount_id = _verify_included_mount_boundary_path(
+        root_path,
+        root_stat,
+        root_parent_identities[-1][1][0],
+        parent_mount_id,
+        expect_directory=True,
+    )
     entries: list[_IncludedTreeEntry] = []
     pending: list[tuple[str, str]] = [("", root_path)]
     while pending:
         relative_directory, directory_path = pending.pop()
         directory_identities = _capture_fallback_directory_ancestors(
             directory_path
+        )
+        directory_stat = os.lstat(directory_path)
+        _verify_included_mount_boundary_path(
+            directory_path,
+            directory_stat,
+            root_stat.st_dev,
+            root_mount_id,
+            expect_directory=True,
         )
         _verify_fallback_directory_ancestors(directory_identities)
         try:
@@ -1241,6 +1606,13 @@ def _capture_included_tree_fallback(
                     f"Refusing redirected entry in Included Files tree: {entry_path}"
                 )
             if stat.S_ISDIR(entry_stat.st_mode):
+                _verify_included_mount_boundary_path(
+                    entry_path,
+                    entry_stat,
+                    root_stat.st_dev,
+                    root_mount_id,
+                    expect_directory=True,
+                )
                 kind = "directory"
                 ctime_ns = None
                 content_sha256 = None
@@ -1249,14 +1621,22 @@ def _capture_included_tree_fallback(
                 kind = "file"
                 ctime_ns = entry_stat.st_ctime_ns
                 _verify_fallback_directory_ancestors(directory_identities)
-                content_sha256 = (
-                    _digest_included_regular_file(
+                if include_content:
+                    content_sha256 = _digest_included_regular_file(
                         entry_path,
                         entry_stat,
+                        expected_device=root_stat.st_dev,
+                        expected_mount_id=root_mount_id,
                     )
-                    if include_content
-                    else None
-                )
+                else:
+                    _verify_included_mount_boundary_path(
+                        entry_path,
+                        entry_stat,
+                        root_stat.st_dev,
+                        root_mount_id,
+                        expect_directory=False,
+                    )
+                    content_sha256 = None
             else:
                 raise OSError(
                     f"Refusing non-regular entry in Included Files tree: {entry_path}"
@@ -1410,6 +1790,130 @@ def _included_tree_matches_source_receipts(
     )
 
 
+def _included_registry_receipts_from_tree(
+    snapshot: _IncludedTreeSnapshot,
+    assignments_by_source: dict[str, IncludedFilePathAssignment],
+    emitted_logical_paths: set[str],
+) -> dict[str, tuple[int, str]] | None:
+    entries_by_path = {
+        entry.relative_path: entry
+        for entry in snapshot.entries
+        if entry.kind == "file"
+    }
+    receipts: dict[str, tuple[int, str]] = {}
+    for logical_path in emitted_logical_paths:
+        assignment = assignments_by_source.get(logical_path)
+        if assignment is None:
+            return None
+        entry = entries_by_path.get(assignment.assigned_output_path)
+        if entry is None or entry.content_sha256 is None:
+            return None
+        receipts[logical_path] = (
+            entry.fingerprint[3],
+            entry.content_sha256,
+        )
+    return receipts
+
+
+def _included_stage_container_snapshot(
+    project_identity: _PathIdentity,
+    stage_path: str,
+    stage_identity: _PathIdentity,
+    staged_root_snapshot: _IncludedTreeSnapshot,
+    staged_registry_identity: _PathIdentity,
+    staged_registry_content: bytes,
+) -> _IncludedTreeSnapshot:
+    """Bind the complete staged namespace without re-reading payload bodies."""
+
+    metadata = _capture_included_tree(
+        stage_path,
+        expected_parent_identity=project_identity,
+        include_content=False,
+    )
+    if metadata.identity != stage_identity:
+        raise OSError("Included Files staging container changed")
+    marker_path = os.path.join(stage_path, _INCLUDED_FILES_STAGE_MARKER_NAME)
+    marker_record = _read_included_recovery_record(
+        marker_path,
+        stage_identity,
+    )
+    if marker_record is None or not _included_stage_marker_matches(
+        marker_record[1],
+        project_identity,
+        stage_identity,
+    ):
+        raise OSError("Included Files staging ownership marker changed")
+    marker_content = _included_recovery_record_content(marker_record[1])
+    expected_file_hashes = {
+        _INCLUDED_FILES_STAGE_MARKER_NAME: hashlib.sha256(
+            marker_content
+        ).hexdigest(),
+        "gml_included_file_registry.gd": hashlib.sha256(
+            staged_registry_content
+        ).hexdigest(),
+        **{
+            _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path:
+                entry.content_sha256
+            for entry in staged_root_snapshot.entries
+            if entry.kind == "file" and entry.content_sha256 is not None
+        },
+    }
+    expected_directories = {
+        _INCLUDED_FILES_ROOT_NAME,
+        *(
+            _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path
+            for entry in staged_root_snapshot.entries
+            if entry.kind == "directory"
+        ),
+    }
+    actual_files = {
+        entry.relative_path
+        for entry in metadata.entries
+        if entry.kind == "file"
+    }
+    actual_directories = {
+        entry.relative_path
+        for entry in metadata.entries
+        if entry.kind == "directory"
+    }
+    if actual_files != set(expected_file_hashes) or actual_directories != expected_directories:
+        raise OSError("Included Files staging container inventory changed")
+    entries: list[_IncludedTreeEntry] = []
+    for entry in metadata.entries:
+        if entry.kind == "file" and entry.fingerprint[5] != 1:
+            raise OSError(
+                "Included Files staging file has multiple hard links: "
+                + entry.relative_path
+            )
+        if (
+            entry.relative_path == _INCLUDED_FILES_ROOT_NAME
+            and entry.fingerprint[:2] != staged_root_snapshot.identity
+        ):
+            raise OSError("Included Files staging root identity changed")
+        if (
+            entry.relative_path == "gml_included_file_registry.gd"
+            and entry.fingerprint[:2] != staged_registry_identity
+        ):
+            raise OSError("Included File staging registry identity changed")
+        entries.append(
+            _IncludedTreeEntry(
+                relative_path=entry.relative_path,
+                kind=entry.kind,
+                fingerprint=entry.fingerprint,
+                ctime_ns=entry.ctime_ns,
+                content_sha256=(
+                    expected_file_hashes[entry.relative_path]
+                    if entry.kind == "file"
+                    else None
+                ),
+            )
+        )
+    return _IncludedTreeSnapshot(
+        root_fingerprint=metadata.root_fingerprint,
+        entries=tuple(entries),
+    )
+
+
 def _verify_staged_included_inventory(
     snapshot: _IncludedTreeSnapshot,
     assigned_receipts: dict[str, _IncludedCopyReceipt],
@@ -1443,6 +1947,11 @@ def _verify_staged_included_inventory(
     }
     for assigned_path, receipt in assigned_receipts.items():
         staged_entry = entries_by_path[assigned_path]
+        if staged_entry.fingerprint[5] != 1:
+            raise OSError(
+                "Included Files staging payload has multiple hard links: "
+                + assigned_path
+            )
         if (
             staged_entry.fingerprint[3] != receipt.byte_count
             or staged_entry.content_sha256 != receipt.sha256
@@ -1484,6 +1993,8 @@ def _capture_included_registry(
             registry_directory
         )
         try:
+            project_stat = os.fstat(project_fd)
+            project_mount_id = _included_linux_mount_id_from_fd(project_fd)
             _verify_included_directory_fd(
                 project_fd,
                 expected_project_identity,
@@ -1527,6 +2038,13 @@ def _capture_included_registry(
                     raise OSError(
                         "Included File registry directory changed while opening"
                     )
+                _verify_included_mount_boundary(
+                    registry_directory,
+                    os.fstat(registry_directory_fd),
+                    project_stat.st_dev,
+                    project_mount_id,
+                    registry_directory_fd,
+                )
                 _before_included_registry_file_read(
                     project_fd,
                     registry_directory_name,
@@ -1598,6 +2116,17 @@ def _capture_included_registry(
         registry_directory_stat.st_dev,
         registry_directory_stat.st_ino,
     )
+    project_mount_id = _included_directory_mount_id(
+        project_path,
+        project_ancestors[-1][1],
+    )
+    _verify_included_mount_boundary_path(
+        registry_directory,
+        registry_directory_stat,
+        project_ancestors[-1][1][0],
+        project_mount_id,
+        expect_directory=True,
+    )
     registry_ancestors = (
         *project_ancestors,
         (registry_directory, directory_identity),
@@ -1668,9 +2197,67 @@ def _verify_included_stage_container(
     )
     if actual_parent != expected_parent:
         raise OSError("Included Files staging directory escaped the Godot project")
-    if _included_directory_identity(stage_path) != stage_identity:
+    try:
+        current_stage_identity = _included_directory_identity(stage_path)
+    except OSError as error:
+        raise OSError(
+            "Refusing redirected or non-directory Included Files staging "
+            f"path: {stage_path}"
+        ) from error
+    if current_stage_identity != stage_identity:
         raise OSError("Included Files staging directory changed during conversion")
     _verify_included_project_identity(project_path, project_identity)
+
+
+def _write_included_stage_marker(
+    project_path: str,
+    project_identity: _PathIdentity,
+    stage_path: str,
+    stage_identity: _PathIdentity,
+) -> None:
+    marker_path = os.path.join(stage_path, _INCLUDED_FILES_STAGE_MARKER_NAME)
+    content = _included_recovery_record_content(
+        {
+            "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            "state": "staging",
+            "project_identity": _included_identity_payload(project_identity),
+            "stage_identity": _included_identity_payload(stage_identity),
+        }
+    )
+    file_descriptor = os.open(
+        marker_path,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    marker_stat = os.fstat(file_descriptor)
+    marker_identity = (marker_stat.st_dev, marker_stat.st_ino)
+    try:
+        with os.fdopen(file_descriptor, "wb") as marker_file:
+            file_descriptor = -1
+            marker_file.write(content)
+            marker_file.flush()
+            os.fsync(marker_file.fileno())
+        marker_state = _included_regular_file_state(
+            marker_path,
+            expected_parent_identity=stage_identity,
+            allowed_identities=frozenset({marker_identity}),
+        )
+        if marker_state is None or marker_state[2] != content:
+            raise OSError("Included Files staging ownership marker changed")
+        _sync_included_directory(stage_path, stage_identity)
+        _sync_included_directory(project_path, project_identity)
+        _verify_included_stage_container(
+            project_path,
+            project_identity,
+            stage_path,
+            stage_identity,
+        )
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
 
 
 def _create_included_output_stage(
@@ -1727,7 +2314,14 @@ def _create_included_output_stage(
                 raise OSError(
                     "Godot project root changed during Included Files staging"
                 )
-            return os.path.join(project_path, stage_name), stage_identity
+            stage_path = os.path.join(project_path, stage_name)
+            _write_included_stage_marker(
+                project_path,
+                project_identity,
+                stage_path,
+                stage_identity,
+            )
+            return stage_path, stage_identity
         except BaseException:
             if stage_name and stage_identity is not None:
                 try:
@@ -1742,11 +2336,22 @@ def _create_included_output_stage(
         finally:
             os.close(project_fd)
 
-    stage_path = tempfile.mkdtemp(
-        dir=project_path,
-        prefix=_INCLUDED_FILES_STAGE_PREFIX,
-        suffix=".stage",
-    )
+    stage_path = ""
+    for _attempt in range(100):
+        candidate_path = os.path.join(
+            project_path,
+            _INCLUDED_FILES_STAGE_PREFIX
+            + secrets.token_hex(8)
+            + ".stage",
+        )
+        try:
+            os.mkdir(candidate_path, 0o700)
+        except FileExistsError:
+            continue
+        stage_path = candidate_path
+        break
+    if not stage_path:
+        raise OSError("Could not allocate Included Files staging directory")
     stage_identity = _included_directory_identity(stage_path)
     if stage_identity is None:
         raise OSError("Included Files staging directory disappeared")
@@ -1757,6 +2362,12 @@ def _create_included_output_stage(
         )
         if stage_parent_identity != project_identity:
             raise OSError("Included Files staging directory escaped the Godot project")
+        _write_included_stage_marker(
+            project_path,
+            project_identity,
+            stage_path,
+            stage_identity,
+        )
     except Exception:
         try:
             _remove_owned_included_tree(
@@ -1891,6 +2502,8 @@ def _remove_included_tree_contents_at(
     directory_fd: int,
     display_path: str,
     verify_binding: Callable[[], None],
+    boundary_device: int,
+    boundary_mount_id: int | None,
 ) -> None:
     verify_binding()
     for name in sorted(os.listdir(directory_fd)):
@@ -1901,23 +2514,37 @@ def _remove_included_tree_contents_at(
             raise OSError(f"Included Files cleanup entry changed: {entry_path}")
         entry_identity = entry_stat.st_dev, entry_stat.st_ino
         if stat.S_ISDIR(entry_stat.st_mode):
-            quarantined_name, quarantined_path = _quarantine_included_entry_at(
-                directory_fd,
-                name,
-                entry_identity,
-                expect_directory=True,
-                display_path=entry_path,
-            )
             child_fd = os.open(
-                quarantined_name,
+                name,
                 _DIRECTORY_OPEN_FLAGS,
                 dir_fd=directory_fd,
             )
             try:
-                if _directory_identity_from_fd(child_fd) != entry_identity:
+                child_stat = os.fstat(child_fd)
+                if (
+                    not stat.S_ISDIR(child_stat.st_mode)
+                    or (child_stat.st_dev, child_stat.st_ino)
+                    != entry_identity
+                ):
                     raise OSError(
                         f"Included Files cleanup directory changed: {entry_path}"
                     )
+                _verify_included_mount_boundary(
+                    entry_path,
+                    child_stat,
+                    boundary_device,
+                    boundary_mount_id,
+                    child_fd,
+                )
+                quarantined_name, quarantined_path = (
+                    _quarantine_included_entry_at(
+                        directory_fd,
+                        name,
+                        entry_identity,
+                        expect_directory=True,
+                        display_path=entry_path,
+                    )
+                )
 
                 def verify_child_binding() -> None:
                     verify_binding()
@@ -1927,22 +2554,50 @@ def _remove_included_tree_contents_at(
                         entry_identity,
                         quarantined_path,
                     )
+                    current_child_stat = os.fstat(child_fd)
+                    if (
+                        not stat.S_ISDIR(current_child_stat.st_mode)
+                        or (current_child_stat.st_dev, current_child_stat.st_ino)
+                        != entry_identity
+                    ):
+                        raise OSError(
+                            "Included Files cleanup directory changed: "
+                            f"{quarantined_path}"
+                        )
+                    _verify_included_mount_boundary(
+                        quarantined_path,
+                        current_child_stat,
+                        boundary_device,
+                        boundary_mount_id,
+                        child_fd,
+                    )
 
                 _remove_included_tree_contents_at(
                     child_fd,
                     quarantined_path,
                     verify_child_binding,
+                    boundary_device,
+                    boundary_mount_id,
+                )
+                verify_child_binding()
+                _rmdir_exact_quarantined_entry_at(
+                    directory_fd,
+                    quarantined_name,
+                    entry_identity,
+                    quarantined_path,
                 )
             finally:
                 os.close(child_fd)
-            verify_child_binding()
-            _rmdir_exact_quarantined_entry_at(
-                directory_fd,
-                quarantined_name,
-                entry_identity,
-                quarantined_path,
-            )
         else:
+            if stat.S_ISREG(entry_stat.st_mode):
+                _verify_included_regular_file_mount_boundary_at(
+                    directory_fd,
+                    name,
+                    entry_stat,
+                    entry_path,
+                    boundary_device,
+                    boundary_mount_id,
+                )
             quarantined_name, quarantined_path = _quarantine_included_entry_at(
                 directory_fd,
                 name,
@@ -2049,6 +2704,7 @@ def _unlink_exact_quarantined_entry_fallback(
                 "Included Files cleanup file changed while clearing its "
                 f"Windows read-only attribute: {path!r}"
             )
+        _after_included_transaction_phase("cleanup-readonly-cleared")
     try:
         os.unlink(path)
     except OSError as error:
@@ -2275,6 +2931,17 @@ def _remove_owned_included_tree_fallback(
         or (root_stat.st_dev, root_stat.st_ino) != expected_identity
     ):
         raise OSError(f"Refusing to remove changed Included Files tree: {path}")
+    parent_mount_id = _included_directory_mount_id(
+        parent_path,
+        parent_identities[-1][1],
+    )
+    root_mount_id = _verify_included_mount_boundary_path(
+        path,
+        root_stat,
+        parent_identities[-1][1][0],
+        parent_mount_id,
+        expect_directory=True,
+    )
     quarantined_root_path = _quarantine_included_entry_fallback(
         path,
         expected_identity,
@@ -2292,6 +2959,14 @@ def _remove_owned_included_tree_fallback(
             raise OSError(
                 f"Included Files cleanup directory changed: {directory_path}"
             )
+        directory_stat = os.lstat(directory_path)
+        _verify_included_mount_boundary_path(
+            directory_path,
+            directory_stat,
+            root_stat.st_dev,
+            root_mount_id,
+            expect_directory=True,
+        )
         for name in sorted(os.listdir(directory_path)):
             _verify_fallback_directory_ancestors(directory_ancestors)
             entry_path = os.path.join(directory_path, name)
@@ -2302,6 +2977,13 @@ def _remove_owned_included_tree_fallback(
                     f"Refusing redirected Included Files cleanup entry: {entry_path}"
                 )
             if stat.S_ISDIR(entry_stat.st_mode):
+                _verify_included_mount_boundary_path(
+                    entry_path,
+                    entry_stat,
+                    root_stat.st_dev,
+                    root_mount_id,
+                    expect_directory=True,
+                )
                 quarantined_entry_path = _quarantine_included_entry_fallback(
                     entry_path,
                     entry_identity,
@@ -2314,6 +2996,14 @@ def _remove_owned_included_tree_fallback(
                     entry_identity,
                 )
             else:
+                if stat.S_ISREG(entry_stat.st_mode):
+                    _verify_included_mount_boundary_path(
+                        entry_path,
+                        entry_stat,
+                        root_stat.st_dev,
+                        root_mount_id,
+                        expect_directory=False,
+                    )
                 _verify_fallback_directory_ancestors(directory_ancestors)
                 quarantined_entry_path = _quarantine_included_entry_fallback(
                     entry_path,
@@ -2349,7 +3039,7 @@ def _remove_owned_included_tree(
         return
     parent_fd, name = _open_pinned_included_parent(path)
     try:
-        _verify_included_directory_fd(
+        parent_identity = _verify_included_directory_fd(
             parent_fd,
             expected_parent_identity,
             os.path.dirname(path),
@@ -2362,169 +3052,28 @@ def _remove_owned_included_tree(
             or (root_stat.st_dev, root_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Refusing to remove changed Included Files tree: {path}")
-        quarantined_name, quarantined_path = _quarantine_included_entry_at(
-            parent_fd,
-            name,
-            expected_identity,
-            expect_directory=True,
-            display_path=path,
-        )
         root_fd = os.open(
-            quarantined_name,
+            name,
             _DIRECTORY_OPEN_FLAGS,
             dir_fd=parent_fd,
         )
         try:
-            if _directory_identity_from_fd(root_fd) != expected_identity:
+            opened_root_stat = os.fstat(root_fd)
+            if (
+                not stat.S_ISDIR(opened_root_stat.st_mode)
+                or (opened_root_stat.st_dev, opened_root_stat.st_ino)
+                != expected_identity
+            ):
                 raise OSError(
                     f"Refusing to remove changed Included Files tree: {path}"
                 )
-
-            def verify_root_binding() -> None:
-                _verify_included_directory_entry_identity_at(
-                    parent_fd,
-                    quarantined_name,
-                    expected_identity,
-                    quarantined_path,
-                )
-
-            _remove_included_tree_contents_at(
-                root_fd,
-                quarantined_path,
-                verify_root_binding,
-            )
-        finally:
-            os.close(root_fd)
-        verify_root_binding()
-        _rmdir_exact_quarantined_entry_at(
-            parent_fd,
-            quarantined_name,
-            expected_identity,
-            quarantined_path,
-        )
-    finally:
-        os.close(parent_fd)
-
-
-def _remove_owned_included_file(
-    path: str,
-    expected_identity: _PathIdentity,
-    *,
-    expected_parent_identity: _PathIdentity | None = None,
-) -> None:
-    parent_path = os.path.dirname(os.path.abspath(path))
-    if _included_descriptor_paths_supported():
-        parent_fd, name = _open_pinned_included_parent(path)
-        try:
-            _verify_included_directory_fd(
-                parent_fd,
-                expected_parent_identity,
-                parent_path,
-            )
-            file_stat = _included_entry_stat_at(parent_fd, name)
-            if file_stat is None:
-                return
-            if (
-                not stat.S_ISREG(file_stat.st_mode)
-                or (file_stat.st_dev, file_stat.st_ino) != expected_identity
-            ):
-                raise OSError(
-                    f"Refusing to remove changed Included Files file: {path}"
-                )
-            quarantined_name, quarantined_path = _quarantine_included_entry_at(
-                parent_fd,
-                name,
-                expected_identity,
-                expect_directory=False,
-                display_path=path,
-            )
-            file_descriptor = os.open(
-                quarantined_name,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=parent_fd,
-            )
-            try:
-                opened_stat = os.fstat(file_descriptor)
-                if (
-                    not stat.S_ISREG(opened_stat.st_mode)
-                    or (opened_stat.st_dev, opened_stat.st_ino)
-                    != expected_identity
-                ):
-                    raise OSError(
-                        f"Refusing to remove changed Included Files file: {path}"
-                    )
-                current_stat = _included_entry_stat_at(
-                    parent_fd,
-                    quarantined_name,
-                )
-                if (
-                    current_stat is None
-                    or (current_stat.st_dev, current_stat.st_ino)
-                    != expected_identity
-                ):
-                    raise OSError(
-                        f"Refusing to remove changed Included Files file: {path}"
-                    )
-                _unlink_exact_quarantined_entry_at(
-                    parent_fd,
-                    quarantined_name,
-                    expected_identity,
-                    quarantined_path,
-                )
-            finally:
-                os.close(file_descriptor)
-        finally:
-            os.close(parent_fd)
-        return
-
-    parent_identities = _capture_fallback_directory_ancestors(parent_path)
-    if (
-        expected_parent_identity is not None
-        and parent_identities[-1][1] != expected_parent_identity
-    ):
-        raise OSError(f"Included Files cleanup parent changed: {parent_path}")
-    try:
-        file_stat = os.lstat(path)
-    except FileNotFoundError:
-        _verify_fallback_directory_ancestors(parent_identities)
-        return
-    if (
-        _included_output_path_is_redirected(path, file_stat)
-        or not stat.S_ISREG(file_stat.st_mode)
-        or (file_stat.st_dev, file_stat.st_ino) != expected_identity
-    ):
-        raise OSError(f"Refusing to remove changed Included Files file: {path}")
-    _verify_fallback_directory_ancestors(parent_identities)
-    quarantined_path = _quarantine_included_entry_fallback(
-        path,
-        expected_identity,
-        expect_directory=False,
-    )
-    _unlink_exact_quarantined_entry_fallback(
-        quarantined_path,
-        expected_identity,
-    )
-
-
-def _remove_owned_empty_included_directory(
-    path: str,
-    expected_identity: _PathIdentity,
-    expected_parent_identity: _PathIdentity,
-) -> None:
-    parent_path = os.path.dirname(os.path.abspath(path))
-    if _included_descriptor_paths_supported():
-        parent_fd, name = _open_pinned_included_parent(path)
-        try:
-            _verify_included_directory_fd(
-                parent_fd,
-                expected_parent_identity,
-                parent_path,
-            )
-            _verify_included_directory_entry_identity_at(
-                parent_fd,
-                name,
-                expected_identity,
+            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+            root_mount_id = _verify_included_mount_boundary(
                 path,
+                opened_root_stat,
+                parent_identity[0],
+                parent_mount_id,
+                root_fd,
             )
             quarantined_name, quarantined_path = _quarantine_included_entry_at(
                 parent_fd,
@@ -2533,6 +3082,40 @@ def _remove_owned_empty_included_directory(
                 expect_directory=True,
                 display_path=path,
             )
+
+            def verify_root_binding() -> None:
+                _verify_included_directory_entry_identity_at(
+                    parent_fd,
+                    quarantined_name,
+                    expected_identity,
+                    quarantined_path,
+                )
+                current_root_stat = os.fstat(root_fd)
+                if (
+                    not stat.S_ISDIR(current_root_stat.st_mode)
+                    or (current_root_stat.st_dev, current_root_stat.st_ino)
+                    != expected_identity
+                ):
+                    raise OSError(
+                        "Refusing to remove changed Included Files tree: "
+                        f"{quarantined_path}"
+                    )
+                _verify_included_mount_boundary(
+                    quarantined_path,
+                    current_root_stat,
+                    opened_root_stat.st_dev,
+                    root_mount_id,
+                    root_fd,
+                )
+
+            _remove_included_tree_contents_at(
+                root_fd,
+                quarantined_path,
+                verify_root_binding,
+                opened_root_stat.st_dev,
+                root_mount_id,
+            )
+            verify_root_binding()
             _rmdir_exact_quarantined_entry_at(
                 parent_fd,
                 quarantined_name,
@@ -2540,24 +3123,9 @@ def _remove_owned_empty_included_directory(
                 quarantined_path,
             )
         finally:
-            os.close(parent_fd)
-        return
-    parent_identities = _capture_fallback_directory_ancestors(parent_path)
-    if parent_identities[-1][1] != expected_parent_identity:
-        raise OSError(f"Included Files directory parent changed: {parent_path}")
-    current_identity = _included_directory_identity(path)
-    if current_identity != expected_identity:
-        raise OSError(f"Included Files directory changed: {path}")
-    _verify_fallback_directory_ancestors(parent_identities)
-    quarantined_path = _quarantine_included_entry_fallback(
-        path,
-        expected_identity,
-        expect_directory=True,
-    )
-    _rmdir_exact_quarantined_entry_fallback(
-        quarantined_path,
-        expected_identity,
-    )
+            os.close(root_fd)
+    finally:
+        os.close(parent_fd)
 
 
 def _before_included_fallback_chmod_open(_path: str) -> None:
@@ -2722,7 +3290,21 @@ def _rename_included_transaction_entry(source: str, destination: str) -> None:
         raise OSError(
             "Unsafe path-based Included Files rename is disabled on POSIX"
         )
-    os.rename(source, destination)
+    if sys.platform != "win32":
+        # Cross-platform unit tests model the Windows fallback by patching
+        # os.name; the real Windows runner exercises MoveFileExW below.
+        os.rename(source, destination)
+        return
+    kernel32 = _windows_included_transaction_api()
+    if not kernel32.MoveFileExW(
+        _windows_extended_included_path(source),
+        _windows_extended_included_path(destination),
+        _WINDOWS_MOVEFILE_WRITE_THROUGH,
+    ):
+        raise _windows_included_transaction_error(
+            "Could not durably move Included Files transaction entry",
+            destination,
+        )
 
 
 def _move_exact_included_entry(
@@ -2911,6 +3493,76 @@ def _move_exact_included_file(
     )
 
 
+def _sync_included_directory(
+    path: str,
+    expected_identity: _PathIdentity,
+) -> None:
+    """Make prior namespace changes durable where Python exposes directory fsync."""
+
+    if os.name == "nt":
+        # Windows transaction renames use MoveFileExW with
+        # MOVEFILE_WRITE_THROUGH instead.
+        return
+    directory_fd = _open_pinned_included_directory(path)
+    try:
+        _verify_included_directory_fd(
+            directory_fd,
+            expected_identity,
+            path,
+        )
+        os.fsync(directory_fd)
+        _verify_included_directory_fd(
+            directory_fd,
+            expected_identity,
+            path,
+        )
+    finally:
+        os.close(directory_fd)
+
+
+def _sync_included_tree_directories_bottom_up(
+    root_path: str,
+    snapshot: _IncludedTreeSnapshot,
+    expected_parent_identity: _PathIdentity,
+) -> None:
+    """Durably bind every recorded tree namespace before committing it."""
+
+    root_identity = snapshot.identity
+    if root_identity is None:
+        raise OSError("Cannot sync an absent Included Files generation")
+    _verify_included_tree_snapshot_metadata(
+        root_path,
+        snapshot,
+        expected_parent_identity=expected_parent_identity,
+    )
+    directories = sorted(
+        (entry for entry in snapshot.entries if entry.kind == "directory"),
+        key=lambda entry: (
+            entry.relative_path.count("/"),
+            entry.relative_path,
+        ),
+        reverse=True,
+    )
+    for entry in directories:
+        _sync_included_directory(
+            _included_recovery_tree_entry_path(
+                root_path,
+                entry.relative_path,
+            ),
+            entry.fingerprint[:2],
+        )
+    _sync_included_directory(root_path, root_identity)
+    _verify_included_tree_snapshot_metadata(
+        root_path,
+        snapshot,
+        expected_parent_identity=expected_parent_identity,
+    )
+
+
+def _after_included_transaction_phase(_phase: str) -> None:
+    """Narrow subprocess-test seam after one durable publication boundary."""
+
+
 def _prepare_included_registry_directory(
     project_path: str,
     expected: _IncludedRegistrySnapshot,
@@ -2989,6 +3641,2818 @@ def _prepare_included_registry_directory(
     return registry_directory, created_identity, True
 
 
+def _after_included_lock_initialization_phase(_phase: str) -> None:
+    """Narrow test seam around durable project-lock initialization."""
+
+
+def _write_included_lock_initialization_temporary(file_descriptor: int) -> None:
+    midpoint = len(_INCLUDED_FILES_LOCK_CONTENT) // 2
+    chunks = (
+        _INCLUDED_FILES_LOCK_CONTENT[:midpoint],
+        _INCLUDED_FILES_LOCK_CONTENT[midpoint:],
+    )
+    for index, chunk in enumerate(chunks):
+        pending = memoryview(chunk)
+        while pending:
+            written = os.write(file_descriptor, pending)
+            if written <= 0:
+                raise OSError("Could not initialize Included Files transaction lock")
+            pending = pending[written:]
+        if index == 0:
+            _after_included_lock_initialization_phase("temporary-partially-written")
+    _after_included_lock_initialization_phase("temporary-written")
+    os.fsync(file_descriptor)
+
+
+def _remove_exact_included_lock_initialization_temporary(
+    path: str,
+    expected_identity: _PathIdentity,
+    project_identity: _PathIdentity,
+) -> None:
+    state = _included_lock_initialization_record_state(
+        path,
+        project_identity,
+        allowed_identities=frozenset({expected_identity}),
+    )
+    if state is None:
+        return
+    current_stat = os.lstat(path)
+    if (
+        (current_stat.st_dev, current_stat.st_ino) != expected_identity
+        or current_stat.st_nlink != 1
+        or state[2] != _INCLUDED_FILES_LOCK_CONTENT
+    ):
+        return
+
+    name = os.path.basename(path)
+    initialization_token: str | None = None
+    cleanup_token: str | None = None
+    try:
+        _included_recovery_managed_name(
+            name,
+            prefix=_INCLUDED_FILES_LOCK_TEMP_PREFIX,
+            suffix=".tmp",
+            label="lock initialization temporary",
+        )
+        initialization_token = name[
+            len(_INCLUDED_FILES_LOCK_TEMP_PREFIX) : -len(".tmp")
+        ]
+    except OSError:
+        try:
+            _included_recovery_managed_name(
+                name,
+                prefix=_INCLUDED_FILES_LOCK_CLEANUP_PREFIX,
+                suffix=".tmp",
+                label="lock initialization cleanup tombstone",
+            )
+            cleanup_token = name[
+                len(_INCLUDED_FILES_LOCK_CLEANUP_PREFIX) : -len(".tmp")
+            ]
+        except OSError:
+            return
+
+    parent_path = os.path.dirname(path)
+    if cleanup_token is not None:
+        initialization_path = os.path.join(
+            parent_path,
+            _INCLUDED_FILES_LOCK_TEMP_PREFIX + cleanup_token + ".tmp",
+        )
+        if os.path.lexists(initialization_path):
+            return
+        tombstone_path = path
+    else:
+        assert initialization_token is not None
+        tombstone_path = os.path.join(
+            parent_path,
+            _INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+            + initialization_token
+            + ".tmp",
+        )
+        if os.path.lexists(tombstone_path):
+            return
+        _move_exact_included_file(
+            path,
+            tombstone_path,
+            expected_identity,
+            source_parent_identity=project_identity,
+            destination_parent_identity=project_identity,
+        )
+        _sync_included_directory(parent_path, project_identity)
+        _after_included_lock_initialization_phase("temporary-cleanup-quarantined")
+
+    tombstone_state = _included_lock_initialization_record_state(
+        tombstone_path,
+        project_identity,
+        allowed_identities=frozenset({expected_identity}),
+    )
+    if (
+        tombstone_state is None
+        or tombstone_state[2] != _INCLUDED_FILES_LOCK_CONTENT
+    ):
+        return
+    _remove_included_cleanup_tombstone(
+        tombstone_path,
+        expected_identity,
+        parent_path,
+        project_identity,
+        expect_directory=False,
+    )
+    _after_included_lock_initialization_phase("temporary-cleanup-removed")
+
+
+def _cleanup_included_lock_initialization_temporaries(
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> None:
+    for name in sorted(os.listdir(project_path)):
+        managed = False
+        for prefix, label in (
+            (
+                _INCLUDED_FILES_LOCK_TEMP_PREFIX,
+                "lock initialization temporary",
+            ),
+            (
+                _INCLUDED_FILES_LOCK_CLEANUP_PREFIX,
+                "lock initialization cleanup tombstone",
+            ),
+        ):
+            try:
+                _included_recovery_managed_name(
+                    name,
+                    prefix=prefix,
+                    suffix=".tmp",
+                    label=label,
+                )
+            except OSError:
+                continue
+            managed = True
+            break
+        if not managed:
+            continue
+        candidate_path = os.path.join(project_path, name)
+        try:
+            state = _included_lock_initialization_record_state(
+                candidate_path,
+                project_identity,
+            )
+            if state is None or state[2] != _INCLUDED_FILES_LOCK_CONTENT:
+                continue
+            _remove_exact_included_lock_initialization_temporary(
+                candidate_path,
+                state[0],
+                project_identity,
+            )
+        except OSError:
+            # Partial, redirected, aliased, or concurrently changed candidates are
+            # not sufficient evidence of converter ownership and stay untouched.
+            continue
+
+
+def _initialize_included_project_lock(
+    project_path: str,
+    project_identity: _PathIdentity,
+    *,
+    project_fd: int,
+) -> None:
+    lock_path = os.path.join(project_path, _INCLUDED_FILES_LOCK_NAME)
+    file_descriptor = -1
+    temporary_path = ""
+    temporary_identity: _PathIdentity | None = None
+    for _attempt in range(100):
+        temporary_name = (
+            _INCLUDED_FILES_LOCK_TEMP_PREFIX + secrets.token_hex(8) + ".tmp"
+        )
+        candidate_path = os.path.join(project_path, temporary_name)
+        try:
+            temporary_flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_BINARY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            if project_fd >= 0:
+                file_descriptor = os.open(
+                    temporary_name,
+                    temporary_flags,
+                    0o600,
+                    dir_fd=project_fd,
+                )
+            else:
+                file_descriptor = os.open(
+                    candidate_path,
+                    temporary_flags,
+                    0o600,
+                )
+        except FileExistsError:
+            continue
+        temporary_path = candidate_path
+        temporary_stat = os.fstat(file_descriptor)
+        temporary_identity = (temporary_stat.st_dev, temporary_stat.st_ino)
+        break
+    if file_descriptor < 0 or not temporary_path or temporary_identity is None:
+        raise OSError("Could not allocate Included Files lock initialization record")
+
+    temporary_pending = True
+    try:
+        try:
+            _after_included_lock_initialization_phase("temporary-created")
+            _write_included_lock_initialization_temporary(file_descriptor)
+            os.close(file_descriptor)
+            file_descriptor = -1
+            temporary_state = _included_lock_initialization_record_state(
+                temporary_path,
+                project_identity,
+                allowed_identities=frozenset({temporary_identity}),
+            )
+            if (
+                temporary_state is None
+                or temporary_state[2] != _INCLUDED_FILES_LOCK_CONTENT
+            ):
+                raise OSError("Included Files lock initialization record changed")
+            _sync_included_directory(project_path, project_identity)
+            _after_included_lock_initialization_phase("temporary-synced")
+            _move_exact_included_file(
+                temporary_path,
+                lock_path,
+                temporary_identity,
+                source_parent_identity=project_identity,
+                destination_parent_identity=project_identity,
+            )
+            temporary_pending = False
+            _sync_included_directory(project_path, project_identity)
+            _after_included_lock_initialization_phase("temporary-published")
+        except OSError:
+            # A competing initializer may have atomically published the complete
+            # stable record first. The caller opens and validates that winner.
+            stable_exists = (
+                _included_entry_stat_at(project_fd, _INCLUDED_FILES_LOCK_NAME)
+                is not None
+                if project_fd >= 0
+                else os.path.lexists(lock_path)
+            )
+            if not stable_exists:
+                raise
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_pending:
+            try:
+                _remove_exact_included_lock_initialization_temporary(
+                    temporary_path,
+                    temporary_identity,
+                    project_identity,
+                )
+            except OSError:
+                pass
+
+
+def _acquire_included_project_lock(
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> _IncludedProjectLock:
+    """Acquire the cooperative lock that serializes recovery and publication."""
+
+    lock_path = os.path.join(project_path, _INCLUDED_FILES_LOCK_NAME)
+    flags = (
+        os.O_RDWR
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    project_fd = -1
+    descriptor_bound = _included_descriptor_paths_supported()
+    if descriptor_bound:
+        project_fd = _open_pinned_included_directory(project_path)
+        try:
+            _verify_included_directory_fd(
+                project_fd,
+                project_identity,
+                project_path,
+            )
+        except BaseException:
+            os.close(project_fd)
+            raise
+
+    def open_lock(open_flags: int, mode: int = 0o600) -> int:
+        if descriptor_bound:
+            return os.open(
+                _INCLUDED_FILES_LOCK_NAME,
+                open_flags,
+                mode,
+                dir_fd=project_fd,
+            )
+        return os.open(lock_path, open_flags, mode)
+
+    def lock_lstat() -> os.stat_result:
+        if descriptor_bound:
+            return os.stat(
+                _INCLUDED_FILES_LOCK_NAME,
+                dir_fd=project_fd,
+                follow_symlinks=False,
+            )
+        return os.lstat(lock_path)
+
+    try:
+        try:
+            file_descriptor = open_lock(flags)
+        except FileNotFoundError:
+            _initialize_included_project_lock(
+                project_path,
+                project_identity,
+                project_fd=project_fd,
+            )
+            file_descriptor = open_lock(flags)
+    except BaseException:
+        if project_fd >= 0:
+            os.close(project_fd)
+        raise
+
+    windows = os.name == "nt"
+    locked = False
+    try:
+        opened_stat = os.fstat(file_descriptor)
+        path_stat = lock_lstat()
+        if (
+            _included_output_path_is_redirected(lock_path, path_stat)
+            or not stat.S_ISREG(opened_stat.st_mode)
+            or not os.path.samestat(opened_stat, path_stat)
+            or opened_stat.st_nlink != 1
+        ):
+            raise OSError(
+                "Refusing redirected or aliased Included Files transaction lock: "
+                + lock_path
+            )
+        if windows:
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            try:
+                _windows_included_file_locking(file_descriptor, 2)
+            except OSError as error:
+                raise OSError(
+                    "Another GM2Godot conversion is already publishing or "
+                    f"recovering Included Files in {project_path}"
+                ) from error
+            locked = True
+        os.lseek(file_descriptor, 0, os.SEEK_SET)
+        initial_content = os.read(
+            file_descriptor,
+            len(_INCLUDED_FILES_LOCK_CONTENT) + 1,
+        )
+        if initial_content != _INCLUDED_FILES_LOCK_CONTENT:
+            raise OSError(
+                "Refusing an unknown or incomplete file at the reserved Included "
+                f"Files transaction lock path: {lock_path}"
+            )
+        if not windows:
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            try:
+                import fcntl
+
+                fcntl.flock(file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                raise OSError(
+                    "Another GM2Godot conversion is already publishing or "
+                    f"recovering Included Files in {project_path}"
+                ) from error
+            locked = True
+
+        os.lseek(file_descriptor, 0, os.SEEK_SET)
+        current_content = os.read(
+            file_descriptor,
+            len(_INCLUDED_FILES_LOCK_CONTENT) + 1,
+        )
+        if current_content != _INCLUDED_FILES_LOCK_CONTENT:
+            raise OSError(
+                "Included Files transaction lock changed after acquisition: "
+                + lock_path
+            )
+        _verify_included_project_identity(project_path, project_identity)
+        if descriptor_bound:
+            _verify_included_directory_fd(
+                project_fd,
+                project_identity,
+                project_path,
+            )
+        final_stat = lock_lstat()
+        if (
+            _included_output_path_is_redirected(lock_path, final_stat)
+            or not os.path.samestat(os.fstat(file_descriptor), final_stat)
+        ):
+            raise OSError(f"Included Files transaction lock changed: {lock_path}")
+        _cleanup_included_lock_initialization_temporaries(
+            project_path,
+            project_identity,
+        )
+        project_lock = _IncludedProjectLock(
+            file_descriptor=file_descriptor,
+            path=lock_path,
+            windows=windows,
+        )
+        if project_fd >= 0:
+            os.close(project_fd)
+        return project_lock
+    except BaseException:
+        if locked:
+            try:
+                if windows:
+                    os.lseek(file_descriptor, 0, os.SEEK_SET)
+                    _windows_included_file_locking(file_descriptor, 0)
+                else:
+                    import fcntl
+
+                    fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(file_descriptor)
+        if project_fd >= 0:
+            os.close(project_fd)
+        raise
+
+
+def _release_included_project_lock(project_lock: _IncludedProjectLock) -> None:
+    try:
+        if project_lock.windows:
+            os.lseek(project_lock.file_descriptor, 0, os.SEEK_SET)
+            _windows_included_file_locking(project_lock.file_descriptor, 0)
+        else:
+            import fcntl
+
+            fcntl.flock(project_lock.file_descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(project_lock.file_descriptor)
+
+
+def _included_identity_payload(identity: _PathIdentity | None) -> list[int] | None:
+    return None if identity is None else [identity[0], identity[1]]
+
+
+def _included_tree_snapshot_payload(snapshot: _IncludedTreeSnapshot) -> dict[str, Any]:
+    return {
+        "root_fingerprint": (
+            None
+            if snapshot.root_fingerprint is None
+            else list(snapshot.root_fingerprint)
+        ),
+        "entries": [
+            {
+                "relative_path": entry.relative_path,
+                "kind": entry.kind,
+                "fingerprint": list(entry.fingerprint),
+                "ctime_ns": entry.ctime_ns,
+                "content_sha256": entry.content_sha256,
+            }
+            for entry in snapshot.entries
+        ],
+    }
+
+
+def _included_registry_snapshot_payload(
+    snapshot: _IncludedRegistrySnapshot,
+) -> dict[str, Any]:
+    return {
+        "directory_identity": _included_identity_payload(
+            snapshot.directory_identity
+        ),
+        "file_identity": _included_identity_payload(snapshot.file_identity),
+        "file_mode": snapshot.file_mode,
+        "content_base64": (
+            None
+            if snapshot.content is None
+            else base64.b64encode(snapshot.content).decode("ascii")
+        ),
+    }
+
+
+def _included_recovery_journal_payload(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    transaction = journal.transaction
+    project_path = os.path.dirname(transaction.stage_container_path)
+    registry_directory = os.path.dirname(_included_registry_path(project_path))
+    registry_backup_parent = os.path.dirname(journal.registry_backup_path)
+    if os.path.normcase(os.path.abspath(registry_backup_parent)) == os.path.normcase(
+        os.path.abspath(project_path)
+    ):
+        registry_backup_location = "project"
+    elif os.path.normcase(os.path.abspath(registry_backup_parent)) == os.path.normcase(
+        os.path.abspath(registry_directory)
+    ):
+        registry_backup_location = "registry"
+    else:
+        raise OSError("Included File registry backup escaped its managed parents")
+    return {
+        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "state": "prepared",
+        "transaction_id": journal.transaction_id,
+        "project_identity": _included_identity_payload(transaction.project_identity),
+        "stage_container_name": os.path.basename(transaction.stage_container_path),
+        "stage_container_identity": _included_identity_payload(
+            transaction.stage_container_identity
+        ),
+        "staged_container_snapshot": _included_tree_snapshot_payload(
+            transaction.staged_container_snapshot
+        ),
+        "staged_root_snapshot": _included_tree_snapshot_payload(
+            transaction.staged_root_snapshot
+        ),
+        "staged_registry_identity": _included_identity_payload(
+            transaction.staged_registry_identity
+        ),
+        "staged_registry_mode": transaction.staged_registry_mode,
+        "staged_registry_content_base64": base64.b64encode(
+            transaction.staged_registry_content
+        ).decode("ascii"),
+        "previous_root_snapshot": _included_tree_snapshot_payload(
+            transaction.previous_root_snapshot
+        ),
+        "previous_registry_snapshot": _included_registry_snapshot_payload(
+            transaction.previous_registry_snapshot
+        ),
+        "root_backup_name": os.path.basename(journal.root_backup_path),
+        "registry_backup_name": os.path.basename(journal.registry_backup_path),
+        "registry_backup_location": registry_backup_location,
+        "registry_directory_identity": _included_identity_payload(
+            journal.registry_directory_identity
+        ),
+        "registry_directory_created": journal.registry_directory_created,
+    }
+
+
+def _included_tree_snapshot_sha256(snapshot: _IncludedTreeSnapshot) -> str:
+    return hashlib.sha256(
+        _included_recovery_record_content(
+            {"tree_snapshot": _included_tree_snapshot_payload(snapshot)}
+        )
+    ).hexdigest()
+
+
+def _included_commit_marker_from_journal(
+    journal: _IncludedRecoveryJournal,
+) -> _IncludedCommitMarker:
+    transaction = journal.transaction
+    root_identity = transaction.staged_root_snapshot.identity
+    if root_identity is None:
+        raise AssertionError("A committed Included Files root must be present")
+    return _IncludedCommitMarker(
+        transaction_id=journal.transaction_id,
+        project_identity=transaction.project_identity,
+        root_identity=root_identity,
+        root_snapshot_sha256=_included_tree_snapshot_sha256(
+            transaction.staged_root_snapshot
+        ),
+        registry_directory_identity=journal.registry_directory_identity,
+        registry_identity=transaction.staged_registry_identity,
+        registry_content_sha256=hashlib.sha256(
+            transaction.staged_registry_content
+        ).hexdigest(),
+    )
+
+
+def _included_commit_marker_payload(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    marker = _included_commit_marker_from_journal(journal)
+    journal_payload = _included_recovery_journal_payload(journal)
+    return {
+        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "state": "committed",
+        "transaction_id": marker.transaction_id,
+        "project_identity": _included_identity_payload(marker.project_identity),
+        "root_identity": _included_identity_payload(marker.root_identity),
+        "root_snapshot_sha256": marker.root_snapshot_sha256,
+        "registry_directory_identity": _included_identity_payload(
+            marker.registry_directory_identity
+        ),
+        "registry_identity": _included_identity_payload(marker.registry_identity),
+        "registry_content_sha256": marker.registry_content_sha256,
+        "recovery_journal": journal_payload,
+        "recovery_journal_sha256": hashlib.sha256(
+            _included_recovery_record_content(journal_payload)
+        ).hexdigest(),
+    }
+
+
+def _included_recovery_dict(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    mapping = cast(dict[object, object], value)
+    if not all(isinstance(key, str) for key in mapping):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return cast(dict[str, Any], mapping)
+
+
+def _included_recovery_exact_keys(
+    payload: dict[str, Any],
+    expected: frozenset[str],
+    label: str,
+) -> None:
+    if payload.keys() != expected:
+        raise OSError(f"Invalid Included Files recovery {label} fields")
+
+
+def _included_recovery_int(value: Any, label: str) -> int:
+    if type(value) is not int:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return value
+
+
+def _included_recovery_identity(
+    value: Any,
+    label: str,
+    *,
+    optional: bool = False,
+) -> _PathIdentity | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, list):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    components = cast(list[Any], value)
+    if len(components) != 2:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    first = _included_recovery_int(components[0], label)
+    second = _included_recovery_int(components[1], label)
+    if first < 0 or second < 0:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return (first, second)
+
+
+def _included_recovery_fingerprint(value: Any, label: str) -> _PathFingerprint:
+    if not isinstance(value, list):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    components = cast(list[Any], value)
+    if len(components) != 6:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    fingerprint = tuple(
+        _included_recovery_int(component, label) for component in components
+    )
+    if any(component < 0 for component in fingerprint):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return cast(_PathFingerprint, fingerprint)
+
+
+def _included_recovery_sha256(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return value
+
+
+def _included_recovery_bytes(value: Any, label: str) -> bytes:
+    if not isinstance(value, str):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise OSError(f"Invalid Included Files recovery {label}") from error
+    if base64.b64encode(decoded).decode("ascii") != value:
+        raise OSError(f"Non-canonical Included Files recovery {label}")
+    return decoded
+
+
+def _included_windows_recovery_component_is_ambiguous(component: str) -> bool:
+    if len(component) >= 2 and component[1] == ":":
+        # A drive-relative component such as ``D:payload`` can discard every
+        # previously joined component when reconstructed with Windows paths.
+        return True
+    if component.startswith(" ") or component.endswith((" ", ".")):
+        return True
+    if any(
+        ord(character) < 32 or character in '<>:"|?*'
+        for character in component
+    ):
+        # This includes NTFS alternate-data-stream separators.
+        return True
+    device_stem = component.split(".", 1)[0].rstrip(" ").upper()
+    return device_stem in _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES
+
+
+def _included_recovery_relative_path(value: Any) -> str:
+    if not isinstance(value, str):
+        raise OSError("Invalid Included Files recovery tree path")
+    components = value.split("/")
+    if (
+        value == ""
+        or value.startswith("/")
+        or "\0" in value
+        or "\\" in value
+        or any(component in {"", ".", ".."} for component in components)
+    ):
+        raise OSError("Invalid Included Files recovery tree path")
+    if os.name == "nt" and any(
+        _included_windows_recovery_component_is_ambiguous(component)
+        for component in components
+    ):
+        raise OSError("Windows-ambiguous Included Files recovery tree path")
+    return value
+
+
+def _included_recovery_tree_entry_path(
+    root_path: str,
+    relative_path: str,
+) -> str:
+    """Reconstruct one journal path without permitting platform path resets."""
+
+    validated_relative_path = _included_recovery_relative_path(relative_path)
+    components = validated_relative_path.split("/")
+    absolute_root = os.path.abspath(root_path)
+    native_relative_path = os.path.join(*components)
+    absolute_entry = os.path.abspath(
+        os.path.join(absolute_root, native_relative_path)
+    )
+    try:
+        common_root = os.path.commonpath((absolute_root, absolute_entry))
+        round_trip = os.path.relpath(absolute_entry, absolute_root)
+    except ValueError as error:
+        raise OSError(
+            "Included Files recovery tree path escaped its recorded root"
+        ) from error
+    if (
+        os.path.normcase(common_root) != os.path.normcase(absolute_root)
+        or os.path.isabs(round_trip)
+        or os.path.normcase(round_trip)
+        != os.path.normcase(native_relative_path)
+    ):
+        raise OSError(
+            "Included Files recovery tree path escaped its recorded root"
+        )
+    return absolute_entry
+
+
+def _included_tree_snapshot_from_payload(
+    value: Any,
+    label: str,
+) -> _IncludedTreeSnapshot:
+    payload = _included_recovery_dict(value, label)
+    _included_recovery_exact_keys(
+        payload,
+        frozenset({"root_fingerprint", "entries"}),
+        label,
+    )
+    root_value = payload.get("root_fingerprint")
+    root_fingerprint = (
+        None
+        if root_value is None
+        else _included_recovery_fingerprint(
+            root_value,
+            label + " root fingerprint",
+        )
+    )
+    entries_value = payload.get("entries")
+    if not isinstance(entries_value, list):
+        raise OSError(f"Invalid Included Files recovery {label} entries")
+    raw_entries = cast(list[Any], entries_value)
+    entries: list[_IncludedTreeEntry] = []
+    seen_paths: set[str] = set()
+    for raw_entry in raw_entries:
+        entry_payload = _included_recovery_dict(raw_entry, label + " entry")
+        _included_recovery_exact_keys(
+            entry_payload,
+            frozenset(
+                {
+                    "relative_path",
+                    "kind",
+                    "fingerprint",
+                    "ctime_ns",
+                    "content_sha256",
+                }
+            ),
+            label + " entry",
+        )
+        relative_path = _included_recovery_relative_path(
+            entry_payload.get("relative_path")
+        )
+        if relative_path in seen_paths:
+            raise OSError(f"Duplicate Included Files recovery tree path: {relative_path}")
+        seen_paths.add(relative_path)
+        kind = entry_payload.get("kind")
+        if not isinstance(kind, str) or kind not in {"file", "directory"}:
+            raise OSError(f"Invalid Included Files recovery tree kind: {relative_path}")
+        fingerprint = _included_recovery_fingerprint(
+            entry_payload.get("fingerprint"),
+            label + " entry fingerprint",
+        )
+        expected_kind = stat.S_IFREG if kind == "file" else stat.S_IFDIR
+        if stat.S_IFMT(fingerprint[2]) != expected_kind:
+            raise OSError(f"Invalid Included Files recovery tree mode: {relative_path}")
+        ctime_value = entry_payload.get("ctime_ns")
+        ctime_ns = (
+            None
+            if ctime_value is None
+            else _included_recovery_int(ctime_value, label + " entry ctime")
+        )
+        content_sha256 = _included_recovery_sha256(
+            entry_payload.get("content_sha256"),
+            label + " entry content digest",
+        )
+        if kind == "directory":
+            if ctime_ns is not None or content_sha256 is not None:
+                raise OSError(
+                    "Invalid Included Files recovery directory receipt: "
+                    + relative_path
+                )
+        elif ctime_ns is None or ctime_ns < 0 or content_sha256 is None:
+            raise OSError(
+                "Incomplete Included Files recovery file receipt: " + relative_path
+            )
+        entries.append(
+            _IncludedTreeEntry(
+                relative_path=relative_path,
+                kind=kind,
+                fingerprint=fingerprint,
+                ctime_ns=ctime_ns,
+                content_sha256=content_sha256,
+            )
+        )
+    if root_fingerprint is None and entries:
+        raise OSError(f"Invalid Included Files recovery absent {label}")
+    if root_fingerprint is not None and not stat.S_ISDIR(root_fingerprint[2]):
+        raise OSError(f"Invalid Included Files recovery {label} root mode")
+    if root_fingerprint is not None and root_fingerprint[5] < 1:
+        raise OSError(f"Invalid Included Files recovery {label} root link count")
+    if any(entry.fingerprint[5] < 1 for entry in entries):
+        raise OSError(f"Invalid Included Files recovery {label} link count")
+    if root_fingerprint is not None and any(
+        entry.fingerprint[0] != root_fingerprint[0] for entry in entries
+    ):
+        raise OSError(
+            f"Invalid cross-device Included Files recovery {label}"
+        )
+    directory_paths = {
+        entry.relative_path for entry in entries if entry.kind == "directory"
+    }
+    if any(
+        (parent := posixpath.dirname(entry.relative_path))
+        and parent not in directory_paths
+        for entry in entries
+    ):
+        raise OSError(f"Invalid Included Files recovery {label} topology")
+    if entries != sorted(entries, key=lambda entry: entry.relative_path):
+        raise OSError(f"Unsorted Included Files recovery {label}")
+    return _IncludedTreeSnapshot(
+        root_fingerprint=root_fingerprint,
+        entries=tuple(entries),
+    )
+
+
+def _included_registry_snapshot_from_payload(
+    value: Any,
+) -> _IncludedRegistrySnapshot:
+    payload = _included_recovery_dict(value, "registry snapshot")
+    _included_recovery_exact_keys(
+        payload,
+        frozenset(
+            {
+                "directory_identity",
+                "file_identity",
+                "file_mode",
+                "content_base64",
+            }
+        ),
+        "registry snapshot",
+    )
+    directory_identity = _included_recovery_identity(
+        payload.get("directory_identity"),
+        "registry directory identity",
+        optional=True,
+    )
+    file_identity = _included_recovery_identity(
+        payload.get("file_identity"),
+        "registry file identity",
+        optional=True,
+    )
+    file_mode_value = payload.get("file_mode")
+    file_mode = (
+        None
+        if file_mode_value is None
+        else _included_recovery_int(file_mode_value, "registry file mode")
+    )
+    if file_mode is not None and (
+        file_mode < 0 or stat.S_IMODE(file_mode) != file_mode
+    ):
+        raise OSError("Invalid Included File registry recovery mode")
+    content_value = payload.get("content_base64")
+    content = (
+        None
+        if content_value is None
+        else _included_recovery_bytes(content_value, "registry content")
+    )
+    if file_identity is None:
+        if file_mode is not None or content is not None:
+            raise OSError("Invalid absent Included File registry recovery state")
+    elif directory_identity is None or file_mode is None or content is None:
+        raise OSError("Incomplete Included File registry recovery state")
+    elif file_identity[0] != directory_identity[0]:
+        raise OSError("Invalid cross-device Included File registry recovery state")
+    return _IncludedRegistrySnapshot(
+        directory_identity=directory_identity,
+        file_identity=file_identity,
+        file_mode=file_mode,
+        content=content,
+    )
+
+
+def _included_recovery_token(value: Any, length: int, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != length
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return value
+
+
+def _included_recovery_managed_name(
+    value: Any,
+    *,
+    prefix: str,
+    suffix: str,
+    label: str,
+) -> str:
+    if not isinstance(value, str) or not value.startswith(prefix) or not value.endswith(suffix):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    token = value[len(prefix):len(value) - len(suffix)]
+    _included_recovery_token(token, 16, label + " token")
+    return value
+
+
+def _included_recovery_journal_from_payload(
+    project_path: str,
+    project_identity: _PathIdentity,
+    value: Any,
+) -> _IncludedRecoveryJournal:
+    payload = _included_recovery_dict(value, "journal")
+    _included_recovery_exact_keys(
+        payload,
+        frozenset(
+            {
+                "format_version",
+                "state",
+                "transaction_id",
+                "project_identity",
+                "stage_container_name",
+                "stage_container_identity",
+                "staged_container_snapshot",
+                "staged_root_snapshot",
+                "staged_registry_identity",
+                "staged_registry_mode",
+                "staged_registry_content_base64",
+                "previous_root_snapshot",
+                "previous_registry_snapshot",
+                "root_backup_name",
+                "registry_backup_name",
+                "registry_backup_location",
+                "registry_directory_identity",
+                "registry_directory_created",
+            }
+        ),
+        "journal",
+    )
+    format_version = _included_recovery_int(
+        payload.get("format_version"),
+        "journal format version",
+    )
+    if (
+        format_version != _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        or payload.get("state") != "prepared"
+    ):
+        raise OSError("Unsupported Included Files recovery journal")
+    transaction_id = _included_recovery_token(
+        payload.get("transaction_id"),
+        32,
+        "transaction id",
+    )
+    recorded_project_identity = _included_recovery_identity(
+        payload.get("project_identity"),
+        "project identity",
+    )
+    if recorded_project_identity != project_identity:
+        raise OSError("Godot project root changed since Included Files interruption")
+    stage_container_name = _included_recovery_managed_name(
+        payload.get("stage_container_name"),
+        prefix=_INCLUDED_FILES_STAGE_PREFIX,
+        suffix=".stage",
+        label="stage container",
+    )
+    stage_container_identity = _included_recovery_identity(
+        payload.get("stage_container_identity"),
+        "stage container identity",
+    )
+    if stage_container_identity is None:
+        raise OSError("Missing Included Files recovery stage identity")
+    staged_container_snapshot = _included_tree_snapshot_from_payload(
+        payload.get("staged_container_snapshot"),
+        "staged container snapshot",
+    )
+    if staged_container_snapshot.identity != stage_container_identity:
+        raise OSError("Included Files recovery stage snapshot identity mismatch")
+    staged_root_snapshot = _included_tree_snapshot_from_payload(
+        payload.get("staged_root_snapshot"),
+        "staged root snapshot",
+    )
+    if staged_root_snapshot.identity is None:
+        raise OSError("Missing Included Files recovery staged root")
+    staged_registry_identity = _included_recovery_identity(
+        payload.get("staged_registry_identity"),
+        "staged registry identity",
+    )
+    if staged_registry_identity is None:
+        raise OSError("Missing Included Files recovery staged registry")
+    staged_registry_mode = _included_recovery_int(
+        payload.get("staged_registry_mode"),
+        "staged registry mode",
+    )
+    if (
+        staged_registry_mode < 0
+        or stat.S_IMODE(staged_registry_mode) != staged_registry_mode
+    ):
+        raise OSError("Invalid Included Files recovery staged registry mode")
+    staged_registry_content = _included_recovery_bytes(
+        payload.get("staged_registry_content_base64"),
+        "staged registry content",
+    )
+    previous_root_snapshot = _included_tree_snapshot_from_payload(
+        payload.get("previous_root_snapshot"),
+        "previous root snapshot",
+    )
+    previous_registry_snapshot = _included_registry_snapshot_from_payload(
+        payload.get("previous_registry_snapshot")
+    )
+    staged_entries = {
+        entry.relative_path: entry
+        for entry in staged_container_snapshot.entries
+    }
+    staged_root_entry = staged_entries.get(_INCLUDED_FILES_ROOT_NAME)
+    staged_registry_entry = staged_entries.get("gml_included_file_registry.gd")
+    staged_marker_entry = staged_entries.get(_INCLUDED_FILES_STAGE_MARKER_NAME)
+    expected_stage_marker_content = _included_recovery_record_content(
+        {
+            "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            "state": "staging",
+            "project_identity": _included_identity_payload(project_identity),
+            "stage_identity": _included_identity_payload(stage_container_identity),
+        }
+    )
+    expected_staged_paths = {
+        _INCLUDED_FILES_STAGE_MARKER_NAME,
+        _INCLUDED_FILES_ROOT_NAME,
+        "gml_included_file_registry.gd",
+        *(
+            _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path
+            for entry in staged_root_snapshot.entries
+        ),
+    }
+    staged_root_entries = {
+        _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path: entry
+        for entry in staged_root_snapshot.entries
+    }
+    if (
+        set(staged_entries) != expected_staged_paths
+        or staged_root_entry is None
+        or staged_root_entry.kind != "directory"
+        or staged_root_entry.fingerprint != staged_root_snapshot.root_fingerprint
+        or staged_registry_entry is None
+        or staged_registry_entry.kind != "file"
+        or staged_registry_entry.fingerprint[:2] != staged_registry_identity
+        or stat.S_IMODE(staged_registry_entry.fingerprint[2])
+        != staged_registry_mode
+        or staged_registry_entry.fingerprint[3] != len(staged_registry_content)
+        or staged_registry_entry.content_sha256
+        != hashlib.sha256(staged_registry_content).hexdigest()
+        or staged_marker_entry is None
+        or staged_marker_entry.kind != "file"
+        or staged_marker_entry.content_sha256
+        != hashlib.sha256(expected_stage_marker_content).hexdigest()
+        or staged_marker_entry.fingerprint[3] != len(expected_stage_marker_content)
+        or any(
+            (
+                staged_entries[path].kind != expected_entry.kind
+                or staged_entries[path].fingerprint != expected_entry.fingerprint
+                or staged_entries[path].ctime_ns != expected_entry.ctime_ns
+                or staged_entries[path].content_sha256
+                != expected_entry.content_sha256
+            )
+            for path, expected_entry in staged_root_entries.items()
+        )
+    ):
+        raise OSError("Included Files recovery staged snapshots disagree")
+    root_backup_name = _included_recovery_managed_name(
+        payload.get("root_backup_name"),
+        prefix=".included_files.",
+        suffix=".backup",
+        label="root backup",
+    )
+    registry_backup_name = _included_recovery_managed_name(
+        payload.get("registry_backup_name"),
+        prefix=".gml_included_file_registry.gd.",
+        suffix=".backup",
+        label="registry backup",
+    )
+    registry_backup_location = payload.get("registry_backup_location")
+    if (
+        not isinstance(registry_backup_location, str)
+        or registry_backup_location not in {"project", "registry"}
+    ):
+        raise OSError("Invalid Included File registry recovery backup location")
+    expected_registry_backup_location = (
+        "registry"
+        if previous_registry_snapshot.file_identity is not None
+        else "project"
+    )
+    if registry_backup_location != expected_registry_backup_location:
+        raise OSError("Included File registry recovery backup location disagrees")
+    registry_directory_identity = _included_recovery_identity(
+        payload.get("registry_directory_identity"),
+        "registry directory identity",
+    )
+    if registry_directory_identity is None:
+        raise OSError("Missing Included File registry recovery directory")
+    registry_directory_created = payload.get("registry_directory_created")
+    if type(registry_directory_created) is not bool:
+        raise OSError("Invalid Included File registry recovery directory state")
+    previous_directory_identity = previous_registry_snapshot.directory_identity
+    if registry_directory_created:
+        if previous_directory_identity is not None:
+            raise OSError("Invalid created Included File registry recovery directory")
+    elif previous_directory_identity != registry_directory_identity:
+        raise OSError("Included File registry recovery directory identity mismatch")
+    managed_identities = (
+        stage_container_identity,
+        staged_root_snapshot.identity,
+        staged_registry_identity,
+        previous_root_snapshot.identity,
+        previous_registry_snapshot.directory_identity,
+        previous_registry_snapshot.file_identity,
+        registry_directory_identity,
+    )
+    if any(
+        identity is not None and identity[0] != project_identity[0]
+        for identity in managed_identities
+    ):
+        raise OSError(
+            "Included Files recovery state crosses the Godot project filesystem"
+        )
+    if (
+        staged_root_snapshot.identity == previous_root_snapshot.identity
+        and previous_root_snapshot.identity is not None
+    ):
+        raise OSError("Included Files staged and previous roots alias")
+    if (
+        staged_registry_identity == previous_registry_snapshot.file_identity
+        and previous_registry_snapshot.file_identity is not None
+    ):
+        raise OSError("Included File staged and previous registries alias")
+    if stage_container_identity in {
+        project_identity,
+        staged_root_snapshot.identity,
+        registry_directory_identity,
+    }:
+        raise OSError("Included Files recovery directories alias")
+
+    project_path = os.path.abspath(project_path)
+    stage_container_path = os.path.join(project_path, stage_container_name)
+    registry_directory_path = os.path.dirname(_included_registry_path(project_path))
+    registry_backup_parent = (
+        project_path
+        if registry_backup_location == "project"
+        else registry_directory_path
+    )
+    transaction = _IncludedOutputSetTransaction(
+        project_identity=project_identity,
+        stage_container_path=stage_container_path,
+        stage_container_identity=stage_container_identity,
+        staged_container_snapshot=staged_container_snapshot,
+        staged_root_path=os.path.join(
+            stage_container_path,
+            _INCLUDED_FILES_ROOT_NAME,
+        ),
+        staged_root_snapshot=staged_root_snapshot,
+        staged_registry_path=os.path.join(
+            stage_container_path,
+            "gml_included_file_registry.gd",
+        ),
+        staged_registry_identity=staged_registry_identity,
+        staged_registry_mode=staged_registry_mode,
+        staged_registry_content=staged_registry_content,
+        previous_root_snapshot=previous_root_snapshot,
+        previous_registry_snapshot=previous_registry_snapshot,
+    )
+    return _IncludedRecoveryJournal(
+        transaction_id=transaction_id,
+        transaction=transaction,
+        root_backup_path=os.path.join(project_path, root_backup_name),
+        registry_backup_path=os.path.join(
+            registry_backup_parent,
+            registry_backup_name,
+        ),
+        registry_directory_path=registry_directory_path,
+        registry_directory_identity=registry_directory_identity,
+        registry_directory_created=registry_directory_created,
+    )
+
+
+def _verify_included_bounded_record_size(
+    record_stat: os.stat_result,
+    path: str,
+    maximum_bytes: int,
+    record_label: str,
+    size_qualifier: str,
+) -> None:
+    if record_stat.st_size < 0 or record_stat.st_size > maximum_bytes:
+        raise OSError(
+            f"{record_label} exceeds the {size_qualifier} size limit of "
+            f"{maximum_bytes} bytes: {path}"
+        )
+
+
+def _read_included_recovery_record_payload(opened_file: BinaryIO) -> bytes:
+    """Narrow test seam for a stat-bounded canonical recovery-record read."""
+
+    return opened_file.read(_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES + 1)
+
+
+def _read_included_lock_initialization_payload(
+    opened_file: BinaryIO,
+) -> bytes:
+    """Read only enough bytes to distinguish the fixed lock payload."""
+
+    return opened_file.read(len(_INCLUDED_FILES_LOCK_CONTENT) + 1)
+
+
+def _read_opened_included_bounded_record_payload(
+    opened_file: BinaryIO,
+    expected_stat: os.stat_result,
+    path: str,
+    expected_device: int,
+    expected_mount_id: int | None,
+    maximum_bytes: int,
+    payload_reader: Callable[[BinaryIO], bytes],
+    record_label: str,
+    size_qualifier: str,
+) -> bytes:
+    opened_stat = os.fstat(opened_file.fileno())
+    if (
+        not stat.S_ISREG(opened_stat.st_mode)
+        or _included_path_handle_binding(opened_stat)
+        != _included_path_handle_binding(expected_stat)
+    ):
+        raise OSError(
+            f"{record_label} changed before reading: {path}"
+        )
+    _verify_included_bounded_record_size(
+        opened_stat,
+        path,
+        maximum_bytes,
+        record_label,
+        size_qualifier,
+    )
+    _verify_included_mount_boundary(
+        path,
+        opened_stat,
+        expected_device,
+        expected_mount_id,
+        opened_file.fileno(),
+    )
+    opened_state = _included_handle_state(opened_stat)
+    content = payload_reader(opened_file)
+    current_opened_stat = os.fstat(opened_file.fileno())
+    if len(content) > maximum_bytes:
+        raise OSError(
+            f"{record_label} exceeds the {size_qualifier} size limit of "
+            f"{maximum_bytes} bytes: {path}"
+        )
+    if (
+        len(content) != opened_stat.st_size
+        or _included_handle_state(current_opened_stat) != opened_state
+    ):
+        raise OSError(
+            f"{record_label} changed while reading: {path}"
+        )
+    return content
+
+
+def _included_bounded_record_state(
+    path: str,
+    project_identity: _PathIdentity,
+    *,
+    maximum_bytes: int,
+    payload_reader: Callable[[BinaryIO], bytes],
+    record_label: str,
+    size_qualifier: str,
+    allowed_identities: frozenset[_PathIdentity] | None = None,
+) -> tuple[_PathIdentity, int, bytes] | None:
+    if _included_descriptor_paths_supported():
+        try:
+            parent_fd, name = _open_pinned_included_parent(path)
+        except FileNotFoundError:
+            return None
+        try:
+            parent_identity = _verify_included_directory_fd(
+                parent_fd,
+                project_identity,
+                os.path.dirname(path),
+            )
+            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+            path_stat = _included_entry_stat_at(parent_fd, name)
+            if path_stat is None:
+                return None
+            if not stat.S_ISREG(path_stat.st_mode):
+                raise OSError(
+                    f"Refusing redirected or non-regular {record_label}: {path}"
+                )
+            path_identity = path_stat.st_dev, path_stat.st_ino
+            if (
+                allowed_identities is not None
+                and path_identity not in allowed_identities
+            ):
+                raise OSError(
+                    f"{record_label} changed before reading: {path}"
+                )
+            _verify_included_bounded_record_size(
+                path_stat,
+                path,
+                maximum_bytes,
+                record_label,
+                size_qualifier,
+            )
+            expected_fingerprint = _included_path_fingerprint(path_stat)
+            expected_ctime_ns = path_stat.st_ctime_ns
+            file_descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            try:
+                with os.fdopen(file_descriptor, "rb") as opened_file:
+                    file_descriptor = -1
+                    content = _read_opened_included_bounded_record_payload(
+                        opened_file,
+                        path_stat,
+                        path,
+                        parent_identity[0],
+                        parent_mount_id,
+                        maximum_bytes,
+                        payload_reader,
+                        record_label,
+                        size_qualifier,
+                    )
+            finally:
+                if file_descriptor >= 0:
+                    os.close(file_descriptor)
+            current_stat = _included_entry_stat_at(parent_fd, name)
+            if (
+                current_stat is None
+                or not stat.S_ISREG(current_stat.st_mode)
+                or _included_path_fingerprint(current_stat)
+                != expected_fingerprint
+                or current_stat.st_ctime_ns != expected_ctime_ns
+            ):
+                raise OSError(
+                    f"{record_label} changed while reading: {path}"
+                )
+            return (
+                (current_stat.st_dev, current_stat.st_ino),
+                stat.S_IMODE(current_stat.st_mode),
+                content,
+            )
+        finally:
+            os.close(parent_fd)
+
+    parent_path = os.path.dirname(os.path.abspath(path))
+    parent_identities = _capture_fallback_directory_ancestors(parent_path)
+    if parent_identities[-1][1] != project_identity:
+        raise OSError(f"{record_label} parent changed: {path}")
+    try:
+        path_stat = os.lstat(path)
+    except FileNotFoundError:
+        _verify_fallback_directory_ancestors(parent_identities)
+        return None
+    if (
+        _included_output_path_is_redirected(path, path_stat)
+        or not stat.S_ISREG(path_stat.st_mode)
+    ):
+        raise OSError(
+            f"Refusing redirected or non-regular {record_label}: {path}"
+        )
+    path_identity = path_stat.st_dev, path_stat.st_ino
+    if (
+        allowed_identities is not None
+        and path_identity not in allowed_identities
+    ):
+        raise OSError(
+            f"{record_label} changed before reading: {path}"
+        )
+    _verify_included_bounded_record_size(
+        path_stat,
+        path,
+        maximum_bytes,
+        record_label,
+        size_qualifier,
+    )
+    expected_fingerprint = _included_path_fingerprint(path_stat)
+    expected_ctime_ns = path_stat.st_ctime_ns
+    parent_mount_id = _included_directory_mount_id(
+        parent_path,
+        parent_identities[-1][1],
+    )
+    _verify_fallback_directory_ancestors(parent_identities)
+    _before_included_fallback_regular_file_open(path)
+    file_descriptor = os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        with os.fdopen(file_descriptor, "rb") as opened_file:
+            file_descriptor = -1
+            content = _read_opened_included_bounded_record_payload(
+                opened_file,
+                path_stat,
+                path,
+                project_identity[0],
+                parent_mount_id,
+                maximum_bytes,
+                payload_reader,
+                record_label,
+                size_qualifier,
+            )
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+    current_stat = os.lstat(path)
+    if (
+        _included_output_path_is_redirected(path, current_stat)
+        or not stat.S_ISREG(current_stat.st_mode)
+        or _included_path_fingerprint(current_stat) != expected_fingerprint
+        or current_stat.st_ctime_ns != expected_ctime_ns
+    ):
+        raise OSError(
+            f"{record_label} changed while reading: {path}"
+        )
+    _verify_fallback_directory_ancestors(parent_identities)
+    return (
+        (current_stat.st_dev, current_stat.st_ino),
+        stat.S_IMODE(current_stat.st_mode),
+        content,
+    )
+
+
+def _included_recovery_record_state(
+    path: str,
+    project_identity: _PathIdentity,
+    *,
+    allowed_identities: frozenset[_PathIdentity] | None = None,
+) -> tuple[_PathIdentity, int, bytes] | None:
+    return _included_bounded_record_state(
+        path,
+        project_identity,
+        maximum_bytes=_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+        payload_reader=_read_included_recovery_record_payload,
+        record_label="Included Files recovery record",
+        size_qualifier="canonical",
+        allowed_identities=allowed_identities,
+    )
+
+
+def _included_lock_initialization_record_state(
+    path: str,
+    project_identity: _PathIdentity,
+    *,
+    allowed_identities: frozenset[_PathIdentity] | None = None,
+) -> tuple[_PathIdentity, int, bytes] | None:
+    return _included_bounded_record_state(
+        path,
+        project_identity,
+        maximum_bytes=len(_INCLUDED_FILES_LOCK_CONTENT),
+        payload_reader=_read_included_lock_initialization_payload,
+        record_label="Included Files lock initialization record",
+        size_qualifier="fixed-content",
+        allowed_identities=allowed_identities,
+    )
+
+
+def _included_recovery_record_content(payload: dict[str, Any]) -> bytes:
+    content = (
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if len(content) > _INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES:
+        raise OSError(
+            "Generated Included Files recovery record exceeds the canonical "
+            "size limit of "
+            f"{_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES} bytes"
+        )
+    return content
+
+
+def _publish_included_recovery_record(
+    project_path: str,
+    project_identity: _PathIdentity,
+    *,
+    filename: str,
+    temporary_prefix: str,
+    payload: dict[str, Any],
+    staged_phase: str | None = None,
+) -> _PathIdentity:
+    destination_path = os.path.join(project_path, filename)
+    if (
+        _included_recovery_record_state(
+            destination_path,
+            project_identity,
+            allowed_identities=frozenset(),
+        )
+        is not None
+    ):
+        raise OSError(
+            "Included Files recovery record already exists: " + destination_path
+        )
+    content = _included_recovery_record_content(payload)
+    file_descriptor = -1
+    temporary_path = ""
+    for _attempt in range(100):
+        temporary_name = temporary_prefix + secrets.token_hex(8) + ".tmp"
+        candidate_path = os.path.join(project_path, temporary_name)
+        try:
+            file_descriptor = os.open(
+                candidate_path,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except FileExistsError:
+            continue
+        temporary_path = candidate_path
+        break
+    if file_descriptor < 0 or not temporary_path:
+        raise OSError("Could not allocate Included Files recovery staging record")
+    temporary_stat = os.fstat(file_descriptor)
+    temporary_identity = (temporary_stat.st_dev, temporary_stat.st_ino)
+    temporary_pending = True
+    try:
+        with os.fdopen(file_descriptor, "wb") as temporary_file:
+            file_descriptor = -1
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        _verify_included_project_identity(project_path, project_identity)
+        temporary_state = _included_recovery_record_state(
+            temporary_path,
+            project_identity,
+            allowed_identities=frozenset({temporary_identity}),
+        )
+        if (
+            temporary_state is None
+            or temporary_state[0] != temporary_identity
+            or temporary_state[2] != content
+        ):
+            raise OSError("Included Files recovery staging record changed")
+        # The crash-test phase names this temporary "durable". Persist its
+        # project-directory entry as well as its already-fsynced contents
+        # before exposing that boundary to recovery.
+        _sync_included_directory(project_path, project_identity)
+        if staged_phase is not None:
+            _after_included_transaction_phase(staged_phase)
+        _move_exact_included_file(
+            temporary_path,
+            destination_path,
+            temporary_identity,
+            source_parent_identity=project_identity,
+            destination_parent_identity=project_identity,
+        )
+        temporary_pending = False
+        _sync_included_directory(project_path, project_identity)
+        published_state = _included_recovery_record_state(
+            destination_path,
+            project_identity,
+            allowed_identities=frozenset({temporary_identity}),
+        )
+        if (
+            published_state is None
+            or published_state[0] != temporary_identity
+            or published_state[2] != content
+        ):
+            raise OSError("Included Files recovery record changed after publication")
+        return temporary_identity
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if temporary_pending:
+            try:
+                _remove_included_recovery_record(
+                    temporary_path,
+                    temporary_identity,
+                    project_path,
+                    project_identity,
+                )
+            except OSError:
+                pass
+
+
+def _read_included_recovery_record(
+    path: str,
+    project_identity: _PathIdentity,
+) -> tuple[_PathIdentity, dict[str, Any]] | None:
+    state = _included_recovery_record_state(path, project_identity)
+    if state is None:
+        return None
+    identity, _mode, content = state
+    try:
+        decoded = content.decode("utf-8")
+        payload = _included_recovery_dict(
+            json.loads(decoded),
+            "record",
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise OSError(f"Invalid Included Files recovery record: {path}") from error
+    if content != _included_recovery_record_content(payload):
+        raise OSError(f"Non-canonical Included Files recovery record: {path}")
+    return identity, payload
+
+
+def _included_recovery_record_tombstone_path(path: str) -> str:
+    return _included_cleanup_tombstone_path(
+        path,
+        "recovery-record",
+        "record",
+        os.path.basename(path),
+        expect_directory=False,
+    )
+
+
+def _read_included_recovery_record_or_tombstone(
+    path: str,
+    project_identity: _PathIdentity,
+) -> tuple[str, _PathIdentity, dict[str, Any]] | None:
+    record = _read_included_recovery_record(path, project_identity)
+    tombstone_path = _included_recovery_record_tombstone_path(path)
+    tombstone_record = _read_included_recovery_record(
+        tombstone_path,
+        project_identity,
+    )
+    if record is not None and tombstone_record is not None:
+        raise OSError(
+            "Included Files recovery record and cleanup tombstone both exist: "
+            + path
+        )
+    if record is not None:
+        return path, record[0], record[1]
+    if tombstone_record is not None:
+        return tombstone_path, tombstone_record[0], tombstone_record[1]
+    return None
+
+
+def _included_commit_marker_and_journal_from_payload(
+    project_path: str,
+    payload: dict[str, Any],
+    project_identity: _PathIdentity,
+) -> tuple[_IncludedCommitMarker, _IncludedRecoveryJournal]:
+    _included_recovery_exact_keys(
+        payload,
+        frozenset(
+            {
+                "format_version",
+                "state",
+                "transaction_id",
+                "project_identity",
+                "root_identity",
+                "root_snapshot_sha256",
+                "registry_directory_identity",
+                "registry_identity",
+                "registry_content_sha256",
+                "recovery_journal",
+                "recovery_journal_sha256",
+            }
+        ),
+        "commit marker",
+    )
+    format_version = _included_recovery_int(
+        payload.get("format_version"),
+        "commit marker format version",
+    )
+    if (
+        format_version != _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        or payload.get("state") != "committed"
+    ):
+        raise OSError("Unsupported Included Files recovery commit marker")
+    transaction_id = _included_recovery_token(
+        payload.get("transaction_id"),
+        32,
+        "commit transaction id",
+    )
+    recorded_project_identity = _included_recovery_identity(
+        payload.get("project_identity"),
+        "commit project identity",
+    )
+    if recorded_project_identity != project_identity:
+        raise OSError("Included Files commit marker belongs to another project")
+    root_identity = _included_recovery_identity(
+        payload.get("root_identity"),
+        "commit root identity",
+    )
+    registry_directory_identity = _included_recovery_identity(
+        payload.get("registry_directory_identity"),
+        "commit registry directory identity",
+    )
+    registry_identity = _included_recovery_identity(
+        payload.get("registry_identity"),
+        "commit registry identity",
+    )
+    root_snapshot_sha256 = _included_recovery_sha256(
+        payload.get("root_snapshot_sha256"),
+        "commit root snapshot digest",
+    )
+    registry_content_sha256 = _included_recovery_sha256(
+        payload.get("registry_content_sha256"),
+        "commit registry content digest",
+    )
+    if (
+        root_identity is None
+        or registry_directory_identity is None
+        or registry_identity is None
+        or root_snapshot_sha256 is None
+        or registry_content_sha256 is None
+    ):
+        raise OSError("Incomplete Included Files recovery commit marker")
+    marker = _IncludedCommitMarker(
+        transaction_id=transaction_id,
+        project_identity=project_identity,
+        root_identity=root_identity,
+        root_snapshot_sha256=root_snapshot_sha256,
+        registry_directory_identity=registry_directory_identity,
+        registry_identity=registry_identity,
+        registry_content_sha256=registry_content_sha256,
+    )
+    journal_payload = _included_recovery_dict(
+        payload.get("recovery_journal"),
+        "commit recovery journal",
+    )
+    journal_sha256 = _included_recovery_sha256(
+        payload.get("recovery_journal_sha256"),
+        "commit recovery journal digest",
+    )
+    if (
+        journal_sha256 is None
+        or hashlib.sha256(
+            _included_recovery_record_content(journal_payload)
+        ).hexdigest()
+        != journal_sha256
+    ):
+        raise OSError("Included Files commit recovery journal digest mismatch")
+    journal = _included_recovery_journal_from_payload(
+        project_path,
+        project_identity,
+        journal_payload,
+    )
+    if marker != _included_commit_marker_from_journal(journal):
+        raise OSError("Included Files commit recovery journal disagrees with marker")
+    return marker, journal
+
+
+def _verify_included_commit_marker_generation(
+    project_path: str,
+    marker: _IncludedCommitMarker,
+) -> None:
+    root_snapshot = _capture_included_tree(
+        os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME),
+        expected_parent_identity=marker.project_identity,
+    )
+    if (
+        root_snapshot.identity != marker.root_identity
+        or _included_tree_snapshot_sha256(root_snapshot)
+        != marker.root_snapshot_sha256
+    ):
+        raise OSError("Committed Included Files root generation is unavailable")
+    registry_snapshot = _capture_included_registry(
+        project_path,
+        expected_project_identity=marker.project_identity,
+        allowed_file_identities=frozenset({marker.registry_identity}),
+    )
+    if (
+        registry_snapshot.directory_identity
+        != marker.registry_directory_identity
+        or registry_snapshot.file_identity != marker.registry_identity
+        or registry_snapshot.content is None
+        or hashlib.sha256(registry_snapshot.content).hexdigest()
+        != marker.registry_content_sha256
+    ):
+        raise OSError("Committed Included File registry generation is unavailable")
+
+
+def _verify_included_published_journal(
+    project_path: str,
+    project_identity: _PathIdentity,
+    expected_journal: _IncludedRecoveryJournal,
+    expected_identity: _PathIdentity | None,
+) -> _PathIdentity:
+    journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
+    record = _read_included_recovery_record(journal_path, project_identity)
+    if record is None:
+        raise OSError("Included Files recovery journal disappeared")
+    identity, payload = record
+    if expected_identity is not None and identity != expected_identity:
+        raise OSError("Included Files recovery journal identity changed")
+    journal = _included_recovery_journal_from_payload(
+        project_path,
+        project_identity,
+        payload,
+    )
+    if journal != expected_journal:
+        raise OSError("Included Files recovery journal changed")
+    return identity
+
+
+def _verify_included_published_commit_marker(
+    project_path: str,
+    project_identity: _PathIdentity,
+    expected_journal: _IncludedRecoveryJournal,
+    expected_identity: _PathIdentity | None,
+    *,
+    verify_generation: bool = True,
+) -> _PathIdentity:
+    commit_path = os.path.join(project_path, _INCLUDED_FILES_COMMIT_NAME)
+    record = _read_included_recovery_record(commit_path, project_identity)
+    if record is None:
+        raise OSError("Included Files commit marker disappeared")
+    identity, payload = record
+    if expected_identity is not None and identity != expected_identity:
+        raise OSError("Included Files commit marker identity changed")
+    marker, embedded_journal = _included_commit_marker_and_journal_from_payload(
+        project_path,
+        payload,
+        project_identity,
+    )
+    if (
+        marker != _included_commit_marker_from_journal(expected_journal)
+        or embedded_journal != expected_journal
+    ):
+        raise OSError("Included Files commit marker changed")
+    if verify_generation:
+        _verify_included_commit_marker_generation(project_path, marker)
+    return identity
+
+
+def _included_cleanup_tombstone_path(
+    path: str,
+    transaction_id: str,
+    role: str,
+    relative_path: str,
+    *,
+    expect_directory: bool,
+) -> str:
+    digest = hashlib.sha256(
+        (transaction_id + "\0" + role + "\0" + relative_path).encode("utf-8")
+    ).hexdigest()
+    suffix = "dir" if expect_directory else "file"
+    return os.path.join(
+        os.path.dirname(os.path.abspath(path)),
+        _INCLUDED_FILES_CLEANUP_PREFIX + digest + "." + suffix,
+    )
+
+
+def _included_cleanup_file_state(
+    path: str,
+    expected_identity: _PathIdentity,
+    expected_parent_identity: _PathIdentity,
+) -> _IncludedCleanupFileState | None:
+    if _included_descriptor_paths_supported():
+        parent_fd, name = _open_pinned_included_parent(path)
+        try:
+            _verify_included_directory_fd(
+                parent_fd,
+                expected_parent_identity,
+                os.path.dirname(path),
+            )
+            current_stat = _included_entry_stat_at(parent_fd, name)
+            if current_stat is None:
+                return None
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or (current_stat.st_dev, current_stat.st_ino)
+                != expected_identity
+            ):
+                raise OSError(f"Included Files cleanup file changed: {path}")
+            expected_fingerprint = _included_path_fingerprint(current_stat)
+            expected_ctime_ns = current_stat.st_ctime_ns
+            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+            content_sha256 = _digest_included_regular_file_at(
+                parent_fd,
+                name,
+                current_stat,
+                path,
+                expected_device=expected_parent_identity[0],
+                expected_mount_id=parent_mount_id,
+            )
+            final_stat = _included_entry_stat_at(parent_fd, name)
+            if (
+                final_stat is None
+                or not stat.S_ISREG(final_stat.st_mode)
+                or (final_stat.st_dev, final_stat.st_ino) != expected_identity
+                or _included_path_fingerprint(final_stat)
+                != expected_fingerprint
+                or final_stat.st_ctime_ns != expected_ctime_ns
+            ):
+                raise OSError(f"Included Files cleanup file changed: {path}")
+            return (
+                stat.S_IMODE(final_stat.st_mode),
+                content_sha256,
+                expected_fingerprint,
+            )
+        finally:
+            os.close(parent_fd)
+
+    parent_path = os.path.dirname(os.path.abspath(path))
+    parent_identities = _capture_fallback_directory_ancestors(parent_path)
+    if parent_identities[-1][1] != expected_parent_identity:
+        raise OSError(f"Included Files cleanup parent changed: {path}")
+    try:
+        current_stat = os.lstat(path)
+    except FileNotFoundError:
+        _verify_fallback_directory_ancestors(parent_identities)
+        return None
+    if (
+        _included_output_path_is_redirected(path, current_stat)
+        or not stat.S_ISREG(current_stat.st_mode)
+        or (current_stat.st_dev, current_stat.st_ino) != expected_identity
+    ):
+        raise OSError(f"Included Files cleanup file changed: {path}")
+    expected_fingerprint = _included_path_fingerprint(current_stat)
+    expected_ctime_ns = current_stat.st_ctime_ns
+    parent_mount_id = _included_directory_mount_id(
+        parent_path,
+        expected_parent_identity,
+    )
+    _verify_fallback_directory_ancestors(parent_identities)
+    content_sha256 = _digest_included_regular_file(
+        path,
+        current_stat,
+        expected_device=expected_parent_identity[0],
+        expected_mount_id=parent_mount_id,
+    )
+    _verify_fallback_directory_ancestors(parent_identities)
+    final_stat = os.lstat(path)
+    if (
+        _included_output_path_is_redirected(path, final_stat)
+        or not stat.S_ISREG(final_stat.st_mode)
+        or (final_stat.st_dev, final_stat.st_ino) != expected_identity
+        or _included_path_fingerprint(final_stat) != expected_fingerprint
+        or final_stat.st_ctime_ns != expected_ctime_ns
+    ):
+        raise OSError(f"Included Files cleanup file changed: {path}")
+    _verify_fallback_directory_ancestors(parent_identities)
+    return (
+        stat.S_IMODE(final_stat.st_mode),
+        content_sha256,
+        expected_fingerprint,
+    )
+
+
+def _included_cleanup_mode_matches(
+    current: int,
+    expected: int,
+    *,
+    allow_windows_writable: bool,
+) -> bool:
+    if current == expected:
+        return True
+    if not allow_windows_writable or os.name != "nt":
+        return False
+    write_mask = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+    return (
+        not bool(expected & stat.S_IWRITE)
+        and bool(current & stat.S_IWRITE)
+        and current & ~write_mask == expected & ~write_mask
+    )
+
+
+def _included_cleanup_tombstone_fingerprint_matches(
+    current: _PathFingerprint,
+    expected: _PathFingerprint,
+) -> bool:
+    if current == expected:
+        return True
+    return (
+        current[:2] == expected[:2]
+        and current[3:] == expected[3:]
+        and _included_cleanup_mode_matches(
+            current[2],
+            expected[2],
+            allow_windows_writable=True,
+        )
+    )
+
+
+def _included_cleanup_file_receipt_matches(
+    state: _IncludedCleanupFileState,
+    expected_content_sha256: str,
+    expected_fingerprint: _PathFingerprint | None,
+    expected_mode: int | None,
+    *,
+    allow_windows_writable: bool,
+) -> bool:
+    return (
+        state[1] == expected_content_sha256
+        and (
+            expected_fingerprint is None
+            or (
+                _included_cleanup_tombstone_fingerprint_matches(
+                    state[2],
+                    expected_fingerprint,
+                )
+                if allow_windows_writable
+                else state[2] == expected_fingerprint
+            )
+        )
+        and (
+            expected_mode is None
+            or _included_cleanup_mode_matches(
+                state[0],
+                expected_mode,
+                allow_windows_writable=allow_windows_writable,
+            )
+        )
+    )
+
+
+def _included_cleanup_directory_state(
+    path: str,
+    expected_identity: _PathIdentity,
+    expected_parent_identity: _PathIdentity,
+) -> bool | None:
+    parent_path = os.path.dirname(os.path.abspath(path))
+    current_parent_identity = _included_directory_identity(parent_path)
+    if current_parent_identity != expected_parent_identity:
+        raise OSError(f"Included Files cleanup parent changed: {parent_path}")
+    current_identity = _included_directory_identity(path)
+    if current_identity is None:
+        return None
+    if current_identity != expected_identity:
+        raise OSError(f"Included Files cleanup directory changed: {path}")
+    path_stat = os.lstat(path)
+    if (
+        _included_output_path_is_redirected(path, path_stat)
+        or not stat.S_ISDIR(path_stat.st_mode)
+    ):
+        raise OSError(f"Included Files cleanup directory changed: {path}")
+    parent_mount_id = _included_directory_mount_id(
+        parent_path,
+        expected_parent_identity,
+    )
+    _verify_included_mount_boundary_path(
+        path,
+        path_stat,
+        expected_parent_identity[0],
+        parent_mount_id,
+        expect_directory=True,
+    )
+    if (
+        _included_directory_identity(path) != expected_identity
+        or _included_directory_identity(parent_path) != expected_parent_identity
+    ):
+        raise OSError(f"Included Files cleanup directory changed: {path}")
+    return True
+
+
+def _remove_included_cleanup_tombstone(
+    path: str,
+    expected_identity: _PathIdentity,
+    parent_path: str,
+    parent_identity: _PathIdentity,
+    *,
+    expect_directory: bool,
+) -> None:
+    # The fallback removers must observe the original Windows READONLY state
+    # themselves so they can restore that attribute after a sharing failure.
+    if _included_descriptor_paths_supported():
+        parent_fd, name = _open_pinned_included_parent(path)
+        try:
+            _verify_included_directory_fd(
+                parent_fd,
+                parent_identity,
+                parent_path,
+            )
+            if expect_directory:
+                _rmdir_exact_quarantined_entry_at(
+                    parent_fd,
+                    name,
+                    expected_identity,
+                    path,
+                )
+            else:
+                _unlink_exact_quarantined_entry_at(
+                    parent_fd,
+                    name,
+                    expected_identity,
+                    path,
+                )
+        finally:
+            os.close(parent_fd)
+    elif expect_directory:
+        _rmdir_exact_quarantined_entry_fallback(path, expected_identity)
+    else:
+        _unlink_exact_quarantined_entry_fallback(path, expected_identity)
+    _sync_included_directory(parent_path, parent_identity)
+
+
+def _cleanup_recorded_included_file(
+    path: str,
+    expected_identity: _PathIdentity,
+    expected_content_sha256: str,
+    expected_parent_identity: _PathIdentity,
+    transaction_id: str,
+    role: str,
+    relative_path: str,
+    *,
+    expected_fingerprint: _PathFingerprint | None = None,
+    expected_mode: int | None = None,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    parent_path = os.path.dirname(os.path.abspath(path))
+    tombstone_path = _included_cleanup_tombstone_path(
+        path,
+        transaction_id,
+        role,
+        relative_path,
+        expect_directory=False,
+    )
+    try:
+        source_state = _included_cleanup_file_state(
+            path,
+            expected_identity,
+            expected_parent_identity,
+        )
+    except OSError:
+        source_state = None
+        if os.path.lexists(path):
+            warnings.append(
+                f"unknown Included Files cleanup entry was preserved: {path}"
+            )
+    try:
+        tombstone_state = _included_cleanup_file_state(
+            tombstone_path,
+            expected_identity,
+            expected_parent_identity,
+        )
+    except OSError:
+        tombstone_state = None
+        if os.path.lexists(tombstone_path):
+            warnings.append(
+                "unknown Included Files cleanup tombstone was preserved: "
+                + tombstone_path
+            )
+            return tuple(warnings)
+
+    if source_state is not None and tombstone_state is not None:
+        warnings.append(
+            f"ambiguous duplicate Included Files cleanup entry was preserved: {path}"
+        )
+        return tuple(warnings)
+    if tombstone_state is not None:
+        if not _included_cleanup_file_receipt_matches(
+            tombstone_state,
+            expected_content_sha256,
+            expected_fingerprint,
+            expected_mode,
+            allow_windows_writable=True,
+        ):
+            warnings.append(
+                "changed Included Files cleanup tombstone was preserved: "
+                + tombstone_path
+            )
+            return tuple(warnings)
+        _remove_included_cleanup_tombstone(
+            tombstone_path,
+            expected_identity,
+            parent_path,
+            expected_parent_identity,
+            expect_directory=False,
+        )
+        _after_included_transaction_phase(
+            f"cleanup:{role}:{relative_path}:removed"
+        )
+        return tuple(warnings)
+    if source_state is None:
+        return tuple(warnings)
+    if not _included_cleanup_file_receipt_matches(
+        source_state,
+        expected_content_sha256,
+        expected_fingerprint,
+        expected_mode,
+        allow_windows_writable=False,
+    ):
+        warnings.append(f"changed Included Files cleanup entry was preserved: {path}")
+        return tuple(warnings)
+
+    _move_exact_included_file(
+        path,
+        tombstone_path,
+        expected_identity,
+        source_parent_identity=expected_parent_identity,
+        destination_parent_identity=expected_parent_identity,
+    )
+    _sync_included_directory(parent_path, expected_parent_identity)
+    _after_included_transaction_phase(
+        f"cleanup:{role}:{relative_path}:quarantined"
+    )
+    tombstone_state = _included_cleanup_file_state(
+        tombstone_path,
+        expected_identity,
+        expected_parent_identity,
+    )
+    if tombstone_state is None or not _included_cleanup_file_receipt_matches(
+        tombstone_state,
+        expected_content_sha256,
+        expected_fingerprint,
+        expected_mode,
+        allow_windows_writable=True,
+    ):
+        raise OSError(
+            "Included Files cleanup tombstone changed after publication: "
+            + tombstone_path
+        )
+    _remove_included_cleanup_tombstone(
+        tombstone_path,
+        expected_identity,
+        parent_path,
+        expected_parent_identity,
+        expect_directory=False,
+    )
+    _after_included_transaction_phase(f"cleanup:{role}:{relative_path}:removed")
+    return tuple(warnings)
+
+
+def _cleanup_recorded_included_directory(
+    path: str,
+    expected_identity: _PathIdentity,
+    expected_parent_identity: _PathIdentity,
+    transaction_id: str,
+    role: str,
+    relative_path: str,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    parent_path = os.path.dirname(os.path.abspath(path))
+    tombstone_path = _included_cleanup_tombstone_path(
+        path,
+        transaction_id,
+        role,
+        relative_path,
+        expect_directory=True,
+    )
+    try:
+        source_state = _included_cleanup_directory_state(
+            path,
+            expected_identity,
+            expected_parent_identity,
+        )
+    except OSError:
+        source_state = None
+        if os.path.lexists(path):
+            warnings.append(
+                f"unknown Included Files cleanup directory was preserved: {path}"
+            )
+    try:
+        tombstone_state = _included_cleanup_directory_state(
+            tombstone_path,
+            expected_identity,
+            expected_parent_identity,
+        )
+    except OSError:
+        tombstone_state = None
+        if os.path.lexists(tombstone_path):
+            warnings.append(
+                "unknown Included Files cleanup tombstone was preserved: "
+                + tombstone_path
+            )
+            return tuple(warnings)
+
+    if source_state is not None and tombstone_state is not None:
+        warnings.append(
+            f"ambiguous duplicate Included Files cleanup directory was preserved: {path}"
+        )
+        return tuple(warnings)
+    if tombstone_state is not None:
+        if os.listdir(tombstone_path):
+            warnings.append(
+                "non-empty Included Files cleanup tombstone was preserved: "
+                + tombstone_path
+            )
+            return tuple(warnings)
+        _remove_included_cleanup_tombstone(
+            tombstone_path,
+            expected_identity,
+            parent_path,
+            expected_parent_identity,
+            expect_directory=True,
+        )
+        _after_included_transaction_phase(
+            f"cleanup:{role}:{relative_path}:removed"
+        )
+        return tuple(warnings)
+    if source_state is None:
+        return tuple(warnings)
+    if os.listdir(path):
+        warnings.append(
+            f"non-empty Included Files cleanup directory was preserved: {path}"
+        )
+        return tuple(warnings)
+    if (
+        _included_directory_identity(path) != expected_identity
+        or _included_directory_identity(parent_path) != expected_parent_identity
+    ):
+        raise OSError(f"Included Files cleanup directory changed: {path}")
+    _move_exact_included_directory(
+        path,
+        tombstone_path,
+        expected_identity,
+        source_parent_identity=expected_parent_identity,
+        destination_parent_identity=expected_parent_identity,
+    )
+    _sync_included_directory(parent_path, expected_parent_identity)
+    _after_included_transaction_phase(
+        f"cleanup:{role}:{relative_path}:quarantined"
+    )
+    if os.listdir(tombstone_path):
+        warnings.append(
+            "non-empty Included Files cleanup tombstone was preserved: "
+            + tombstone_path
+        )
+        return tuple(warnings)
+    _remove_included_cleanup_tombstone(
+        tombstone_path,
+        expected_identity,
+        parent_path,
+        expected_parent_identity,
+        expect_directory=True,
+    )
+    _after_included_transaction_phase(f"cleanup:{role}:{relative_path}:removed")
+    return tuple(warnings)
+
+
+def _cleanup_recorded_included_tree(
+    path: str,
+    snapshot: _IncludedTreeSnapshot,
+    expected_parent_identity: _PathIdentity,
+    transaction_id: str,
+    role: str,
+) -> tuple[str, ...]:
+    recorded_entry_paths = {
+        entry.relative_path: _included_recovery_tree_entry_path(
+            path,
+            entry.relative_path,
+        )
+        for entry in snapshot.entries
+    }
+    if len(recorded_entry_paths) != len(snapshot.entries):
+        raise OSError("Duplicate Included Files cleanup manifest path")
+    root_identity = snapshot.identity
+    if root_identity is None:
+        if os.path.lexists(path):
+            return (f"unknown Included Files cleanup tree was preserved: {path}",)
+        return ()
+    if (
+        root_identity[0] != expected_parent_identity[0]
+        or any(
+            entry.fingerprint[0] != root_identity[0]
+            for entry in snapshot.entries
+        )
+    ):
+        return (
+            f"cross-mount Included Files cleanup tree was preserved: {path}",
+        )
+    directory_identities: dict[str, _PathIdentity] = {"": root_identity}
+    for entry in snapshot.entries:
+        if entry.kind == "directory":
+            directory_identities[entry.relative_path] = entry.fingerprint[:2]
+
+    try:
+        root_state = _included_cleanup_directory_state(
+            path,
+            root_identity,
+            expected_parent_identity,
+        )
+    except OSError:
+        return (f"unknown or mounted Included Files cleanup tree was preserved: {path}",)
+    if root_state is None:
+        return _cleanup_recorded_included_directory(
+            path,
+            root_identity,
+            expected_parent_identity,
+            transaction_id,
+            role,
+            ".",
+        )
+
+    absent_directories: set[str] = set()
+    for entry in sorted(
+        (candidate for candidate in snapshot.entries if candidate.kind == "directory"),
+        key=lambda candidate: (
+            candidate.relative_path.count("/"),
+            candidate.relative_path,
+        ),
+    ):
+        entry_path = recorded_entry_paths[entry.relative_path]
+        parent_relative = posixpath.dirname(entry.relative_path)
+        if parent_relative in absent_directories:
+            absent_directories.add(entry.relative_path)
+            continue
+        try:
+            entry_state = _included_cleanup_directory_state(
+                entry_path,
+                entry.fingerprint[:2],
+                directory_identities[parent_relative],
+            )
+        except OSError:
+            return (
+                "unknown or mounted Included Files cleanup directory was "
+                f"preserved: {entry_path}",
+            )
+        if entry_state is None:
+            absent_directories.add(entry.relative_path)
+
+    warnings: list[str] = []
+    for entry in sorted(
+        (candidate for candidate in snapshot.entries if candidate.kind == "file"),
+        key=lambda candidate: candidate.relative_path,
+        reverse=True,
+    ):
+        parent_relative = posixpath.dirname(entry.relative_path)
+        parent_identity = directory_identities[parent_relative]
+        if entry.content_sha256 is None:
+            warnings.append(
+                "Included Files cleanup manifest omitted a file digest: "
+                + entry.relative_path
+            )
+            continue
+        warnings.extend(
+            _cleanup_recorded_included_file(
+                recorded_entry_paths[entry.relative_path],
+                entry.fingerprint[:2],
+                entry.content_sha256,
+                parent_identity,
+                transaction_id,
+                role,
+                entry.relative_path,
+                expected_fingerprint=entry.fingerprint,
+            )
+        )
+
+    directories = sorted(
+        (candidate for candidate in snapshot.entries if candidate.kind == "directory"),
+        key=lambda candidate: (
+            candidate.relative_path.count("/"),
+            candidate.relative_path,
+        ),
+        reverse=True,
+    )
+    for entry in directories:
+        parent_relative = posixpath.dirname(entry.relative_path)
+        warnings.extend(
+            _cleanup_recorded_included_directory(
+                recorded_entry_paths[entry.relative_path],
+                entry.fingerprint[:2],
+                directory_identities[parent_relative],
+                transaction_id,
+                role,
+                entry.relative_path,
+            )
+        )
+    warnings.extend(
+        _cleanup_recorded_included_directory(
+            path,
+            root_identity,
+            expected_parent_identity,
+            transaction_id,
+            role,
+            ".",
+        )
+    )
+    return tuple(warnings)
+
+
+def _remove_included_recovery_record(
+    path: str,
+    identity: _PathIdentity,
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> None:
+    current_state = _included_recovery_record_state(
+        path,
+        project_identity,
+        allowed_identities=frozenset({identity}),
+    )
+    if current_state is None:
+        return
+    if os.path.basename(path).startswith(_INCLUDED_FILES_CLEANUP_PREFIX):
+        _remove_included_cleanup_tombstone(
+            path,
+            identity,
+            project_path,
+            project_identity,
+            expect_directory=False,
+        )
+        _after_included_transaction_phase(
+            f"cleanup:record:{os.path.basename(path)}:removed"
+        )
+        return
+    basename = os.path.basename(path)
+    content_sha256 = hashlib.sha256(current_state[2]).hexdigest()
+    if basename in {
+        _INCLUDED_FILES_JOURNAL_NAME,
+        _INCLUDED_FILES_COMMIT_NAME,
+    }:
+        cleanup_transaction_id = "recovery-record"
+        cleanup_role = "record"
+        cleanup_relative_path = basename
+    elif basename.startswith(_INCLUDED_FILES_JOURNAL_TEMP_PREFIX):
+        cleanup_transaction_id = content_sha256[:32]
+        cleanup_role = "journal-temporary-record"
+        cleanup_relative_path = "journal"
+    elif basename.startswith(_INCLUDED_FILES_COMMIT_TEMP_PREFIX):
+        cleanup_transaction_id = content_sha256[:32]
+        cleanup_role = "commit-temporary-record"
+        cleanup_relative_path = "commit"
+    else:
+        cleanup_transaction_id = "recovery-record"
+        cleanup_role = "record"
+        cleanup_relative_path = basename
+    warnings = _cleanup_recorded_included_file(
+        path,
+        identity,
+        content_sha256,
+        project_identity,
+        cleanup_transaction_id,
+        cleanup_role,
+        cleanup_relative_path,
+    )
+    if warnings:
+        raise OSError("; ".join(warnings))
+
+
+def _included_stage_marker_matches(
+    payload: dict[str, Any],
+    project_identity: _PathIdentity,
+    stage_identity: _PathIdentity,
+) -> bool:
+    _included_recovery_exact_keys(
+        payload,
+        frozenset(
+            {
+                "format_version",
+                "state",
+                "project_identity",
+                "stage_identity",
+            }
+        ),
+        "stage marker",
+    )
+    return (
+        _included_recovery_int(
+            payload.get("format_version"),
+            "stage marker format version",
+        )
+        == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        and payload.get("state") == "staging"
+        and _included_recovery_identity(
+            payload.get("project_identity"),
+            "stage project identity",
+        )
+        == project_identity
+        and _included_recovery_identity(
+            payload.get("stage_identity"),
+            "stage identity",
+        )
+        == stage_identity
+    )
+
+
+def _cleanup_orphan_included_recovery_state(
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> tuple[int, tuple[str, ...]]:
+    """Remove exact self-identifying orphans and preserve ambiguous state."""
+
+    _verify_included_project_identity(project_path, project_identity)
+    names = sorted(os.listdir(project_path))
+    _verify_included_project_identity(project_path, project_identity)
+    cleaned = 0
+    warnings: list[str] = []
+    for name in names:
+        if name.startswith(_INCLUDED_FILES_STAGE_PREFIX) and name.endswith(
+            ".stage"
+        ):
+            stage_path = os.path.join(project_path, name)
+            try:
+                _included_recovery_managed_name(
+                    name,
+                    prefix=_INCLUDED_FILES_STAGE_PREFIX,
+                    suffix=".stage",
+                    label="orphan stage",
+                )
+                stage_identity = _included_directory_identity(stage_path)
+            except OSError:
+                warnings.append(
+                    "ambiguous entry at a reserved Included Files staging path "
+                    f"was preserved: {stage_path}"
+                )
+                continue
+            if stage_identity is None:
+                continue
+            marker_path = os.path.join(
+                stage_path,
+                _INCLUDED_FILES_STAGE_MARKER_NAME,
+            )
+            try:
+                marker_record = _read_included_recovery_record(
+                    marker_path,
+                    stage_identity,
+                )
+                stage_names = sorted(os.listdir(stage_path))
+                if _included_directory_identity(stage_path) != stage_identity:
+                    raise OSError("Included Files orphan stage changed")
+                marker_matches = (
+                    marker_record is not None
+                    and _included_stage_marker_matches(
+                        marker_record[1],
+                        project_identity,
+                        stage_identity,
+                    )
+                )
+            except OSError:
+                marker_record = None
+                marker_matches = False
+                stage_names = []
+            if (
+                not marker_matches
+                or marker_record is None
+                or stage_names != [_INCLUDED_FILES_STAGE_MARKER_NAME]
+            ):
+                warnings.append(
+                    "ambiguous Included Files staging directory was preserved: "
+                    + stage_path
+                )
+                continue
+            orphan_snapshot = _capture_included_tree(
+                stage_path,
+                expected_parent_identity=project_identity,
+            )
+            orphan_warnings = _cleanup_recorded_included_tree(
+                stage_path,
+                orphan_snapshot,
+                project_identity,
+                hashlib.sha256(
+                    _included_recovery_record_content(marker_record[1])
+                ).hexdigest()[:32],
+                "orphan-stage",
+            )
+            if orphan_warnings:
+                warnings.extend(orphan_warnings)
+            else:
+                cleaned += 1
+
+    names = sorted(os.listdir(project_path))
+    _verify_included_project_identity(project_path, project_identity)
+    for name in names:
+        record_kind: str | None = None
+        if name.startswith(_INCLUDED_FILES_JOURNAL_TEMP_PREFIX) and name.endswith(
+            ".tmp"
+        ):
+            record_kind = "journal"
+        elif name.startswith(_INCLUDED_FILES_COMMIT_TEMP_PREFIX) and name.endswith(
+            ".tmp"
+        ):
+            record_kind = "commit"
+        if record_kind is None:
+            continue
+        record_path = os.path.join(project_path, name)
+        try:
+            _included_recovery_managed_name(
+                name,
+                prefix=(
+                    _INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                    if record_kind == "journal"
+                    else _INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                ),
+                suffix=".tmp",
+                label=record_kind + " temporary record",
+            )
+            record = _read_included_recovery_record(
+                record_path,
+                project_identity,
+            )
+        except OSError:
+            warnings.append(
+                "ambiguous Included Files recovery temporary record was "
+                f"preserved: {record_path}"
+            )
+            continue
+        if record is None:
+            continue
+        record_identity, payload = record
+        try:
+            if record_kind == "journal":
+                _included_recovery_journal_from_payload(
+                    project_path,
+                    project_identity,
+                    payload,
+                )
+            else:
+                _included_commit_marker_and_journal_from_payload(
+                    project_path,
+                    payload,
+                    project_identity,
+                )
+        except OSError:
+            warnings.append(
+                "ambiguous Included Files recovery temporary record was "
+                f"preserved: {record_path}"
+            )
+            continue
+        if record_kind == "journal":
+            warnings.append(
+                "unpromoted Included Files journal temporary was preserved: "
+                + record_path
+            )
+            continue
+        _remove_included_recovery_record(
+            record_path,
+            record_identity,
+            project_path,
+            project_identity,
+        )
+        cleaned += 1
+
+    names = sorted(os.listdir(project_path))
+    _verify_included_project_identity(project_path, project_identity)
+    for name in names:
+        if not (
+            name.startswith(_INCLUDED_FILES_CLEANUP_PREFIX)
+            and name.endswith(".file")
+        ):
+            continue
+        record_path = os.path.join(project_path, name)
+        try:
+            record = _read_included_recovery_record(
+                record_path,
+                project_identity,
+            )
+            if record is None:
+                continue
+            record_identity, payload = record
+            content_sha256 = hashlib.sha256(
+                _included_recovery_record_content(payload)
+            ).hexdigest()
+            state = payload.get("state")
+            if state == "prepared":
+                _included_recovery_journal_from_payload(
+                    project_path,
+                    project_identity,
+                    payload,
+                )
+                role = "journal-temporary-record"
+                relative_path = "journal"
+            elif state == "committed":
+                _included_commit_marker_and_journal_from_payload(
+                    project_path,
+                    payload,
+                    project_identity,
+                )
+                role = "commit-temporary-record"
+                relative_path = "commit"
+            else:
+                raise OSError("Unknown Included Files recovery tombstone state")
+            expected_path = _included_cleanup_tombstone_path(
+                os.path.join(project_path, "temporary-record"),
+                content_sha256[:32],
+                role,
+                relative_path,
+                expect_directory=False,
+            )
+            if os.path.normcase(record_path) != os.path.normcase(expected_path):
+                raise OSError("Included Files recovery tombstone name mismatch")
+        except OSError:
+            warnings.append(
+                "ambiguous Included Files cleanup tombstone was preserved: "
+                + record_path
+            )
+            continue
+        _remove_included_recovery_record(
+            record_path,
+            record_identity,
+            project_path,
+            project_identity,
+        )
+        cleaned += 1
+    return cleaned, tuple(warnings)
+
+
 def _rollback_included_output_set(
     transaction: _IncludedOutputSetTransaction,
     *,
@@ -3016,11 +6480,33 @@ def _rollback_included_output_set(
         previous_registry_directory_identity = (
             transaction.previous_registry_snapshot.directory_identity
         )
-        final_registry_parent_identity = (
+        expected_registry_parent_identity = (
             registry_directory_identity
             if registry_directory_identity is not None
             else previous_registry_directory_identity
         )
+        current_registry_directory_identity = _included_directory_identity(
+            registry_directory_path
+        )
+        if current_registry_directory_identity is None:
+            if not (
+                registry_directory_created
+                and previous_registry_directory_identity is None
+            ) and expected_registry_parent_identity is not None:
+                raise OSError(
+                    "Included File registry directory disappeared during rollback"
+                )
+            final_registry_parent_identity = None
+        elif (
+            expected_registry_parent_identity is None
+            or current_registry_directory_identity
+            != expected_registry_parent_identity
+        ):
+            raise OSError(
+                "Included File registry directory changed during rollback"
+            )
+        else:
+            final_registry_parent_identity = current_registry_directory_identity
         previous_registry_identity = (
             transaction.previous_registry_snapshot.file_identity
         )
@@ -3051,6 +6537,11 @@ def _rollback_included_output_set(
             else None
         )
         if previous_registry_identity is None:
+            backup_registry_identity = None
+        elif current_registry_identity == previous_registry_identity:
+            # The previous public registry is already intact. An entry at the
+            # reserved backup path is therefore not ours and must be preserved
+            # without preventing rollback of the rest of the transaction.
             backup_registry_identity = None
         else:
             if previous_registry_directory_identity is None:
@@ -3089,8 +6580,7 @@ def _rollback_included_output_set(
             if backup_registry_identity is not None or current_registry_identity is not None:
                 raise OSError("Could not restore the previously absent Included File registry")
         elif current_registry_identity == previous_registry_identity:
-            if backup_registry_identity is not None:
-                raise OSError("Included File registry rollback left a duplicate backup")
+            pass
         elif backup_registry_identity == previous_registry_identity:
             if (
                 previous_registry_directory_identity is None
@@ -3115,8 +6605,12 @@ def _rollback_included_output_set(
 
     try:
         current_root_identity = _included_directory_identity(final_root_path)
-        backup_root_identity = _included_directory_identity(root_backup_path)
         previous_root_identity = transaction.previous_root_snapshot.identity
+        backup_root_identity = (
+            None
+            if current_root_identity == previous_root_identity
+            else _included_directory_identity(root_backup_path)
+        )
         staged_root_identity = transaction.staged_root_snapshot.identity
         if staged_root_identity is None:
             raise AssertionError("A staged Included Files root must be present")
@@ -3136,8 +6630,7 @@ def _rollback_included_output_set(
             if backup_root_identity is not None or current_root_identity is not None:
                 raise OSError("Could not restore the previously absent Included Files root")
         elif current_root_identity == previous_root_identity:
-            if backup_root_identity is not None:
-                raise OSError("Included Files rollback left a duplicate root backup")
+            pass
         elif backup_root_identity == previous_root_identity:
             _move_exact_included_directory(
                 root_backup_path,
@@ -3153,14 +6646,440 @@ def _rollback_included_output_set(
 
     if registry_directory_created and registry_directory_identity is not None:
         try:
-            _remove_owned_empty_included_directory(
-                registry_directory_path,
-                registry_directory_identity,
-                transaction.project_identity,
+            current_registry_directory_identity = _included_directory_identity(
+                registry_directory_path
             )
+            if current_registry_directory_identity is None:
+                pass
+            elif current_registry_directory_identity == registry_directory_identity:
+                _cleanup_recorded_included_directory(
+                    registry_directory_path,
+                    registry_directory_identity,
+                    transaction.project_identity,
+                    (
+                        f"{transaction.project_identity[0]:x}"
+                        f"{transaction.project_identity[1]:x}"
+                    ),
+                    "rollback-registry-directory",
+                    "gm2godot",
+                )
+            else:
+                raise OSError(
+                    "Included File registry directory changed during rollback"
+                )
         except Exception as error:
             errors.append(error)
     return tuple(errors)
+
+
+def _cleanup_committed_included_output_set(
+    journal: _IncludedRecoveryJournal,
+    *,
+    verify_content: bool = True,
+) -> tuple[tuple[Exception, ...], tuple[str, ...]]:
+    errors: list[Exception] = []
+    warnings: list[str] = []
+    transaction = journal.transaction
+    project_path = os.path.dirname(transaction.stage_container_path)
+    final_root_path = os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME)
+    final_registry_path = _included_registry_path(project_path)
+
+    try:
+        _verify_included_project_identity(project_path, transaction.project_identity)
+        if verify_content:
+            _verify_included_tree_snapshot(
+                final_root_path,
+                transaction.staged_root_snapshot,
+                expected_parent_identity=transaction.project_identity,
+            )
+        else:
+            _verify_included_tree_snapshot_metadata(
+                final_root_path,
+                transaction.staged_root_snapshot,
+                expected_parent_identity=transaction.project_identity,
+            )
+        if (
+            _included_directory_identity(journal.registry_directory_path)
+            != journal.registry_directory_identity
+        ):
+            raise OSError(
+                "Included File registry directory changed during committed recovery"
+            )
+        registry_state = _included_regular_file_state(
+            final_registry_path,
+            expected_parent_identity=journal.registry_directory_identity,
+            allowed_identities=frozenset(
+                {transaction.staged_registry_identity}
+            ),
+        )
+        if (
+            registry_state is None
+            or registry_state[0] != transaction.staged_registry_identity
+            or registry_state[2] != transaction.staged_registry_content
+        ):
+            raise OSError(
+                "Committed Included File registry generation is unavailable"
+            )
+    except Exception as error:
+        return (error,), ()
+
+    try:
+        warnings.extend(
+            _cleanup_recorded_included_tree(
+                journal.root_backup_path,
+                transaction.previous_root_snapshot,
+                transaction.project_identity,
+                journal.transaction_id,
+                "root-backup",
+            )
+        )
+    except Exception as error:
+        errors.append(error)
+
+    previous_registry_identity = (
+        transaction.previous_registry_snapshot.file_identity
+    )
+    try:
+        if previous_registry_identity is None:
+            if os.path.lexists(journal.registry_backup_path):
+                warnings.append(
+                    "Unknown replacement at the Included File registry backup "
+                    f"path was preserved: {journal.registry_backup_path}"
+                )
+        else:
+            previous_registry_content = (
+                transaction.previous_registry_snapshot.content
+            )
+            if previous_registry_content is None:
+                raise AssertionError(
+                    "A previous Included File registry requires recorded content"
+                )
+            warnings.extend(
+                _cleanup_recorded_included_file(
+                    journal.registry_backup_path,
+                    previous_registry_identity,
+                    hashlib.sha256(previous_registry_content).hexdigest(),
+                    journal.registry_directory_identity,
+                    journal.transaction_id,
+                    "registry-backup",
+                    os.path.basename(journal.registry_backup_path),
+                    expected_mode=(
+                        transaction.previous_registry_snapshot.file_mode
+                    ),
+                )
+            )
+    except Exception as error:
+        errors.append(error)
+
+    try:
+        warnings.extend(
+            _cleanup_recorded_included_tree(
+                transaction.stage_container_path,
+                transaction.staged_container_snapshot,
+                transaction.project_identity,
+                journal.transaction_id,
+                "stage",
+            )
+        )
+    except Exception as error:
+        errors.append(error)
+    return tuple(errors), tuple(warnings)
+
+
+def _promote_included_journal_temporary(
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> tuple[bool, tuple[str, ...]]:
+    journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
+    if os.path.lexists(journal_path):
+        return False, ()
+    candidates: list[tuple[str, _PathIdentity]] = []
+    warnings: list[str] = []
+    _verify_included_project_identity(project_path, project_identity)
+    for name in sorted(os.listdir(project_path)):
+        if not (
+            name.startswith(_INCLUDED_FILES_JOURNAL_TEMP_PREFIX)
+            and name.endswith(".tmp")
+        ):
+            continue
+        candidate_path = os.path.join(project_path, name)
+        try:
+            _included_recovery_managed_name(
+                name,
+                prefix=_INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
+                suffix=".tmp",
+                label="journal temporary record",
+            )
+            record = _read_included_recovery_record(
+                candidate_path,
+                project_identity,
+            )
+            if record is None:
+                continue
+            candidate_identity, payload = record
+            journal = _included_recovery_journal_from_payload(
+                project_path,
+                project_identity,
+                payload,
+            )
+            transaction = journal.transaction
+            _verify_included_tree_snapshot(
+                transaction.stage_container_path,
+                transaction.staged_container_snapshot,
+                expected_parent_identity=project_identity,
+            )
+            _verify_included_tree_snapshot(
+                os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME),
+                transaction.previous_root_snapshot,
+                expected_parent_identity=project_identity,
+            )
+            if journal.registry_directory_created:
+                if transaction.previous_registry_snapshot != (
+                    _IncludedRegistrySnapshot(
+                        directory_identity=None,
+                        file_identity=None,
+                        file_mode=None,
+                        content=None,
+                    )
+                ):
+                    raise OSError(
+                        "Created Included File registry directory disagrees "
+                        "with the previous generation"
+                    )
+                _verify_included_registry_snapshot(
+                    project_path,
+                    _IncludedRegistrySnapshot(
+                        directory_identity=journal.registry_directory_identity,
+                        file_identity=None,
+                        file_mode=None,
+                        content=None,
+                    ),
+                    expected_project_identity=project_identity,
+                )
+            else:
+                _verify_included_registry_snapshot(
+                    project_path,
+                    transaction.previous_registry_snapshot,
+                    expected_project_identity=project_identity,
+                )
+        except OSError:
+            warnings.append(
+                "ambiguous Included Files journal temporary was preserved: "
+                + candidate_path
+            )
+            continue
+        candidates.append((candidate_path, candidate_identity))
+    if len(candidates) > 1:
+        raise OSError(
+            "Multiple valid Included Files journal temporaries require manual "
+            "inspection"
+        )
+    if not candidates:
+        return False, tuple(warnings)
+    candidate_path, candidate_identity = candidates[0]
+    _move_exact_included_file(
+        candidate_path,
+        journal_path,
+        candidate_identity,
+        source_parent_identity=project_identity,
+        destination_parent_identity=project_identity,
+    )
+    _sync_included_directory(project_path, project_identity)
+    _after_included_transaction_phase("recovery-journal-promoted")
+    return True, tuple(warnings)
+
+
+def _recover_included_output_set(
+    project_path: str,
+    project_identity: _PathIdentity,
+) -> str | None:
+    journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
+    commit_path = os.path.join(project_path, _INCLUDED_FILES_COMMIT_NAME)
+    journal_promoted, promotion_warnings = _promote_included_journal_temporary(
+        project_path,
+        project_identity,
+    )
+    journal_record = _read_included_recovery_record_or_tombstone(
+        journal_path,
+        project_identity,
+    )
+    commit_record = _read_included_recovery_record_or_tombstone(
+        commit_path,
+        project_identity,
+    )
+    if journal_record is None:
+        messages: list[str] = list(promotion_warnings)
+        if commit_record is not None:
+            commit_record_path, commit_identity, commit_payload = commit_record
+            marker, embedded_journal = (
+                _included_commit_marker_and_journal_from_payload(
+                    project_path,
+                    commit_payload,
+                    project_identity,
+                )
+            )
+            _verify_included_commit_marker_generation(project_path, marker)
+            cleanup_errors, cleanup_warnings = (
+                _cleanup_committed_included_output_set(embedded_journal)
+            )
+            if cleanup_errors:
+                error = OSError(
+                    "Committed Included Files marker-only recovery could not "
+                    "finish cleanup"
+                )
+                for cleanup_error in cleanup_errors:
+                    error.add_note(str(cleanup_error))
+                raise error
+            _remove_included_recovery_record(
+                commit_record_path,
+                commit_identity,
+                project_path,
+                project_identity,
+            )
+            messages.append(
+                "finalized an already committed Included Files generation"
+            )
+            messages.extend(cleanup_warnings)
+        orphan_count, orphan_warnings = _cleanup_orphan_included_recovery_state(
+            project_path,
+            project_identity,
+        )
+        if orphan_count:
+            messages.append(
+                f"removed {orphan_count} self-identified orphan transaction entries"
+            )
+        messages.extend(orphan_warnings)
+        return "; ".join(messages) if messages else None
+
+    journal_record_path, journal_identity, journal_payload = journal_record
+    journal = _included_recovery_journal_from_payload(
+        project_path,
+        project_identity,
+        journal_payload,
+    )
+    commit_identity: _PathIdentity | None = None
+    commit_record_path = commit_path
+    if commit_record is not None:
+        commit_record_path, commit_identity, commit_payload = commit_record
+        marker, embedded_journal = (
+            _included_commit_marker_and_journal_from_payload(
+                project_path,
+                commit_payload,
+                project_identity,
+            )
+        )
+        if (
+            marker != _included_commit_marker_from_journal(journal)
+            or embedded_journal != journal
+        ):
+            raise OSError(
+                "Included Files recovery journal and commit marker disagree"
+            )
+
+    transaction = journal.transaction
+    if commit_identity is None:
+        rollback_errors = _rollback_included_output_set(
+            transaction,
+            root_backup_path=journal.root_backup_path,
+            registry_backup_path=journal.registry_backup_path,
+            registry_directory_path=journal.registry_directory_path,
+            registry_directory_identity=journal.registry_directory_identity,
+            registry_directory_created=journal.registry_directory_created,
+        )
+        if rollback_errors:
+            error = OSError(
+                "Interrupted Included Files generation could not be rolled back"
+            )
+            for rollback_error in rollback_errors:
+                error.add_note(str(rollback_error))
+            raise error
+        final_root_path = os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME)
+        _verify_included_tree_snapshot(
+            final_root_path,
+            transaction.previous_root_snapshot,
+            expected_parent_identity=project_identity,
+        )
+        _verify_included_registry_snapshot(
+            project_path,
+            transaction.previous_registry_snapshot,
+            expected_project_identity=project_identity,
+        )
+        rollback_cleanup_warnings = _cleanup_recorded_included_tree(
+            transaction.stage_container_path,
+            transaction.staged_container_snapshot,
+            project_identity,
+            journal.transaction_id,
+            "rollback-stage",
+        )
+        _sync_included_directory(project_path, project_identity)
+        previous_registry_directory_identity = (
+            transaction.previous_registry_snapshot.directory_identity
+        )
+        if previous_registry_directory_identity is not None:
+            _sync_included_directory(
+                journal.registry_directory_path,
+                previous_registry_directory_identity,
+            )
+        _remove_included_recovery_record(
+            journal_record_path,
+            journal_identity,
+            project_path,
+            project_identity,
+        )
+        orphan_count, orphan_warnings = _cleanup_orphan_included_recovery_state(
+            project_path,
+            project_identity,
+        )
+        _after_included_transaction_phase("recovery-rolled-back")
+        message = "rolled back an interrupted Included Files generation"
+        if journal_promoted:
+            message += " from its durable journal temporary"
+        if orphan_count:
+            message += f"; removed {orphan_count} orphan transaction entries"
+        all_warnings = (
+            *promotion_warnings,
+            *rollback_cleanup_warnings,
+            *orphan_warnings,
+        )
+        if all_warnings:
+            message += "; " + "; ".join(all_warnings)
+        return message
+
+    cleanup_errors, cleanup_warnings = _cleanup_committed_included_output_set(
+        journal
+    )
+    if cleanup_errors:
+        error = OSError(
+            "Committed Included Files generation recovery could not finish cleanup"
+        )
+        for cleanup_error in cleanup_errors:
+            error.add_note(str(cleanup_error))
+        raise error
+    _remove_included_recovery_record(
+        journal_record_path,
+        journal_identity,
+        project_path,
+        project_identity,
+    )
+    _after_included_transaction_phase("recovery-journal-removed")
+    _remove_included_recovery_record(
+        commit_record_path,
+        commit_identity,
+        project_path,
+        project_identity,
+    )
+    orphan_count, orphan_warnings = _cleanup_orphan_included_recovery_state(
+        project_path,
+        project_identity,
+    )
+    _after_included_transaction_phase("recovery-committed")
+    message = "finalized a committed Included Files generation"
+    all_warnings = (*promotion_warnings, *cleanup_warnings, *orphan_warnings)
+    if orphan_count:
+        message += f"; removed {orphan_count} orphan transaction entries"
+    if all_warnings:
+        message += "; " + "; ".join(all_warnings)
+    return message
 
 
 def _commit_included_output_set(
@@ -3168,18 +7087,11 @@ def _commit_included_output_set(
     transaction: _IncludedOutputSetTransaction,
     conversion_running: ConversionRunning,
 ) -> tuple[str, ...]:
-    """Publish one rollback-protected root/registry generation.
-
-    The two public paths require separate renames, so ordinary conversion is
-    not a synchronization mechanism for concurrent readers. A process crash
-    between those renames also requires a future persistent recovery journal;
-    this transaction only guarantees rollback for failures observed in-process.
-    Cleanup and publication also assume no non-cooperating process mutates this
-    managed namespace: portable inode-conditional rename/unlink primitives do
-    not exist. Issue #727 owns the locking/generation-pointer redesign.
-    """
+    """Publish one journaled, recoverable root/registry generation."""
     final_root_path = os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME)
     final_registry_path = _included_registry_path(project_path)
+    journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
+    commit_path = os.path.join(project_path, _INCLUDED_FILES_COMMIT_NAME)
     root_backup_path = _unique_included_transaction_path(
         project_path,
         "included_files",
@@ -3193,6 +7105,9 @@ def _commit_included_output_set(
     )
     registry_directory_identity: _PathIdentity | None = None
     registry_directory_created = False
+    journal_identity: _PathIdentity | None = None
+    commit_marker_identity: _PathIdentity | None = None
+    recovery_journal: _IncludedRecoveryJournal | None = None
 
     try:
         _verify_included_project_identity(
@@ -3245,26 +7160,32 @@ def _commit_included_output_set(
             transaction.previous_registry_snapshot,
             transaction.project_identity,
         )
-        if transaction.previous_registry_snapshot.file_mode is not None:
-            _chmod_exact_included_file(
-                transaction.staged_registry_path,
-                transaction.staged_registry_identity,
-                transaction.previous_registry_snapshot.file_mode,
-                transaction.stage_container_identity,
-            )
-            staged_registry_state = _included_regular_file_state(
-                transaction.staged_registry_path,
-                expected_parent_identity=transaction.stage_container_identity,
-                allowed_identities=frozenset(
-                    {transaction.staged_registry_identity}
-                ),
-            )
-            if (
-                staged_registry_state is None
-                or staged_registry_state[0] != transaction.staged_registry_identity
-                or staged_registry_state[2] != transaction.staged_registry_content
-            ):
-                raise OSError("Included File registry staging candidate changed")
+        registry_backup_path = _unique_included_transaction_path(
+            registry_directory_path
+            if transaction.previous_registry_snapshot.file_identity is not None
+            else project_path,
+            "gml_included_file_registry.gd",
+        )
+        recovery_journal = _IncludedRecoveryJournal(
+            transaction_id=secrets.token_hex(16),
+            transaction=transaction,
+            root_backup_path=root_backup_path,
+            registry_backup_path=registry_backup_path,
+            registry_directory_path=registry_directory_path,
+            registry_directory_identity=registry_directory_identity,
+            registry_directory_created=registry_directory_created,
+        )
+        journal_identity = _publish_included_recovery_record(
+            project_path,
+            transaction.project_identity,
+            filename=_INCLUDED_FILES_JOURNAL_NAME,
+            temporary_prefix=_INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
+            payload=_included_recovery_journal_payload(recovery_journal),
+            staged_phase="journal-record-staged",
+        )
+        _after_included_transaction_phase("journal-prepared")
+        if not conversion_running():
+            raise _IncludedOutputSetCancelled()
 
         previous_root_identity = transaction.previous_root_snapshot.identity
         if previous_root_identity is not None:
@@ -3275,6 +7196,8 @@ def _commit_included_output_set(
                 source_parent_identity=transaction.project_identity,
                 destination_parent_identity=transaction.project_identity,
             )
+        _sync_included_directory(project_path, transaction.project_identity)
+        _after_included_transaction_phase("previous-root-backed-up")
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
 
@@ -3288,11 +7211,17 @@ def _commit_included_output_set(
             source_parent_identity=transaction.stage_container_identity,
             destination_parent_identity=transaction.project_identity,
         )
-        _verify_included_tree_snapshot(
+        _sync_included_directory(
+            transaction.stage_container_path,
+            transaction.stage_container_identity,
+        )
+        _sync_included_directory(project_path, transaction.project_identity)
+        _verify_included_tree_snapshot_metadata(
             final_root_path,
             transaction.staged_root_snapshot,
             expected_parent_identity=transaction.project_identity,
         )
+        _after_included_transaction_phase("new-root-published")
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
 
@@ -3300,10 +7229,6 @@ def _commit_included_output_set(
             transaction.previous_registry_snapshot.file_identity
         )
         if previous_registry_identity is not None:
-            registry_backup_path = _unique_included_transaction_path(
-                registry_directory_path,
-                "gml_included_file_registry.gd",
-            )
             _move_exact_included_file(
                 final_registry_path,
                 registry_backup_path,
@@ -3311,6 +7236,11 @@ def _commit_included_output_set(
                 source_parent_identity=registry_directory_identity,
                 destination_parent_identity=registry_directory_identity,
             )
+        _sync_included_directory(
+            registry_directory_path,
+            registry_directory_identity,
+        )
+        _after_included_transaction_phase("previous-registry-backed-up")
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
 
@@ -3320,6 +7250,14 @@ def _commit_included_output_set(
             transaction.staged_registry_identity,
             source_parent_identity=transaction.stage_container_identity,
             destination_parent_identity=registry_directory_identity,
+        )
+        _sync_included_directory(
+            transaction.stage_container_path,
+            transaction.stage_container_identity,
+        )
+        _sync_included_directory(
+            registry_directory_path,
+            registry_directory_identity,
         )
         published_registry_state = _included_regular_file_state(
             final_registry_path,
@@ -3334,15 +7272,75 @@ def _commit_included_output_set(
             or published_registry_state[2] != transaction.staged_registry_content
         ):
             raise OSError("Included File registry changed after publication")
+        _after_included_transaction_phase("new-registry-published")
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
+        _sync_included_tree_directories_bottom_up(
+            final_root_path,
+            transaction.staged_root_snapshot,
+            transaction.project_identity,
+        )
+        journal_identity = _verify_included_published_journal(
+            project_path,
+            transaction.project_identity,
+            recovery_journal,
+            journal_identity,
+        )
+        _verify_included_commit_marker_generation(
+            project_path,
+            _included_commit_marker_from_journal(recovery_journal),
+        )
         _verify_included_stage_container(
             project_path,
             transaction.project_identity,
             transaction.stage_container_path,
             transaction.stage_container_identity,
         )
+        commit_marker_identity = _publish_included_recovery_record(
+            project_path,
+            transaction.project_identity,
+            filename=_INCLUDED_FILES_COMMIT_NAME,
+            temporary_prefix=_INCLUDED_FILES_COMMIT_TEMP_PREFIX,
+            payload=_included_commit_marker_payload(recovery_journal),
+            staged_phase="commit-record-staged",
+        )
+        _after_included_transaction_phase("generation-committed")
+        commit_marker_identity = _verify_included_published_commit_marker(
+            project_path,
+            transaction.project_identity,
+            recovery_journal,
+            commit_marker_identity,
+            verify_generation=False,
+        )
     except BaseException as error:
+        if commit_marker_identity is None and recovery_journal is not None:
+            try:
+                stable_commit_record = _read_included_recovery_record(
+                    commit_path,
+                    transaction.project_identity,
+                )
+                if stable_commit_record is not None:
+                    commit_marker_identity = (
+                        _verify_included_published_commit_marker(
+                            project_path,
+                            transaction.project_identity,
+                            recovery_journal,
+                            None,
+                            verify_generation=False,
+                        )
+                    )
+            except Exception as marker_error:
+                error.add_note(
+                    "The Included Files commit path became ambiguous after "
+                    "publication; rollback was not attempted: " + str(marker_error)
+                )
+                raise error from marker_error
+        if commit_marker_identity is not None:
+            error.add_note(
+                "The new Included Files generation was durably committed; "
+                "the next conversion will finish cleanup"
+            )
+            raise
         rollback_errors = _rollback_included_output_set(
             transaction,
             root_backup_path=root_backup_path,
@@ -3351,6 +7349,55 @@ def _commit_included_output_set(
             registry_directory_identity=registry_directory_identity,
             registry_directory_created=registry_directory_created,
         )
+        if not rollback_errors:
+            try:
+                rollback_cleanup_warnings = _cleanup_recorded_included_tree(
+                    transaction.stage_container_path,
+                    transaction.staged_container_snapshot,
+                    transaction.project_identity,
+                    (
+                        recovery_journal.transaction_id
+                        if recovery_journal is not None
+                        else "unprepared-stage"
+                    ),
+                    "rollback-stage",
+                )
+                for cleanup_warning in rollback_cleanup_warnings:
+                    error.add_note(cleanup_warning)
+                _sync_included_directory(
+                    project_path,
+                    transaction.project_identity,
+                )
+                if (
+                    registry_directory_identity is not None
+                    and _included_directory_identity(registry_directory_path)
+                    == registry_directory_identity
+                ):
+                    _sync_included_directory(
+                        registry_directory_path,
+                        registry_directory_identity,
+                    )
+                stable_journal_record = _read_included_recovery_record(
+                    journal_path,
+                    transaction.project_identity,
+                )
+                if recovery_journal is not None and stable_journal_record is not None:
+                    journal_identity = _verify_included_published_journal(
+                        project_path,
+                        transaction.project_identity,
+                        recovery_journal,
+                        journal_identity,
+                    )
+                    _remove_included_recovery_record(
+                        journal_path,
+                        journal_identity,
+                        project_path,
+                        transaction.project_identity,
+                    )
+                    journal_identity = None
+                _after_included_transaction_phase("rollback-complete")
+            except Exception as cleanup_error:
+                rollback_errors = (cleanup_error,)
         if rollback_errors:
             error.add_note(
                 "Included Files rollback also failed: "
@@ -3358,28 +7405,49 @@ def _commit_included_output_set(
             )
         raise
 
-    cleanup_errors: list[str] = []
-    previous_root_identity = transaction.previous_root_snapshot.identity
-    if previous_root_identity is not None:
-        try:
-            _remove_owned_included_tree(
-                root_backup_path,
-                previous_root_identity,
-                expected_parent_identity=transaction.project_identity,
-            )
-        except OSError as error:
-            cleanup_errors.append(str(error))
-    previous_registry_identity = transaction.previous_registry_snapshot.file_identity
-    if previous_registry_identity is not None:
-        try:
-            _remove_owned_included_file(
-                registry_backup_path,
-                previous_registry_identity,
-                expected_parent_identity=registry_directory_identity,
-            )
-        except OSError as error:
-            cleanup_errors.append(str(error))
-    return tuple(cleanup_errors)
+    cleanup_errors, cleanup_warnings = _cleanup_committed_included_output_set(
+        recovery_journal,
+        verify_content=False,
+    )
+    if cleanup_errors:
+        return tuple(str(cleanup_error) for cleanup_error in cleanup_errors)
+
+    try:
+        commit_marker_identity = _verify_included_published_commit_marker(
+            project_path,
+            transaction.project_identity,
+            recovery_journal,
+            commit_marker_identity,
+            verify_generation=False,
+        )
+        _remove_included_recovery_record(
+            journal_path,
+            journal_identity,
+            project_path,
+            transaction.project_identity,
+        )
+        _after_included_transaction_phase("journal-removed")
+    except OSError as cleanup_error:
+        return (*cleanup_warnings, str(cleanup_error))
+
+    try:
+        commit_marker_identity = _verify_included_published_commit_marker(
+            project_path,
+            transaction.project_identity,
+            recovery_journal,
+            commit_marker_identity,
+            verify_generation=False,
+        )
+        _remove_included_recovery_record(
+            commit_path,
+            commit_marker_identity,
+            project_path,
+            transaction.project_identity,
+        )
+        _after_included_transaction_phase("commit-marker-removed")
+    except OSError as cleanup_error:
+        return (*cleanup_warnings, str(cleanup_error))
+    return cleanup_warnings
 
 
 def _included_output_components(
@@ -4973,15 +9041,31 @@ class IncludedFilesConverter(BaseConverter):
         emitted_logical_paths = {
             source.relative_path for source in all_files
         }
-        staged_registry_text = render_included_file_registry(
-            path_assignments,
-            emitted_logical_paths,
-        )
-        expected_registry_content = staged_registry_text.encode("utf-8")
 
         project_identity = _ensure_included_output_project_root(
             self.godot_project_path
         )
+        try:
+            project_lock = _acquire_included_project_lock(
+                self.godot_project_path,
+                project_identity,
+            )
+        except Exception:
+            for source in all_files:
+                self._resource_failed(source.relative_path)
+            raise
+        try:
+            recovery_message = _recover_included_output_set(
+                self.godot_project_path,
+                project_identity,
+            )
+            if recovery_message is not None:
+                self._safe_log("Recovered: " + recovery_message)
+        except Exception:
+            _release_included_project_lock(project_lock)
+            for source in all_files:
+                self._resource_failed(source.relative_path)
+            raise
         public_root_path = os.path.join(
             self.godot_project_path,
             _INCLUDED_FILES_ROOT_NAME,
@@ -4998,6 +9082,7 @@ class IncludedFilesConverter(BaseConverter):
                 expected_project_identity=project_identity,
             )
         except Exception as error:
+            _release_included_project_lock(project_lock)
             for source in all_files:
                 self._resource_failed(source.relative_path)
                 assignment = assignments_by_source[source.relative_path]
@@ -5015,7 +9100,22 @@ class IncludedFilesConverter(BaseConverter):
         stage_container_identity: _PathIdentity | None = None
         active_error: BaseException | None = None
         transaction_committed = False
+        transaction_cleanup_managed = False
         try:
+            previous_content_receipts = _included_registry_receipts_from_tree(
+                previous_root_snapshot,
+                assignments_by_source,
+                emitted_logical_paths,
+            )
+            expected_registry_content = (
+                b""
+                if previous_content_receipts is None
+                else render_included_file_registry(
+                    path_assignments,
+                    emitted_logical_paths,
+                    previous_content_receipts,
+                ).encode("utf-8")
+            )
             if self._unchanged_included_generation_matches(
                 tuple(all_files),
                 assignments_by_source,
@@ -5161,6 +9261,17 @@ class IncludedFilesConverter(BaseConverter):
                 assigned_receipts,
             )
 
+            staged_registry_text = render_included_file_registry(
+                path_assignments,
+                emitted_logical_paths,
+                {
+                    logical_path: (
+                        receipt.byte_count,
+                        receipt.sha256,
+                    )
+                    for logical_path, receipt in copy_receipts.items()
+                },
+            )
             staged_registry_path = os.path.join(
                 stage_container_path,
                 "gml_included_file_registry.gd",
@@ -5176,22 +9287,51 @@ class IncludedFilesConverter(BaseConverter):
             )
             if staged_registry_state is None:
                 raise OSError("Included File registry staging candidate disappeared")
-            staged_registry_identity, _staged_mode, staged_registry_content = (
+            if previous_registry_snapshot.file_mode is not None:
+                _chmod_exact_included_file(
+                    staged_registry_path,
+                    staged_registry_state[0],
+                    previous_registry_snapshot.file_mode,
+                    stage_container_identity,
+                )
+                staged_registry_state = _included_regular_file_state(
+                    staged_registry_path,
+                    expected_parent_identity=stage_container_identity,
+                    allowed_identities=frozenset({staged_registry_state[0]}),
+                )
+                if staged_registry_state is None:
+                    raise OSError(
+                        "Included File registry staging candidate disappeared"
+                    )
+            staged_registry_identity, staged_registry_mode, staged_registry_content = (
                 staged_registry_state
+            )
+            staged_container_snapshot = _included_stage_container_snapshot(
+                project_identity,
+                stage_container_path,
+                stage_container_identity,
+                staged_root_snapshot,
+                staged_registry_identity,
+                staged_registry_content,
             )
 
             transaction = _IncludedOutputSetTransaction(
                 project_identity=project_identity,
                 stage_container_path=stage_container_path,
                 stage_container_identity=stage_container_identity,
+                staged_container_snapshot=staged_container_snapshot,
                 staged_root_path=staged_root_path,
                 staged_root_snapshot=staged_root_snapshot,
                 staged_registry_path=staged_registry_path,
                 staged_registry_identity=staged_registry_identity,
+                staged_registry_mode=staged_registry_mode,
                 staged_registry_content=staged_registry_content,
                 previous_root_snapshot=previous_root_snapshot,
                 previous_registry_snapshot=previous_registry_snapshot,
             )
+            # From this handoff onward, only manifest-bound transaction
+            # cleanup may remove the stage, including after rollback.
+            transaction_cleanup_managed = True
             cleanup_warnings = _commit_included_output_set(
                 self.godot_project_path,
                 transaction,
@@ -5233,26 +9373,58 @@ class IncludedFilesConverter(BaseConverter):
             raise
         finally:
             self._active_output_project_path = None
-            if (
-                stage_container_path is not None
-                and stage_container_identity is not None
-            ):
-                try:
-                    _remove_owned_included_tree(
-                        stage_container_path,
-                        stage_container_identity,
-                        expected_parent_identity=project_identity,
+            try:
+                recovery_pending = os.path.lexists(
+                    os.path.join(
+                        self.godot_project_path,
+                        _INCLUDED_FILES_JOURNAL_NAME,
                     )
-                except OSError as cleanup_error:
+                )
+                if (
+                    not transaction_cleanup_managed
+                    and not recovery_pending
+                    and stage_container_path is not None
+                    and stage_container_identity is not None
+                ):
+                    try:
+                        _remove_owned_included_tree(
+                            stage_container_path,
+                            stage_container_identity,
+                            expected_parent_identity=project_identity,
+                        )
+                    except OSError as cleanup_error:
+                        if active_error is not None:
+                            active_error.add_note(
+                                "Included Files staging cleanup also failed: "
+                                + str(cleanup_error)
+                            )
+                        elif transaction_committed:
+                            self._safe_log(
+                                "Warning: Included Files staging cleanup failed: "
+                                + str(cleanup_error)
+                            )
+                elif recovery_pending:
+                    message = (
+                        "Included Files recovery state was retained; the next "
+                        "conversion will resume it"
+                    )
+                    if active_error is not None:
+                        active_error.add_note(message)
+                    else:
+                        self._safe_log("Warning: " + message)
+            finally:
+                try:
+                    _release_included_project_lock(project_lock)
+                except OSError as lock_error:
                     if active_error is not None:
                         active_error.add_note(
-                            "Included Files staging cleanup also failed: "
-                            + str(cleanup_error)
+                            "Included Files transaction lock release failed: "
+                            + str(lock_error)
                         )
-                    elif transaction_committed:
+                    else:
                         self._safe_log(
-                            "Warning: Included Files staging cleanup failed: "
-                            + str(cleanup_error)
+                            "Warning: Included Files transaction lock release failed: "
+                            + str(lock_error)
                         )
 
     def convert_all(self) -> None:

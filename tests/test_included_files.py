@@ -10,12 +10,13 @@ import sys
 import shutil
 import tempfile
 import threading
+import tracemalloc
 import unittest
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import BinaryIO, Callable
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -31,6 +32,49 @@ from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
+
+
+def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:
+    project_path = os.path.abspath(project_path)
+    persistent_lock_path = os.path.normcase(
+        os.path.join(
+            project_path,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+    )
+    debris: list[str] = []
+    for directory, subdirectories, filenames in os.walk(project_path):
+        for name in (*subdirectories, *filenames):
+            candidate_path = os.path.abspath(os.path.join(directory, name))
+            if os.path.normcase(candidate_path) == persistent_lock_path:
+                continue
+            if (
+                name == included_files_module._INCLUDED_FILES_LOCK_NAME
+                or name == included_files_module._INCLUDED_FILES_JOURNAL_NAME
+                or name == included_files_module._INCLUDED_FILES_COMMIT_NAME
+                or name == included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME
+                or name.startswith(
+                    included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                )
+                or name.startswith(
+                    included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                )
+                or name.startswith(
+                    included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                )
+                or name.startswith(".included_files.")
+                or name.startswith(".gml_included_file_registry.gd.")
+                or name.startswith(
+                    included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                )
+            ):
+                debris.append(
+                    os.path.relpath(candidate_path, project_path).replace(
+                        os.sep,
+                        "/",
+                    )
+                )
+    return tuple(sorted(debris))
 
 
 class TestIncludedFilesConverterBasic(unittest.TestCase):
@@ -312,6 +356,16 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.chmod(path, path_mode | stat.S_IWRITE)
         function(path)
 
+    @staticmethod
+    def _open_modeled_windows_validation_stream(
+        path: str,
+        *,
+        deny_writes: bool,
+        no_follow: bool = False,
+    ) -> BinaryIO:
+        del deny_writes, no_follow
+        return open(path, "rb")
+
     def _converter(self, *, max_workers: int = 2) -> IncludedFilesConverter:
         return IncludedFilesConverter(
             self.gm_dir,
@@ -330,6 +384,119 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(content)
+
+    def _assert_streaming_cleanup_path(self, *, force_fallback: bool) -> None:
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "fallback-streaming-cleanup"
+            if force_fallback
+            else "descriptor-streaming-cleanup",
+        )
+        os.mkdir(cleanup_directory)
+        owned_path = os.path.join(cleanup_directory, "owned.bin")
+        content = b"streaming cleanup payload\n" * (96 * 1024)
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(content)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+        streamed_bytes = 0
+        largest_chunk = 0
+        original_read = included_files_module._read_included_validation_chunk
+
+        def count_streamed_bytes(opened_file: BinaryIO) -> bytes:
+            nonlocal streamed_bytes, largest_chunk
+            chunk = original_read(opened_file)
+            streamed_bytes += len(chunk)
+            largest_chunk = max(largest_chunk, len(chunk))
+            return chunk
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=not force_fallback,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_validation_chunk",
+                side_effect=count_streamed_bytes,
+            ),
+            patch.object(
+                included_files_module,
+                "_included_regular_file_state",
+                side_effect=AssertionError(
+                    "cleanup used the whole-content file-state helper"
+                ),
+            ),
+            patch.object(
+                included_files_module,
+                "_rename_included_transaction_entry",
+                side_effect=os.rename,
+            ),
+            patch.object(
+                included_files_module,
+                "_sync_included_directory",
+            ),
+        ):
+            warnings = included_files_module._cleanup_recorded_included_file(
+                owned_path,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                hashlib.sha256(content).hexdigest(),
+                (parent_stat.st_dev, parent_stat.st_ino),
+                "e" * 32,
+                "streaming-cleanup",
+                "owned.bin",
+                expected_fingerprint=(
+                    included_files_module._included_path_fingerprint(
+                        owned_stat
+                    )
+                ),
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
+            )
+
+        self.assertEqual(warnings, ())
+        self.assertEqual(streamed_bytes, 2 * len(content))
+        self.assertLessEqual(largest_chunk, 1024 * 1024)
+        self.assertFalse(os.path.lexists(owned_path))
+
+    @staticmethod
+    def _recovery_cleanup_snapshot(
+        relative_path: str,
+    ) -> included_files_module._IncludedTreeSnapshot:
+        components = relative_path.split("/")
+        entries: list[included_files_module._IncludedTreeEntry] = []
+        for index in range(1, len(components)):
+            entries.append(
+                included_files_module._IncludedTreeEntry(
+                    relative_path="/".join(components[:index]),
+                    kind="directory",
+                    fingerprint=(
+                        11,
+                        200 + index,
+                        stat.S_IFDIR | 0o700,
+                        0,
+                        0,
+                        1,
+                    ),
+                    ctime_ns=None,
+                    content_sha256=None,
+                )
+            )
+        entries.append(
+            included_files_module._IncludedTreeEntry(
+                relative_path=relative_path,
+                kind="file",
+                fingerprint=(11, 401, stat.S_IFREG | 0o600, 0, 0, 1),
+                ctime_ns=0,
+                content_sha256=hashlib.sha256(b"").hexdigest(),
+            )
+        )
+        return included_files_module._IncludedTreeSnapshot(
+            root_fingerprint=(11, 21, stat.S_IFDIR | 0o700, 0, 0, 1),
+            entries=tuple(
+                sorted(entries, key=lambda entry: entry.relative_path)
+            ),
+        )
 
     def _make_native_windows_junction(
         self,
@@ -408,12 +575,24 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self._mark_native_windows_tree_read_only(
             transaction.staged_root_path
         )
+        staged_root_snapshot = included_files_module._capture_included_tree(
+            transaction.staged_root_path,
+            expected_parent_identity=transaction.stage_container_identity,
+        )
+        staged_container_snapshot = (
+            included_files_module._included_stage_container_snapshot(
+                transaction.project_identity,
+                transaction.stage_container_path,
+                transaction.stage_container_identity,
+                staged_root_snapshot,
+                transaction.staged_registry_identity,
+                transaction.staged_registry_content,
+            )
+        )
         return replace(
             transaction,
-            staged_root_snapshot=included_files_module._capture_included_tree(
-                transaction.staged_root_path,
-                expected_parent_identity=transaction.stage_container_identity,
-            ),
+            staged_container_snapshot=staged_container_snapshot,
+            staged_root_snapshot=staged_root_snapshot,
         )
 
     def _pair_snapshot(self) -> tuple[int, dict[str, bytes], int, bytes]:
@@ -441,26 +620,3532 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             registry_content,
         )
 
-    def _assert_no_transaction_debris(self) -> None:
-        project_debris = [
-            name
-            for name in os.listdir(self.godot_dir)
-            if name.startswith(".gm2godot-included-files-")
-            or name.startswith(".included_files.")
-        ]
-        registry_directory = os.path.join(self.godot_dir, "gm2godot")
-        registry_debris = (
-            [
-                name
-                for name in os.listdir(registry_directory)
-                if name.startswith(".gml_included_file_registry.gd.")
-                and name.endswith(".backup")
-            ]
-            if os.path.isdir(registry_directory)
-            else []
+    def _leave_committed_generation_recovery_records(self) -> None:
+        self._write("old.txt", "old generation")
+        self._converter(max_workers=1).convert_all()
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == "generation-committed":
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
         )
-        self.assertEqual(project_debris, [])
-        self.assertEqual(registry_debris, [])
+        interrupted = subprocess.run(
+            (
+                sys.executable,
+                "-c",
+                interruption_script,
+                self.gm_dir,
+                self.godot_dir,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+
+    def test_recovery_parsers_reject_ambiguous_json_types(
+        self,
+    ) -> None:
+        self._leave_committed_generation_recovery_records()
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        journal_record = included_files_module._read_included_recovery_record(
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            ),
+            project_identity,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            ),
+            project_identity,
+        )
+        if journal_record is None or commit_record is None:
+            self.fail("committed interruption did not preserve both records")
+        journal_payload = dict(journal_record[1])
+        commit_payload = dict(commit_record[1])
+        journal = included_files_module._included_recovery_journal_from_payload(
+            self.godot_dir,
+            project_identity,
+            journal_payload,
+        )
+        stage_identity = journal.transaction.stage_container_identity
+        stage_payload = {
+            "format_version": True,
+            "state": "staging",
+            "project_identity": list(project_identity),
+            "stage_identity": list(stage_identity),
+        }
+        journal_with_invalid_backup_location = dict(journal_payload)
+        journal_with_invalid_backup_location["registry_backup_location"] = []
+        tree_with_invalid_kind = {
+            "root_fingerprint": [
+                1,
+                2,
+                stat.S_IFDIR | 0o700,
+                0,
+                0,
+                1,
+            ],
+            "entries": [
+                {
+                    "relative_path": "payload.txt",
+                    "kind": [],
+                    "fingerprint": [
+                        1,
+                        3,
+                        stat.S_IFREG | 0o600,
+                        0,
+                        0,
+                        1,
+                    ],
+                    "ctime_ns": 0,
+                    "content_sha256": hashlib.sha256(b"").hexdigest(),
+                }
+            ],
+        }
+        journal_payload["format_version"] = True
+        commit_payload["format_version"] = True
+
+        cases: tuple[tuple[str, Callable[[], object], str], ...] = (
+            (
+                "journal",
+                lambda: included_files_module._included_recovery_journal_from_payload(
+                    self.godot_dir,
+                    project_identity,
+                    journal_payload,
+                ),
+                "journal format version",
+            ),
+            (
+                "commit-marker",
+                lambda: included_files_module._included_commit_marker_and_journal_from_payload(
+                    self.godot_dir,
+                    commit_payload,
+                    project_identity,
+                ),
+                "commit marker format version",
+            ),
+            (
+                "stage-marker",
+                lambda: included_files_module._included_stage_marker_matches(
+                    stage_payload,
+                    project_identity,
+                    stage_identity,
+                ),
+                "stage marker format version",
+            ),
+            (
+                "tree-kind",
+                lambda: included_files_module._included_tree_snapshot_from_payload(
+                    tree_with_invalid_kind,
+                    "test tree",
+                ),
+                "tree kind",
+            ),
+            (
+                "registry-backup-location",
+                lambda: included_files_module._included_recovery_journal_from_payload(
+                    self.godot_dir,
+                    project_identity,
+                    journal_with_invalid_backup_location,
+                ),
+                "registry recovery backup location",
+            ),
+        )
+        for label, parse, error_pattern in cases:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(OSError, error_pattern):
+                    parse()
+
+    def test_linux_mount_id_parser_and_boundary_reject_different_mount(
+        self,
+    ) -> None:
+        with open(
+            os.path.join(self.datafiles_dir, "test-mount-id"),
+            "wb",
+        ) as test_file:
+            test_file.write(b"mount id model")
+        opened_stat = os.lstat(os.path.join(self.datafiles_dir, "test-mount-id"))
+
+        with (
+            patch.object(included_files_module.sys, "platform", "linux"),
+            patch(
+                "builtins.open",
+                mock_open(read_data="pos:\t0\nflags:\t0100000\nmnt_id:\t41\n"),
+            ),
+        ):
+            self.assertEqual(
+                included_files_module._included_linux_mount_id_from_fd(123),
+                41,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_linux_mount_id_from_fd",
+                return_value=42,
+            ),
+            patch.object(included_files_module.os.path, "ismount", return_value=False),
+            self.assertRaisesRegex(OSError, "mount boundary"),
+        ):
+            included_files_module._verify_included_mount_boundary(
+                os.path.join(self.datafiles_dir, "test-mount-id"),
+                opened_stat,
+                opened_stat.st_dev,
+                41,
+                123,
+            )
+
+    def test_descriptor_tree_capture_closes_parent_when_mount_check_fails(
+        self,
+    ) -> None:
+        if not included_files_module._included_descriptor_paths_supported():
+            self.skipTest("Descriptor-pinned tree capture is unavailable")
+        root_path = os.path.join(self.godot_dir, "fd-cleanup-root")
+        os.mkdir(root_path)
+        original_open_parent = (
+            included_files_module._open_pinned_included_parent
+        )
+        opened_parent_fd = -1
+
+        def observe_parent_open(path: str) -> tuple[int, str]:
+            nonlocal opened_parent_fd
+            opened_parent_fd, name = original_open_parent(path)
+            return opened_parent_fd, name
+
+        with (
+            patch.object(
+                included_files_module,
+                "_open_pinned_included_parent",
+                side_effect=observe_parent_open,
+            ),
+            patch.object(
+                included_files_module,
+                "_included_linux_mount_id_from_fd",
+                side_effect=OSError("injected mount inspection failure"),
+            ),
+            self.assertRaisesRegex(OSError, "mount inspection failure"),
+        ):
+            included_files_module._capture_included_tree(root_path)
+
+        self.assertGreaterEqual(opened_parent_fd, 0)
+        with self.assertRaises(OSError):
+            os.fstat(opened_parent_fd)
+
+    def test_fallback_tree_capture_rejects_modeled_mountpoint(self) -> None:
+        root_path = os.path.join(self.godot_dir, "included_files")
+        mounted_path = os.path.join(root_path, "mounted")
+        sentinel_path = os.path.join(mounted_path, "external-sentinel.txt")
+        os.makedirs(mounted_path)
+        with open(sentinel_path, "wb") as sentinel_file:
+            sentinel_file.write(b"external mount sentinel")
+        project_stat = os.lstat(self.godot_dir)
+        mounted_normalized = os.path.normcase(os.path.abspath(mounted_path))
+
+        def modeled_mountpoint(path: str) -> bool:
+            return os.path.normcase(os.path.abspath(path)) == mounted_normalized
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(
+                included_files_module.os.path,
+                "ismount",
+                side_effect=modeled_mountpoint,
+            ),
+            self.assertRaisesRegex(OSError, "mount boundary"),
+        ):
+            included_files_module._capture_included_tree(
+                root_path,
+                expected_parent_identity=(
+                    project_stat.st_dev,
+                    project_stat.st_ino,
+                ),
+            )
+
+        with open(sentinel_path, "rb") as sentinel_file:
+            self.assertEqual(sentinel_file.read(), b"external mount sentinel")
+
+    def test_recovery_tree_parser_rejects_cross_device_entry(self) -> None:
+        root_path = os.path.join(self.godot_dir, "included_files")
+        os.makedirs(root_path)
+        with open(os.path.join(root_path, "payload.txt"), "wb") as payload_file:
+            payload_file.write(b"payload")
+        snapshot = included_files_module._capture_included_tree(root_path)
+        payload = included_files_module._included_tree_snapshot_payload(snapshot)
+        entries = payload["entries"]
+        self.assertIsInstance(entries, list)
+        first_entry = entries[0]
+        self.assertIsInstance(first_entry, dict)
+        fingerprint = first_entry["fingerprint"]
+        self.assertIsInstance(fingerprint, list)
+        root_fingerprint = snapshot.root_fingerprint
+        if root_fingerprint is None:
+            self.fail("captured recovery test tree unexpectedly disappeared")
+        fingerprint[0] = root_fingerprint[0] + 1
+
+        with self.assertRaisesRegex(OSError, "cross-device"):
+            included_files_module._included_tree_snapshot_from_payload(
+                payload,
+                "modeled cross-device tree",
+            )
+
+    def test_cleanup_preserves_tree_when_nested_mount_appears(self) -> None:
+        root_path = os.path.join(self.godot_dir, "cleanup-root")
+        mounted_path = os.path.join(root_path, "mounted")
+        sentinel_path = os.path.join(mounted_path, "external-sentinel.txt")
+        os.makedirs(mounted_path)
+        with open(sentinel_path, "wb") as sentinel_file:
+            sentinel_file.write(b"late mount sentinel")
+        project_stat = os.lstat(self.godot_dir)
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=(project_stat.st_dev, project_stat.st_ino),
+        )
+        mounted_normalized = os.path.normcase(os.path.abspath(mounted_path))
+
+        def modeled_mountpoint(path: str) -> bool:
+            return os.path.normcase(os.path.abspath(path)) == mounted_normalized
+
+        with patch.object(
+            included_files_module.os.path,
+            "ismount",
+            side_effect=modeled_mountpoint,
+        ):
+            warnings = included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                (project_stat.st_dev, project_stat.st_ino),
+                "a" * 32,
+                "late-mount",
+            )
+
+        self.assertTrue(any("mounted" in warning for warning in warnings))
+        with open(sentinel_path, "rb") as sentinel_file:
+            self.assertEqual(sentinel_file.read(), b"late mount sentinel")
+        self.assertTrue(os.path.isdir(root_path))
+
+    def test_owned_tree_cleanup_preserves_modeled_nested_mount(self) -> None:
+        variants = [("fallback", False)]
+        if (
+            included_files_module._included_descriptor_paths_supported()
+            and included_files_module._included_native_noreplace_available()
+        ):
+            variants.append(("descriptor", True))
+
+        for label, descriptor_paths_supported in variants:
+            with self.subTest(cleanup_path=label):
+                root_name = f"owned-cleanup-{label}"
+                root_path = os.path.join(self.godot_dir, root_name)
+                mounted_path = os.path.join(root_path, "mounted")
+                sentinel_name = f"external-sentinel-{label}.txt"
+                sentinel_path = os.path.join(mounted_path, sentinel_name)
+                os.makedirs(mounted_path)
+                with open(sentinel_path, "wb") as sentinel_file:
+                    sentinel_file.write(b"legacy cleanup mount sentinel")
+                root_stat = os.lstat(root_path)
+                project_stat = os.lstat(self.godot_dir)
+
+                def modeled_mountpoint(path: str) -> bool:
+                    return os.path.basename(os.path.normpath(path)) == "mounted"
+
+                with (
+                    patch.object(
+                        included_files_module,
+                        "_included_descriptor_paths_supported",
+                        return_value=descriptor_paths_supported,
+                    ),
+                    patch.object(
+                        included_files_module.os,
+                        "name",
+                        os.name if descriptor_paths_supported else "nt",
+                    ),
+                    patch.object(
+                        included_files_module.os.path,
+                        "ismount",
+                        side_effect=modeled_mountpoint,
+                    ),
+                    self.assertRaisesRegex(OSError, "mount boundary"),
+                ):
+                    included_files_module._remove_owned_included_tree(
+                        root_path,
+                        (root_stat.st_dev, root_stat.st_ino),
+                        expected_parent_identity=(
+                            project_stat.st_dev,
+                            project_stat.st_ino,
+                        ),
+                    )
+
+                retained_sentinel_paths = [
+                    os.path.join(
+                        self.godot_dir,
+                        candidate_name,
+                        "mounted",
+                        sentinel_name,
+                    )
+                    for candidate_name in os.listdir(self.godot_dir)
+                    if os.path.isfile(
+                        os.path.join(
+                            self.godot_dir,
+                            candidate_name,
+                            "mounted",
+                            sentinel_name,
+                        )
+                    )
+                ]
+                self.assertEqual(len(retained_sentinel_paths), 1)
+                with open(
+                    retained_sentinel_paths[0],
+                    "rb",
+                ) as retained_sentinel:
+                    self.assertEqual(
+                        retained_sentinel.read(),
+                        b"legacy cleanup mount sentinel",
+                    )
+
+    def test_native_linux_same_device_bind_mount_is_rejected(self) -> None:
+        if not sys.platform.startswith("linux"):
+            self.skipTest("Native Linux bind mounts are unavailable")
+        if not included_files_module._included_descriptor_paths_supported():
+            self.skipTest("Descriptor-pinned Included Files paths are unavailable")
+        mount_tool = shutil.which("mount")
+        umount_tool = shutil.which("umount")
+        if mount_tool is None or umount_tool is None:
+            self.skipTest("mount/umount are unavailable")
+
+        workspace = tempfile.mkdtemp(prefix="gm2godot-bind-mount-")
+        project_path = os.path.join(workspace, "project")
+        root_path = os.path.join(project_path, "included_files")
+        mounted_path = os.path.join(root_path, "mounted")
+        external_path = os.path.join(workspace, "external")
+        sentinel_path = os.path.join(external_path, "external-sentinel.txt")
+        os.makedirs(mounted_path)
+        os.makedirs(external_path)
+        with open(sentinel_path, "wb") as sentinel_file:
+            sentinel_file.write(b"native bind mount sentinel")
+        mounted = False
+        try:
+            mount_result = subprocess.run(
+                (mount_tool, "--bind", external_path, mounted_path),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if mount_result.returncode != 0:
+                self.skipTest(
+                    "bind mount permission unavailable: "
+                    + (mount_result.stderr.strip() or mount_result.stdout.strip())
+                )
+            mounted = True
+            self.assertEqual(
+                os.lstat(project_path).st_dev,
+                os.lstat(external_path).st_dev,
+            )
+            project_stat = os.lstat(project_path)
+            with (
+                patch.object(
+                    included_files_module.os.path,
+                    "ismount",
+                    return_value=False,
+                ),
+                self.assertRaisesRegex(OSError, "mount boundary"),
+            ):
+                included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=(
+                        project_stat.st_dev,
+                        project_stat.st_ino,
+                    ),
+                )
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"native bind mount sentinel",
+                )
+        finally:
+            if mounted:
+                unmount_result = subprocess.run(
+                    (umount_tool, mounted_path),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if unmount_result.returncode != 0:
+                    unmount_result = subprocess.run(
+                        (umount_tool, "-l", mounted_path),
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                if unmount_result.returncode != 0:
+                    raise RuntimeError(
+                        "Could not unmount native bind-mount test path; retained "
+                        + workspace
+                    )
+                mounted = False
+            if not mounted:
+                shutil.rmtree(workspace)
+
+    def _assert_no_transaction_debris(self) -> None:
+        self.assertEqual(
+            _included_files_transaction_debris(self.godot_dir),
+            (),
+        )
+
+    def test_transaction_debris_helper_detects_every_artifact_family(
+        self,
+    ) -> None:
+        token = "a" * 16
+        cleanup_digest = "b" * 64
+        registry_backup_name = (
+            ".gml_included_file_registry.gd." + token + ".backup"
+        )
+        cases = (
+            (
+                "journal",
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                False,
+            ),
+            (
+                "commit-marker",
+                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                False,
+            ),
+            (
+                "stage-marker",
+                included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+                False,
+            ),
+            (
+                "journal-temporary",
+                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                + token
+                + ".tmp",
+                False,
+            ),
+            (
+                "commit-temporary",
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                + token
+                + ".tmp",
+                False,
+            ),
+            (
+                "lock-initialization-temporary",
+                included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                + token
+                + ".tmp",
+                False,
+            ),
+            (
+                "lock-cleanup-tombstone",
+                included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                + token
+                + ".tmp",
+                False,
+            ),
+            (
+                "stage",
+                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                + token
+                + ".stage",
+                True,
+            ),
+            ("root-backup", ".included_files." + token + ".backup", True),
+            ("project-registry-backup", registry_backup_name, False),
+            (
+                "nested-registry-backup",
+                os.path.join("gm2godot", registry_backup_name),
+                False,
+            ),
+            (
+                "cleanup-file-tombstone",
+                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                + cleanup_digest
+                + ".file",
+                False,
+            ),
+            (
+                "cleanup-directory-tombstone",
+                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                + cleanup_digest
+                + ".dir",
+                True,
+            ),
+            (
+                "nested-lock-collision",
+                os.path.join(
+                    "gm2godot",
+                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                ),
+                False,
+            ),
+        )
+
+        for label, relative_path, is_directory in cases:
+            with (
+                self.subTest(artifact=label),
+                tempfile.TemporaryDirectory() as project_path,
+            ):
+                lock_path = os.path.join(
+                    project_path,
+                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                )
+                with open(lock_path, "wb") as lock_file:
+                    lock_file.write(
+                        included_files_module._INCLUDED_FILES_LOCK_CONTENT
+                    )
+                self.assertEqual(
+                    _included_files_transaction_debris(project_path),
+                    (),
+                )
+
+                artifact_path = os.path.join(project_path, relative_path)
+                if is_directory:
+                    os.makedirs(artifact_path)
+                else:
+                    os.makedirs(os.path.dirname(artifact_path), exist_ok=True)
+                    with open(artifact_path, "wb") as artifact_file:
+                        artifact_file.write(b"transaction artifact\n")
+
+                self.assertEqual(
+                    _included_files_transaction_debris(project_path),
+                    (relative_path.replace(os.sep, "/"),),
+                )
+
+    def _run_interrupted_conversion(
+        self,
+        phase: str,
+    ) -> subprocess.CompletedProcess[str]:
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path, requested_phase = sys.argv[1:]
+
+def stop_after_phase(current_phase: str) -> None:
+    if current_phase == requested_phase:
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+        return subprocess.run(
+            (
+                sys.executable,
+                "-c",
+                interruption_script,
+                self.gm_dir,
+                self.godot_dir,
+                phase,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+
+    def test_project_lock_rejects_concurrent_included_files_transaction(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        with patch.object(
+            included_files_module.tempfile,
+            "gettempdir",
+            side_effect=AssertionError(
+                "the Included Files lock must not depend on a temp directory"
+            ),
+        ):
+            first_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            self.assertEqual(first_lock.path, lock_path)
+            first_identity = (
+                os.lstat(lock_path).st_dev,
+                os.lstat(lock_path).st_ino,
+            )
+            try:
+                with self.assertRaisesRegex(
+                    OSError,
+                    "already publishing or recovering",
+                ):
+                    included_files_module._acquire_included_project_lock(
+                        self.godot_dir,
+                        project_identity,
+                    )
+            finally:
+                included_files_module._release_included_project_lock(first_lock)
+
+            with open(lock_path, "rb") as lock_file:
+                self.assertEqual(
+                    lock_file.read(),
+                    included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                )
+            self.assertEqual(
+                (os.lstat(lock_path).st_dev, os.lstat(lock_path).st_ino),
+                first_identity,
+            )
+
+            second_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            self.assertEqual(second_lock.path, lock_path)
+            included_files_module._release_included_project_lock(second_lock)
+
+        with open(lock_path, "rb") as lock_file:
+            self.assertEqual(
+                lock_file.read(),
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+            )
+        self.assertEqual(
+            (os.lstat(lock_path).st_dev, os.lstat(lock_path).st_ino),
+            first_identity,
+        )
+
+    def test_project_lock_rejects_ambiguous_existing_content_without_mutation(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        lock_content = included_files_module._INCLUDED_FILES_LOCK_CONTENT
+        cases = {
+            "empty": b"",
+            "partial-prefix": lock_content[: len(lock_content) // 2],
+            "unrelated": b"user-owned lock collision\n",
+        }
+
+        for label, existing_content in cases.items():
+            with self.subTest(content=label):
+                with open(lock_path, "wb") as lock_file:
+                    lock_file.write(existing_content)
+                original_stat = os.lstat(lock_path)
+                original_identity = (original_stat.st_dev, original_stat.st_ino)
+
+                with self.assertRaisesRegex(
+                    OSError,
+                    "unknown or incomplete file",
+                ):
+                    included_files_module._acquire_included_project_lock(
+                        self.godot_dir,
+                        project_identity,
+                    )
+
+                current_stat = os.lstat(lock_path)
+                self.assertEqual(
+                    (current_stat.st_dev, current_stat.st_ino),
+                    original_identity,
+                )
+                with open(lock_path, "rb") as lock_file:
+                    self.assertEqual(lock_file.read(), existing_content)
+                os.unlink(lock_path)
+
+    def test_modeled_windows_lock_contends_before_reading_locked_byte(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(included_files_module._INCLUDED_FILES_LOCK_CONTENT)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_locking",
+                side_effect=PermissionError("locked byte"),
+            ) as locking,
+            patch.object(
+                included_files_module.os,
+                "read",
+                side_effect=AssertionError("locked byte was read before contention"),
+            ) as read,
+            self.assertRaisesRegex(OSError, "already publishing or recovering"),
+        ):
+            included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+
+        locking.assert_called_once()
+        self.assertEqual(locking.call_args.args[1], 2)
+        read.assert_not_called()
+
+    def test_modeled_windows_unknown_lock_is_unlocked_after_validation(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        lock_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        existing_content = b"user-owned lock collision\n"
+        with open(lock_path, "wb") as lock_file:
+            lock_file.write(existing_content)
+        locking_modes: list[int] = []
+
+        def record_locking(_file_descriptor: int, mode: int) -> None:
+            locking_modes.append(mode)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_locking",
+                side_effect=record_locking,
+            ),
+            self.assertRaisesRegex(OSError, "unknown or incomplete file"),
+        ):
+            included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+
+        self.assertEqual(locking_modes, [2, 0])
+        with open(lock_path, "rb") as lock_file:
+            self.assertEqual(lock_file.read(), existing_content)
+
+    def test_fallback_stage_name_matches_recovery_grammar(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module, "_sync_included_directory"),
+        ):
+            stage_path, _stage_identity = (
+                included_files_module._create_included_output_stage(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        stage_name = os.path.basename(stage_path)
+        self.assertEqual(
+            included_files_module._included_recovery_managed_name(
+                stage_name,
+                prefix=included_files_module._INCLUDED_FILES_STAGE_PREFIX,
+                suffix=".stage",
+                label="stage container",
+            ),
+            stage_name,
+        )
+
+    def test_fallback_stage_allocation_preserves_colliding_file(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        first_token = "a" * 16
+        second_token = "b" * 16
+        colliding_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + first_token
+            + ".stage",
+        )
+        colliding_content = b"user-owned stage collision\n"
+        with open(colliding_path, "wb") as colliding_file:
+            colliding_file.write(colliding_content)
+        colliding_stat = os.lstat(colliding_path)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(
+                included_files_module.secrets,
+                "token_hex",
+                side_effect=[first_token, second_token],
+            ) as token_hex,
+        ):
+            stage_path, _stage_identity = (
+                included_files_module._create_included_output_stage(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        self.assertEqual(
+            os.path.basename(stage_path),
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + second_token
+            + ".stage",
+        )
+        self.assertEqual(token_hex.call_count, 2)
+        current_colliding_stat = os.lstat(colliding_path)
+        self.assertEqual(
+            (current_colliding_stat.st_dev, current_colliding_stat.st_ino),
+            (colliding_stat.st_dev, colliding_stat.st_ino),
+        )
+        with open(colliding_path, "rb") as colliding_file:
+            self.assertEqual(colliding_file.read(), colliding_content)
+
+    def test_fallback_stage_allocation_exhaustion_preserves_collision(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        colliding_token = "c" * 16
+        colliding_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + colliding_token
+            + ".stage",
+        )
+        colliding_content = b"persistent user-owned stage collision\n"
+        with open(colliding_path, "wb") as colliding_file:
+            colliding_file.write(colliding_content)
+        colliding_stat = os.lstat(colliding_path)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(
+                included_files_module.secrets,
+                "token_hex",
+                return_value=colliding_token,
+            ) as token_hex,
+            self.assertRaisesRegex(
+                OSError,
+                "Could not allocate Included Files staging directory",
+            ),
+        ):
+            included_files_module._create_included_output_stage(
+                self.godot_dir,
+                project_identity,
+            )
+
+        self.assertEqual(token_hex.call_count, 100)
+        current_colliding_stat = os.lstat(colliding_path)
+        self.assertEqual(
+            (current_colliding_stat.st_dev, current_colliding_stat.st_ino),
+            (colliding_stat.st_dev, colliding_stat.st_ino),
+        )
+        with open(colliding_path, "rb") as colliding_file:
+            self.assertEqual(colliding_file.read(), colliding_content)
+
+    def test_project_lock_initialization_recovers_after_hard_exit(self) -> None:
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+
+project_path, requested_phase = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == requested_phase:
+        os._exit(86)
+
+included_files_module._after_included_lock_initialization_phase = stop_after_phase
+project_identity = included_files_module._ensure_included_output_project_root(
+    project_path
+)
+included_files_module._acquire_included_project_lock(
+    project_path,
+    project_identity,
+)
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+        partial_phases = {
+            "temporary-created": b"",
+            "temporary-partially-written": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT[
+                    : len(included_files_module._INCLUDED_FILES_LOCK_CONTENT) // 2
+                ]
+            ),
+        }
+        phases = (
+            *partial_phases,
+            "temporary-written",
+            "temporary-synced",
+            "temporary-published",
+        )
+
+        for phase in phases:
+            with self.subTest(phase=phase):
+                project_path = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, project_path)
+                interrupted = subprocess.run(
+                    (
+                        sys.executable,
+                        "-c",
+                        interruption_script,
+                        project_path,
+                        phase,
+                    ),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=environment,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+                lock_path = os.path.join(
+                    project_path,
+                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                )
+                temporary_paths = [
+                    os.path.join(project_path, name)
+                    for name in os.listdir(project_path)
+                    if name.startswith(
+                        included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                    )
+                    and name.endswith(".tmp")
+                ]
+                if phase == "temporary-published":
+                    self.assertEqual(temporary_paths, [])
+                    self.assertTrue(os.path.isfile(lock_path))
+                else:
+                    self.assertEqual(len(temporary_paths), 1)
+                    self.assertFalse(os.path.lexists(lock_path))
+                if phase in {"temporary-written", "temporary-synced"}:
+                    self.assertEqual(
+                        os.lstat(temporary_paths[0]).st_size,
+                        len(included_files_module._INCLUDED_FILES_LOCK_CONTENT),
+                    )
+                    with open(temporary_paths[0], "rb") as temporary_file:
+                        self.assertEqual(
+                            temporary_file.read(),
+                            included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                        )
+
+                project_identity = (
+                    included_files_module._ensure_included_output_project_root(
+                        project_path
+                    )
+                )
+                project_lock = included_files_module._acquire_included_project_lock(
+                    project_path,
+                    project_identity,
+                )
+                included_files_module._release_included_project_lock(project_lock)
+
+                with open(lock_path, "rb") as lock_file:
+                    self.assertEqual(
+                        lock_file.read(),
+                        included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                    )
+                remaining_temporaries = [
+                    path for path in temporary_paths if os.path.lexists(path)
+                ]
+                if phase in partial_phases:
+                    self.assertEqual(remaining_temporaries, temporary_paths)
+                    with open(remaining_temporaries[0], "rb") as temporary_file:
+                        self.assertEqual(temporary_file.read(), partial_phases[phase])
+                else:
+                    self.assertEqual(remaining_temporaries, [])
+                self.assertFalse(
+                    any(
+                        name.startswith(
+                            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                        )
+                        for name in os.listdir(project_path)
+                    )
+                )
+
+    def test_project_lock_cleanup_tombstone_recovers_after_hard_exit(self) -> None:
+        project_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, project_path)
+        token = "d" * 16
+        temporary_path = os.path.join(
+            project_path,
+            included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+            + token
+            + ".tmp",
+        )
+        tombstone_path = os.path.join(
+            project_path,
+            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+            + token
+            + ".tmp",
+        )
+        with open(temporary_path, "wb") as temporary_file:
+            temporary_file.write(included_files_module._INCLUDED_FILES_LOCK_CONTENT)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+
+project_path = sys.argv[1]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == "temporary-cleanup-quarantined":
+        os._exit(86)
+
+included_files_module._after_included_lock_initialization_phase = stop_after_phase
+project_identity = included_files_module._ensure_included_output_project_root(
+    project_path
+)
+included_files_module._acquire_included_project_lock(
+    project_path,
+    project_identity,
+)
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+        interrupted = subprocess.run(
+            (sys.executable, "-c", interruption_script, project_path),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        self.assertFalse(os.path.lexists(temporary_path))
+        with open(tombstone_path, "rb") as tombstone_file:
+            self.assertEqual(
+                tombstone_file.read(),
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+            )
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(project_path)
+        )
+        project_lock = included_files_module._acquire_included_project_lock(
+            project_path,
+            project_identity,
+        )
+        included_files_module._release_included_project_lock(project_lock)
+        self.assertFalse(os.path.lexists(tombstone_path))
+        self.assertEqual(_included_files_transaction_debris(project_path), ())
+
+    def test_project_lock_concurrent_initializers_publish_once(self) -> None:
+        project_path = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, project_path)
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(project_path)
+        )
+        initialization_barrier = threading.Barrier(2)
+        losing_initializer_finished = threading.Event()
+        results: list[str] = []
+        results_lock = threading.Lock()
+
+        def wait_for_both_initializers(phase: str) -> None:
+            if phase == "temporary-synced":
+                initialization_barrier.wait(timeout=10)
+
+        def acquire() -> None:
+            try:
+                project_lock = included_files_module._acquire_included_project_lock(
+                    project_path,
+                    project_identity,
+                )
+            except OSError as error:
+                with results_lock:
+                    results.append(str(error))
+                losing_initializer_finished.set()
+                return
+            with results_lock:
+                results.append("acquired")
+            try:
+                losing_initializer_finished.wait(timeout=10)
+            finally:
+                included_files_module._release_included_project_lock(project_lock)
+
+        with patch.object(
+            included_files_module,
+            "_after_included_lock_initialization_phase",
+            side_effect=wait_for_both_initializers,
+        ):
+            workers = [threading.Thread(target=acquire) for _index in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=15)
+            self.assertTrue(all(not worker.is_alive() for worker in workers))
+
+        self.assertEqual(results.count("acquired"), 1)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(
+            any("already publishing or recovering" in result for result in results)
+        )
+        lock_path = os.path.join(
+            project_path,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        with open(lock_path, "rb") as lock_file:
+            self.assertEqual(
+                lock_file.read(),
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+            )
+        self.assertEqual(_included_files_transaction_debris(project_path), ())
+        next_lock = included_files_module._acquire_included_project_lock(
+            project_path,
+            project_identity,
+        )
+        included_files_module._release_included_project_lock(next_lock)
+
+    def test_project_lock_cleans_only_canonical_complete_temporaries(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        prefix = included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+        cleanup_prefix = (
+            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+        )
+        candidates = {
+            prefix + "a" * 16 + ".tmp": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                False,
+            ),
+            prefix + "b" * 16 + ".tmp": (b"partial lock bytes", True),
+            prefix + "c" * 15 + ".tmp": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                True,
+            ),
+            prefix + "e" * 16 + ".tmp": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                True,
+            ),
+            cleanup_prefix + "e" * 16 + ".tmp": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                True,
+            ),
+            cleanup_prefix + "f" * 16 + ".tmp": (
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                False,
+            ),
+        }
+        original_identities: dict[str, tuple[int, int]] = {}
+        for name, (content, _preserved) in candidates.items():
+            path = os.path.join(self.godot_dir, name)
+            with open(path, "wb") as temporary_file:
+                temporary_file.write(content)
+            path_stat = os.lstat(path)
+            original_identities[name] = (path_stat.st_dev, path_stat.st_ino)
+
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        included_files_module._release_included_project_lock(project_lock)
+
+        for name, (content, preserved) in candidates.items():
+            with self.subTest(name=name):
+                path = os.path.join(self.godot_dir, name)
+                self.assertEqual(os.path.lexists(path), preserved)
+                if not preserved:
+                    continue
+                path_stat = os.lstat(path)
+                self.assertEqual(
+                    (path_stat.st_dev, path_stat.st_ino),
+                    original_identities[name],
+                )
+                with open(path, "rb") as temporary_file:
+                    self.assertEqual(temporary_file.read(), content)
+
+    def test_project_lock_preserves_oversized_temp_and_tombstone_unread(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        candidate_paths = (
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                + "d" * 16
+                + ".tmp",
+            ),
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                + "e" * 16
+                + ".tmp",
+            ),
+        )
+        oversized_byte_count = (
+            len(included_files_module._INCLUDED_FILES_LOCK_CONTENT) + 1
+        )
+        original_identities: dict[str, tuple[int, int]] = {}
+        for candidate_path in candidate_paths:
+            with open(candidate_path, "wb") as candidate_file:
+                candidate_file.truncate(oversized_byte_count)
+            candidate_stat = os.lstat(candidate_path)
+            original_identities[candidate_path] = (
+                candidate_stat.st_dev,
+                candidate_stat.st_ino,
+            )
+
+        with patch.object(
+            included_files_module,
+            "_read_included_lock_initialization_payload",
+            side_effect=AssertionError(
+                "oversized lock initialization payload was read"
+            ),
+        ) as payload_read:
+            included_files_module._cleanup_included_lock_initialization_temporaries(
+                self.godot_dir,
+                project_identity,
+            )
+
+        payload_read.assert_not_called()
+        for candidate_path in candidate_paths:
+            with self.subTest(candidate_path=candidate_path):
+                candidate_stat = os.lstat(candidate_path)
+                self.assertEqual(
+                    (candidate_stat.st_dev, candidate_stat.st_ino),
+                    original_identities[candidate_path],
+                )
+                self.assertEqual(
+                    candidate_stat.st_size,
+                    oversized_byte_count,
+                )
+
+    def test_unknown_recovery_record_is_preserved_and_rejected(self) -> None:
+        journal_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+        )
+        unknown_content = b"user-owned recovery collision\n"
+        with open(journal_path, "wb") as journal_file:
+            journal_file.write(unknown_content)
+
+        self._write("payload.txt", "payload")
+        with self.assertRaisesRegex(
+            OSError,
+            "Invalid Included Files recovery record",
+        ):
+            self._converter(max_workers=1).convert_all()
+
+        with open(journal_path, "rb") as journal_file:
+            self.assertEqual(journal_file.read(), unknown_content)
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.godot_dir, "included_files"))
+        )
+        os.unlink(journal_path)
+
+    def test_oversized_stable_recovery_records_are_not_read_or_removed(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        for record_name in (
+            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        ):
+            with self.subTest(record_name=record_name):
+                record_path = os.path.join(self.godot_dir, record_name)
+                with open(record_path, "wb") as record_file:
+                    record_file.truncate(65)
+                original_stat = os.lstat(record_path)
+                with (
+                    patch.object(
+                        included_files_module,
+                        "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                        64,
+                    ),
+                    patch.object(
+                        included_files_module,
+                        "_read_included_recovery_record_payload",
+                        side_effect=AssertionError(
+                            "oversized recovery payload was read"
+                        ),
+                    ) as payload_read,
+                    self.assertRaisesRegex(OSError, "canonical size limit"),
+                ):
+                    included_files_module._recover_included_output_set(
+                        self.godot_dir,
+                        project_identity,
+                    )
+                payload_read.assert_not_called()
+                current_stat = os.lstat(record_path)
+                self.assertEqual(
+                    (current_stat.st_dev, current_stat.st_ino),
+                    (original_stat.st_dev, original_stat.st_ino),
+                )
+                self.assertEqual(current_stat.st_size, 65)
+                os.unlink(record_path)
+
+    def test_oversized_canonical_recovery_temporaries_are_preserved_unread(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        temporary_paths = (
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                + "a" * 16
+                + ".tmp",
+            ),
+            os.path.join(
+                self.godot_dir,
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                + "b" * 16
+                + ".tmp",
+            ),
+        )
+        original_identities: dict[str, tuple[int, int]] = {}
+        for temporary_path in temporary_paths:
+            with open(temporary_path, "wb") as temporary_file:
+                temporary_file.truncate(65)
+            temporary_stat = os.lstat(temporary_path)
+            original_identities[temporary_path] = (
+                temporary_stat.st_dev,
+                temporary_stat.st_ino,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                64,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_recovery_record_payload",
+                side_effect=AssertionError(
+                    "oversized recovery payload was read"
+                ),
+            ) as payload_read,
+        ):
+            cleaned, warnings = (
+                included_files_module._cleanup_orphan_included_recovery_state(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        self.assertEqual(cleaned, 0)
+        payload_read.assert_not_called()
+        for temporary_path in temporary_paths:
+            with self.subTest(temporary_path=temporary_path):
+                self.assertTrue(
+                    any(temporary_path in warning for warning in warnings)
+                )
+                temporary_stat = os.lstat(temporary_path)
+                self.assertEqual(
+                    (temporary_stat.st_dev, temporary_stat.st_ino),
+                    original_identities[temporary_path],
+                )
+                self.assertEqual(temporary_stat.st_size, 65)
+
+    def test_oversized_recovery_tombstone_is_preserved_unread(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+            os.path.join(self.godot_dir, "temporary-record"),
+            "c" * 32,
+            "journal-temporary-record",
+            "journal",
+            expect_directory=False,
+        )
+        with open(tombstone_path, "wb") as tombstone_file:
+            tombstone_file.truncate(65)
+        original_stat = os.lstat(tombstone_path)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                64,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_recovery_record_payload",
+                side_effect=AssertionError(
+                    "oversized recovery payload was read"
+                ),
+            ) as payload_read,
+        ):
+            cleaned, warnings = (
+                included_files_module._cleanup_orphan_included_recovery_state(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        self.assertEqual(cleaned, 0)
+        payload_read.assert_not_called()
+        self.assertTrue(any(tombstone_path in warning for warning in warnings))
+        current_stat = os.lstat(tombstone_path)
+        self.assertEqual(
+            (current_stat.st_dev, current_stat.st_ino),
+            (original_stat.st_dev, original_stat.st_ino),
+        )
+        self.assertEqual(current_stat.st_size, 65)
+
+    def test_generated_oversized_recovery_record_is_rejected_before_staging(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        destination_name = "oversized-recovery-record.json"
+        temporary_prefix = ".oversized-recovery-record."
+        original_names = set(os.listdir(self.godot_dir))
+
+        with (
+            patch.object(
+                included_files_module,
+                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                64,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "Generated Included Files recovery record.*size limit",
+            ),
+        ):
+            included_files_module._publish_included_recovery_record(
+                self.godot_dir,
+                project_identity,
+                filename=destination_name,
+                temporary_prefix=temporary_prefix,
+                payload={"state": "x" * 128},
+            )
+
+        self.assertEqual(set(os.listdir(self.godot_dir)), original_names)
+
+    def test_recovery_record_staging_syncs_parent_before_durable_phase(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        events: list[tuple[str, str]] = []
+        original_sync = included_files_module._sync_included_directory
+
+        def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
+            events.append(("sync", path))
+            original_sync(path, expected_identity)
+
+        def trace_phase(phase: str) -> None:
+            events.append(("phase", phase))
+
+        with (
+            patch.object(
+                included_files_module,
+                "_sync_included_directory",
+                side_effect=trace_sync,
+            ),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=trace_phase,
+            ),
+        ):
+            included_files_module._publish_included_recovery_record(
+                self.godot_dir,
+                project_identity,
+                filename="test-recovery-record.json",
+                temporary_prefix=".test-recovery-record.",
+                payload={"state": "test"},
+                staged_phase="journal-record-staged",
+            )
+
+        self.assertEqual(
+            events,
+            [
+                ("sync", self.godot_dir),
+                ("phase", "journal-record-staged"),
+                ("sync", self.godot_dir),
+            ],
+        )
+
+    def test_staged_tree_directories_sync_bottom_up_before_commit_record(
+        self,
+    ) -> None:
+        self._write("level-one/level-two/payload.txt", "payload")
+        events: list[tuple[str, str]] = []
+        original_sync = included_files_module._sync_included_directory
+
+        def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
+            events.append(("sync", os.path.abspath(path)))
+            original_sync(path, expected_identity)
+
+        def trace_phase(phase: str) -> None:
+            events.append(("phase", phase))
+
+        with (
+            patch.object(
+                included_files_module,
+                "_sync_included_directory",
+                side_effect=trace_sync,
+            ),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=trace_phase,
+            ),
+        ):
+            self._converter(max_workers=1).convert_all()
+
+        commit_record_index = events.index(("phase", "commit-record-staged"))
+        root_path = os.path.join(self.godot_dir, "included_files")
+        tree_syncs = [
+            event
+            for event in events[:commit_record_index]
+            if event[0] == "sync"
+            and (
+                event[1] == root_path
+                or event[1].startswith(root_path + os.sep)
+            )
+        ]
+        self.assertEqual(
+            tree_syncs,
+            [
+                (
+                    "sync",
+                    os.path.join(root_path, "level-one", "level-two"),
+                ),
+                ("sync", os.path.join(root_path, "level-one")),
+                ("sync", root_path),
+            ],
+        )
+
+    def test_subprocess_interruption_recovers_every_publication_boundary(
+        self,
+    ) -> None:
+        phases = (
+            ("journal-record-staged", False),
+            ("journal-prepared", False),
+            ("previous-root-backed-up", False),
+            ("new-root-published", False),
+            ("previous-registry-backed-up", False),
+            ("new-registry-published", False),
+            ("commit-record-staged", False),
+            ("generation-committed", True),
+            ("journal-removed", True),
+            ("commit-marker-removed", True),
+        )
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path, requested_phase = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == requested_phase:
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+
+        def pair_snapshot(project_path: str) -> tuple[int, dict[str, bytes], int, bytes]:
+            root_path = os.path.join(project_path, "included_files")
+            registry_path = os.path.join(
+                project_path,
+                INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+            )
+            files: dict[str, bytes] = {}
+            for directory, _subdirectories, filenames in os.walk(root_path):
+                for filename in filenames:
+                    file_path = os.path.join(directory, filename)
+                    relative_path = os.path.relpath(
+                        file_path,
+                        root_path,
+                    ).replace(os.sep, "/")
+                    with open(file_path, "rb") as output_file:
+                        files[relative_path] = output_file.read()
+            with open(registry_path, "rb") as registry_file:
+                registry_content = registry_file.read()
+            return (
+                os.lstat(root_path).st_ino,
+                files,
+                os.lstat(registry_path).st_ino,
+                registry_content,
+            )
+
+        for phase, committed in phases:
+            with self.subTest(phase=phase):
+                with (
+                    tempfile.TemporaryDirectory() as gm_path,
+                    tempfile.TemporaryDirectory() as godot_path,
+                ):
+                    datafiles_path = os.path.join(gm_path, "datafiles")
+                    os.mkdir(datafiles_path)
+                    old_source_path = os.path.join(datafiles_path, "old.txt")
+                    with open(old_source_path, "wb") as source_file:
+                        source_file.write(b"old generation")
+                    converter = IncludedFilesConverter(
+                        gm_path,
+                        godot_path,
+                        log_callback=lambda _message: None,
+                        progress_callback=lambda _value: None,
+                        conversion_running=lambda: True,
+                        max_workers=1,
+                    )
+                    converter.convert_all()
+                    previous_pair = pair_snapshot(godot_path)
+
+                    os.unlink(old_source_path)
+                    with open(
+                        os.path.join(datafiles_path, "new.txt"),
+                        "wb",
+                    ) as source_file:
+                        source_file.write(b"new generation")
+
+                    environment = os.environ.copy()
+                    existing_python_path = environment.get("PYTHONPATH")
+                    environment["PYTHONPATH"] = (
+                        PROJECT_ROOT
+                        if not existing_python_path
+                        else PROJECT_ROOT + os.pathsep + existing_python_path
+                    )
+                    interrupted = subprocess.run(
+                        (
+                            sys.executable,
+                            "-c",
+                            interruption_script,
+                            gm_path,
+                            godot_path,
+                            phase,
+                        ),
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=environment,
+                    )
+                    self.assertEqual(
+                        interrupted.returncode,
+                        86,
+                        interrupted.stdout + interrupted.stderr,
+                    )
+                    if phase == "journal-record-staged":
+                        self.assertFalse(
+                            os.path.lexists(
+                                os.path.join(
+                                    godot_path,
+                                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                                )
+                            )
+                        )
+                        journal_temporaries = [
+                            name
+                            for name in os.listdir(godot_path)
+                            if name.startswith(
+                                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                            )
+                            and name.endswith(".tmp")
+                        ]
+                        self.assertEqual(len(journal_temporaries), 1)
+                        stages = [
+                            name
+                            for name in os.listdir(godot_path)
+                            if name.startswith(
+                                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                            )
+                            and name.endswith(".stage")
+                        ]
+                        self.assertEqual(len(stages), 1)
+                        self.assertNotEqual(
+                            os.listdir(os.path.join(godot_path, stages[0])),
+                            [],
+                        )
+
+                    project_identity = (
+                        included_files_module._ensure_included_output_project_root(
+                            godot_path
+                        )
+                    )
+                    project_lock = (
+                        included_files_module._acquire_included_project_lock(
+                            godot_path,
+                            project_identity,
+                        )
+                    )
+                    try:
+                        recovery_message = (
+                            included_files_module._recover_included_output_set(
+                                godot_path,
+                                project_identity,
+                            )
+                        )
+                    finally:
+                        included_files_module._release_included_project_lock(
+                            project_lock
+                        )
+                    if phase == "journal-record-staged":
+                        self.assertIsNotNone(recovery_message)
+                        assert recovery_message is not None
+                        self.assertIn(
+                            "durable journal temporary",
+                            recovery_message,
+                        )
+
+                    recovered_pair = pair_snapshot(godot_path)
+                    if committed:
+                        self.assertEqual(
+                            recovered_pair[1],
+                            {"new.txt": b"new generation"},
+                        )
+                        self.assertIn(b'"logical_path": "new.txt"', recovered_pair[3])
+                        self.assertNotIn(b'"logical_path": "old.txt"', recovered_pair[3])
+                    else:
+                        self.assertEqual(recovered_pair, previous_pair)
+
+                    self.assertEqual(
+                        _included_files_transaction_debris(godot_path),
+                        (),
+                    )
+
+                    converter.convert_all()
+                    self.assertEqual(
+                        pair_snapshot(godot_path)[1],
+                        {"new.txt": b"new generation"},
+                    )
+
+    def test_first_publication_rollback_is_idempotent_after_registry_publish(
+        self,
+    ) -> None:
+        self._write("first.txt", "first generation")
+        root_path = os.path.join(self.godot_dir, "included_files")
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        registry_directory = os.path.dirname(registry_path)
+        self.assertFalse(os.path.lexists(root_path))
+        self.assertFalse(os.path.lexists(registry_path))
+        self.assertFalse(os.path.lexists(registry_directory))
+
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == "new-registry-published":
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+        interrupted = subprocess.run(
+            (
+                sys.executable,
+                "-c",
+                interruption_script,
+                self.gm_dir,
+                self.godot_dir,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        self.assertTrue(os.path.isdir(root_path))
+        self.assertTrue(os.path.isfile(registry_path))
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+
+        def recover() -> str | None:
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        def assert_absent_generation() -> None:
+            self.assertFalse(os.path.lexists(root_path))
+            self.assertFalse(os.path.lexists(registry_path))
+            self.assertFalse(os.path.lexists(registry_directory))
+            self._assert_no_transaction_debris()
+            self.assertEqual(
+                set(os.listdir(self.godot_dir)),
+                {included_files_module._INCLUDED_FILES_LOCK_NAME},
+            )
+
+        first_recovery = recover()
+        self.assertIsNotNone(first_recovery)
+        self.assertIn("rolled back", first_recovery or "")
+        assert_absent_generation()
+
+        self.assertIsNone(recover())
+        assert_absent_generation()
+
+    def test_first_publication_recovers_durable_prepared_journal_temporary(
+        self,
+    ) -> None:
+        self._write("first.txt", "first generation")
+        root_path = os.path.join(self.godot_dir, "included_files")
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        registry_directory = os.path.dirname(registry_path)
+
+        interrupted = self._run_interrupted_conversion(
+            "journal-record-staged"
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        self.assertFalse(os.path.lexists(root_path))
+        self.assertTrue(os.path.isdir(registry_directory))
+        self.assertFalse(os.path.lexists(registry_path))
+        self.assertEqual(
+            len(
+                [
+                    name
+                    for name in os.listdir(self.godot_dir)
+                    if name.startswith(
+                        included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                    )
+                    and name.endswith(".tmp")
+                ]
+            ),
+            1,
+        )
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        try:
+            recovery_message = (
+                included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+        finally:
+            included_files_module._release_included_project_lock(project_lock)
+
+        self.assertIsNotNone(recovery_message)
+        self.assertIn("durable journal temporary", recovery_message or "")
+        self.assertFalse(os.path.lexists(root_path))
+        self.assertFalse(os.path.lexists(registry_directory))
+        self._assert_no_transaction_debris()
+
+    def test_first_publication_journal_temporary_preserves_appeared_registry(
+        self,
+    ) -> None:
+        self._write("first.txt", "first generation")
+        interrupted = self._run_interrupted_conversion(
+            "journal-record-staged"
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        journal_temporary_path = os.path.join(
+            self.godot_dir,
+            next(
+                name
+                for name in os.listdir(self.godot_dir)
+                if name.startswith(
+                    included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                )
+                and name.endswith(".tmp")
+            ),
+        )
+        journal_temporary_stat = os.lstat(journal_temporary_path)
+        journal_temporary_identity = (
+            journal_temporary_stat.st_dev,
+            journal_temporary_stat.st_ino,
+        )
+        with open(journal_temporary_path, "rb") as journal_temporary_file:
+            journal_temporary_content = journal_temporary_file.read()
+
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        unknown_registry_content = b"user-owned registry collision\n"
+        with open(registry_path, "wb") as registry_file:
+            registry_file.write(unknown_registry_content)
+        unknown_registry_stat = os.lstat(registry_path)
+        unknown_registry_identity = (
+            unknown_registry_stat.st_dev,
+            unknown_registry_stat.st_ino,
+        )
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        try:
+            recovery_message = (
+                included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+        finally:
+            included_files_module._release_included_project_lock(project_lock)
+
+        self.assertIn(
+            "ambiguous Included Files journal temporary was preserved",
+            recovery_message or "",
+        )
+        current_journal_temporary_stat = os.lstat(journal_temporary_path)
+        self.assertEqual(
+            (
+                current_journal_temporary_stat.st_dev,
+                current_journal_temporary_stat.st_ino,
+            ),
+            journal_temporary_identity,
+        )
+        with open(journal_temporary_path, "rb") as journal_temporary_file:
+            self.assertEqual(
+                journal_temporary_file.read(),
+                journal_temporary_content,
+            )
+        current_registry_stat = os.lstat(registry_path)
+        self.assertEqual(
+            (current_registry_stat.st_dev, current_registry_stat.st_ino),
+            unknown_registry_identity,
+        )
+        with open(registry_path, "rb") as registry_file:
+            self.assertEqual(registry_file.read(), unknown_registry_content)
+
+    def test_restart_rollback_syncs_registry_before_journal_retirement(
+        self,
+    ) -> None:
+        self._write("old.txt", "old generation")
+        self._converter(max_workers=1).convert_all()
+        previous_pair = self._pair_snapshot()
+        registry_directory = os.path.join(self.godot_dir, "gm2godot")
+        registry_directory_stat = os.lstat(registry_directory)
+        registry_directory_identity = (
+            registry_directory_stat.st_dev,
+            registry_directory_stat.st_ino,
+        )
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        interrupted = self._run_interrupted_conversion(
+            "new-registry-published"
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+
+        events: list[tuple[str, str, tuple[int, int] | None]] = []
+        original_sync = included_files_module._sync_included_directory
+        original_remove = included_files_module._remove_included_recovery_record
+
+        def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
+            if os.path.abspath(path) == registry_directory:
+                events.append(("sync", path, expected_identity))
+            original_sync(path, expected_identity)
+
+        def trace_remove(
+            path: str,
+            identity: tuple[int, int],
+            project_path: str,
+            project_identity: tuple[int, int],
+        ) -> None:
+            if os.path.basename(path) == (
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME
+            ):
+                events.append(("remove", path, identity))
+            original_remove(
+                path,
+                identity,
+                project_path,
+                project_identity,
+            )
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        with (
+            patch.object(
+                included_files_module,
+                "_sync_included_directory",
+                side_effect=trace_sync,
+            ),
+            patch.object(
+                included_files_module,
+                "_remove_included_recovery_record",
+                side_effect=trace_remove,
+            ),
+        ):
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                recovery_message = (
+                    included_files_module._recover_included_output_set(
+                        self.godot_dir,
+                        project_identity,
+                    )
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        self.assertIn("rolled back", recovery_message or "")
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(events[0], ("sync", registry_directory, registry_directory_identity))
+        self.assertEqual(events[1][0], "remove")
+        self._assert_no_transaction_debris()
+
+    def test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary(
+        self,
+    ) -> None:
+        boundaries = (
+            ("root-backup", "quarantined", None),
+            ("root-backup", "removed", None),
+            ("registry-backup", "quarantined", None),
+            ("registry-backup", "removed", None),
+            ("stage", "quarantined", None),
+            ("stage", "removed", None),
+            (
+                "record",
+                "quarantined",
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            ),
+            (
+                "record",
+                "removed",
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            ),
+            (
+                "record",
+                "quarantined",
+                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            ),
+            (
+                "record",
+                "removed",
+                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            ),
+        )
+        commit_interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == "generation-committed":
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+        cleanup_interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+
+godot_path, requested_role, requested_action, requested_path = sys.argv[1:]
+matches = 0
+
+def stop_after_phase(phase: str) -> None:
+    global matches
+    parts = phase.split(":", 3)
+    if len(parts) != 4 or parts[0] != "cleanup":
+        return
+    _cleanup, role, relative_path, action = parts
+    if role != requested_role or action != requested_action:
+        return
+    if requested_path != "-" and relative_path != requested_path:
+        return
+    matches += 1
+    if matches == 1:
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+project_identity = included_files_module._ensure_included_output_project_root(
+    godot_path
+)
+project_lock = included_files_module._acquire_included_project_lock(
+    godot_path,
+    project_identity,
+)
+try:
+    included_files_module._recover_included_output_set(
+        godot_path,
+        project_identity,
+    )
+finally:
+    included_files_module._release_included_project_lock(project_lock)
+"""
+
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+
+        def pair_snapshot(
+            project_path: str,
+        ) -> tuple[int, dict[str, bytes], int, bytes]:
+            root_path = os.path.join(project_path, "included_files")
+            registry_path = os.path.join(
+                project_path,
+                INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+            )
+            files: dict[str, bytes] = {}
+            for directory, _subdirectories, filenames in os.walk(root_path):
+                for filename in filenames:
+                    file_path = os.path.join(directory, filename)
+                    relative_path = os.path.relpath(
+                        file_path,
+                        root_path,
+                    ).replace(os.sep, "/")
+                    with open(file_path, "rb") as output_file:
+                        files[relative_path] = output_file.read()
+            with open(registry_path, "rb") as registry_file:
+                registry_content = registry_file.read()
+            return (
+                os.lstat(root_path).st_ino,
+                files,
+                os.lstat(registry_path).st_ino,
+                registry_content,
+            )
+
+        def recover(project_path: str) -> str | None:
+            project_identity = (
+                included_files_module._ensure_included_output_project_root(
+                    project_path
+                )
+            )
+            project_lock = included_files_module._acquire_included_project_lock(
+                project_path,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    project_path,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        for role, action, relative_path in boundaries:
+            label = relative_path or role
+            with self.subTest(role=role, action=action, path=label):
+                with (
+                    tempfile.TemporaryDirectory() as gm_path,
+                    tempfile.TemporaryDirectory() as godot_path,
+                ):
+                    datafiles_path = os.path.join(gm_path, "datafiles")
+                    os.mkdir(datafiles_path)
+                    old_source_path = os.path.join(datafiles_path, "old.txt")
+                    with open(old_source_path, "wb") as source_file:
+                        source_file.write(b"old generation")
+                    converter = IncludedFilesConverter(
+                        gm_path,
+                        godot_path,
+                        log_callback=lambda _message: None,
+                        progress_callback=lambda _value: None,
+                        conversion_running=lambda: True,
+                        max_workers=1,
+                    )
+                    converter.convert_all()
+
+                    os.unlink(old_source_path)
+                    with open(
+                        os.path.join(datafiles_path, "new.txt"),
+                        "wb",
+                    ) as source_file:
+                        source_file.write(b"new generation")
+
+                    committed = subprocess.run(
+                        (
+                            sys.executable,
+                            "-c",
+                            commit_interruption_script,
+                            gm_path,
+                            godot_path,
+                        ),
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=environment,
+                    )
+                    self.assertEqual(
+                        committed.returncode,
+                        86,
+                        committed.stdout + committed.stderr,
+                    )
+                    committed_pair = pair_snapshot(godot_path)
+                    self.assertEqual(
+                        committed_pair[1],
+                        {"new.txt": b"new generation"},
+                    )
+
+                    interrupted_cleanup = subprocess.run(
+                        (
+                            sys.executable,
+                            "-c",
+                            cleanup_interruption_script,
+                            godot_path,
+                            role,
+                            action,
+                            relative_path or "-",
+                        ),
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=environment,
+                    )
+                    self.assertEqual(
+                        interrupted_cleanup.returncode,
+                        86,
+                        interrupted_cleanup.stdout
+                        + interrupted_cleanup.stderr,
+                    )
+
+                    recover(godot_path)
+                    self.assertEqual(
+                        pair_snapshot(godot_path),
+                        committed_pair,
+                    )
+                    self.assertEqual(
+                        _included_files_transaction_debris(godot_path),
+                        (),
+                    )
+
+                    self.assertIsNone(recover(godot_path))
+                    self.assertEqual(
+                        pair_snapshot(godot_path),
+                        committed_pair,
+                    )
+                    self.assertEqual(
+                        _included_files_transaction_debris(godot_path),
+                        (),
+                    )
+
+    def test_committed_cleanup_preserves_unknown_content_inside_recorded_trees(
+        self,
+    ) -> None:
+        locations = ("root-backup", "stage")
+
+        for location in locations:
+            with self.subTest(location=location):
+                with (
+                    tempfile.TemporaryDirectory() as gm_path,
+                    tempfile.TemporaryDirectory() as godot_path,
+                ):
+                    datafiles_path = os.path.join(gm_path, "datafiles")
+                    os.mkdir(datafiles_path)
+                    old_source_path = os.path.join(datafiles_path, "old.txt")
+                    with open(old_source_path, "wb") as source_file:
+                        source_file.write(b"old generation")
+                    converter = IncludedFilesConverter(
+                        gm_path,
+                        godot_path,
+                        log_callback=lambda _message: None,
+                        progress_callback=lambda _value: None,
+                        conversion_running=lambda: True,
+                        max_workers=1,
+                    )
+                    converter.convert_all()
+
+                    unrelated_path = os.path.join(
+                        godot_path,
+                        "user-project-sentinel.txt",
+                    )
+                    with open(unrelated_path, "wb") as unrelated_file:
+                        unrelated_file.write(b"unrelated user content\n")
+                    unrelated_identity = os.lstat(unrelated_path).st_ino
+
+                    os.unlink(old_source_path)
+                    with open(
+                        os.path.join(datafiles_path, "new.txt"),
+                        "wb",
+                    ) as source_file:
+                        source_file.write(b"new generation")
+
+                    class CommitInterrupted(BaseException):
+                        pass
+
+                    def stop_after_commit(phase: str) -> None:
+                        if phase == "generation-committed":
+                            raise CommitInterrupted()
+
+                    with patch.object(
+                        included_files_module,
+                        "_after_included_transaction_phase",
+                        side_effect=stop_after_commit,
+                    ):
+                        with self.assertRaises(CommitInterrupted):
+                            converter.convert_all()
+
+                    project_identity = (
+                        included_files_module._ensure_included_output_project_root(
+                            godot_path
+                        )
+                    )
+                    journal_path = os.path.join(
+                        godot_path,
+                        included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                    )
+                    journal_record = (
+                        included_files_module._read_included_recovery_record(
+                            journal_path,
+                            project_identity,
+                        )
+                    )
+                    if journal_record is None:
+                        self.fail("committed interruption did not preserve its journal")
+                    _journal_identity, journal_payload = journal_record
+                    journal = (
+                        included_files_module._included_recovery_journal_from_payload(
+                            godot_path,
+                            project_identity,
+                            journal_payload,
+                        )
+                    )
+                    if location == "root-backup":
+                        container_path = journal.root_backup_path
+                        container_snapshot = (
+                            journal.transaction.previous_root_snapshot
+                        )
+                        cleanup_role = "root-backup"
+                    else:
+                        container_path = journal.transaction.stage_container_path
+                        container_snapshot = (
+                            journal.transaction.staged_container_snapshot
+                        )
+                        cleanup_role = "stage"
+
+                    user_path = os.path.join(
+                        container_path,
+                        "user-preserved.txt",
+                    )
+                    with open(user_path, "wb") as user_file:
+                        user_file.write(b"injected user content\n")
+                    user_identity = os.lstat(user_path).st_ino
+
+                    final_root_path = os.path.join(
+                        godot_path,
+                        "included_files",
+                    )
+                    final_registry_path = os.path.join(
+                        godot_path,
+                        INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+                    )
+                    final_root_identity = os.lstat(final_root_path).st_ino
+                    final_registry_identity = os.lstat(final_registry_path).st_ino
+                    with open(final_registry_path, "rb") as registry_file:
+                        final_registry_content = registry_file.read()
+
+                    project_lock = (
+                        included_files_module._acquire_included_project_lock(
+                            godot_path,
+                            project_identity,
+                        )
+                    )
+                    try:
+                        recovery_message = (
+                            included_files_module._recover_included_output_set(
+                                godot_path,
+                                project_identity,
+                            )
+                        )
+                    finally:
+                        included_files_module._release_included_project_lock(
+                            project_lock
+                        )
+
+                    self.assertIsNotNone(recovery_message)
+                    self.assertIn("preserved", recovery_message or "")
+                    tombstone_path = (
+                        included_files_module._included_cleanup_tombstone_path(
+                            container_path,
+                            journal.transaction_id,
+                            cleanup_role,
+                            ".",
+                            expect_directory=True,
+                        )
+                    )
+                    preserved_containers = [
+                        candidate
+                        for candidate in (container_path, tombstone_path)
+                        if os.path.isdir(candidate)
+                    ]
+                    self.assertEqual(len(preserved_containers), 1)
+                    preserved_container = preserved_containers[0]
+                    preserved_user_path = os.path.join(
+                        preserved_container,
+                        "user-preserved.txt",
+                    )
+                    self.assertEqual(
+                        os.lstat(preserved_user_path).st_ino,
+                        user_identity,
+                    )
+                    with open(preserved_user_path, "rb") as user_file:
+                        self.assertEqual(
+                            user_file.read(),
+                            b"injected user content\n",
+                        )
+                    for entry in container_snapshot.entries:
+                        self.assertFalse(
+                            os.path.lexists(
+                                os.path.join(
+                                    preserved_container,
+                                    *entry.relative_path.split("/"),
+                                )
+                            ),
+                            entry.relative_path,
+                        )
+
+                    self.assertEqual(
+                        os.lstat(final_root_path).st_ino,
+                        final_root_identity,
+                    )
+                    with open(
+                        os.path.join(final_root_path, "new.txt"),
+                        "rb",
+                    ) as output_file:
+                        self.assertEqual(output_file.read(), b"new generation")
+                    self.assertFalse(
+                        os.path.lexists(os.path.join(final_root_path, "old.txt"))
+                    )
+                    self.assertEqual(
+                        os.lstat(final_registry_path).st_ino,
+                        final_registry_identity,
+                    )
+                    with open(final_registry_path, "rb") as registry_file:
+                        self.assertEqual(
+                            registry_file.read(),
+                            final_registry_content,
+                        )
+                    self.assertEqual(
+                        os.lstat(unrelated_path).st_ino,
+                        unrelated_identity,
+                    )
+                    with open(unrelated_path, "rb") as unrelated_file:
+                        self.assertEqual(
+                            unrelated_file.read(),
+                            b"unrelated user content\n",
+                        )
+                    self.assertFalse(os.path.lexists(journal_path))
+                    self.assertFalse(
+                        os.path.lexists(
+                            os.path.join(
+                                godot_path,
+                                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                            )
+                        )
+                    )
+
+    def test_marker_only_committed_recovery_uses_embedded_cleanup_manifest(
+        self,
+    ) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+from src.conversion.included_files import IncludedFilesConverter
+
+gm_path, godot_path = sys.argv[1:]
+
+def stop_after_phase(phase: str) -> None:
+    if phase == "generation-committed":
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+IncludedFilesConverter(
+    gm_path,
+    godot_path,
+    log_callback=lambda _message: None,
+    progress_callback=lambda _value: None,
+    conversion_running=lambda: True,
+    max_workers=1,
+).convert_all()
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+        interrupted = subprocess.run(
+            (
+                sys.executable,
+                "-c",
+                interruption_script,
+                self.gm_dir,
+                self.godot_dir,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=environment,
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        journal_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+        )
+        commit_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        )
+        journal_record = included_files_module._read_included_recovery_record(
+            journal_path,
+            project_identity,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            commit_path,
+            project_identity,
+        )
+        if journal_record is None or commit_record is None:
+            self.fail("committed interruption did not preserve both records")
+        _journal_identity, journal_payload = journal_record
+        _commit_identity, commit_payload = commit_record
+        journal = included_files_module._included_recovery_journal_from_payload(
+            self.godot_dir,
+            project_identity,
+            journal_payload,
+        )
+        _marker, embedded_journal = (
+            included_files_module._included_commit_marker_and_journal_from_payload(
+                self.godot_dir,
+                commit_payload,
+                project_identity,
+            )
+        )
+        self.assertEqual(embedded_journal, journal)
+        self.assertTrue(os.path.lexists(journal.root_backup_path))
+        self.assertTrue(os.path.lexists(journal.registry_backup_path))
+        self.assertTrue(
+            os.path.lexists(journal.transaction.stage_container_path)
+        )
+        committed_pair = self._pair_snapshot()
+        self.assertEqual(
+            committed_pair[1],
+            {"new.txt": b"new generation"},
+        )
+        self.assertIn(b'"logical_path": "new.txt"', committed_pair[3])
+        self.assertNotIn(b'"logical_path": "old.txt"', committed_pair[3])
+
+        os.unlink(journal_path)
+        included_files_module._sync_included_directory(
+            self.godot_dir,
+            project_identity,
+        )
+
+        def recover() -> str | None:
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        recovery_message = recover()
+
+        self.assertIsNotNone(recovery_message)
+        self.assertIn("already committed", recovery_message or "")
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+        self.assertFalse(os.path.lexists(journal.root_backup_path))
+        self.assertFalse(os.path.lexists(journal.registry_backup_path))
+        self.assertFalse(
+            os.path.lexists(journal.transaction.stage_container_path)
+        )
+        self.assertFalse(os.path.lexists(commit_path))
+        self._assert_no_transaction_debris()
+
+        self.assertIsNone(recover())
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+        self._assert_no_transaction_debris()
+
+    def test_canonical_tampered_commit_receipts_are_rejected_without_cleanup(
+        self,
+    ) -> None:
+        self._leave_committed_generation_recovery_records()
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        journal_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+        )
+        commit_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        )
+        journal_record = included_files_module._read_included_recovery_record(
+            journal_path,
+            project_identity,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            commit_path,
+            project_identity,
+        )
+        if journal_record is None or commit_record is None:
+            self.fail("committed interruption did not preserve both records")
+        _journal_identity, journal_payload = journal_record
+        _commit_identity, commit_payload = commit_record
+        journal = included_files_module._included_recovery_journal_from_payload(
+            self.godot_dir,
+            project_identity,
+            journal_payload,
+        )
+        committed_pair = self._pair_snapshot()
+        self.assertEqual(committed_pair[1], {"new.txt": b"new generation"})
+
+        os.unlink(journal_path)
+        included_files_module._sync_included_directory(
+            self.godot_dir,
+            project_identity,
+        )
+
+        def recovery_artifact_snapshot() -> tuple[
+            tuple[int, int],
+            bytes,
+            tuple[int, int],
+            bytes,
+            tuple[int, int],
+            tuple[str, ...],
+        ]:
+            root_backup_stat = os.lstat(journal.root_backup_path)
+            with open(
+                os.path.join(journal.root_backup_path, "old.txt"),
+                "rb",
+            ) as root_backup_file:
+                root_backup_content = root_backup_file.read()
+            registry_backup_stat = os.lstat(journal.registry_backup_path)
+            with open(journal.registry_backup_path, "rb") as registry_backup_file:
+                registry_backup_content = registry_backup_file.read()
+            stage_stat = os.lstat(journal.transaction.stage_container_path)
+            return (
+                (root_backup_stat.st_dev, root_backup_stat.st_ino),
+                root_backup_content,
+                (registry_backup_stat.st_dev, registry_backup_stat.st_ino),
+                registry_backup_content,
+                (stage_stat.st_dev, stage_stat.st_ino),
+                tuple(sorted(os.listdir(journal.transaction.stage_container_path))),
+            )
+
+        def recover() -> str | None:
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        mutations = (
+            (
+                "copied-project-receipt",
+                "project_identity",
+                [project_identity[0], project_identity[1] + 1],
+            ),
+            ("root-receipt", "root_snapshot_sha256", "0" * 64),
+            ("registry-receipt", "registry_content_sha256", "0" * 64),
+        )
+        for label, key, replacement in mutations:
+            with self.subTest(receipt=label):
+                tampered_payload = dict(commit_payload)
+                tampered_payload[key] = replacement
+                tampered_content = (
+                    included_files_module._included_recovery_record_content(
+                        tampered_payload
+                    )
+                )
+                with open(commit_path, "wb") as commit_file:
+                    commit_file.write(tampered_content)
+                commit_stat = os.lstat(commit_path)
+                commit_identity = (commit_stat.st_dev, commit_stat.st_ino)
+                artifact_snapshot = recovery_artifact_snapshot()
+
+                with self.assertRaises(OSError):
+                    recover()
+
+                current_commit_stat = os.lstat(commit_path)
+                self.assertEqual(
+                    (current_commit_stat.st_dev, current_commit_stat.st_ino),
+                    commit_identity,
+                )
+                with open(commit_path, "rb") as commit_file:
+                    self.assertEqual(commit_file.read(), tampered_content)
+                self.assertEqual(
+                    recovery_artifact_snapshot(),
+                    artifact_snapshot,
+                )
+                self.assertEqual(self._pair_snapshot(), committed_pair)
+
+        original_commit_content = (
+            included_files_module._included_recovery_record_content(commit_payload)
+        )
+        with open(commit_path, "wb") as commit_file:
+            commit_file.write(original_commit_content)
+        recovery_message = recover()
+        self.assertIsNotNone(recovery_message)
+        self.assertIn("already committed", recovery_message or "")
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+        self.assertFalse(os.path.lexists(journal.root_backup_path))
+        self.assertFalse(os.path.lexists(journal.registry_backup_path))
+        self.assertFalse(
+            os.path.lexists(journal.transaction.stage_container_path)
+        )
+        self.assertFalse(os.path.lexists(commit_path))
+
+    def test_modeled_windows_commit_marker_rejects_forged_embedded_path_before_io(
+        self,
+    ) -> None:
+        self._leave_committed_generation_recovery_records()
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        commit_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            commit_path,
+            project_identity,
+        )
+        if commit_record is None:
+            self.fail("committed interruption did not preserve its commit marker")
+        _commit_identity, commit_payload = commit_record
+        forged_payload = json.loads(json.dumps(commit_payload))
+        embedded_journal = forged_payload["recovery_journal"]
+        staged_entries = embedded_journal["staged_container_snapshot"]["entries"]
+        forged_entry = next(
+            entry for entry in staged_entries if entry["kind"] == "file"
+        )
+        forged_entry["relative_path"] = "safe/D:evil"
+        forged_payload["recovery_journal_sha256"] = hashlib.sha256(
+            included_files_module._included_recovery_record_content(
+                embedded_journal
+            )
+        ).hexdigest()
+        forged_content = (
+            included_files_module._included_recovery_record_content(
+                forged_payload
+            )
+        )
+        self.assertEqual(
+            forged_content,
+            included_files_module._included_recovery_record_content(
+                json.loads(forged_content.decode("utf-8"))
+            ),
+        )
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(included_files_module.os, "stat") as stat_call,
+            patch.object(included_files_module.os, "lstat") as lstat_call,
+            patch.object(
+                included_files_module,
+                "_cleanup_recorded_included_tree",
+            ) as cleanup_tree,
+            patch.object(
+                included_files_module,
+                "_move_exact_included_file",
+            ) as move_file,
+            patch.object(
+                included_files_module,
+                "_move_exact_included_directory",
+            ) as move_directory,
+            self.assertRaisesRegex(OSError, "Windows-ambiguous"),
+        ):
+            included_files_module._included_commit_marker_and_journal_from_payload(
+                self.godot_dir,
+                forged_payload,
+                project_identity,
+            )
+        stat_call.assert_not_called()
+        lstat_call.assert_not_called()
+        cleanup_tree.assert_not_called()
+        move_file.assert_not_called()
+        move_directory.assert_not_called()
+
+    def test_modeled_windows_recovery_paths_reject_ambiguous_components_before_io(
+        self,
+    ) -> None:
+        cases = (
+            "safe/D:evil",
+            "foo:bar",
+            " leading.txt",
+            "trailing.",
+            "trailing ",
+            "CON",
+            "con.txt",
+            "AUX.bin",
+            "NUL",
+            "COM1.dat",
+            "LPT9",
+        )
+        cleanup_root = os.path.join(self.godot_dir, "modeled-cleanup-root")
+
+        for relative_path in cases:
+            with (
+                self.subTest(relative_path=relative_path),
+                patch.object(included_files_module.os, "name", "nt"),
+                patch.object(included_files_module.os, "stat") as stat_call,
+                patch.object(included_files_module.os, "lstat") as lstat_call,
+                patch.object(
+                    included_files_module,
+                    "_move_exact_included_file",
+                ) as move_file,
+                patch.object(
+                    included_files_module,
+                    "_move_exact_included_directory",
+                ) as move_directory,
+                self.assertRaisesRegex(OSError, "Windows-ambiguous"),
+            ):
+                included_files_module._cleanup_recorded_included_tree(
+                    cleanup_root,
+                    self._recovery_cleanup_snapshot(relative_path),
+                    (7, 8),
+                    "modeled-windows-path",
+                    "path-confinement-test",
+                )
+            lstat_call.assert_not_called()
+            stat_call.assert_not_called()
+            move_file.assert_not_called()
+            move_directory.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "requires native POSIX path semantics")
+    def test_posix_recovery_paths_keep_posix_valid_components(self) -> None:
+        root_path = os.path.join(self.godot_dir, "posix-cleanup-root")
+        cases = (
+            "safe/D:evil",
+            "D:evil",
+            "foo:bar",
+            " leading.txt",
+            "trailing.",
+            "trailing ",
+            "CON",
+            "con.txt",
+        )
+
+        for relative_path in cases:
+            with self.subTest(relative_path=relative_path):
+                self.assertEqual(
+                    included_files_module._included_recovery_relative_path(
+                        relative_path
+                    ),
+                    relative_path,
+                )
+                reconstructed = (
+                    included_files_module._included_recovery_tree_entry_path(
+                        root_path,
+                        relative_path,
+                    )
+                )
+                self.assertEqual(
+                    reconstructed,
+                    os.path.abspath(
+                        os.path.join(root_path, *relative_path.split("/"))
+                    ),
+                )
+                self.assertEqual(
+                    os.path.commonpath(
+                        (os.path.abspath(root_path), reconstructed)
+                    ),
+                    os.path.abspath(root_path),
+                )
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows paths")
+    def test_native_windows_recovery_paths_reject_before_io(self) -> None:
+        cleanup_root = os.path.join(self.godot_dir, "native-cleanup-root")
+        safe_path = included_files_module._included_recovery_tree_entry_path(
+            cleanup_root,
+            "safe/payload.txt",
+        )
+        self.assertEqual(
+            safe_path,
+            os.path.abspath(
+                os.path.join(cleanup_root, "safe", "payload.txt")
+            ),
+        )
+
+        for relative_path in (
+            "safe/D:evil",
+            "foo:bar",
+            " leading.txt",
+            "trailing.",
+            "trailing ",
+            "CON",
+            "AUX.txt",
+            "NUL",
+            "COM1.bin",
+            "LPT1",
+        ):
+            with (
+                self.subTest(relative_path=relative_path),
+                patch.object(included_files_module.os, "stat") as stat_call,
+                patch.object(included_files_module.os, "lstat") as lstat_call,
+                patch.object(
+                    included_files_module,
+                    "_move_exact_included_file",
+                ) as move_file,
+                patch.object(
+                    included_files_module,
+                    "_move_exact_included_directory",
+                ) as move_directory,
+                self.assertRaisesRegex(OSError, "Windows-ambiguous"),
+            ):
+                included_files_module._cleanup_recorded_included_tree(
+                    cleanup_root,
+                    self._recovery_cleanup_snapshot(relative_path),
+                    (7, 8),
+                    "native-windows-path",
+                    "path-confinement-test",
+                )
+            lstat_call.assert_not_called()
+            stat_call.assert_not_called()
+            move_file.assert_not_called()
+            move_directory.assert_not_called()
+
+    def test_noncanonical_reserved_temporaries_are_preserved_and_nonblocking(
+        self,
+    ) -> None:
+        self._leave_committed_generation_recovery_records()
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        commit_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            commit_path,
+            project_identity,
+        )
+        if commit_record is None:
+            self.fail("committed interruption did not preserve its commit marker")
+        _commit_identity, commit_payload = commit_record
+        canonical_commit_content = (
+            included_files_module._included_recovery_record_content(commit_payload)
+        )
+
+        def recover() -> str | None:
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        self.assertIsNotNone(recover())
+        committed_pair = self._pair_snapshot()
+        invalid_records = {
+            (
+                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                + "f" * 15
+                + ".tmp"
+            ): b"short reserved token\n",
+            (
+                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                + "f" * 17
+                + ".tmp"
+            ): b"long reserved token\n",
+            (
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                + "g" * 16
+                + ".tmp"
+            ): b"non-hex reserved token\n",
+            (
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                + "F" * 16
+                + ".tmp"
+            ): b"uppercase reserved token\n",
+            (
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                + "f" * 16
+                + ".extra.tmp"
+            ): b"extra reserved token material\n",
+            (
+                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                + "user-owned.tmp"
+            ): b"arbitrary reserved-prefix temporary\n",
+        }
+        invalid_identities: dict[str, tuple[int, int]] = {}
+        for name, content in invalid_records.items():
+            record_path = os.path.join(self.godot_dir, name)
+            with open(record_path, "wb") as record_file:
+                record_file.write(content)
+            record_stat = os.lstat(record_path)
+            invalid_identities[name] = (record_stat.st_dev, record_stat.st_ino)
+
+        canonical_commit_temporary = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+            + "a" * 16
+            + ".tmp",
+        )
+        with open(canonical_commit_temporary, "wb") as temporary_file:
+            temporary_file.write(canonical_commit_content)
+
+        recovery_message = recover()
+
+        self.assertIsNotNone(recovery_message)
+        self.assertIn("removed 1", recovery_message or "")
+        self.assertFalse(os.path.lexists(canonical_commit_temporary))
+        for name, expected_content in invalid_records.items():
+            with self.subTest(preserved=name):
+                record_path = os.path.join(self.godot_dir, name)
+                record_stat = os.lstat(record_path)
+                self.assertEqual(
+                    (record_stat.st_dev, record_stat.st_ino),
+                    invalid_identities[name],
+                )
+                with open(record_path, "rb") as record_file:
+                    self.assertEqual(record_file.read(), expected_content)
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+
+        self.assertIsNotNone(recover())
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+
+    def test_temporary_record_cleanup_tombstones_resume_after_hard_exit(
+        self,
+    ) -> None:
+        self._leave_committed_generation_recovery_records()
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        record_specs = (
+            (
+                "journal",
+                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
+            ),
+            (
+                "commit",
+                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX,
+            ),
+        )
+        canonical_records: list[tuple[str, str, bytes]] = []
+        for record_kind, stable_name, temporary_prefix in record_specs:
+            record = included_files_module._read_included_recovery_record(
+                os.path.join(self.godot_dir, stable_name),
+                project_identity,
+            )
+            if record is None:
+                self.fail(
+                    "committed interruption did not preserve its "
+                    + record_kind
+                    + " record"
+                )
+            canonical_records.append(
+                (
+                    record_kind,
+                    temporary_prefix,
+                    included_files_module._included_recovery_record_content(
+                        record[1]
+                    ),
+                )
+            )
+
+        def recover() -> str | None:
+            project_lock = included_files_module._acquire_included_project_lock(
+                self.godot_dir,
+                project_identity,
+            )
+            try:
+                return included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            finally:
+                included_files_module._release_included_project_lock(
+                    project_lock
+                )
+
+        committed_pair = self._pair_snapshot()
+        self.assertIsNotNone(recover())
+        self.assertEqual(self._pair_snapshot(), committed_pair)
+        self._assert_no_transaction_debris()
+
+        interruption_script = """
+import os
+import sys
+from src.conversion import included_files as included_files_module
+
+project_path, record_path, requested_phase = sys.argv[1:]
+project_identity = included_files_module._ensure_included_output_project_root(
+    project_path
+)
+project_lock = included_files_module._acquire_included_project_lock(
+    project_path,
+    project_identity,
+)
+
+def stop_after_phase(phase: str) -> None:
+    if phase == requested_phase:
+        os._exit(86)
+
+included_files_module._after_included_transaction_phase = stop_after_phase
+try:
+    record_state = included_files_module._included_regular_file_state(
+        record_path,
+        expected_parent_identity=project_identity,
+    )
+    if record_state is None:
+        os._exit(87)
+    included_files_module._remove_included_recovery_record(
+        record_path,
+        record_state[0],
+        project_path,
+        project_identity,
+    )
+finally:
+    included_files_module._release_included_project_lock(project_lock)
+os._exit(88)
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            PROJECT_ROOT
+            if not existing_python_path
+            else PROJECT_ROOT + os.pathsep + existing_python_path
+        )
+
+        for record_kind, temporary_prefix, content in canonical_records:
+            for action in ("quarantined", "removed"):
+                with self.subTest(record=record_kind, action=action):
+                    temporary_path = os.path.join(
+                        self.godot_dir,
+                        temporary_prefix + "a" * 16 + ".tmp",
+                    )
+                    with open(temporary_path, "wb") as temporary_file:
+                        temporary_file.write(content)
+                        temporary_file.flush()
+                        os.fsync(temporary_file.fileno())
+                    included_files_module._sync_included_directory(
+                        self.godot_dir,
+                        project_identity,
+                    )
+                    temporary_stat = os.lstat(temporary_path)
+                    temporary_identity = (
+                        temporary_stat.st_dev,
+                        temporary_stat.st_ino,
+                    )
+                    tombstone_path = (
+                        included_files_module._included_cleanup_tombstone_path(
+                            temporary_path,
+                            hashlib.sha256(content).hexdigest()[:32],
+                            record_kind + "-temporary-record",
+                            record_kind,
+                            expect_directory=False,
+                        )
+                    )
+                    requested_phase = (
+                        "cleanup:"
+                        + record_kind
+                        + "-temporary-record:"
+                        + record_kind
+                        + ":"
+                        + action
+                    )
+
+                    interrupted = subprocess.run(
+                        (
+                            sys.executable,
+                            "-c",
+                            interruption_script,
+                            self.godot_dir,
+                            temporary_path,
+                            requested_phase,
+                        ),
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=environment,
+                    )
+
+                    self.assertEqual(
+                        interrupted.returncode,
+                        86,
+                        interrupted.stdout + interrupted.stderr,
+                    )
+                    self.assertFalse(os.path.lexists(temporary_path))
+                    if action == "quarantined":
+                        tombstone_stat = os.lstat(tombstone_path)
+                        self.assertEqual(
+                            (tombstone_stat.st_dev, tombstone_stat.st_ino),
+                            temporary_identity,
+                        )
+                        with open(tombstone_path, "rb") as tombstone_file:
+                            self.assertEqual(tombstone_file.read(), content)
+                    else:
+                        self.assertFalse(os.path.lexists(tombstone_path))
+
+                    recovery_message = recover()
+                    if action == "quarantined":
+                        self.assertIn("removed 1", recovery_message or "")
+                    else:
+                        self.assertIsNone(recovery_message)
+
+                    self.assertFalse(os.path.lexists(tombstone_path))
+                    self.assertEqual(self._pair_snapshot(), committed_pair)
+                    self._assert_no_transaction_debris()
+                    self.assertIsNone(recover())
 
     def test_unchanged_generation_preserves_public_identity_without_writes(
         self,
@@ -524,13 +4209,15 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         def count_payload_read(source_file: BinaryIO) -> bytes:
             nonlocal read_bytes
             chunk = original_payload_read(source_file)
-            read_bytes += len(chunk)
+            if os.fstat(source_file.fileno()).st_size == payload_size:
+                read_bytes += len(chunk)
             return chunk
 
         def count_validation_read(source_file: BinaryIO) -> bytes:
             nonlocal read_bytes
             chunk = original_validation_read(source_file)
-            read_bytes += len(chunk)
+            if os.fstat(source_file.fileno()).st_size == payload_size:
+                read_bytes += len(chunk)
             return chunk
 
         with (
@@ -636,9 +4323,14 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         def changed_render(
             assignments: Iterable[IncludedFilePathAssignment],
             emitted_logical_paths: Collection[str],
+            content_receipts: Mapping[str, tuple[int, str]] | None = None,
         ) -> str:
             return (
-                original_render(assignments, emitted_logical_paths)
+                original_render(
+                    assignments,
+                    emitted_logical_paths,
+                    content_receipts,
+                )
                 + "# changed rendering\n"
             )
 
@@ -694,6 +4386,128 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self.assertEqual(os.lstat(output_path).st_nlink, 1)
         with open(external_path, "r", encoding="utf-8") as external_file:
             self.assertEqual(external_file.read(), "stable")
+        self._assert_no_transaction_debris()
+
+    def test_staged_payload_hardlink_is_rejected_before_publication(self) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        external_path = os.path.join(
+            self.gm_dir,
+            "external-staged-payload.txt",
+        )
+        original_capture = included_files_module._capture_included_tree
+        hardlink_created = False
+
+        def capture_with_hardlink(
+            root_path: str,
+            *,
+            expected_parent_identity: (
+                included_files_module._PathIdentity | None
+            ) = None,
+            include_content: bool = True,
+        ) -> included_files_module._IncludedTreeSnapshot:
+            nonlocal hardlink_created
+            stage_name = os.path.basename(os.path.dirname(root_path))
+            if (
+                not hardlink_created
+                and os.path.basename(root_path)
+                == included_files_module._INCLUDED_FILES_ROOT_NAME
+                and stage_name.startswith(
+                    included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                )
+            ):
+                staged_path = os.path.join(root_path, "new.txt")
+                try:
+                    os.link(staged_path, external_path)
+                except (NotImplementedError, OSError) as error:
+                    self.skipTest(f"Hard links are unavailable: {error}")
+                hardlink_created = True
+            return original_capture(
+                root_path,
+                expected_parent_identity=expected_parent_identity,
+                include_content=include_content,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_capture_included_tree",
+                side_effect=capture_with_hardlink,
+            ),
+            self.assertRaisesRegex(OSError, "multiple hard links"),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(hardlink_created)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        with open(external_path, "rb") as external_file:
+            self.assertEqual(external_file.read(), b"new generation")
+        self._assert_no_transaction_debris()
+
+    def test_staged_registry_hardlink_is_rejected_before_publication(self) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        external_path = os.path.join(
+            self.gm_dir,
+            "external-staged-registry.gd",
+        )
+        external_content: bytes | None = None
+        original_snapshot = (
+            included_files_module._included_stage_container_snapshot
+        )
+
+        def snapshot_with_hardlink(
+            project_identity: included_files_module._PathIdentity,
+            stage_path: str,
+            stage_identity: included_files_module._PathIdentity,
+            staged_root_snapshot: included_files_module._IncludedTreeSnapshot,
+            staged_registry_identity: included_files_module._PathIdentity,
+            staged_registry_content: bytes,
+        ) -> included_files_module._IncludedTreeSnapshot:
+            nonlocal external_content
+            staged_registry_path = os.path.join(
+                stage_path,
+                "gml_included_file_registry.gd",
+            )
+            try:
+                os.link(staged_registry_path, external_path)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Hard links are unavailable: {error}")
+            with open(external_path, "rb") as external_file:
+                external_content = external_file.read()
+            return original_snapshot(
+                project_identity,
+                stage_path,
+                stage_identity,
+                staged_root_snapshot,
+                staged_registry_identity,
+                staged_registry_content,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_stage_container_snapshot",
+                side_effect=snapshot_with_hardlink,
+            ),
+            self.assertRaisesRegex(OSError, "multiple hard links"),
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(external_content)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        with open(external_path, "rb") as external_file:
+            self.assertEqual(external_file.read(), external_content)
         self._assert_no_transaction_debris()
 
     def test_collision_and_availability_changes_use_normal_transactions(
@@ -1059,6 +4873,41 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
+    def test_bounded_record_accepts_stable_path_handle_metadata_skew(self) -> None:
+        payload = b'{"state":"prepared"}\n'
+        record_path = os.path.join(self.godot_dir, "recovery-record.json")
+        with open(record_path, "wb") as record_file:
+            record_file.write(payload)
+        path_stat = os.lstat(record_path)
+        handle_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=1,
+        )
+
+        with (
+            open(record_path, "rb") as record_file,
+            patch.object(
+                included_files_module.os,
+                "fstat",
+                side_effect=(handle_stat, handle_stat),
+            ),
+        ):
+            content = (
+                included_files_module._read_opened_included_bounded_record_payload(
+                    record_file,
+                    path_stat,
+                    record_path,
+                    path_stat.st_dev,
+                    None,
+                    len(payload),
+                    lambda opened_file: opened_file.read(len(payload) + 1),
+                    "Included Files recovery record",
+                    "canonical",
+                )
+            )
+
+        self.assertEqual(content, payload)
+
     def test_digest_rejects_open_handle_change_during_hashing(self) -> None:
         staged_path = os.path.join(self.godot_dir, "staged.bin")
         with open(staged_path, "wb") as staged_file:
@@ -1120,7 +4969,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 
         self.assertIs(opened_stream, binary_stream)
         kernel32.CreateFileW.assert_called_once_with(
-            os.path.abspath(path),
+            included_files_module._windows_extended_included_path(path),
             included_files_module._WINDOWS_GENERIC_READ,
             included_files_module._WINDOWS_FILE_SHARE_READ,
             None,
@@ -1136,6 +4985,61 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         fdopen.assert_called_once_with(5678, "rb")
         kernel32.CloseHandle.assert_not_called()
+
+    def test_windows_native_paths_use_extended_length_namespace(self) -> None:
+        cases = {
+            r"C:\projects\game": r"\\?\C:\projects\game",
+            r"\\server\share\game": r"\\?\UNC\server\share\game",
+            r"\\?\C:\already\extended": r"\\?\C:\already\extended",
+            r"\\.\C:": r"\\.\C:",
+        }
+
+        def unchanged_absolute_path(path: str) -> str:
+            return path
+
+        with patch.object(
+            included_files_module.os.path,
+            "abspath",
+            side_effect=unchanged_absolute_path,
+        ):
+            for path, expected in cases.items():
+                with self.subTest(path=path):
+                    self.assertEqual(
+                        included_files_module._windows_extended_included_path(
+                            path
+                        ),
+                        expected,
+                    )
+
+    def test_windows_transaction_move_uses_extended_length_paths(self) -> None:
+        kernel32 = MagicMock()
+        kernel32.MoveFileExW.return_value = 1
+        source = os.path.join(self.godot_dir, "source")
+        destination = os.path.join(self.godot_dir, "destination")
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(
+                included_files_module,
+                "_windows_included_transaction_api",
+                return_value=kernel32,
+            ),
+        ):
+            included_files_module._rename_included_transaction_entry(
+                source,
+                destination,
+            )
+
+        source_argument, destination_argument, flags = (
+            kernel32.MoveFileExW.call_args.args
+        )
+        self.assertTrue(source_argument.startswith("\\\\?\\"))
+        self.assertTrue(destination_argument.startswith("\\\\?\\"))
+        self.assertEqual(
+            flags,
+            included_files_module._WINDOWS_MOVEFILE_WRITE_THROUGH,
+        )
 
     def test_windows_validation_stream_closes_fd_when_wrapping_fails(
         self,
@@ -1407,17 +5311,19 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self._write("new.txt", "GOOD")
         original_commit = included_files_module._commit_included_output_set
         mutated = False
+        preserved_staged_file: str | None = None
 
         def mutate_then_commit(
             project_path: str,
             transaction: included_files_module._IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
-            nonlocal mutated
+            nonlocal mutated, preserved_staged_file
             staged_file = os.path.join(
                 transaction.staged_root_path,
                 "new.txt",
             )
+            preserved_staged_file = staged_file
             staged_stat = os.stat(staged_file)
             with open(staged_file, "r+b", buffering=0) as output_file:
                 output_file.write(b"EVIL")
@@ -1450,7 +5356,18 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ).resources,
             ConversionCounts(requested=1, executed=1, failed=1),
         )
-        self._assert_no_transaction_debris()
+        self.assertIsNotNone(preserved_staged_file)
+        if preserved_staged_file is not None:
+            with open(preserved_staged_file, "rb") as staged_file:
+                self.assertEqual(staged_file.read(), b"EVIL")
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (
+                    os.path.basename(
+                        os.path.dirname(os.path.dirname(preserved_staged_file))
+                    ),
+                ),
+            )
 
     def test_first_registry_publication_failure_restores_absent_pair(
         self,
@@ -1594,12 +5511,31 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ).resources,
             ConversionCounts(requested=1, executed=1, failed=1),
         )
-        self.assertFalse(
-            any(
-                name.startswith(".gm2godot-included-files-")
-                for name in os.listdir(self.godot_dir)
-            )
+        debris = _included_files_transaction_debris(self.godot_dir)
+        self.assertEqual(len(debris), 2)
+        stage_relative_path = debris[0]
+        self.assertTrue(
+            stage_relative_path.startswith(
+                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            ),
+            debris,
         )
+        self.assertEqual(
+            debris[1],
+            stage_relative_path
+            + "/"
+            + included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                stage_relative_path,
+                "included_files",
+                "new.txt",
+            ),
+            "rb",
+        ) as staged_file:
+            self.assertEqual(staged_file.read(), b"new")
 
     def test_unknown_registry_backup_destination_is_not_overwritten(
         self,
@@ -1693,13 +5629,15 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             )
             with open(sentinel_path, "rb") as sentinel_file:
                 self.assertEqual(sentinel_file.read(), b"unknown sentinel")
-        project_debris = [
-            name
-            for name in os.listdir(self.godot_dir)
-            if name.startswith(".gm2godot-included-files-")
-            or name.startswith(".included_files.")
-        ]
-        self.assertEqual(project_debris, [])
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (
+                    os.path.relpath(sentinel_path, self.godot_dir).replace(
+                        os.sep,
+                        "/",
+                    ),
+                ),
+            )
         self.assertEqual(
             converter.conversion_step_result(
                 finalize_unfinished_as=None,
@@ -1733,57 +5671,35 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             victim_file.write("victim sentinel")
         parked_backup = os.path.join(self.godot_dir, ".parked-old-root")
         swapped_backup_path: str | None = None
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
 
         def swap_cleanup_root(
-            parent_fd: int,
-            name: str,
-        ) -> None:
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
             nonlocal swapped_backup_path
-            if (
-                swapped_backup_path is None
-                and name.startswith(".included_files.")
-                and name.endswith(".backup")
-            ):
-                os.rename(
-                    name,
-                    os.path.basename(parked_backup),
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                )
-                os.rename(
-                    os.path.basename(victim_path),
-                    name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                )
-                swapped_backup_path = os.path.join(self.godot_dir, name)
-
-        def swap_cleanup_root_fallback(path: str) -> None:
-            nonlocal swapped_backup_path
-            name = os.path.basename(path)
-            if (
-                swapped_backup_path is None
-                and name.startswith(".included_files.")
-                and name.endswith(".backup")
-            ):
+            if swapped_backup_path is None and role == "root-backup":
                 os.rename(path, parked_backup)
                 os.rename(victim_path, path)
                 swapped_backup_path = path
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
 
-        cleanup_patcher = (
-            patch.object(
-                included_files_module,
-                "_before_included_cleanup_quarantine",
-                side_effect=swap_cleanup_root,
-            )
-            if included_files_module._included_descriptor_paths_supported()
-            else patch.object(
-                included_files_module,
-                "_before_included_cleanup_quarantine_fallback",
-                side_effect=swap_cleanup_root_fallback,
-            )
-        )
-        with cleanup_patcher:
+        with patch.object(
+            included_files_module,
+            "_cleanup_recorded_included_tree",
+            side_effect=swap_cleanup_root,
+        ):
             converter.convert_all()
 
         self.assertIsNotNone(swapped_backup_path)
@@ -1803,6 +5719,10 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 encoding="utf-8",
             ) as victim_file:
                 self.assertEqual(victim_file.read(), "victim sentinel")
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(swapped_backup_path),),
+            )
         self.assertTrue(
             any("transaction cleanup failed" in message for message in logs),
             logs,
@@ -1813,11 +5733,199 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ).resources,
             ConversionCounts(requested=1, executed=1, completed=1),
         )
-        self.assertFalse(
-            any(
-                name.startswith(".gm2godot-included-files-")
-                for name in os.listdir(self.godot_dir)
+
+    def test_committed_cleanup_preserves_unknown_stage_content(self) -> None:
+        logs: list[str] = []
+        converter = IncludedFilesConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=self.running.is_set,
+            max_workers=1,
+        )
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown committed stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
             )
+
+        with patch.object(
+            included_files_module,
+            "_cleanup_recorded_included_tree",
+            side_effect=inject_unknown_stage_content,
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown committed stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertEqual(self._pair_snapshot()[1], {"new.txt": b"new"})
+        self.assertTrue(
+            any("transaction cleanup failed" in message for message in logs),
+            logs,
+        )
+
+    def test_cancelled_rollback_preserves_unknown_stage_content(self) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+        cancellation_injected = False
+
+        def cancel_after_journal(phase: str) -> None:
+            nonlocal cancellation_injected
+            if phase == "journal-prepared":
+                cancellation_injected = True
+                self.running.clear()
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "rollback-stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown cancelled stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=cancel_after_journal,
+            ),
+            patch.object(
+                included_files_module,
+                "_cleanup_recorded_included_tree",
+                side_effect=inject_unknown_stage_content,
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(cancellation_injected)
+        self.assertTrue(converter.conversion_step_result().cancelled)
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown cancelled stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.godot_dir, "included_files"))
+        )
+
+    def test_failed_rollback_preserves_unknown_stage_content(self) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+
+        def fail_after_journal(phase: str) -> None:
+            if phase == "journal-prepared":
+                raise OSError("injected commit failure")
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "rollback-stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown failed stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=fail_after_journal,
+            ),
+            patch.object(
+                included_files_module,
+                "_cleanup_recorded_included_tree",
+                side_effect=inject_unknown_stage_content,
+            ),
+            self.assertRaisesRegex(OSError, "injected commit failure"),
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown failed stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.godot_dir, "included_files"))
         )
 
     def test_transaction_source_swap_restores_unknown_replacement_without_loss(
@@ -1927,16 +6035,24 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 
         with patch.object(
             included_files_module,
-            "_before_included_cleanup_quarantine",
+            "_before_included_transaction_rename",
             side_effect=swap_cleanup_file,
         ), self.assertRaisesRegex(OSError, "restored without loss"):
-            included_files_module._remove_owned_included_file(
+            included_files_module._cleanup_recorded_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
-                expected_parent_identity=(
+                hashlib.sha256(b"owned cleanup file").hexdigest(),
+                (
                     parent_stat.st_dev,
                     parent_stat.st_ino,
                 ),
+                "c" * 32,
+                "test-file-swap",
+                "owned.txt",
+                expected_fingerprint=(
+                    included_files_module._included_path_fingerprint(owned_stat)
+                ),
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
 
         self.assertTrue(swapped)
@@ -1944,6 +6060,147 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             self.assertEqual(owned_file.read(), "unknown replacement")
         with open(parked_path, encoding="utf-8") as parked_file:
             self.assertEqual(parked_file.read(), "owned cleanup file")
+
+    def test_descriptor_cleanup_streams_payload_receipts(self) -> None:
+        if not included_files_module._included_descriptor_paths_supported():
+            self.skipTest("Descriptor-pinned cleanup is unavailable")
+        self._assert_streaming_cleanup_path(force_fallback=False)
+
+    def test_forced_fallback_cleanup_streams_payload_receipts(self) -> None:
+        self._assert_streaming_cleanup_path(force_fallback=True)
+
+    def test_64_mib_cleanup_has_bounded_memory_and_two_streaming_passes(
+        self,
+    ) -> None:
+        payload_size = 64 * 1024 * 1024
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "large-streaming-cleanup",
+        )
+        os.mkdir(cleanup_directory)
+        owned_path = os.path.join(cleanup_directory, "large.bin")
+        with open(owned_path, "wb") as owned_file:
+            owned_file.truncate(payload_size)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+        zero_chunk = b"\0" * (1024 * 1024)
+        expected_digest = hashlib.sha256()
+        for _index in range(payload_size // len(zero_chunk)):
+            expected_digest.update(zero_chunk)
+        del zero_chunk
+
+        streamed_bytes = 0
+        largest_chunk = 0
+        original_read = included_files_module._read_included_validation_chunk
+
+        def count_streamed_bytes(opened_file: BinaryIO) -> bytes:
+            nonlocal streamed_bytes, largest_chunk
+            chunk = original_read(opened_file)
+            streamed_bytes += len(chunk)
+            largest_chunk = max(largest_chunk, len(chunk))
+            return chunk
+
+        tracemalloc.start()
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_read_included_validation_chunk",
+                    side_effect=count_streamed_bytes,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_included_regular_file_state",
+                    side_effect=AssertionError(
+                        "cleanup used the whole-content file-state helper"
+                    ),
+                ),
+            ):
+                warnings = (
+                    included_files_module._cleanup_recorded_included_file(
+                        owned_path,
+                        (owned_stat.st_dev, owned_stat.st_ino),
+                        expected_digest.hexdigest(),
+                        (parent_stat.st_dev, parent_stat.st_ino),
+                        "f" * 32,
+                        "large-streaming-cleanup",
+                        "large.bin",
+                        expected_fingerprint=(
+                            included_files_module._included_path_fingerprint(
+                                owned_stat
+                            )
+                        ),
+                        expected_mode=stat.S_IMODE(owned_stat.st_mode),
+                    )
+                )
+            _current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        self.assertEqual(warnings, ())
+        self.assertEqual(streamed_bytes, 2 * payload_size)
+        self.assertLessEqual(largest_chunk, 1024 * 1024)
+        self.assertLess(peak_bytes, 8 * 1024 * 1024)
+        self.assertFalse(os.path.lexists(owned_path))
+
+    def test_large_cleanup_tombstone_recovers_after_hard_exit(self) -> None:
+        payload_size = 64 * 1024 * 1024
+        source_path = os.path.join(self.datafiles_dir, "large.bin")
+        with open(source_path, "wb") as source_file:
+            source_file.truncate(payload_size)
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        os.unlink(source_path)
+        self._write("new.txt", "new generation")
+
+        interrupted = self._run_interrupted_conversion(
+            "cleanup:root-backup:large.bin:quarantined"
+        )
+
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        large_tombstones = [
+            os.path.join(directory, filename)
+            for directory, _subdirectories, filenames in os.walk(
+                self.godot_dir
+            )
+            for filename in filenames
+            if filename.startswith(
+                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+            )
+            and filename.endswith(".file")
+            and os.path.getsize(os.path.join(directory, filename))
+            == payload_size
+        ]
+        self.assertEqual(len(large_tombstones), 1)
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                )
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                )
+            )
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            self._pair_snapshot()[1],
+            {"new.txt": b"new generation"},
+        )
+        self.assertFalse(os.path.lexists(large_tombstones[0]))
+        self._assert_no_transaction_debris()
 
     def test_cleanup_tree_final_rmdir_retains_unknown_replacement(
         self,
@@ -2471,62 +6728,34 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         os.chmod(owned_path, 0o600)
 
-    def test_windows_fallback_cleanup_removes_readonly_owned_file(self) -> None:
-        cleanup_directory = os.path.join(
-            self.godot_dir,
-            "windows-readonly-cleanup",
-        )
-        os.mkdir(cleanup_directory)
-        owned_path = os.path.join(cleanup_directory, "owned.txt")
-        with open(owned_path, "w", encoding="utf-8") as owned_file:
-            owned_file.write("owned cleanup target")
-        os.chmod(owned_path, 0o400)
-        owned_stat = os.lstat(owned_path)
-        parent_stat = os.lstat(cleanup_directory)
-        supports_without_chmod = set(os.supports_fd)
-        supports_without_chmod.discard(os.chmod)
-
-        with (
-            patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
-                return_value=False,
-            ),
-            patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module.os,
-                "supports_fd",
-                supports_without_chmod,
-            ),
-        ):
-            included_files_module._remove_owned_included_file(
-                owned_path,
-                (owned_stat.st_dev, owned_stat.st_ino),
-                expected_parent_identity=(
-                    parent_stat.st_dev,
-                    parent_stat.st_ino,
-                ),
-            )
-
-        self.assertFalse(os.path.lexists(owned_path))
-        self.assertEqual(os.listdir(cleanup_directory), [])
-
-    def test_windows_fallback_cleanup_restores_readonly_after_unlink_failure(
+    def test_windows_deterministic_cleanup_restores_readonly_after_unlink_failure(
         self,
     ) -> None:
         cleanup_directory = os.path.join(
             self.godot_dir,
-            "windows-readonly-cleanup-failure",
+            "windows-deterministic-readonly-failure",
         )
         os.mkdir(cleanup_directory)
         owned_path = os.path.join(cleanup_directory, "owned.txt")
-        with open(owned_path, "w", encoding="utf-8") as owned_file:
-            owned_file.write("owned cleanup target")
+        content = b"owned deterministic cleanup target"
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(content)
         os.chmod(owned_path, 0o400)
         owned_stat = os.lstat(owned_path)
         parent_stat = os.lstat(cleanup_directory)
-        supports_without_chmod = set(os.supports_fd)
-        supports_without_chmod.discard(os.chmod)
+        expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
+        expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+        expected_fingerprint = included_files_module._included_path_fingerprint(
+            owned_stat
+        )
+        transaction_id = "a" * 32
+        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+            owned_path,
+            transaction_id,
+            "test-readonly",
+            "owned.txt",
+            expect_directory=False,
+        )
 
         with (
             patch.object(
@@ -2537,44 +6766,165 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
                 included_files_module.os,
-                "supports_fd",
-                supports_without_chmod,
-            ),
-            patch.object(
-                included_files_module.os,
                 "unlink",
                 side_effect=PermissionError("injected Windows sharing failure"),
+            ),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
             ),
             self.assertRaisesRegex(
                 OSError,
                 "recoverable quarantine retained",
             ),
         ):
-            included_files_module._remove_owned_included_file(
+            included_files_module._cleanup_recorded_included_file(
                 owned_path,
-                (owned_stat.st_dev, owned_stat.st_ino),
-                expected_parent_identity=(
-                    parent_stat.st_dev,
-                    parent_stat.st_ino,
-                ),
+                expected_identity,
+                hashlib.sha256(content).hexdigest(),
+                expected_parent_identity,
+                transaction_id,
+                "test-readonly",
+                "owned.txt",
+                expected_fingerprint=expected_fingerprint,
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
 
-        quarantined_names = os.listdir(cleanup_directory)
-        self.assertEqual(len(quarantined_names), 1)
-        quarantined_path = os.path.join(
-            cleanup_directory,
-            quarantined_names[0],
-        )
-        quarantined_stat = os.lstat(quarantined_path)
+        self.assertFalse(os.path.lexists(owned_path))
+        retained_stat = os.lstat(tombstone_path)
         self.assertEqual(
-            (quarantined_stat.st_dev, quarantined_stat.st_ino),
-            (owned_stat.st_dev, owned_stat.st_ino),
+            (retained_stat.st_dev, retained_stat.st_ino),
+            expected_identity,
         )
-        self.assertFalse(quarantined_stat.st_mode & stat.S_IWRITE)
-        with open(quarantined_path, encoding="utf-8") as quarantined_file:
-            self.assertEqual(quarantined_file.read(), "owned cleanup target")
-        os.chmod(quarantined_path, 0o600)
-        os.unlink(quarantined_path)
+        self.assertFalse(retained_stat.st_mode & stat.S_IWRITE)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
+        ):
+            warnings = included_files_module._cleanup_recorded_included_file(
+                owned_path,
+                expected_identity,
+                hashlib.sha256(content).hexdigest(),
+                expected_parent_identity,
+                transaction_id,
+                "test-readonly",
+                "owned.txt",
+                expected_fingerprint=expected_fingerprint,
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
+            )
+
+        self.assertEqual(warnings, ())
+        self.assertFalse(os.path.lexists(tombstone_path))
+
+    def test_windows_deterministic_cleanup_recovers_after_readonly_clear_exit(
+        self,
+    ) -> None:
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "windows-deterministic-readonly-exit",
+        )
+        os.mkdir(cleanup_directory)
+        owned_path = os.path.join(cleanup_directory, "owned.txt")
+        content = b"owned interrupted cleanup target"
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(content)
+        os.chmod(owned_path, 0o400)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+        expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
+        expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+        expected_fingerprint = included_files_module._included_path_fingerprint(
+            owned_stat
+        )
+        transaction_id = "b" * 32
+        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+            owned_path,
+            transaction_id,
+            "test-readonly-exit",
+            "owned.txt",
+            expect_directory=False,
+        )
+
+        class SimulatedProcessExit(BaseException):
+            pass
+
+        def stop_after_readonly_clear(phase: str) -> None:
+            if phase == "cleanup-readonly-cleared":
+                raise SimulatedProcessExit()
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=stop_after_readonly_clear,
+            ),
+            self.assertRaises(SimulatedProcessExit),
+        ):
+            included_files_module._cleanup_recorded_included_file(
+                owned_path,
+                expected_identity,
+                hashlib.sha256(content).hexdigest(),
+                expected_parent_identity,
+                transaction_id,
+                "test-readonly-exit",
+                "owned.txt",
+                expected_fingerprint=expected_fingerprint,
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
+            )
+
+        self.assertFalse(os.path.lexists(owned_path))
+        interrupted_stat = os.lstat(tombstone_path)
+        self.assertTrue(interrupted_stat.st_mode & stat.S_IWRITE)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
+        ):
+            warnings = included_files_module._cleanup_recorded_included_file(
+                owned_path,
+                expected_identity,
+                hashlib.sha256(content).hexdigest(),
+                expected_parent_identity,
+                transaction_id,
+                "test-readonly-exit",
+                "owned.txt",
+                expected_fingerprint=expected_fingerprint,
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
+            )
+
+        self.assertEqual(warnings, ())
+        self.assertFalse(os.path.lexists(tombstone_path))
 
     def test_windows_fallback_cleanup_preserves_readonly_hardlink_alias(
         self,
@@ -2603,18 +6953,31 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
             self.assertRaisesRegex(
                 OSError,
                 "multiple hard links.*recoverable quarantine retained",
             ),
         ):
-            included_files_module._remove_owned_included_file(
+            included_files_module._cleanup_recorded_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
-                expected_parent_identity=(
+                hashlib.sha256(b"external hardlink sentinel").hexdigest(),
+                (
                     parent_stat.st_dev,
                     parent_stat.st_ino,
                 ),
+                "d" * 32,
+                "test-hardlink",
+                "owned.txt",
+                expected_fingerprint=(
+                    included_files_module._included_path_fingerprint(owned_stat)
+                ),
+                expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
 
         with open(external_path, encoding="utf-8") as external_file:
@@ -2660,12 +7023,16 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ),
             patch.object(included_files_module.os, "name", "nt"),
         ):
-            included_files_module._remove_owned_empty_included_directory(
+            warnings = included_files_module._cleanup_recorded_included_directory(
                 owned_directory,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 (parent_stat.st_dev, parent_stat.st_ino),
+                "e" * 32,
+                "test-readonly-directory",
+                ".",
             )
 
+        self.assertEqual(warnings, ())
         self.assertFalse(os.path.lexists(owned_directory))
         self.assertEqual(os.listdir(parent_directory), [])
 
@@ -2699,10 +7066,13 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 "directory; recoverable quarantine retained",
             ),
         ):
-            included_files_module._remove_owned_empty_included_directory(
+            included_files_module._cleanup_recorded_included_directory(
                 owned_directory,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 (parent_stat.st_dev, parent_stat.st_ino),
+                "f" * 32,
+                "test-readonly-directory-failure",
+                ".",
             )
 
         quarantined_names = os.listdir(parent_directory)
@@ -3239,6 +7609,53 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             {"new/nested.txt": b"new payload"},
         )
         self.assertFalse(os.lstat(registry_path).st_mode & stat.S_IWRITE)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_readonly_cleanup_recovers_after_process_exit(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old/nested.txt", "old payload")
+        converter.convert_all()
+        public_root = os.path.join(self.godot_dir, "included_files")
+        self._mark_native_windows_tree_read_only(public_root)
+
+        os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
+        os.rmdir(os.path.join(self.datafiles_dir, "old"))
+        self._write("new/nested.txt", "new payload")
+
+        interrupted = self._run_interrupted_conversion(
+            "cleanup-readonly-cleared"
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                )
+            )
+        )
+        self.assertTrue(
+            os.path.isfile(
+                os.path.join(
+                    self.godot_dir,
+                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                )
+            )
+        )
+
+        converter.convert_all()
+
+        self.assertEqual(
+            self._pair_snapshot()[1],
+            {"new/nested.txt": b"new payload"},
+        )
         self._assert_no_transaction_debris()
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
@@ -4180,6 +8597,30 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         except (NotImplementedError, OSError) as error:
             self.skipTest(f"Symbolic links are unavailable: {error}")
 
+    def _assert_persistent_project_lock(self, project_path: str) -> str:
+        lock_path = os.path.join(
+            project_path,
+            included_files_module._INCLUDED_FILES_LOCK_NAME,
+        )
+        self.assertTrue(os.path.isfile(lock_path))
+        self.assertFalse(os.path.islink(lock_path))
+        with open(lock_path, "rb") as lock_file:
+            self.assertEqual(
+                lock_file.read(),
+                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+            )
+        return lock_path
+
+    def _assert_no_project_transaction_debris(
+        self,
+        project_path: str,
+    ) -> None:
+        self._assert_persistent_project_lock(project_path)
+        self.assertEqual(
+            _included_files_transaction_debris(project_path),
+            (),
+        )
+
     def _assert_failed_output(
         self,
         converter: IncludedFilesConverter,
@@ -4478,12 +8919,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
 
         self.assertTrue(os.path.isdir(moved_directory))
         self.assertEqual(os.listdir(moved_directory), [])
-        self.assertFalse(
-            any(
-                name.startswith(".gm2godot-")
-                for name in os.listdir(self.godot_dir)
-            )
-        )
+        self._assert_no_project_transaction_debris(self.godot_dir)
         self._assert_failed_output(
             converter,
             diagnostics,
@@ -4591,12 +9027,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         with open(outside_output, "rb") as outside_file:
             self.assertEqual(outside_file.read(), b"outside sentinel")
         self.assertEqual(os.listdir(moved_directory), [])
-        self.assertFalse(
-            any(
-                name.startswith(".gm2godot-")
-                for name in os.listdir(self.godot_dir)
-            )
-        )
+        self._assert_no_project_transaction_debris(self.godot_dir)
         self._assert_failed_output(
             converter,
             diagnostics,
@@ -4725,18 +9156,17 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
 
         self.assertTrue(os.path.isdir(moved_directory))
         self.assertEqual(os.listdir(moved_directory), [])
-        self.assertFalse(
-            any(
-                name.startswith(".gm2godot-")
-                for name in os.listdir(self.godot_dir)
-            )
-        )
+        self._assert_no_project_transaction_debris(self.godot_dir)
         self._assert_failed_output(
             converter,
             diagnostics,
             rejection_count=0,
         )
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "the persistent Windows project lock blocks root relocation",
+    )
     def test_fallback_project_root_swap_cleans_external_stage_before_copy(
         self,
     ) -> None:
@@ -4803,13 +9233,48 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
                 for filename in filenames
             ]
             self.assertTrue(swapped)
-            self.assertEqual(outside_files, [])
+            lock_path = self._assert_persistent_project_lock(moved_project)
+            non_lock_outside_files = [
+                path for path in outside_files if path != lock_path
+            ]
+            self.assertEqual(len(non_lock_outside_files), 1)
+            self.assertTrue(
+                non_lock_outside_files[0].startswith(moved_project + os.sep)
+            )
+            self.assertEqual(
+                os.path.basename(non_lock_outside_files[0]),
+                included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+            )
             self._assert_failed_output(converter, diagnostics)
         finally:
             if os.path.islink(self.godot_dir):
                 os.unlink(self.godot_dir)
             if os.path.isdir(moved_project):
                 original_rename(moved_project, self.godot_dir)
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_project_lock_blocks_root_relocation(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        moved_project = os.path.join(self.outside_dir, "moved_project")
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        try:
+            with self.assertRaises(OSError):
+                os.rename(self.godot_dir, moved_project)
+        finally:
+            included_files_module._release_included_project_lock(project_lock)
+            if not os.path.lexists(self.godot_dir) and os.path.isdir(moved_project):
+                os.rename(moved_project, self.godot_dir)
+
+        self.assertTrue(os.path.isdir(self.godot_dir))
+        self.assertFalse(os.path.lexists(moved_project))
+        self._assert_no_project_transaction_debris(self.godot_dir)
 
     def test_fallback_rejects_mocked_windows_junction(self) -> None:
         managed_root = os.path.join(self.godot_dir, "included_files")
@@ -4832,6 +9297,16 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
             max_workers=1,
             diagnostics=diagnostics,
         )
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        included_files_module._release_included_project_lock(project_lock)
         with (
             patch.object(
                 included_files_module,

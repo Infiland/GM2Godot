@@ -209,10 +209,25 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
                 ):
                     self.verify(body)
 
+    def test_missing_qtgui_graphics_loader_dependencies_are_rejected(self) -> None:
+        for library in ("libEGL.so.1", "libGL.so.1"):
+            with self.subTest(library=library):
+                body = _success_body(
+                    f"printf '%s\\n' 'ImportError: {library}: "
+                    "cannot open shared object file: No such file or directory' >&2\n"
+                )
+                with self.assertRaisesRegex(
+                    verifier.LinuxGuiArtifactVerificationError,
+                    library.replace(".", r"\."),
+                ):
+                    self.verify(body)
+
     def test_fatal_diagnostic_reports_one_bounded_matching_line(self) -> None:
         marker = "cannot open shared object file"
         body = _success_body(
-            f"printf '%s\\n' 'loader: {marker}: {'x' * 2000}' >&2\n"
+            "printf '%s\\n' 'before-line-sentinel' >&2\n"
+            f"printf '%s\\n' '{'p' * 2000}{marker}{'s' * 2000}' >&2\n"
+            "printf '%s\\n' 'after-line-sentinel' >&2\n"
         )
         with self.assertRaises(
             verifier.LinuxGuiArtifactVerificationError
@@ -220,9 +235,120 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             self.verify(body)
 
         message = str(raised.exception)
-        self.assertIn(f"loader: {marker}", message)
-        self.assertTrue(message.endswith("...'"))
-        self.assertLess(len(message), verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 200)
+        excerpt = message.partition("matching output: ")[2]
+        self.assertIn(marker, excerpt)
+        self.assertTrue(excerpt.startswith("'..."))
+        self.assertTrue(excerpt.endswith("...'"))
+        self.assertNotIn("before-line-sentinel", excerpt)
+        self.assertNotIn("after-line-sentinel", excerpt)
+        self.assertLessEqual(
+            len(excerpt),
+            verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
+        )
+
+    def test_first_fatal_output_line_is_reported(self) -> None:
+        first = "could not load the qt platform plugin"
+        later = "error while loading shared libraries"
+        body = _success_body(
+            f"printf '%s\\n' 'first: {first}' >&2\n"
+            f"printf '%s\\n' 'later: {later}' >&2\n"
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        message = str(raised.exception)
+        self.assertIn(f"matching output: 'first: {first}'", message)
+        self.assertNotIn(f"later: {later}", message)
+
+    def test_leftmost_fatal_signature_on_one_line_is_classified(self) -> None:
+        first = "could not load the qt platform plugin"
+        later = "error while loading shared libraries"
+        body = _success_body(
+            f"printf '%s\\n' 'first: {first}; later: {later}' >&2\n"
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        self.assertIn(
+            f"fatal loader/platform diagnostic: {first};",
+            str(raised.exception),
+        )
+
+    def test_non_ascii_prefix_does_not_shift_fatal_marker_excerpt(self) -> None:
+        marker = "cannot open shared object file"
+        body = _success_body(
+            f"printf '%s\\n' '{'ß' * 2000}{marker}{'x' * 2000}' >&2\n"
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        excerpt = str(raised.exception).partition("matching output: ")[2]
+        self.assertIn(marker, excerpt)
+        self.assertLessEqual(
+            len(excerpt),
+            verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
+        )
+
+    def test_escaped_prefix_does_not_expand_bounded_excerpt(self) -> None:
+        marker = "cannot open shared object file"
+        body = _success_body(
+            f"printf '%s\\n' '{chr(92) * 2000}{marker}{chr(92) * 2000}' >&2\n"
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        excerpt = str(raised.exception).partition("matching output: ")[2]
+        self.assertIn(marker, excerpt)
+        self.assertLessEqual(
+            len(excerpt),
+            verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
+        )
+
+    def test_quote_heavy_prefix_keeps_diagnostic_wrapper_unambiguous(self) -> None:
+        marker = "cannot open shared object file"
+        diagnostic_line = "'" * 2000 + "a" + marker + "x" * 2000
+        body = _success_body(
+            f'printf \'%s\\n\' "{diagnostic_line}" >&2\n'
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        excerpt = str(raised.exception).partition("matching output: ")[2]
+        self.assertIn(marker, excerpt)
+        self.assertEqual(excerpt.count("'"), 2)
+        self.assertNotRegex(excerpt, "[\\r\\n\\x00-\\x1f\\x7f]")
+        self.assertLessEqual(
+            len(excerpt),
+            verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
+        )
+
+    def test_bounded_excerpt_escapes_control_characters(self) -> None:
+        marker = "cannot open shared object file"
+        line = "\x00\t\x1b" * 1000 + marker + "\x7f\r" * 1000
+        marker_start = line.index(marker)
+        excerpt = verifier._bounded_output_excerpt(
+            line,
+            marker_start,
+            marker_start + len(marker),
+        )
+
+        self.assertIn(marker, excerpt)
+        self.assertEqual(excerpt.count("'"), 2)
+        self.assertNotRegex(excerpt, r"[\x00-\x1f\x7f]")
+        self.assertLessEqual(
+            len(excerpt),
+            verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
+        )
 
     def test_timeout_kills_the_isolated_process_group(self) -> None:
         child_receipt = self.root / "timeout-child.pid"

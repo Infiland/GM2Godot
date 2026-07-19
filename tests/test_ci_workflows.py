@@ -4540,6 +4540,8 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(
             packages,
             (
+                "libegl1",
+                "libgl1",
                 "libxkbcommon-x11-0",
                 "libxcb-cursor0",
                 "libxcb-icccm4",
@@ -4566,7 +4568,7 @@ class TestCIWorkflows(unittest.TestCase):
                 )
         for required in (
             'package_manifest="packaging/linux/qt-xcb-runtime-packages.txt"',
-            'if [ "${#qt_packages[@]}" -ne 9 ]; then',
+            'if [ "${#qt_packages[@]}" -ne 11 ]; then',
             "sudo apt-get update",
             "sudo apt-get install --yes --no-install-recommends",
             '"${qt_packages[@]}"',
@@ -4755,12 +4757,12 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn("python -m unittest discover tests/ -v", linux_job)
         self.assertIn(
-            "sudo apt-get install --yes --no-install-recommends libegl1",
+            "sudo apt-get install --yes --no-install-recommends libegl1 libgl1",
             linux_job,
         )
         self.assertLess(
             linux_job.index(
-                "sudo apt-get install --yes --no-install-recommends libegl1"
+                "sudo apt-get install --yes --no-install-recommends libegl1 libgl1"
             ),
             linux_job.index("python -m unittest discover tests/ -v"),
         )

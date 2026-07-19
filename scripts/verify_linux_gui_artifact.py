@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import lzma
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import subprocess
@@ -259,13 +260,90 @@ def _read_process_output(stream: object) -> bytes:
     return content
 
 
-def _matching_output_excerpt(content: str, signature: str) -> str:
+def _bounded_output_excerpt(
+    line: str,
+    marker_start: int,
+    marker_end: int,
+) -> str:
+    escaped_prefix = (
+        line[:marker_start]
+        .encode("unicode_escape")
+        .decode("ascii")
+        .replace("'", r"\x27")
+    )
+    escaped_marker = (
+        line[marker_start:marker_end]
+        .encode("unicode_escape")
+        .decode("ascii")
+        .replace("'", r"\x27")
+    )
+    escaped_suffix = (
+        line[marker_end:]
+        .encode("unicode_escape")
+        .decode("ascii")
+        .replace("'", r"\x27")
+    )
+    escaped_line = escaped_prefix + escaped_marker + escaped_suffix
+    escaped_marker_start = len(escaped_prefix)
+    escaped_marker_end = escaped_marker_start + len(escaped_marker)
+    if len(escaped_line) <= MAX_DIAGNOSTIC_LINE_CHARACTERS:
+        return f"'{escaped_line}'"
+
+    marker_length = escaped_marker_end - escaped_marker_start
+    omitted_prefix = escaped_marker_start > 0
+    omitted_suffix = escaped_marker_end < len(escaped_line)
+    ellipsis_length = 3 * (int(omitted_prefix) + int(omitted_suffix))
+    content_budget = MAX_DIAGNOSTIC_LINE_CHARACTERS - ellipsis_length
+    if marker_length > content_budget:
+        marker_budget = MAX_DIAGNOSTIC_LINE_CHARACTERS - 3
+        return f"'{escaped_marker[:marker_budget]}...'"
+
+    remaining = content_budget - marker_length
+    left_available = escaped_marker_start
+    right_available = len(escaped_line) - escaped_marker_end
+    left_length = min(left_available, remaining // 2)
+    right_length = min(right_available, remaining - left_length)
+    remaining -= left_length + right_length
+    if remaining:
+        additional_left = min(left_available - left_length, remaining)
+        left_length += additional_left
+        remaining -= additional_left
+    if remaining:
+        right_length += min(right_available - right_length, remaining)
+
+    excerpt_start = escaped_marker_start - left_length
+    excerpt_end = escaped_marker_end + right_length
+    excerpt = escaped_line[excerpt_start:excerpt_end]
+    if excerpt_start:
+        excerpt = "..." + excerpt
+    if excerpt_end < len(escaped_line):
+        excerpt += "..."
+    return f"'{excerpt}'"
+
+
+def _fatal_output_diagnostic(content: str) -> tuple[str, str] | None:
     for line in content.splitlines():
-        if signature in line.casefold():
-            if len(line) > MAX_DIAGNOSTIC_LINE_CHARACTERS:
-                line = line[:MAX_DIAGNOSTIC_LINE_CHARACTERS] + "..."
-            return repr(line)
-    return repr(signature)
+        selected: tuple[int, int, str] | None = None
+        for signature in _FATAL_OUTPUT_SIGNATURES:
+            match = re.search(
+                re.escape(signature),
+                line,
+                flags=re.IGNORECASE | re.ASCII,
+            )
+            if match is None:
+                continue
+            candidate = (match.start(), match.end(), signature)
+            if selected is None or candidate[0] < selected[0]:
+                selected = candidate
+        if selected is None:
+            continue
+        marker_start, marker_end, signature = selected
+        return signature, _bounded_output_excerpt(
+            line,
+            marker_start,
+            marker_end,
+        )
+    return None
 
 
 def _process_group_exists(process: subprocess.Popen[bytes]) -> bool:
@@ -532,13 +610,13 @@ def _run_packaged_gui(
             _terminate_process_group(process)
 
     decoded_output = captured.decode("utf-8", errors="replace")
-    folded_output = decoded_output.casefold()
-    for signature in _FATAL_OUTPUT_SIGNATURES:
-        if signature in folded_output:
-            raise LinuxGuiArtifactVerificationError(
-                f"packaged GUI emitted fatal loader/platform diagnostic: {signature}; "
-                f"matching output: {_matching_output_excerpt(decoded_output, signature)}"
-            )
+    fatal_diagnostic = _fatal_output_diagnostic(decoded_output)
+    if fatal_diagnostic is not None:
+        signature, excerpt = fatal_diagnostic
+        raise LinuxGuiArtifactVerificationError(
+            f"packaged GUI emitted fatal loader/platform diagnostic: {signature}; "
+            f"matching output: {excerpt}"
+        )
     if returncode != 0:
         raise LinuxGuiArtifactVerificationError(
             f"packaged GUI exited with status {returncode}"

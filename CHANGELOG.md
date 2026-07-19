@@ -2,7 +2,7 @@
 
 ## 0.7.22 - 2026-07-19
 
-- Declared Ubuntu 24.04 x86_64 as the packaged Linux baseline, supplied Qt's required XCB libraries during dependency analysis, and intentionally excluded the unused Qt TIFF plugin whose obsolete `libtiff.so.5` ABI is unavailable on that baseline.
+- Declared Ubuntu 24.04 x86_64 as the packaged Linux baseline, supplied QtGui's required EGL/GL providers and XCB libraries during dependency analysis, and intentionally excluded the unused Qt TIFF plugin whose obsolete `libtiff.so.5` ABI is unavailable on that baseline.
 - Made the release build fail on unresolved shared-library warnings and validate the extracted Linux archive under the real `qxcb` platform in Xvfb, including bundled-library inventory, executable permissions, GUI readiness, fatal loader diagnostics, and bounded process cleanup.
 
 ## 0.7.21 - 2026-07-19

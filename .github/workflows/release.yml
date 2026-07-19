@@ -800,8 +800,8 @@ jobs:
           mapfile -t qt_packages < <(
             sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$package_manifest"
           )
-          if [ "${#qt_packages[@]}" -ne 9 ]; then
-            echo "::error::Expected exactly nine reviewed Qt/XCB runtime packages; found ${#qt_packages[@]}." >&2
+          if [ "${#qt_packages[@]}" -ne 11 ]; then
+            echo "::error::Expected exactly eleven reviewed Qt GUI/XCB runtime packages; found ${#qt_packages[@]}." >&2
             exit 1
           fi
           for package in "${qt_packages[@]}"; do

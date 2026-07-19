@@ -38,7 +38,7 @@ This policy does not select the macOS architecture tracked in issue #736 and doe
 
 ## Linux packaged-GUI gate
 
-The packaged Linux baseline is Ubuntu 24.04 x86_64. The Linux build installs the exact XCB runtime-package inventory in `packaging/linux/qt-xcb-runtime-packages.txt` before PyInstaller analysis and uses the reviewed hook under `packaging/linux/hooks/` to exclude only Qt's unused TIFF plugin. Any `Library not found` warning fails the build. Before upload, the workflow inspects the one-file archive for the `qxcb` plugin and all required XCB SONAMEs, rejects the TIFF plugin, and runs `scripts/verify_linux_gui_artifact.py` against the extracted final ZIP under Xvfb with `QT_QPA_PLATFORM=xcb`. Success requires the main window to reach the Qt event loop and write the exact one-use readiness receipt before a bounded clean exit; missing loaders, platform-plugin failures, unsafe archive metadata, an immediate crash, a timeout, or fatal captured diagnostics fail the matrix job.
+The packaged Linux baseline is Ubuntu 24.04 x86_64. The Linux build installs the exact Qt GUI/XCB runtime-package inventory in `packaging/linux/qt-xcb-runtime-packages.txt` before PyInstaller analysis, including Ubuntu's `libegl1` and `libgl1` providers required directly by QtGui, and uses the reviewed hook under `packaging/linux/hooks/` to exclude only Qt's unused TIFF plugin. Any `Library not found` warning fails the build. Before upload, the workflow inspects the one-file archive for the `qxcb` plugin and all required XCB SONAMEs, rejects the TIFF plugin, and runs `scripts/verify_linux_gui_artifact.py` against the extracted final ZIP under Xvfb with `QT_QPA_PLATFORM=xcb`. Success requires the main window to reach the Qt event loop and write the exact one-use readiness receipt before a bounded clean exit; missing loaders, platform-plugin failures, unsafe archive metadata, an immediate crash, a timeout, or unresolved captured diagnostics fail the matrix job.
 
 ## Versioned-change checklist
 
@@ -58,7 +58,7 @@ Before merging:
 - [ ] Confirm `refs/tags/v<version>` does not already exist on the GitHub remote; do not rely only on a local checkout's tag list.
 - [ ] Confirm all pull-request checks pass, including exact Godot 4.7.1 smoke and current GameMaker LTS conversion gates.
 - [ ] Confirm Linux, macOS, and Windows build jobs produce non-empty artifacts.
-- [ ] Confirm the Linux build reports no unresolved shared libraries and its extracted-ZIP `qxcb` GUI smoke passes with the required bundled XCB inventory and excluded TIFF plugin.
+- [ ] Confirm the Linux build reports no unresolved shared libraries and its extracted-ZIP `qxcb` GUI smoke passes with the required Qt GUI/XCB runtime inventory and excluded TIFF plugin.
 - [ ] Confirm the macOS build verifies the exact bundle identifier and source release version in the `.app`, ZIP, and DMG before upload.
 - [ ] Confirm the pull request references the intended issue, uses the correct closure timing, and does not absorb unrelated work.
 

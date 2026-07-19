@@ -849,6 +849,7 @@ jobs:
             --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
 
       - name: Build executable
+        if: matrix.name != 'macos'
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             SEP=";"
@@ -870,6 +871,10 @@ jobs:
             --add-data "Languages${SEP}Languages" \
             --add-data "Current Language${SEP}." \
             main.py
+
+      - name: Build macOS app bundle
+        if: matrix.name == 'macos'
+        run: python -m PyInstaller --clean packaging/macos/GM2Godot.spec
 
       - name: Package build
         run: |
@@ -899,6 +904,16 @@ jobs:
             -ov \
             -format UDZO \
             GM2Godot-macos.dmg
+
+      - name: Verify macOS bundle metadata
+        if: matrix.name == 'macos'
+        run: |
+          /usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist
+          python -I scripts/verify_macos_bundle_metadata.py \
+            --source-root "$GITHUB_WORKSPACE" \
+            --app "$GITHUB_WORKSPACE/dist/GM2Godot.app" \
+            --zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip" \
+            --dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg"
 
       - name: Upload artifact
         if: matrix.name != 'macos'

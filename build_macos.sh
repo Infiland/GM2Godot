@@ -8,6 +8,9 @@ readonly SCRIPT_DIRECTORY
 readonly PYTHON_BIN=python3
 readonly DEPENDENCY_CONSTRAINT=constraints/requirements-macos-py312.txt
 readonly DEPENDENCY_VERIFIER=scripts/verify_dependency_environment.py
+readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec
+readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py
+readonly MACOS_METADATA_VERIFIER=scripts/verify_macos_bundle_metadata.py
 export PIP_CONFIG_FILE=/dev/null
 readonly -a REPOSITORY_SENTINELS=(
   build_macos.sh
@@ -15,6 +18,9 @@ readonly -a REPOSITORY_SENTINELS=(
   requirements.txt
   "$DEPENDENCY_CONSTRAINT"
   "$DEPENDENCY_VERIFIER"
+  "$MACOS_BUNDLE_SPEC"
+  "$MACOS_METADATA_POLICY"
+  "$MACOS_METADATA_VERIFIER"
 )
 
 for repository_sentinel in "${REPOSITORY_SENTINELS[@]}"; do
@@ -136,21 +142,7 @@ rm -rf -- build dist release dmg
 rm -f -- GM2Godot-macos.zip GM2Godot-macos.dmg GM2Godot.spec
 
 echo "Building macOS app bundle..."
-"$VENV_PYTHON" -m PyInstaller --onedir \
-  --windowed \
-  --clean \
-  --name GM2Godot \
-  --icon img/Logo.png \
-  --hidden-import markdown2 \
-  --hidden-import PIL \
-  --hidden-import PySide6.QtWidgets \
-  --hidden-import PySide6.QtCore \
-  --hidden-import PySide6.QtGui \
-  --add-data "img:img" \
-  --add-data "src:src" \
-  --add-data "Languages:Languages" \
-  --add-data "Current Language:." \
-  main.py
+"$VENV_PYTHON" -m PyInstaller --clean "$MACOS_BUNDLE_SPEC"
 
 echo "Preparing release directory..."
 mkdir -p release
@@ -173,6 +165,14 @@ hdiutil create \
   -ov \
   -format UDZO \
   GM2Godot-macos.dmg
+
+echo "Verifying macOS bundle metadata..."
+/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist
+"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER" \
+  --source-root "$SCRIPT_DIRECTORY" \
+  --app "$SCRIPT_DIRECTORY/dist/GM2Godot.app" \
+  --zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip" \
+  --dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg"
 
 cleanup_build_temp
 

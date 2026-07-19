@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.7.26 - 2026-07-19
-- Hardened native Windows Included Files cleanup so identity-verified, single-link read-only transaction files are made writable only inside recoverable quarantine, with the attribute restored when deletion fails and shared hard-link aliases preserved fail-closed.
+- Hardened native Windows Included Files cleanup so identity-verified read-only transaction files and directories are made writable only inside recoverable quarantine, with attributes restored when deletion fails and shared hard-link aliases preserved fail-closed.
 - Added native NTFS junction and read-only transaction tests covering managed roots, nested trees, registry and staging directories, backup destinations, successful cleanup, commit failure, cancellation, and rollback.
 
 ## 0.7.25 - 2026-07-19

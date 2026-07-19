@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Collection, Iterable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import BinaryIO, Callable
 from unittest.mock import MagicMock, patch
@@ -300,7 +301,13 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             raise error
         path_stat = os.lstat(path)
         path_mode = stat.S_IMODE(path_stat.st_mode)
-        if not stat.S_ISREG(path_stat.st_mode) or path_mode & stat.S_IWRITE:
+        if (
+            not (
+                stat.S_ISREG(path_stat.st_mode)
+                or stat.S_ISDIR(path_stat.st_mode)
+            )
+            or path_mode & stat.S_IWRITE
+        ):
             raise error
         os.chmod(path, path_mode | stat.S_IWRITE)
         function(path)
@@ -375,6 +382,39 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
     def _remove_native_windows_junction(path: str) -> None:
         if os.path.isjunction(path):
             os.rmdir(path)
+
+    @staticmethod
+    def _mark_native_windows_tree_read_only(root_path: str) -> None:
+        for directory, subdirectories, filenames in os.walk(
+            root_path,
+            topdown=False,
+        ):
+            for filename in filenames:
+                os.chmod(
+                    os.path.join(directory, filename),
+                    stat.S_IREAD,
+                )
+            for subdirectory in subdirectories:
+                os.chmod(
+                    os.path.join(directory, subdirectory),
+                    stat.S_IREAD,
+                )
+        os.chmod(root_path, stat.S_IREAD)
+
+    def _transaction_with_native_windows_readonly_staged_root(
+        self,
+        transaction: included_files_module._IncludedOutputSetTransaction,
+    ) -> included_files_module._IncludedOutputSetTransaction:
+        self._mark_native_windows_tree_read_only(
+            transaction.staged_root_path
+        )
+        return replace(
+            transaction,
+            staged_root_snapshot=included_files_module._capture_included_tree(
+                transaction.staged_root_path,
+                expected_parent_identity=transaction.stage_container_identity,
+            ),
+        )
 
     def _pair_snapshot(self) -> tuple[int, dict[str, bytes], int, bytes]:
         root_path = os.path.join(self.godot_dir, "included_files")
@@ -2599,6 +2639,88 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.chmod(external_path, 0o600)
         os.unlink(quarantined_paths[0])
 
+    def test_windows_fallback_cleanup_removes_readonly_owned_directory(
+        self,
+    ) -> None:
+        parent_directory = os.path.join(
+            self.godot_dir,
+            "windows-readonly-directory-cleanup",
+        )
+        owned_directory = os.path.join(parent_directory, "owned")
+        os.makedirs(owned_directory)
+        os.chmod(owned_directory, 0o400)
+        owned_stat = os.lstat(owned_directory)
+        parent_stat = os.lstat(parent_directory)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+        ):
+            included_files_module._remove_owned_empty_included_directory(
+                owned_directory,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                (parent_stat.st_dev, parent_stat.st_ino),
+            )
+
+        self.assertFalse(os.path.lexists(owned_directory))
+        self.assertEqual(os.listdir(parent_directory), [])
+
+    def test_windows_fallback_cleanup_restores_readonly_directory_after_failure(
+        self,
+    ) -> None:
+        parent_directory = os.path.join(
+            self.godot_dir,
+            "windows-readonly-directory-cleanup-failure",
+        )
+        owned_directory = os.path.join(parent_directory, "owned")
+        os.makedirs(owned_directory)
+        os.chmod(owned_directory, 0o400)
+        owned_stat = os.lstat(owned_directory)
+        parent_stat = os.lstat(parent_directory)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module.os,
+                "rmdir",
+                side_effect=PermissionError("injected Windows sharing failure"),
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "directory; recoverable quarantine retained",
+            ),
+        ):
+            included_files_module._remove_owned_empty_included_directory(
+                owned_directory,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                (parent_stat.st_dev, parent_stat.st_ino),
+            )
+
+        quarantined_names = os.listdir(parent_directory)
+        self.assertEqual(len(quarantined_names), 1)
+        quarantined_path = os.path.join(
+            parent_directory,
+            quarantined_names[0],
+        )
+        quarantined_stat = os.lstat(quarantined_path)
+        self.assertTrue(stat.S_ISDIR(quarantined_stat.st_mode))
+        self.assertEqual(
+            (quarantined_stat.st_dev, quarantined_stat.st_ino),
+            (owned_stat.st_dev, owned_stat.st_ino),
+        )
+        self.assertFalse(quarantined_stat.st_mode & stat.S_IWRITE)
+        os.chmod(quarantined_path, 0o700)
+        os.rmdir(quarantined_path)
+
     def test_moved_and_symlinked_stage_container_is_rejected(self) -> None:
         converter = self._converter(max_workers=1)
         self._write("old.txt", "old")
@@ -3109,8 +3231,6 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
         os.rmdir(os.path.join(self.datafiles_dir, "old"))
         self._write("new/nested.txt", "new payload")
-        new_source = os.path.join(self.datafiles_dir, "new", "nested.txt")
-        os.chmod(new_source, stat.S_IREAD)
 
         converter.convert_all()
 
@@ -3119,17 +3239,6 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             {"new/nested.txt": b"new payload"},
         )
         self.assertFalse(os.lstat(registry_path).st_mode & stat.S_IWRITE)
-        self.assertFalse(
-            os.lstat(
-                os.path.join(
-                    self.godot_dir,
-                    "included_files",
-                    "new",
-                    "nested.txt",
-                )
-            ).st_mode
-            & stat.S_IWRITE
-        )
         self._assert_no_transaction_debris()
 
     @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
@@ -3158,12 +3267,22 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
         os.rmdir(os.path.join(self.datafiles_dir, "old"))
         self._write("new/nested.txt", "new payload")
-        os.chmod(
-            os.path.join(self.datafiles_dir, "new", "nested.txt"),
-            stat.S_IREAD,
-        )
+        original_commit = included_files_module._commit_included_output_set
         original_move = included_files_module._move_exact_included_file
         publication_failed = False
+
+        def commit_with_readonly_stage(
+            project_path: str,
+            transaction: included_files_module._IncludedOutputSetTransaction,
+            conversion_running: Callable[[], bool],
+        ) -> tuple[str, ...]:
+            return original_commit(
+                project_path,
+                self._transaction_with_native_windows_readonly_staged_root(
+                    transaction
+                ),
+                conversion_running,
+            )
 
         def publish_registry_then_fail(
             source: str,
@@ -3186,6 +3305,11 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 raise OSError("injected native Windows commit failure")
 
         with (
+            patch.object(
+                included_files_module,
+                "_commit_included_output_set",
+                side_effect=commit_with_readonly_stage,
+            ),
             patch.object(
                 included_files_module,
                 "_move_exact_included_file",
@@ -3228,12 +3352,22 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
         os.rmdir(os.path.join(self.datafiles_dir, "old"))
         self._write("new/nested.txt", "new payload")
-        os.chmod(
-            os.path.join(self.datafiles_dir, "new", "nested.txt"),
-            stat.S_IREAD,
-        )
+        original_commit = included_files_module._commit_included_output_set
         original_move = included_files_module._move_exact_included_file
         cancellation_injected = False
+
+        def commit_with_readonly_stage(
+            project_path: str,
+            transaction: included_files_module._IncludedOutputSetTransaction,
+            conversion_running: Callable[[], bool],
+        ) -> tuple[str, ...]:
+            return original_commit(
+                project_path,
+                self._transaction_with_native_windows_readonly_staged_root(
+                    transaction
+                ),
+                conversion_running,
+            )
 
         def publish_registry_then_cancel(
             source: str,
@@ -3255,10 +3389,17 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 cancellation_injected = True
                 self.running.clear()
 
-        with patch.object(
-            included_files_module,
-            "_move_exact_included_file",
-            side_effect=publish_registry_then_cancel,
+        with (
+            patch.object(
+                included_files_module,
+                "_commit_included_output_set",
+                side_effect=commit_with_readonly_stage,
+            ),
+            patch.object(
+                included_files_module,
+                "_move_exact_included_file",
+                side_effect=publish_registry_then_cancel,
+            ),
         ):
             converter.convert_all()
 

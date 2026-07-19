@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from typing import BinaryIO, Callable, cast
 
 from src.localization import get_localized
-from src.conversion.asset_registry import atomic_write_confined_generated_text
+from src.conversion.atomic_generated_text import (
+    atomic_write_confined_generated_text,
+)
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import (

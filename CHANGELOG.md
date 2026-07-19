@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.23 - 2026-07-19
+
+- Replaced read-only generated text outputs on Windows through identity-bound handles, no-replace quarantine moves, and POSIX-style read-only disposition without path-level chmod or cleanup races.
+- Restored the exact prior identity and bytes on every pre-commit failure, preserved unknown namespace replacements, retained exact POSIX modes, and added native Windows coverage for the shared registry, group-report, and timeline writers.
+
 ## 0.7.22 - 2026-07-19
 
 - Declared Ubuntu 24.04 x86_64 as the packaged Linux baseline, supplied QtGui's required EGL/GL providers and XCB libraries during dependency analysis, and intentionally excluded the unused Qt TIFF plugin whose obsolete `libtiff.so.5` ABI is unavailable on that baseline.

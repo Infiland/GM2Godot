@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_7_21(self) -> None:
-        self.assertEqual(get_version(), "0.7.21")
+    def test_release_version_is_0_7_22(self) -> None:
+        self.assertEqual(get_version(), "0.7.22")
 
     def test_release_surfaces_match_source_version(self) -> None:
         changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -28,8 +28,13 @@ class TestVersion(unittest.TestCase):
         )
         self.assertIn(f"Current source version: `{current_version}`.", readme)
         self.assertIn(
-            f"GM2Godot {current_version}, GameMaker LTS 2026",
+            f"GM2Godot {current_version}, GameMaker LTS 2026, Godot 4.7.1",
             issue_template,
+        )
+        self.assertIn(
+            "GM2Godot targets GameMaker LTS 2026 source projects and "
+            "Godot 4.7.1 output.",
+            readme,
         )
         self.assertIn("## 0.7.5 - 2026-07-18", changelog)
         self.assertIn("## 0.7.4 - 2026-07-18", changelog)

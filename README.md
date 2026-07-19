@@ -48,9 +48,10 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.21`.
+Current source version: `0.7.22`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
+The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system and X11 libraries. The release job bundles the Qt/XCB client libraries discovered on the baseline, rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
 Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.
 When an exact version tag already exists, a release-workflow rerun now audits the published release, exact five-asset inventory, GitHub digests, downloaded bytes, checksum manifest, and stable tag/release receipt before accepting the run as a build-and-publication no-op.
 
@@ -85,6 +86,12 @@ Use the exact interpreter from the table above. After activation, `python --vers
 Linux x64:
 
 ```bash
+mapfile -t qt_packages < <(
+  sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
+    packaging/linux/qt-xcb-runtime-packages.txt
+)
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends "${qt_packages[@]}"
 python3.12 -m venv venv
 source venv/bin/activate
 python --version  # Python 3.12.13

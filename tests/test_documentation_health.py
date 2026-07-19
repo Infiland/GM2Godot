@@ -171,6 +171,16 @@ class TestDocumentationHealth(unittest.TestCase):
             "sha256sum --check --strict SHA256SUMS",
             installation,
         )
+        macos_source = installation.partition("### macOS\n")[2].partition(
+            "### Linux\n"
+        )[0]
+        linux_source = installation.partition("### Linux\n")[2].partition(
+            "## Verify the source installation\n"
+        )[0]
+        self.assertNotIn("packaging/linux/qt-xcb-runtime-packages.txt", macos_source)
+        self.assertIn("packaging/linux/qt-xcb-runtime-packages.txt", linux_source)
+        self.assertIn("sudo apt-get install", linux_source)
+        self.assertIn("only validated packaged-Linux baseline", installation)
         self.assertIn("not a signature or proof of publisher identity", installation)
         self.assertIn("exactly five unique, non-empty assets", release_maintenance)
         self.assertIn(

@@ -793,6 +793,28 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
+      - name: Install Linux GUI build and smoke dependencies
+        if: matrix.name == 'linux'
+        run: |
+          package_manifest="packaging/linux/qt-xcb-runtime-packages.txt"
+          mapfile -t qt_packages < <(
+            sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' "$package_manifest"
+          )
+          if [ "${#qt_packages[@]}" -ne 9 ]; then
+            echo "::error::Expected exactly nine reviewed Qt/XCB runtime packages; found ${#qt_packages[@]}." >&2
+            exit 1
+          fi
+          for package in "${qt_packages[@]}"; do
+            if [[ ! "$package" =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
+              echo "::error::Invalid package name in $package_manifest: $package" >&2
+              exit 1
+            fi
+          done
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "${qt_packages[@]}" \
+            xvfb
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -851,16 +873,22 @@ jobs:
       - name: Build executable
         if: matrix.name != 'macos'
         run: |
+          additional_hooks=()
           if [ "$RUNNER_OS" = "Windows" ]; then
             SEP=";"
           else
             SEP=":"
           fi
+          if [ "${{ matrix.name }}" = "linux" ]; then
+            additional_hooks=(--additional-hooks-dir packaging/linux/hooks)
+          fi
+          pyinstaller_log="$RUNNER_TEMP/release-${{ matrix.name }}-pyinstaller.log"
           python -m PyInstaller ${{ matrix.pyinstaller_mode }} \
             --windowed \
             --clean \
             --name GM2Godot \
             --icon img/Logo.png \
+            "${additional_hooks[@]}" \
             --hidden-import markdown2 \
             --hidden-import PIL \
             --hidden-import PySide6.QtWidgets \
@@ -870,11 +898,65 @@ jobs:
             --add-data "src${SEP}src" \
             --add-data "Languages${SEP}Languages" \
             --add-data "Current Language${SEP}." \
-            main.py
+            main.py 2>&1 | tee "$pyinstaller_log"
+          if [ "${{ matrix.name }}" = "linux" ]; then
+            warning_status=0
+            grep -Fq "WARNING: Library not found:" "$pyinstaller_log" || warning_status=$?
+            if [ "$warning_status" -eq 0 ]; then
+              echo "::error::The Linux PyInstaller analysis reported an unresolved shared library." >&2
+              exit 1
+            fi
+            if [ "$warning_status" -ne 1 ]; then
+              echo "::error::Unable to inspect the Linux PyInstaller warning log." >&2
+              exit 1
+            fi
+          fi
 
       - name: Build macOS app bundle
         if: matrix.name == 'macos'
         run: python -m PyInstaller --clean packaging/macos/GM2Godot.spec
+
+      - name: Verify Linux bundled Qt runtime
+        if: matrix.name == 'linux'
+        run: |
+          inventory="$RUNNER_TEMP/release-linux-archive-inventory.txt"
+          normalized_inventory="$RUNNER_TEMP/release-linux-archive-members.txt"
+          pyi-archive_viewer --list --recursive --brief dist/GM2Godot > "$inventory"
+          sed -n -e 's/^ //p' "$inventory" > "$normalized_inventory"
+          for required in \
+            PySide6/Qt/plugins/platforms/libqxcb.so \
+            libxkbcommon-x11.so.0 \
+            libxcb-cursor.so.0 \
+            libxcb-icccm.so.4 \
+            libxcb-image.so.0 \
+            libxcb-keysyms.so.1 \
+            libxcb-render-util.so.0 \
+            libxcb-shape.so.0 \
+            libxcb-util.so.1 \
+            libxcb-xkb.so.1
+          do
+            member_status=0
+            grep -Fxq -- "$required" "$normalized_inventory" || member_status=$?
+            if [ "$member_status" -eq 1 ]; then
+              echo "::error::The Linux one-file archive is missing required Qt/XCB member: $required" >&2
+              exit 1
+            fi
+            if [ "$member_status" -ne 0 ]; then
+              echo "::error::Unable to inspect the Linux one-file archive inventory." >&2
+              exit 1
+            fi
+          done
+          tiff_status=0
+          grep -Fxq -- "PySide6/Qt/plugins/imageformats/libqtiff.so" \
+            "$normalized_inventory" || tiff_status=$?
+          if [ "$tiff_status" -eq 0 ]; then
+            echo "::error::The unsupported Qt TIFF plugin remained in the Linux one-file archive." >&2
+            exit 1
+          fi
+          if [ "$tiff_status" -ne 1 ]; then
+            echo "::error::Unable to inspect the Linux one-file archive inventory." >&2
+            exit 1
+          fi
 
       - name: Package build
         run: |
@@ -890,6 +972,12 @@ jobs:
         run: |
           cd release
           7z a ../GM2Godot-${{ matrix.name }}.zip .
+
+      - name: Verify packaged Linux GUI
+        if: matrix.name == 'linux'
+        run: |
+          python -I scripts/verify_linux_gui_artifact.py \
+            --archive "$GITHUB_WORKSPACE/GM2Godot-linux.zip"
 
       - name: Create macOS DMG
         if: matrix.name == 'macos'

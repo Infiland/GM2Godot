@@ -1489,6 +1489,16 @@ included_files_module._acquire_included_project_lock(
                 else:
                     self.assertEqual(len(temporary_paths), 1)
                     self.assertFalse(os.path.lexists(lock_path))
+                if phase in {"temporary-written", "temporary-synced"}:
+                    self.assertEqual(
+                        os.lstat(temporary_paths[0]).st_size,
+                        len(included_files_module._INCLUDED_FILES_LOCK_CONTENT),
+                    )
+                    with open(temporary_paths[0], "rb") as temporary_file:
+                        self.assertEqual(
+                            temporary_file.read(),
+                            included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                        )
 
                 project_identity = (
                     included_files_module._ensure_included_output_project_root(
@@ -4510,6 +4520,41 @@ os._exit(88)
             )
 
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+
+    def test_bounded_record_accepts_stable_path_handle_metadata_skew(self) -> None:
+        payload = b'{"state":"prepared"}\n'
+        record_path = os.path.join(self.godot_dir, "recovery-record.json")
+        with open(record_path, "wb") as record_file:
+            record_file.write(payload)
+        path_stat = os.lstat(record_path)
+        handle_stat = self._modeled_handle_stat(
+            path_stat,
+            ctime_offset=1,
+        )
+
+        with (
+            open(record_path, "rb") as record_file,
+            patch.object(
+                included_files_module.os,
+                "fstat",
+                side_effect=(handle_stat, handle_stat),
+            ),
+        ):
+            content = (
+                included_files_module._read_opened_included_bounded_record_payload(
+                    record_file,
+                    path_stat,
+                    record_path,
+                    path_stat.st_dev,
+                    None,
+                    len(payload),
+                    lambda opened_file: opened_file.read(len(payload) + 1),
+                    "Included Files recovery record",
+                    "canonical",
+                )
+            )
+
+        self.assertEqual(content, payload)
 
     def test_digest_rejects_open_handle_change_during_hashing(self) -> None:
         staged_path = os.path.join(self.godot_dir, "staged.bin")

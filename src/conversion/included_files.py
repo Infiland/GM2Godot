@@ -3807,6 +3807,7 @@ def _initialize_included_project_lock(
                 os.O_WRONLY
                 | os.O_CREAT
                 | os.O_EXCL
+                | getattr(os, "O_BINARY", 0)
                 | getattr(os, "O_NOFOLLOW", 0)
             )
             if project_fd >= 0:
@@ -3892,7 +3893,11 @@ def _acquire_included_project_lock(
     """Acquire the cooperative lock that serializes recovery and publication."""
 
     lock_path = os.path.join(project_path, _INCLUDED_FILES_LOCK_NAME)
-    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDWR
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     project_fd = -1
     descriptor_bound = _included_descriptor_paths_supported()
     if descriptor_bound:
@@ -4862,9 +4867,8 @@ def _read_opened_included_bounded_record_payload(
     opened_stat = os.fstat(opened_file.fileno())
     if (
         not stat.S_ISREG(opened_stat.st_mode)
-        or _included_path_fingerprint(opened_stat)
-        != _included_path_fingerprint(expected_stat)
-        or opened_stat.st_ctime_ns != expected_stat.st_ctime_ns
+        or _included_path_handle_binding(opened_stat)
+        != _included_path_handle_binding(expected_stat)
     ):
         raise OSError(
             f"{record_label} changed before reading: {path}"

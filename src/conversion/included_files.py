@@ -221,6 +221,20 @@ class _IncludedTreeSnapshot:
 
 
 @dataclass(frozen=True)
+class _IncludedTreeDescriptorBinding:
+    parent_fd: int
+    name: str
+    fingerprint: _PathFingerprint
+    display_path: str
+
+
+@dataclass(frozen=True)
+class _IncludedTreePathBinding:
+    path: str
+    identity: _PathIdentity
+
+
+@dataclass(frozen=True)
 class _IncludedRegistrySnapshot:
     directory_identity: _PathIdentity | None
     file_identity: _PathIdentity | None
@@ -1386,17 +1400,50 @@ def _open_included_tree_directory_at(parent_fd: int, name: str) -> int:
     )
 
 
+def _verify_included_tree_descriptor_binding(
+    binding: _IncludedTreeDescriptorBinding,
+) -> None:
+    """Verify one link in a retained descriptor chain."""
+
+    _verify_included_entry_at(
+        binding.parent_fd,
+        binding.name,
+        binding.fingerprint,
+        binding.display_path,
+    )
+
+
+def _verify_included_tree_path_binding(
+    binding: _IncludedTreePathBinding,
+) -> os.stat_result:
+    """Verify one fallback directory through its complete current path."""
+
+    try:
+        current_stat = os.lstat(binding.path)
+    except OSError as error:
+        raise OSError(
+            f"Included Files directory changed: {binding.path}"
+        ) from error
+    if (
+        _included_output_path_is_redirected(binding.path, current_stat)
+        or not stat.S_ISDIR(current_stat.st_mode)
+        or (current_stat.st_dev, current_stat.st_ino) != binding.identity
+    ):
+        raise OSError(f"Included Files directory changed: {binding.path}")
+    return current_stat
+
+
 def _capture_included_tree_from_fd(
     directory_fd: int,
     relative_directory: str,
     display_path: str,
-    verify_binding: Callable[[], None],
+    binding: _IncludedTreeDescriptorBinding,
     boundary_device: int,
     boundary_mount_id: int | None,
     *,
     include_content: bool,
 ) -> list[_IncludedTreeEntry]:
-    verify_binding()
+    _verify_included_tree_descriptor_binding(binding)
     try:
         names = sorted(os.listdir(directory_fd))
     except OSError as error:
@@ -1405,7 +1452,7 @@ def _capture_included_tree_from_fd(
         ) from error
     entries: list[_IncludedTreeEntry] = []
     for name in names:
-        verify_binding()
+        _verify_included_tree_descriptor_binding(binding)
         entry_path = os.path.join(display_path, name)
         entry_stat = _included_entry_stat_at(directory_fd, name)
         if entry_stat is None:
@@ -1437,22 +1484,19 @@ def _capture_included_tree_from_fd(
                     boundary_mount_id,
                     child_fd,
                 )
-
-                def verify_child_binding() -> None:
-                    verify_binding()
-                    _verify_included_entry_at(
-                        directory_fd,
-                        name,
-                        entry_fingerprint,
-                        entry_path,
-                    )
+                child_binding = _IncludedTreeDescriptorBinding(
+                    parent_fd=directory_fd,
+                    name=name,
+                    fingerprint=entry_fingerprint,
+                    display_path=entry_path,
+                )
 
                 entries.extend(
                     _capture_included_tree_from_fd(
                         child_fd,
                         relative_path,
                         entry_path,
-                        verify_child_binding,
+                        child_binding,
                         boundary_device,
                         boundary_mount_id,
                         include_content=include_content,
@@ -1460,13 +1504,8 @@ def _capture_included_tree_from_fd(
                 )
             finally:
                 os.close(child_fd)
-            verify_binding()
-            _verify_included_entry_at(
-                directory_fd,
-                name,
-                entry_fingerprint,
-                entry_path,
-            )
+            _verify_included_tree_descriptor_binding(binding)
+            _verify_included_tree_descriptor_binding(child_binding)
             kind = "directory"
             ctime_ns = None
             content_sha256 = None
@@ -1505,7 +1544,7 @@ def _capture_included_tree_from_fd(
                 content_sha256=content_sha256,
             )
         )
-    verify_binding()
+    _verify_included_tree_descriptor_binding(binding)
     return entries
 
 
@@ -1552,27 +1591,25 @@ def _capture_included_tree_descriptor(
                 parent_mount_id,
                 root_fd,
             )
-
-            def verify_root_binding() -> None:
-                _verify_included_entry_at(
-                    parent_fd,
-                    root_name,
-                    root_fingerprint,
-                    root_path,
-                )
+            root_binding = _IncludedTreeDescriptorBinding(
+                parent_fd=parent_fd,
+                name=root_name,
+                fingerprint=root_fingerprint,
+                display_path=root_path,
+            )
 
             entries = _capture_included_tree_from_fd(
                 root_fd,
                 "",
                 root_path,
-                verify_root_binding,
+                root_binding,
                 opened_root_stat.st_dev,
                 root_mount_id,
                 include_content=include_content,
             )
         finally:
             os.close(root_fd)
-        verify_root_binding()
+        _verify_included_tree_descriptor_binding(root_binding)
         if _included_directory_identity(parent_path) != parent_identity:
             raise OSError(f"Included Files root parent changed: {parent_path}")
         return _IncludedTreeSnapshot(
@@ -1633,13 +1670,19 @@ def _capture_included_tree_fallback(
         expect_directory=True,
     )
     entries: list[_IncludedTreeEntry] = []
-    pending: list[tuple[str, str]] = [("", root_path)]
-    while pending:
-        relative_directory, directory_path = pending.pop()
-        directory_identities = _capture_fallback_directory_ancestors(
-            directory_path
+    pending: list[tuple[str, _IncludedTreePathBinding]] = [
+        (
+            "",
+            _IncludedTreePathBinding(
+                path=root_path,
+                identity=(root_stat.st_dev, root_stat.st_ino),
+            ),
         )
-        directory_stat = os.lstat(directory_path)
+    ]
+    while pending:
+        relative_directory, directory_binding = pending.pop()
+        directory_path = directory_binding.path
+        directory_stat = _verify_included_tree_path_binding(directory_binding)
         _verify_included_mount_boundary_path(
             directory_path,
             directory_stat,
@@ -1647,7 +1690,7 @@ def _capture_included_tree_fallback(
             root_mount_id,
             expect_directory=True,
         )
-        _verify_fallback_directory_ancestors(directory_identities)
+        _verify_included_tree_path_binding(directory_binding)
         try:
             directory_entries = sorted(
                 os.scandir(directory_path),
@@ -1658,9 +1701,9 @@ def _capture_included_tree_fallback(
                 f"Could not inspect Included Files directory: {directory_path}"
             ) from error
         _after_included_fallback_tree_directory_scan(directory_path)
-        _verify_fallback_directory_ancestors(directory_identities)
+        _verify_included_tree_path_binding(directory_binding)
         for directory_entry in directory_entries:
-            _verify_fallback_directory_ancestors(directory_identities)
+            _verify_included_tree_path_binding(directory_binding)
             entry_path = os.path.join(directory_path, directory_entry.name)
             try:
                 entry_stat = os.lstat(entry_path)
@@ -1687,11 +1730,19 @@ def _capture_included_tree_fallback(
                 kind = "directory"
                 ctime_ns = None
                 content_sha256 = None
-                pending.append((relative_path, entry_path))
+                pending.append(
+                    (
+                        relative_path,
+                        _IncludedTreePathBinding(
+                            path=entry_path,
+                            identity=(entry_stat.st_dev, entry_stat.st_ino),
+                        ),
+                    )
+                )
             elif stat.S_ISREG(entry_stat.st_mode):
                 kind = "file"
                 ctime_ns = entry_stat.st_ctime_ns
-                _verify_fallback_directory_ancestors(directory_identities)
+                _verify_included_tree_path_binding(directory_binding)
                 if include_content:
                     content_sha256 = _digest_included_regular_file(
                         entry_path,
@@ -1721,8 +1772,8 @@ def _capture_included_tree_fallback(
                     content_sha256=content_sha256,
                 )
             )
-            _verify_fallback_directory_ancestors(directory_identities)
-        _verify_fallback_directory_ancestors(directory_identities)
+            _verify_included_tree_path_binding(directory_binding)
+        _verify_included_tree_path_binding(directory_binding)
 
     _verify_fallback_directory_ancestors(root_parent_identities)
     current_root_stat = os.lstat(root_path)

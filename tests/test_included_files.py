@@ -386,6 +386,20 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(content)
 
+    def _make_deep_tree(self, label: str, depth: int) -> str:
+        root_path = os.path.join(self.godot_dir, label)
+        os.mkdir(root_path)
+        directory_path = root_path
+        for _index in range(depth):
+            directory_path = os.path.join(directory_path, "d")
+            os.mkdir(directory_path)
+        with open(
+            os.path.join(directory_path, "payload.bin"),
+            "wb",
+        ) as payload_file:
+            payload_file.write(b"deterministic deep-tree payload\n")
+        return root_path
+
     def _assert_streaming_cleanup_path(self, *, force_fallback: bool) -> None:
         cleanup_directory = os.path.join(
             self.godot_dir,
@@ -7262,6 +7276,218 @@ os._exit(88)
                 os.rename(deep_directory, outside_directory)
             if os.path.isdir(parked_directory):
                 os.rename(parked_directory, deep_directory)
+
+    def test_deep_tree_capture_binding_work_scales_linearly(
+        self,
+    ) -> None:
+        variants = [
+            (
+                "native-windows-path" if os.name == "nt" else "fallback-path",
+                False,
+                "_verify_included_tree_path_binding",
+            )
+        ]
+        if included_files_module._included_descriptor_paths_supported():
+            variants.insert(
+                0,
+                (
+                    "descriptor",
+                    True,
+                    "_verify_included_tree_descriptor_binding",
+                ),
+            )
+
+        for label, descriptor_supported, verifier_name in variants:
+            work_by_depth: list[int] = []
+            for depth in (25, 50, 100, 200):
+                with self.subTest(path=label, depth=depth):
+                    root_path = self._make_deep_tree(
+                        f"linear-{label}-{depth}",
+                        depth,
+                    )
+                    original_verifier = getattr(
+                        included_files_module,
+                        verifier_name,
+                    )
+                    binding_checks = 0
+
+                    def count_binding(
+                        binding: object,
+                    ) -> object:
+                        nonlocal binding_checks
+                        binding_checks += 1
+                        return original_verifier(binding)
+
+                    with (
+                        patch.object(
+                            included_files_module,
+                            "_included_descriptor_paths_supported",
+                            return_value=descriptor_supported,
+                        ),
+                        patch.object(
+                            included_files_module,
+                            verifier_name,
+                            side_effect=count_binding,
+                        ),
+                    ):
+                        snapshot = included_files_module._capture_included_tree(
+                            root_path
+                        )
+
+                    self.assertEqual(len(snapshot.entries), depth + 1)
+                    self.assertLessEqual(
+                        binding_checks,
+                        16 * depth + 64,
+                    )
+                    work_by_depth.append(binding_checks)
+
+            for shallow_work, deep_work in zip(
+                work_by_depth[:-1],
+                work_by_depth[1:],
+                strict=True,
+            ):
+                with self.subTest(
+                    path=label,
+                    shallow_work=shallow_work,
+                    deep_work=deep_work,
+                ):
+                    self.assertLessEqual(
+                        deep_work,
+                        shallow_work * 2.25,
+                    )
+
+    @unittest.skipUnless(
+        included_files_module._included_descriptor_paths_supported(),
+        "Descriptor-pinned Included Files paths are unavailable",
+    )
+    def test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent(
+        self,
+    ) -> None:
+        root_path = os.path.join(self.godot_dir, "snapshot-equivalence")
+        os.makedirs(os.path.join(root_path, "z", "nested"))
+        os.makedirs(os.path.join(root_path, "a"))
+        for relative_path, content in (
+            ("z/nested/last.bin", b"\x00\xfflast\n"),
+            ("a/first.txt", b"first\n"),
+            ("middle.json", b'{"stable":true}\n'),
+        ):
+            output_path = os.path.join(root_path, *relative_path.split("/"))
+            with open(output_path, "wb") as output_file:
+                output_file.write(content)
+
+        descriptor_snapshot = included_files_module._capture_included_tree(
+            root_path
+        )
+        with patch.object(
+            included_files_module,
+            "_included_descriptor_paths_supported",
+            return_value=False,
+        ):
+            fallback_snapshot = included_files_module._capture_included_tree(
+                root_path
+            )
+
+        descriptor_bytes = json.dumps(
+            included_files_module._included_tree_snapshot_payload(
+                descriptor_snapshot
+            ),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        fallback_bytes = json.dumps(
+            included_files_module._included_tree_snapshot_payload(
+                fallback_snapshot
+            ),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        self.assertEqual(fallback_bytes, descriptor_bytes)
+
+    @unittest.skipUnless(
+        included_files_module._included_descriptor_paths_supported(),
+        "Descriptor-pinned Included Files paths are unavailable",
+    )
+    def test_descriptor_tree_capture_rejects_deep_ancestor_swap(
+        self,
+    ) -> None:
+        scan_root = os.path.join(self.godot_dir, "ancestor-swap-root")
+        ancestor_path = os.path.join(scan_root, "a")
+        deep_directory = os.path.join(ancestor_path, "b", "c")
+        os.makedirs(deep_directory)
+        with open(
+            os.path.join(deep_directory, "contained.txt"),
+            "w",
+            encoding="utf-8",
+        ) as contained_file:
+            contained_file.write("contained")
+        parked_ancestor = os.path.join(
+            self.godot_dir,
+            "parked-ancestor",
+        )
+        deep_identity = (
+            os.lstat(deep_directory).st_dev,
+            os.lstat(deep_directory).st_ino,
+        )
+        original_listdir = included_files_module.os.listdir
+        swapped = False
+
+        def swap_ancestor_after_deep_scan(
+            directory: int | str,
+        ) -> list[str]:
+            nonlocal swapped
+            names = original_listdir(directory)
+            if (
+                not swapped
+                and isinstance(directory, int)
+                and (
+                    os.fstat(directory).st_dev,
+                    os.fstat(directory).st_ino,
+                )
+                == deep_identity
+            ):
+                os.rename(ancestor_path, parked_ancestor)
+                os.mkdir(ancestor_path)
+                with open(
+                    os.path.join(ancestor_path, "replacement.txt"),
+                    "w",
+                    encoding="utf-8",
+                ) as replacement_file:
+                    replacement_file.write("replacement sentinel")
+                swapped = True
+            return names
+
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_included_descriptor_paths_supported",
+                    return_value=True,
+                ),
+                patch.object(
+                    included_files_module.os,
+                    "listdir",
+                    side_effect=swap_ancestor_after_deep_scan,
+                ),
+                self.assertRaisesRegex(OSError, "entry changed"),
+            ):
+                included_files_module._capture_included_tree(scan_root)
+
+            self.assertTrue(swapped)
+            with open(
+                os.path.join(ancestor_path, "replacement.txt"),
+                encoding="utf-8",
+            ) as replacement_file:
+                self.assertEqual(
+                    replacement_file.read(),
+                    "replacement sentinel",
+                )
+        finally:
+            if swapped and os.path.isdir(ancestor_path):
+                shutil.rmtree(ancestor_path)
+            if os.path.isdir(parked_ancestor):
+                os.rename(parked_ancestor, ancestor_path)
 
     def test_native_noreplace_preserves_file_and_directory_destinations(
         self,

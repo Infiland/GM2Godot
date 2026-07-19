@@ -32,6 +32,7 @@ MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024
 MAX_README_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED_BYTES = MAX_EXECUTABLE_BYTES + MAX_README_BYTES
 MAX_PROCESS_OUTPUT_BYTES = 4 * 1024 * 1024
+MAX_DIAGNOSTIC_LINE_CHARACTERS = 1000
 PROCESS_TIMEOUT_SECONDS = 60.0
 PROCESS_POLL_SECONDS = 0.2
 PROCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
@@ -256,6 +257,15 @@ def _read_process_output(stream: object) -> bytes:
             "packaged GUI output exceeded the bounded verification limit"
         )
     return content
+
+
+def _matching_output_excerpt(content: str, signature: str) -> str:
+    for line in content.splitlines():
+        if signature in line.casefold():
+            if len(line) > MAX_DIAGNOSTIC_LINE_CHARACTERS:
+                line = line[:MAX_DIAGNOSTIC_LINE_CHARACTERS] + "..."
+            return repr(line)
+    return repr(signature)
 
 
 def _process_group_exists(process: subprocess.Popen[bytes]) -> bool:
@@ -526,7 +536,8 @@ def _run_packaged_gui(
     for signature in _FATAL_OUTPUT_SIGNATURES:
         if signature in folded_output:
             raise LinuxGuiArtifactVerificationError(
-                f"packaged GUI emitted fatal loader/platform diagnostic: {signature}"
+                f"packaged GUI emitted fatal loader/platform diagnostic: {signature}; "
+                f"matching output: {_matching_output_excerpt(decoded_output, signature)}"
             )
     if returncode != 0:
         raise LinuxGuiArtifactVerificationError(

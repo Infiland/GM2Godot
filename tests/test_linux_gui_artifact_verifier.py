@@ -209,6 +209,21 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
                 ):
                     self.verify(body)
 
+    def test_fatal_diagnostic_reports_one_bounded_matching_line(self) -> None:
+        marker = "cannot open shared object file"
+        body = _success_body(
+            f"printf '%s\\n' 'loader: {marker}: {'x' * 2000}' >&2\n"
+        )
+        with self.assertRaises(
+            verifier.LinuxGuiArtifactVerificationError
+        ) as raised:
+            self.verify(body)
+
+        message = str(raised.exception)
+        self.assertIn(f"loader: {marker}", message)
+        self.assertTrue(message.endswith("...'"))
+        self.assertLess(len(message), verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 200)
+
     def test_timeout_kills_the_isolated_process_group(self) -> None:
         child_receipt = self.root / "timeout-child.pid"
         body = (

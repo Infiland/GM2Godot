@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
 import posixpath
 import stat
 from dataclasses import dataclass, field
-from typing import BinaryIO, Callable, ClassVar, Iterable, cast
+from functools import lru_cache
+from typing import Any, BinaryIO, Callable, ClassVar, Iterable, cast
 
 from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text,
@@ -67,6 +69,18 @@ ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"
 GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join("gm2godot", "group_compatibility_report.json")
 STATIC_ASSET_ID_MASK = 0x3FFFFFFF
 
+_IncludedFilePathIdentity = tuple[int, int]
+_IncludedFilePathFingerprint = tuple[int, int, int, int, int, int, int]
+_IncludedFilePathHandleBinding = tuple[int, int, int, int, int, int]
+_IncludedFileHandleState = tuple[int, int, int, int, int, int, int]
+_IncludedFileDirectoryIdentity = tuple[str, _IncludedFilePathIdentity]
+
+_WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_OPEN_EXISTING = 3
+_WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+
 
 def _empty_int_list() -> list[int]:
     return []
@@ -103,6 +117,136 @@ def _uses_windows_included_file_path_handle_semantics() -> bool:
     return os.name == "nt"
 
 
+def _included_file_path_fingerprint(
+    file_stat: os.stat_result,
+) -> _IncludedFilePathFingerprint:
+    """Return exact path metadata retained across publication boundaries."""
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        file_stat.st_mode,
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_ctime_ns,
+        file_stat.st_nlink,
+    )
+
+
+def _included_file_path_handle_binding(
+    file_stat: os.stat_result,
+) -> _IncludedFilePathHandleBinding:
+    """Return metadata portable between path and handle stat on Windows."""
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        stat.S_IFMT(file_stat.st_mode),
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_nlink,
+    )
+
+
+def _included_file_handle_state(
+    file_stat: os.stat_result,
+) -> _IncludedFileHandleState:
+    """Return exact metadata used to bind one open regular-file handle."""
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        file_stat.st_mode,
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+        file_stat.st_ctime_ns,
+        file_stat.st_nlink,
+    )
+
+
+def _read_included_file_validation_chunk(opened_file: BinaryIO) -> bytes:
+    """Read one validation chunk through a deterministic accounting seam."""
+
+    return opened_file.read(1024 * 1024)
+
+
+@lru_cache(maxsize=1)
+def _windows_included_file_read_api() -> Any:
+    if os.name != "nt":
+        raise OSError("Windows Included File read handles are unavailable")
+    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    kernel32.CreateFileW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_int
+    return kernel32
+
+
+def _open_included_file_validation_stream(
+    path: str,
+    *,
+    deny_writes: bool,
+) -> BinaryIO:
+    """Open a binary stream, denying Win32 writes at the final boundary."""
+
+    if not deny_writes or os.name != "nt":
+        return open(path, "rb")
+
+    kernel32 = _windows_included_file_read_api()
+    handle_value = kernel32.CreateFileW(
+        os.path.abspath(path),
+        _WINDOWS_GENERIC_READ,
+        _WINDOWS_FILE_SHARE_READ,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        _WINDOWS_FILE_ATTRIBUTE_NORMAL
+        | _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle_value is None or handle_value == invalid_handle:
+        get_last_error = cast(
+            Callable[[], int],
+            getattr(ctypes, "get_last_error"),
+        )
+        error_number = get_last_error()
+        format_error = cast(
+            Callable[[int], str],
+            getattr(ctypes, "FormatError"),
+        )
+        raise OSError(
+            error_number,
+            format_error(error_number).strip(),
+            path,
+        )
+
+    handle = cast(int, handle_value)
+    try:
+        import msvcrt
+
+        file_descriptor = msvcrt.open_osfhandle(
+            handle,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0),
+        )
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(file_descriptor, "rb")
+    except BaseException:
+        os.close(file_descriptor)
+        raise
+
+
 def _included_file_streams_match(
     source_file: BinaryIO,
     output_file: BinaryIO,
@@ -110,8 +254,8 @@ def _included_file_streams_match(
     source_digest = hashlib.sha256()
     output_digest = hashlib.sha256()
     while True:
-        source_chunk = source_file.read(1024 * 1024)
-        output_chunk = output_file.read(1024 * 1024)
+        source_chunk = _read_included_file_validation_chunk(source_file)
+        output_chunk = _read_included_file_validation_chunk(output_file)
         source_digest.update(source_chunk)
         output_digest.update(output_chunk)
         if source_chunk != output_chunk:
@@ -128,39 +272,63 @@ def _included_file_streams_match(
             )
 
 
-def _included_file_stream_sha256(opened_file: BinaryIO) -> str:
+def _included_file_stream_sha256(opened_file: BinaryIO) -> tuple[int, str]:
     digest = hashlib.sha256()
+    byte_count = 0
     while True:
-        chunk = opened_file.read(1024 * 1024)
+        chunk = _read_included_file_validation_chunk(opened_file)
         if not chunk:
-            return digest.hexdigest()
+            return byte_count, digest.hexdigest()
         digest.update(chunk)
+        byte_count += len(chunk)
+
+
+@dataclass(frozen=True)
+class _IncludedFileStreamReceipt:
+    source_byte_count: int
+    source_sha256: str
+    output_byte_count: int
+    output_sha256: str
 
 
 def _included_file_streams_match_stably(
     source_file: BinaryIO,
     output_file: BinaryIO,
     output_path: str,
-) -> bool:
+) -> _IncludedFileStreamReceipt | None:
     matches, source_sha256, output_sha256 = _included_file_streams_match(
         source_file,
         output_file,
     )
     if not matches:
-        return False
+        return None
+
+    source_byte_count = source_file.tell()
+    output_byte_count = output_file.tell()
 
     source_file.seek(0)
-    if _included_file_stream_sha256(source_file) != source_sha256:
+    if _included_file_stream_sha256(source_file) != (
+        source_byte_count,
+        source_sha256,
+    ):
         raise OSError(
             "Asset-registry Included File source changed during validation"
         )
     output_file.seek(0)
-    if _included_file_stream_sha256(output_file) != output_sha256:
+    if _included_file_stream_sha256(output_file) != (
+        output_byte_count,
+        output_sha256,
+    ):
         raise OSError(
             "Asset-registry Included File output changed during validation: "
             f"{output_path}"
         )
-    return True
+    return _IncludedFileStreamReceipt(
+        source_byte_count=source_byte_count,
+        source_sha256=source_sha256,
+        output_byte_count=output_byte_count,
+        output_sha256=output_sha256,
+    )
 
 
 @dataclass(frozen=True)
@@ -197,6 +365,55 @@ class AssetRegistryEntry:
 class _UnavailablePublishedIncludedFile:
     entry: AssetRegistryEntry
     reason: str
+
+
+@dataclass(frozen=True)
+class _IncludedFileOutputReceipt:
+    path: str
+    components: tuple[str, ...]
+    directory_identities: tuple[_IncludedFileDirectoryIdentity, ...]
+    path_fingerprint: _IncludedFilePathFingerprint
+    handle_state: _IncludedFileHandleState
+    byte_count: int
+    sha256: str
+
+    @property
+    def generation_identity(self) -> _IncludedFilePathIdentity:
+        if len(self.directory_identities) < 2:
+            raise OSError(
+                "Asset-registry Included Files generation identity is missing"
+            )
+        return self.directory_identities[1][1]
+
+
+@dataclass(frozen=True)
+class _IncludedFileSourceReceipt:
+    filesystem_path: str
+    canonical_path: str
+    directory_identities: tuple[_IncludedFileDirectoryIdentity, ...]
+    lexical_fingerprint: _IncludedFilePathFingerprint
+    path_fingerprint: _IncludedFilePathFingerprint
+    handle_state: _IncludedFileHandleState
+
+
+@dataclass(frozen=True)
+class _IncludedFileContentReceipt:
+    entry: AssetRegistryEntry
+    source: _IncludedFileSourceReceipt
+    source_byte_count: int
+    source_sha256: str
+    output: _IncludedFileOutputReceipt
+
+
+@dataclass(frozen=True)
+class AssetRegistryPublication:
+    """Immutable Included File receipts for one publication attempt."""
+
+    entries: tuple[AssetRegistryEntry, ...]
+    planned_included_files: tuple[AssetRegistryEntry, ...]
+    included_file_receipts: tuple[_IncludedFileContentReceipt, ...]
+    unavailable_included_files: tuple[_UnavailablePublishedIncludedFile, ...]
+    included_files_generation: _IncludedFilePathIdentity | None
 
 
 @dataclass(frozen=True)
@@ -390,25 +607,34 @@ class AssetRegistryConverter(BaseConverter):
 
         ``build_entries()`` remains the source-planning API used by converters
         that need the complete deterministic asset namespace before outputs
-        exist. Artifact publishers use this method so they never advertise an
-        absent, redirected, stale, or otherwise mismatched Included File.
+        exist. This compatibility query filters absent, redirected, or stale
+        Included Files, but does not retain cross-boundary identity receipts.
+        Artifact publishers must use ``prepare_published_entries()`` together
+        with ``revalidate_publication()``.
         """
+
+        return self.prepare_published_entries().entries
+
+    def prepare_published_entries(self) -> AssetRegistryPublication:
+        """Capture immutable receipts for one artifact publication attempt."""
 
         plan = self._conversion_plan()
         entries, _processed_count = self._build_entries_from_resources(
             plan.resources,
             included_file_logical_paths=plan.included_file_logical_paths,
         )
-        published, _unavailable = self._filter_published_included_file_entries(
-            entries
-        )
-        return published
+        return self._prepare_published_entries(entries)
 
     def revalidate_published_entries(
         self,
         expected_entries: tuple[AssetRegistryEntry, ...],
     ) -> None:
-        """Fail if current published Included Files differ from the plan."""
+        """Compatibility check for logical Included File availability.
+
+        This method cannot bind a prior file identity because its legacy input
+        contains entries only. Receipt-sensitive publishers must use
+        ``revalidate_publication()``.
+        """
 
         expected_included_files = tuple(
             entry
@@ -426,6 +652,142 @@ class AssetRegistryConverter(BaseConverter):
                 "planning."
             )
 
+    def revalidate_publication(
+        self,
+        publication: AssetRegistryPublication,
+        *,
+        validate_content: bool,
+    ) -> None:
+        """Revalidate one receipt-bound publication phase.
+
+        The pre-publication phase deliberately performs only path, handle,
+        generation, and deterministic planning checks. The post-publication
+        phase additionally hashes each source and generated output once and
+        compares both to the immutable receipt captured during selection.
+        """
+
+        try:
+            current_plan = self._conversion_plan()
+            current_entries, _processed_count = self._build_entries_from_resources(
+                current_plan.resources,
+                included_file_logical_paths=(
+                    current_plan.included_file_logical_paths
+                ),
+            )
+            current_included_files = tuple(
+                entry
+                for entry in current_entries
+                if entry.kind == "included_files"
+            )
+            if current_included_files != publication.planned_included_files:
+                raise OSError("deterministic Included File planning changed")
+
+            published_included_files = tuple(
+                entry
+                for entry in publication.entries
+                if entry.kind == "included_files"
+            )
+            receipt_entries = tuple(
+                receipt.entry
+                for receipt in publication.included_file_receipts
+            )
+            unavailable_entries = tuple(
+                unavailable.entry
+                for unavailable in publication.unavailable_included_files
+            )
+            if (
+                receipt_entries != published_included_files
+                or tuple(
+                    sorted(
+                        (*receipt_entries, *unavailable_entries),
+                        key=self._included_file_publication_sort_key,
+                    )
+                )
+                != tuple(
+                    sorted(
+                        publication.planned_included_files,
+                        key=self._included_file_publication_sort_key,
+                    )
+                )
+            ):
+                raise OSError("Included File publication receipt set changed")
+
+            generation = self._included_file_publication_generation(
+                publication.included_file_receipts
+            )
+            if generation != publication.included_files_generation:
+                raise OSError("Included Files generation receipt changed")
+
+            for receipt in publication.included_file_receipts:
+                self._revalidate_included_file_receipt(
+                    receipt,
+                    validate_content=validate_content,
+                )
+        except (OSError, ProjectSourcePathError, ValueError) as error:
+            raise OSError(
+                "Asset-registry Included File publication inputs changed after "
+                "planning."
+            ) from error
+
+    def _prepare_published_entries(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> AssetRegistryPublication:
+        published: list[AssetRegistryEntry] = []
+        unavailable: list[_UnavailablePublishedIncludedFile] = []
+        receipts: list[_IncludedFileContentReceipt] = []
+        planned_included_files: list[AssetRegistryEntry] = []
+        for entry in entries:
+            if entry.kind != "included_files":
+                published.append(entry)
+                continue
+            planned_included_files.append(entry)
+            receipt, reason = self._included_file_content_receipt(entry)
+            if receipt is None:
+                unavailable.append(
+                    _UnavailablePublishedIncludedFile(
+                        entry=entry,
+                        reason=reason,
+                    )
+                )
+                continue
+            published.append(entry)
+            receipts.append(receipt)
+
+        receipt_tuple = tuple(receipts)
+        return AssetRegistryPublication(
+            entries=tuple(published),
+            planned_included_files=tuple(planned_included_files),
+            included_file_receipts=receipt_tuple,
+            unavailable_included_files=tuple(unavailable),
+            included_files_generation=(
+                self._included_file_publication_generation(receipt_tuple)
+            ),
+        )
+
+    @staticmethod
+    def _included_file_publication_sort_key(
+        entry: AssetRegistryEntry,
+    ) -> tuple[str, str, str]:
+        return (entry.source_path, entry.godot_path, entry.name)
+
+    @staticmethod
+    def _included_file_publication_generation(
+        receipts: tuple[_IncludedFileContentReceipt, ...],
+    ) -> _IncludedFilePathIdentity | None:
+        if not receipts:
+            return None
+        generation = receipts[0].output.generation_identity
+        if any(
+            receipt.output.generation_identity != generation
+            for receipt in receipts[1:]
+        ):
+            raise OSError(
+                "Asset-registry Included Files changed generations during "
+                "receipt capture"
+            )
+        return generation
+
     def _filter_published_included_file_entries(
         self,
         entries: tuple[AssetRegistryEntry, ...],
@@ -433,28 +795,20 @@ class AssetRegistryConverter(BaseConverter):
         tuple[AssetRegistryEntry, ...],
         tuple[_UnavailablePublishedIncludedFile, ...],
     ]:
-        published: list[AssetRegistryEntry] = []
-        unavailable: list[_UnavailablePublishedIncludedFile] = []
-        for entry in entries:
-            if entry.kind != "included_files":
-                published.append(entry)
-                continue
-            matches, reason = self._included_file_output_matches_source(entry)
-            if matches:
-                published.append(entry)
-            else:
-                unavailable.append(
-                    _UnavailablePublishedIncludedFile(
-                        entry=entry,
-                        reason=reason,
-                    )
-                )
-        return tuple(published), tuple(unavailable)
+        publication = self._prepare_published_entries(entries)
+        return publication.entries, publication.unavailable_included_files
 
     def _included_file_output_matches_source(
         self,
         entry: AssetRegistryEntry,
     ) -> tuple[bool, str]:
+        receipt, reason = self._included_file_content_receipt(entry)
+        return receipt is not None, reason
+
+    def _included_file_content_receipt(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> tuple[_IncludedFileContentReceipt | None, str]:
         source_file: BinaryIO | None = None
         try:
             source_file, source_stat = self._open_pinned_included_file_source(
@@ -462,45 +816,69 @@ class AssetRegistryConverter(BaseConverter):
             )
             output_path, components = self._included_file_output_path(entry)
             with source_file:
-                self._verify_pinned_included_file_source(
+                source_receipt = self._capture_pinned_included_file_source(
                     entry,
                     source_file,
                     source_stat,
                 )
                 if _confined_asset_output_supported():
-                    matches = self._included_file_output_matches_at(
+                    output_receipt = self._included_file_output_receipt_at(
                         output_path,
                         components,
                         source_file,
                     )
                 else:
-                    matches = self._included_file_output_matches_fallback(
-                        output_path,
-                        components,
-                        source_file,
+                    output_receipt = (
+                        self._included_file_output_receipt_fallback(
+                            output_path,
+                            components,
+                            source_file,
+                        )
                     )
-                self._verify_pinned_included_file_source(
+                final_source_receipt = self._capture_pinned_included_file_source(
                     entry,
                     source_file,
                     source_stat,
                 )
+                if source_receipt != final_source_receipt:
+                    raise OSError(
+                        "Asset-registry Included File source changed during "
+                        f"validation: {entry.source_path}"
+                    )
+                if output_receipt is None:
+                    return (
+                        None,
+                        "the generated output bytes differ from the source file",
+                    )
+                return (
+                    _IncludedFileContentReceipt(
+                        entry=entry,
+                        source=source_receipt,
+                        source_byte_count=output_receipt.byte_count,
+                        source_sha256=output_receipt.sha256,
+                        output=output_receipt,
+                    ),
+                    "",
+                )
         except (OSError, ProjectSourcePathError, ValueError) as error:
             if source_file is not None and not source_file.closed:
                 source_file.close()
-            return False, str(error)
-        if not matches:
-            return False, "the generated output bytes differ from the source file"
-        return True, ""
+            return None, str(error)
 
     def _open_pinned_included_file_source(
         self,
         entry: AssetRegistryEntry,
+        *,
+        deny_writes: bool = False,
     ) -> tuple[BinaryIO, os.stat_result]:
         resolved = resolve_project_source_path(
             self.gm_project_path,
             entry.source_path,
         )
-        source_file = open(resolved.filesystem_path, "rb")
+        source_file = _open_included_file_validation_stream(
+            resolved.filesystem_path,
+            deny_writes=deny_writes,
+        )
         try:
             source_stat = os.fstat(source_file.fileno())
             if not stat.S_ISREG(source_stat.st_mode):
@@ -524,22 +902,108 @@ class AssetRegistryConverter(BaseConverter):
         source_file: BinaryIO,
         expected_stat: os.stat_result,
     ) -> None:
+        self._capture_pinned_included_file_source(
+            entry,
+            source_file,
+            expected_stat,
+        )
+
+    def _capture_pinned_included_file_source(
+        self,
+        entry: AssetRegistryEntry,
+        source_file: BinaryIO,
+        expected_stat: os.stat_result,
+    ) -> _IncludedFileSourceReceipt:
         resolved = resolve_project_source_path(
             self.gm_project_path,
             entry.source_path,
         )
+        lexical_stat = os.lstat(resolved.filesystem_path)
         current_path_stat = os.stat(resolved.filesystem_path)
         current_open_stat = os.fstat(source_file.fileno())
         if (
             not stat.S_ISREG(current_open_stat.st_mode)
             or not os.path.samestat(expected_stat, current_path_stat)
-            or _included_file_content_fingerprint(current_open_stat)
-            != _included_file_content_fingerprint(expected_stat)
+            or _included_file_handle_state(current_open_stat)
+            != _included_file_handle_state(expected_stat)
+            or _included_file_path_handle_binding(current_path_stat)
+            != _included_file_path_handle_binding(current_open_stat)
         ):
             raise OSError(
                 "Asset-registry Included File source changed during validation: "
                 f"{entry.source_path}"
             )
+        canonical_path, directory_identities = (
+            self._included_file_source_directory_identities(
+                resolved.project_root,
+                resolved.filesystem_path,
+            )
+        )
+        return _IncludedFileSourceReceipt(
+            filesystem_path=os.path.normcase(
+                os.path.abspath(resolved.filesystem_path)
+            ),
+            canonical_path=canonical_path,
+            directory_identities=directory_identities,
+            lexical_fingerprint=_included_file_path_fingerprint(
+                lexical_stat
+            ),
+            path_fingerprint=_included_file_path_fingerprint(
+                current_path_stat
+            ),
+            handle_state=_included_file_handle_state(current_open_stat),
+        )
+
+    @staticmethod
+    def _included_file_source_directory_identities(
+        project_root: str,
+        source_path: str,
+    ) -> tuple[str, tuple[_IncludedFileDirectoryIdentity, ...]]:
+        canonical_root = os.path.normcase(os.path.realpath(project_root))
+        canonical_path = os.path.normcase(os.path.realpath(source_path))
+        try:
+            contained = (
+                os.path.commonpath((canonical_root, canonical_path))
+                == canonical_root
+            )
+        except ValueError:
+            contained = False
+        if not contained or canonical_path == canonical_root:
+            raise OSError(
+                "Asset-registry Included File source escapes the selected "
+                f"project: {source_path}"
+            )
+
+        directory_path = canonical_root
+        identities: list[_IncludedFileDirectoryIdentity] = []
+        relative_directory = os.path.relpath(
+            os.path.dirname(canonical_path),
+            canonical_root,
+        )
+        components = (
+            ()
+            if relative_directory == os.curdir
+            else tuple(relative_directory.split(os.sep))
+        )
+        for component in (None, *components):
+            if component is not None:
+                directory_path = os.path.join(directory_path, component)
+            directory_stat = os.lstat(directory_path)
+            if (
+                _path_is_redirected(directory_path, directory_stat)
+                or not stat.S_ISDIR(directory_stat.st_mode)
+            ):
+                raise OSError(
+                    "Asset-registry Included File source directory is "
+                    f"redirected or invalid: {directory_path}"
+                )
+            identities.append(
+                (
+                    directory_path,
+                    (directory_stat.st_dev, directory_stat.st_ino),
+                )
+            )
+        return canonical_path, tuple(identities)
 
     def _included_file_output_path(
         self,
@@ -583,6 +1047,21 @@ class AssetRegistryConverter(BaseConverter):
         components: tuple[str, ...],
         source_file: BinaryIO,
     ) -> bool:
+        return (
+            self._included_file_output_receipt_at(
+                output_path,
+                components,
+                source_file,
+            )
+            is not None
+        )
+
+    def _included_file_output_receipt_at(
+        self,
+        output_path: str,
+        components: tuple[str, ...],
+        source_file: BinaryIO,
+    ) -> _IncludedFileOutputReceipt | None:
         project_root = os.path.abspath(self.godot_project_path)
         directory_flags = os.O_RDONLY
         directory_flags |= getattr(os, "O_DIRECTORY", 0)
@@ -591,12 +1070,21 @@ class AssetRegistryConverter(BaseConverter):
         project_fd = os.open(project_root, directory_flags)
         current_fd = project_fd
         output_fd = -1
+        directory_identities: list[_IncludedFileDirectoryIdentity] = []
         try:
             _verify_open_asset_output_directory(
                 project_root,
                 project_root,
                 project_fd,
             )
+            project_stat = os.fstat(project_fd)
+            directory_identities.append(
+                (
+                    project_root,
+                    (project_stat.st_dev, project_stat.st_ino),
+                )
+            )
+            directory_path = project_root
             for component in components[:-1]:
                 child_fd = os.open(
                     component,
@@ -606,6 +1094,19 @@ class AssetRegistryConverter(BaseConverter):
                 if current_fd != project_fd:
                     os.close(current_fd)
                 current_fd = child_fd
+                directory_path = os.path.join(directory_path, component)
+                _verify_open_asset_output_directory(
+                    project_root,
+                    directory_path,
+                    current_fd,
+                )
+                directory_stat = os.fstat(current_fd)
+                directory_identities.append(
+                    (
+                        directory_path,
+                        (directory_stat.st_dev, directory_stat.st_ino),
+                    )
+                )
 
             output_directory = os.path.dirname(output_path)
             _verify_open_asset_output_directory(
@@ -627,11 +1128,15 @@ class AssetRegistryConverter(BaseConverter):
             expected_fingerprint = _included_file_content_fingerprint(
                 opened_stat
             )
+            path_fingerprint = _included_file_path_fingerprint(path_stat)
+            handle_state = _included_file_handle_state(opened_stat)
             if (
                 _path_is_redirected(output_path, path_stat)
                 or not stat.S_ISREG(opened_stat.st_mode)
                 or not stat.S_ISREG(path_stat.st_mode)
                 or not os.path.samestat(opened_stat, path_stat)
+                or _included_file_path_handle_binding(path_stat)
+                != _included_file_path_handle_binding(opened_stat)
             ):
                 raise OSError(
                     "Asset-registry Included File output is redirected or "
@@ -639,7 +1144,7 @@ class AssetRegistryConverter(BaseConverter):
                 )
             with os.fdopen(output_fd, "rb") as output_file:
                 output_fd = -1
-                matches = _included_file_streams_match_stably(
+                stream_receipt = _included_file_streams_match_stably(
                     source_file,
                     output_file,
                     output_path,
@@ -663,12 +1168,26 @@ class AssetRegistryConverter(BaseConverter):
                 != expected_fingerprint
                 or _included_file_content_fingerprint(final_path_stat)
                 != expected_fingerprint
+                or _included_file_path_fingerprint(final_path_stat)
+                != path_fingerprint
+                or _included_file_handle_state(final_open_stat)
+                != handle_state
             ):
                 raise OSError(
                     "Asset-registry Included File output changed during "
                     f"validation: {output_path}"
                 )
-            return matches
+            if stream_receipt is None:
+                return None
+            return _IncludedFileOutputReceipt(
+                path=os.path.normcase(os.path.abspath(output_path)),
+                components=components,
+                directory_identities=tuple(directory_identities),
+                path_fingerprint=path_fingerprint,
+                handle_state=handle_state,
+                byte_count=stream_receipt.output_byte_count,
+                sha256=stream_receipt.output_sha256,
+            )
         finally:
             if output_fd >= 0:
                 os.close(output_fd)
@@ -682,10 +1201,25 @@ class AssetRegistryConverter(BaseConverter):
         components: tuple[str, ...],
         source_file: BinaryIO,
     ) -> bool:
+        return (
+            self._included_file_output_receipt_fallback(
+                output_path,
+                components,
+                source_file,
+            )
+            is not None
+        )
+
+    def _included_file_output_receipt_fallback(
+        self,
+        output_path: str,
+        components: tuple[str, ...],
+        source_file: BinaryIO,
+    ) -> _IncludedFileOutputReceipt | None:
         project_root = os.path.abspath(self.godot_project_path)
         project_real = os.path.normcase(os.path.realpath(project_root))
         directory_path = project_root
-        directory_identities: list[tuple[str, tuple[int, int]]] = []
+        directory_identities: list[_IncludedFileDirectoryIdentity] = []
         for component in (None, *components[:-1]):
             if component is not None:
                 directory_path = os.path.join(directory_path, component)
@@ -733,14 +1267,18 @@ class AssetRegistryConverter(BaseConverter):
                 f"non-regular: {output_path}"
             )
         expected_fingerprint = _included_file_content_fingerprint(output_stat)
+        path_fingerprint = _included_file_path_fingerprint(output_stat)
         with open(output_path, "rb") as output_file:
             opened_stat = os.fstat(output_file.fileno())
             opened_fingerprint = _included_file_content_fingerprint(
                 opened_stat
             )
+            handle_state = _included_file_handle_state(opened_stat)
             if (
                 not stat.S_ISREG(opened_stat.st_mode)
                 or not os.path.samestat(opened_stat, output_stat)
+                or _included_file_path_handle_binding(output_stat)
+                != _included_file_path_handle_binding(opened_stat)
             ):
                 raise OSError(
                     "Asset-registry Included File output changed before "
@@ -751,7 +1289,7 @@ class AssetRegistryConverter(BaseConverter):
                 output_path,
                 expected_fingerprint,
             )
-            matches = _included_file_streams_match_stably(
+            stream_receipt = _included_file_streams_match_stably(
                 source_file,
                 output_file,
                 output_path,
@@ -769,12 +1307,25 @@ class AssetRegistryConverter(BaseConverter):
                 expected_fingerprint,
                 _included_file_content_fingerprint(final_open_stat),
             )
+            or _included_file_path_fingerprint(os.lstat(output_path))
+            != path_fingerprint
+            or _included_file_handle_state(final_open_stat) != handle_state
         ):
             raise OSError(
                 "Asset-registry Included File output changed during "
                 f"validation: {output_path}"
             )
-        return matches
+        if stream_receipt is None:
+            return None
+        return _IncludedFileOutputReceipt(
+            path=os.path.normcase(os.path.abspath(output_path)),
+            components=components,
+            directory_identities=tuple(directory_identities),
+            path_fingerprint=path_fingerprint,
+            handle_state=handle_state,
+            byte_count=stream_receipt.output_byte_count,
+            sha256=stream_receipt.output_sha256,
+        )
 
     @staticmethod
     def _verify_included_file_output_fallback(
@@ -804,6 +1355,355 @@ class AssetRegistryConverter(BaseConverter):
             raise OSError(
                 "Asset-registry Included File output changed during "
                 f"validation: {output_path}"
+            )
+
+    def _revalidate_included_file_receipt(
+        self,
+        receipt: _IncludedFileContentReceipt,
+        *,
+        validate_content: bool,
+    ) -> None:
+        source_file, source_stat = self._open_pinned_included_file_source(
+            receipt.entry,
+            deny_writes=validate_content,
+        )
+        with source_file:
+            source_receipt = self._capture_pinned_included_file_source(
+                receipt.entry,
+                source_file,
+                source_stat,
+            )
+            if source_receipt != receipt.source:
+                raise OSError(
+                    "Asset-registry Included File source receipt changed: "
+                    f"{receipt.entry.source_path}"
+                )
+            output_path, components = self._included_file_output_path(
+                receipt.entry
+            )
+            if (
+                os.path.normcase(os.path.abspath(output_path))
+                != receipt.output.path
+                or components != receipt.output.components
+            ):
+                raise OSError(
+                    "Asset-registry Included File assigned output path changed: "
+                    f"{receipt.entry.godot_path}"
+                )
+            if _confined_asset_output_supported():
+                self._revalidate_included_file_output_at(
+                    receipt,
+                    source_file,
+                    validate_content=validate_content,
+                )
+            else:
+                self._revalidate_included_file_output_fallback(
+                    receipt,
+                    source_file,
+                    validate_content=validate_content,
+                )
+
+    def _revalidate_included_file_output_at(
+        self,
+        receipt: _IncludedFileContentReceipt,
+        source_file: BinaryIO,
+        *,
+        validate_content: bool,
+    ) -> None:
+        output_receipt = receipt.output
+        project_root = os.path.abspath(self.godot_project_path)
+        directory_flags = os.O_RDONLY
+        directory_flags |= getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        project_fd = os.open(project_root, directory_flags)
+        current_fd = project_fd
+        output_fd = -1
+        directory_identities: list[_IncludedFileDirectoryIdentity] = []
+        try:
+            _verify_open_asset_output_directory(
+                project_root,
+                project_root,
+                project_fd,
+            )
+            project_stat = os.fstat(project_fd)
+            directory_identities.append(
+                (
+                    project_root,
+                    (project_stat.st_dev, project_stat.st_ino),
+                )
+            )
+            directory_path = project_root
+            for component in output_receipt.components[:-1]:
+                child_fd = os.open(
+                    component,
+                    directory_flags,
+                    dir_fd=current_fd,
+                )
+                if current_fd != project_fd:
+                    os.close(current_fd)
+                current_fd = child_fd
+                directory_path = os.path.join(directory_path, component)
+                _verify_open_asset_output_directory(
+                    project_root,
+                    directory_path,
+                    current_fd,
+                )
+                directory_stat = os.fstat(current_fd)
+                directory_identities.append(
+                    (
+                        directory_path,
+                        (directory_stat.st_dev, directory_stat.st_ino),
+                    )
+                )
+            if tuple(directory_identities) != output_receipt.directory_identities:
+                raise OSError(
+                    "Asset-registry Included Files generation changed during "
+                    "publication validation"
+                )
+
+            output_fd = os.open(
+                output_receipt.components[-1],
+                file_flags,
+                dir_fd=current_fd,
+            )
+            opened_stat = os.fstat(output_fd)
+            path_stat = os.stat(
+                output_receipt.components[-1],
+                dir_fd=current_fd,
+                follow_symlinks=False,
+            )
+            if (
+                _path_is_redirected(output_receipt.path, path_stat)
+                or not stat.S_ISREG(opened_stat.st_mode)
+                or not stat.S_ISREG(path_stat.st_mode)
+                or not os.path.samestat(opened_stat, path_stat)
+                or _included_file_path_handle_binding(path_stat)
+                != _included_file_path_handle_binding(opened_stat)
+                or _included_file_path_fingerprint(path_stat)
+                != output_receipt.path_fingerprint
+                or _included_file_handle_state(opened_stat)
+                != output_receipt.handle_state
+            ):
+                raise OSError(
+                    "Asset-registry Included File output receipt changed: "
+                    f"{output_receipt.path}"
+                )
+
+            with os.fdopen(output_fd, "rb") as output_file:
+                output_fd = -1
+                if validate_content:
+                    self._verify_included_file_receipt_content(
+                        receipt,
+                        source_file,
+                        output_file,
+                    )
+                final_open_stat = os.fstat(output_file.fileno())
+                _verify_open_asset_output_directory(
+                    project_root,
+                    os.path.dirname(output_receipt.path),
+                    current_fd,
+                )
+                final_path_stat = os.stat(
+                    output_receipt.components[-1],
+                    dir_fd=current_fd,
+                    follow_symlinks=False,
+                )
+                if (
+                    _path_is_redirected(output_receipt.path, final_path_stat)
+                    or _included_file_path_fingerprint(final_path_stat)
+                    != output_receipt.path_fingerprint
+                    or _included_file_handle_state(final_open_stat)
+                    != output_receipt.handle_state
+                    or not os.path.samestat(final_path_stat, final_open_stat)
+                ):
+                    raise OSError(
+                        "Asset-registry Included File output changed during "
+                        f"publication validation: {output_receipt.path}"
+                    )
+                self._verify_included_file_directory_identities(
+                    output_receipt.directory_identities
+                )
+                current_source = self._capture_pinned_included_file_source(
+                    receipt.entry,
+                    source_file,
+                    os.fstat(source_file.fileno()),
+                )
+                if current_source != receipt.source:
+                    raise OSError(
+                        "Asset-registry Included File source changed during "
+                        "publication validation: "
+                        f"{receipt.entry.source_path}"
+                    )
+        finally:
+            if output_fd >= 0:
+                os.close(output_fd)
+            if current_fd != project_fd:
+                os.close(current_fd)
+            os.close(project_fd)
+
+    def _revalidate_included_file_output_fallback(
+        self,
+        receipt: _IncludedFileContentReceipt,
+        source_file: BinaryIO,
+        *,
+        validate_content: bool,
+    ) -> None:
+        output_receipt = receipt.output
+        project_root = os.path.abspath(self.godot_project_path)
+        project_real = os.path.normcase(os.path.realpath(project_root))
+        directory_path = project_root
+        directory_identities: list[_IncludedFileDirectoryIdentity] = []
+        for component in (None, *output_receipt.components[:-1]):
+            if component is not None:
+                directory_path = os.path.join(directory_path, component)
+            directory_stat = os.lstat(directory_path)
+            directory_real = os.path.normcase(os.path.realpath(directory_path))
+            try:
+                contained = (
+                    os.path.commonpath((project_real, directory_real))
+                    == project_real
+                )
+            except ValueError:
+                contained = False
+            if (
+                _path_is_redirected(directory_path, directory_stat)
+                or not stat.S_ISDIR(directory_stat.st_mode)
+                or not contained
+            ):
+                raise OSError(
+                    "Asset-registry Included File output directory is "
+                    f"redirected or invalid: {directory_path}"
+                )
+            directory_identities.append(
+                (
+                    directory_path,
+                    (directory_stat.st_dev, directory_stat.st_ino),
+                )
+            )
+        if tuple(directory_identities) != output_receipt.directory_identities:
+            raise OSError(
+                "Asset-registry Included Files generation changed during "
+                "publication validation"
+            )
+
+        output_stat = os.lstat(output_receipt.path)
+        output_real = os.path.normcase(os.path.realpath(output_receipt.path))
+        try:
+            output_contained = (
+                os.path.commonpath((project_real, output_real)) == project_real
+            )
+        except ValueError:
+            output_contained = False
+        if (
+            _path_is_redirected(output_receipt.path, output_stat)
+            or not stat.S_ISREG(output_stat.st_mode)
+            or not output_contained
+            or _included_file_path_fingerprint(output_stat)
+            != output_receipt.path_fingerprint
+        ):
+            raise OSError(
+                "Asset-registry Included File output receipt changed: "
+                f"{output_receipt.path}"
+            )
+
+        with _open_included_file_validation_stream(
+            output_receipt.path,
+            deny_writes=validate_content,
+        ) as output_file:
+            opened_stat = os.fstat(output_file.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or not os.path.samestat(opened_stat, output_stat)
+                or _included_file_path_handle_binding(output_stat)
+                != _included_file_path_handle_binding(opened_stat)
+                or _included_file_handle_state(opened_stat)
+                != output_receipt.handle_state
+            ):
+                raise OSError(
+                    "Asset-registry Included File output changed before "
+                    f"publication validation: {output_receipt.path}"
+                )
+            self._verify_included_file_directory_identities(
+                output_receipt.directory_identities
+            )
+            if validate_content:
+                self._verify_included_file_receipt_content(
+                    receipt,
+                    source_file,
+                    output_file,
+                )
+            final_open_stat = os.fstat(output_file.fileno())
+            final_path_stat = os.lstat(output_receipt.path)
+            self._verify_included_file_directory_identities(
+                output_receipt.directory_identities
+            )
+            if (
+                _path_is_redirected(output_receipt.path, final_path_stat)
+                or _included_file_path_fingerprint(final_path_stat)
+                != output_receipt.path_fingerprint
+                or _included_file_handle_state(final_open_stat)
+                != output_receipt.handle_state
+                or not os.path.samestat(final_path_stat, final_open_stat)
+            ):
+                raise OSError(
+                    "Asset-registry Included File output changed during "
+                    f"publication validation: {output_receipt.path}"
+                )
+            current_source = self._capture_pinned_included_file_source(
+                receipt.entry,
+                source_file,
+                os.fstat(source_file.fileno()),
+            )
+            if current_source != receipt.source:
+                raise OSError(
+                    "Asset-registry Included File source changed during "
+                    f"publication validation: {receipt.entry.source_path}"
+                )
+
+    @staticmethod
+    def _verify_included_file_directory_identities(
+        directory_identities: tuple[_IncludedFileDirectoryIdentity, ...],
+    ) -> None:
+        for directory_path, expected_identity in directory_identities:
+            directory_stat = os.lstat(directory_path)
+            if (
+                _path_is_redirected(directory_path, directory_stat)
+                or not stat.S_ISDIR(directory_stat.st_mode)
+                or (directory_stat.st_dev, directory_stat.st_ino)
+                != expected_identity
+            ):
+                raise OSError(
+                    "Asset-registry Included File directory changed during "
+                    f"publication validation: {directory_path}"
+                )
+
+    @staticmethod
+    def _verify_included_file_receipt_content(
+        receipt: _IncludedFileContentReceipt,
+        source_file: BinaryIO,
+        output_file: BinaryIO,
+    ) -> None:
+        source_file.seek(0)
+        source_content = _included_file_stream_sha256(source_file)
+        output_file.seek(0)
+        output_content = _included_file_stream_sha256(output_file)
+        expected_source = (
+            receipt.source_byte_count,
+            receipt.source_sha256,
+        )
+        expected_output = (
+            receipt.output.byte_count,
+            receipt.output.sha256,
+        )
+        if (
+            source_content != expected_source
+            or output_content != expected_output
+            or source_content != output_content
+        ):
+            raise OSError(
+                "Asset-registry Included File content receipt changed: "
+                f"{receipt.entry.godot_path}"
             )
 
     def _ordered_project_resources(self) -> tuple[_ProjectResource, ...]:
@@ -1389,9 +2289,9 @@ class AssetRegistryConverter(BaseConverter):
         if processed_count < len(resources) or not self.conversion_running():
             return registry_path
 
-        entries, unavailable_outputs = self._filter_published_included_file_entries(
-            entries
-        )
+        publication = self._prepare_published_entries(entries)
+        entries = publication.entries
+        unavailable_outputs = publication.unavailable_included_files
         unavailable_output_keys = {
             self._entry_outcome_resource_key(unavailable.entry)
             for unavailable in unavailable_outputs
@@ -1435,8 +2335,8 @@ class AssetRegistryConverter(BaseConverter):
                 registry_path,
                 registry_script,
                 confinement_root=self.godot_project_path,
-                publication_validator=lambda: self.revalidate_published_entries(
-                    entries
+                publication_validator=(
+                    self._included_file_publication_validator(publication)
                 ),
             )
         except Exception:
@@ -1482,6 +2382,27 @@ class AssetRegistryConverter(BaseConverter):
             confinement_root=confinement_root or output_directory,
             publication_validator=publication_validator,
         )
+
+    def _included_file_publication_validator(
+        self,
+        publication: AssetRegistryPublication,
+    ) -> Callable[[], None]:
+        phases = iter((False, True))
+
+        def validate() -> None:
+            try:
+                validate_content = next(phases)
+            except StopIteration as error:
+                raise OSError(
+                    "Asset-registry publication validator was called outside "
+                    "its pre/post boundary contract"
+                ) from error
+            self.revalidate_publication(
+                publication,
+                validate_content=validate_content,
+            )
+
+        return validate
 
     @staticmethod
     def _outcome_resource_key(resource: _ProjectResource) -> str:

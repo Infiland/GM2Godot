@@ -10,7 +10,7 @@ import tempfile
 import threading
 import unittest
 from typing import BinaryIO, Iterable, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -18,8 +18,8 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion.asset_registry import (
     ASSET_REGISTRY_RELATIVE_PATH,
-    AssetRegistryEntry,
     AssetRegistryConverter,
+    AssetRegistryPublication,
     GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
     _ProjectResource,
 )
@@ -2405,6 +2405,462 @@ class TestAssetRegistryConverter(unittest.TestCase):
             )
         )
 
+    def test_convert_all_reads_matching_64_mib_payload_exactly_six_times(
+        self,
+    ) -> None:
+        payload_size = 64 * 1024 * 1024
+        payload = bytes(range(256)) * (payload_size // 256)
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        del payload
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            "payload.bin",
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        source_stat = os.stat(source_path)
+        output_stat = os.stat(output_path)
+        source_identity = source_stat.st_dev, source_stat.st_ino
+        output_identity = output_stat.st_dev, output_stat.st_ino
+        self.assertNotEqual(source_identity, output_identity)
+        converter = self._converter()
+        real_read = asset_registry_module._read_included_file_validation_chunk
+        bytes_by_identity = {
+            source_identity: 0,
+            output_identity: 0,
+        }
+
+        def counting_read(opened_file: BinaryIO) -> bytes:
+            chunk = real_read(opened_file)
+            opened_stat = os.fstat(opened_file.fileno())
+            identity = opened_stat.st_dev, opened_stat.st_ino
+            self.assertIn(identity, bytes_by_identity)
+            bytes_by_identity[identity] += len(chunk)
+            return chunk
+
+        with patch.object(
+            asset_registry_module,
+            "_read_included_file_validation_chunk",
+            side_effect=counting_read,
+        ):
+            registry_path = converter.convert_all()
+
+        self.assertEqual(bytes_by_identity[source_identity], 3 * payload_size)
+        self.assertEqual(bytes_by_identity[output_identity], 3 * payload_size)
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            self.assertIn('"name": "payload.bin"', registry_file.read())
+
+    def test_publication_receipts_reject_same_byte_path_replacements(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        for endpoint in ("source", "output"):
+            with self.subTest(endpoint=endpoint):
+                relative_path = f"{endpoint}-replacement.bin"
+                self._write_included_source(relative_path, payload)
+                self._write_included_output(relative_path, payload)
+                converter = self._converter()
+                publication = converter.prepare_published_entries()
+                target_path = os.path.join(
+                    self.gm_dir if endpoint == "source" else self.godot_dir,
+                    "datafiles" if endpoint == "source" else "included_files",
+                    relative_path,
+                )
+                target_stat = os.lstat(target_path)
+                replacement_path = os.path.join(
+                    self.gm_dir if endpoint == "source" else self.godot_dir,
+                    f".{endpoint}-replacement.bin",
+                )
+                with open(replacement_path, "wb") as replacement_file:
+                    replacement_file.write(payload)
+                os.utime(
+                    replacement_path,
+                    ns=(target_stat.st_atime_ns, target_stat.st_mtime_ns),
+                )
+
+                os.replace(replacement_path, target_path)
+
+                replacement_stat = os.lstat(target_path)
+                self.assertNotEqual(
+                    (replacement_stat.st_dev, replacement_stat.st_ino),
+                    (target_stat.st_dev, target_stat.st_ino),
+                )
+                self.assertEqual(replacement_stat.st_size, target_stat.st_size)
+                self.assertEqual(
+                    replacement_stat.st_mtime_ns,
+                    target_stat.st_mtime_ns,
+                )
+                with self.assertRaisesRegex(
+                    OSError,
+                    "publication inputs changed",
+                ):
+                    converter.revalidate_publication(
+                        publication,
+                        validate_content=False,
+                    )
+
+    def test_publication_receipt_rejects_output_hardlink_substitution(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        output_stat = os.lstat(output_path)
+        referent_path = os.path.join(self.godot_dir, "payload-referent.bin")
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        with open(referent_path, "wb") as referent_file:
+            referent_file.write(payload)
+        os.utime(
+            referent_path,
+            ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+        )
+        os.unlink(output_path)
+        try:
+            os.link(referent_path, output_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Hard links are unavailable: {error}")
+
+        substituted_stat = os.stat(output_path)
+        self.assertEqual(
+            (substituted_stat.st_dev, substituted_stat.st_ino),
+            (os.stat(referent_path).st_dev, os.stat(referent_path).st_ino),
+        )
+        self.assertNotEqual(
+            (substituted_stat.st_dev, substituted_stat.st_ino),
+            (output_stat.st_dev, output_stat.st_ino),
+        )
+        self.assertEqual(substituted_stat.st_size, output_stat.st_size)
+        self.assertEqual(substituted_stat.st_mtime_ns, output_stat.st_mtime_ns)
+        with self.assertRaisesRegex(OSError, "publication inputs changed"):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+
+    def test_publication_receipt_rejects_included_files_generation_swap(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("nested/payload.bin", payload)
+        self._write_included_output("nested/payload.bin", payload)
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        included_files_root = os.path.join(self.godot_dir, "included_files")
+        prior_generation = os.path.join(
+            self.godot_dir,
+            "included_files-prior-generation",
+        )
+        original_identity = (
+            os.stat(included_files_root).st_dev,
+            os.stat(included_files_root).st_ino,
+        )
+
+        os.rename(included_files_root, prior_generation)
+        shutil.copytree(prior_generation, included_files_root)
+
+        replacement_identity = (
+            os.stat(included_files_root).st_dev,
+            os.stat(included_files_root).st_ino,
+        )
+        self.assertNotEqual(replacement_identity, original_identity)
+        with open(
+            os.path.join(included_files_root, "nested", "payload.bin"),
+            "rb",
+        ) as replacement_file:
+            self.assertEqual(replacement_file.read(), payload)
+        with self.assertRaisesRegex(OSError, "publication inputs changed"):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+
+    def test_publication_receipt_rejects_output_symlink_inserted_after_prepare(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        referent_path = os.path.join(self.godot_dir, "payload-referent.bin")
+        with open(referent_path, "wb") as referent_file:
+            referent_file.write(payload)
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        replacement_link = output_path + ".replacement"
+        try:
+            os.symlink(referent_path, replacement_link)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        os.replace(replacement_link, output_path)
+
+        self.assertTrue(os.path.islink(output_path))
+        with self.assertRaisesRegex(OSError, "publication inputs changed"):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+
+    def test_publication_receipt_rejects_nested_output_directory_swap(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("nested/payload.bin", payload)
+        self._write_included_output("nested/payload.bin", payload)
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        included_files_root = os.path.join(self.godot_dir, "included_files")
+        nested_directory = os.path.join(included_files_root, "nested")
+        prior_directory = os.path.join(
+            self.godot_dir,
+            "nested-prior-generation",
+        )
+        root_identity = (
+            os.stat(included_files_root).st_dev,
+            os.stat(included_files_root).st_ino,
+        )
+        original_nested_identity = (
+            os.stat(nested_directory).st_dev,
+            os.stat(nested_directory).st_ino,
+        )
+
+        os.rename(nested_directory, prior_directory)
+        shutil.copytree(prior_directory, nested_directory)
+
+        self.assertEqual(
+            (
+                os.stat(included_files_root).st_dev,
+                os.stat(included_files_root).st_ino,
+            ),
+            root_identity,
+        )
+        self.assertNotEqual(
+            (
+                os.stat(nested_directory).st_dev,
+                os.stat(nested_directory).st_ino,
+            ),
+            original_nested_identity,
+        )
+        with open(
+            os.path.join(nested_directory, "payload.bin"),
+            "rb",
+        ) as replacement_file:
+            self.assertEqual(replacement_file.read(), payload)
+        with self.assertRaisesRegex(OSError, "publication inputs changed"):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+
+    def test_publication_receipt_rejects_collision_driven_path_change(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("Read Me.txt", payload)
+        self._write_included_output("read_me.txt", payload)
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        self.assertEqual(
+            publication.included_file_receipts[0].entry.godot_path,
+            "res://included_files/read_me.txt",
+        )
+
+        self._write_included_source("read_me.txt", b"new collider")
+
+        current_paths = {
+            entry.name: entry.godot_path
+            for entry in converter.build_entries()
+            if entry.kind == "included_files"
+        }
+        self.assertEqual(
+            current_paths,
+            {
+                "Read Me.txt": "res://included_files/read_me_2.txt",
+                "read_me.txt": "res://included_files/read_me.txt",
+            },
+        )
+        with self.assertRaisesRegex(OSError, "publication inputs changed"):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+
+    def test_windows_validation_stream_denies_writes_and_transfers_handle(
+        self,
+    ) -> None:
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        msvcrt = MagicMock()
+        msvcrt.open_osfhandle.return_value = 5678
+        binary_stream = MagicMock()
+        path = os.path.join(self.gm_dir, "payload.bin")
+
+        with (
+            patch.object(asset_registry_module.os, "name", "nt"),
+            patch.object(
+                asset_registry_module,
+                "_windows_included_file_read_api",
+                return_value=kernel32,
+            ),
+            patch.dict(sys.modules, {"msvcrt": msvcrt}),
+            patch.object(
+                asset_registry_module.os,
+                "fdopen",
+                return_value=binary_stream,
+            ) as fdopen,
+        ):
+            opened_stream = (
+                asset_registry_module._open_included_file_validation_stream(
+                    path,
+                    deny_writes=True,
+                )
+            )
+
+        self.assertIs(opened_stream, binary_stream)
+        kernel32.CreateFileW.assert_called_once_with(
+            os.path.abspath(path),
+            asset_registry_module._WINDOWS_GENERIC_READ,
+            asset_registry_module._WINDOWS_FILE_SHARE_READ,
+            None,
+            asset_registry_module._WINDOWS_OPEN_EXISTING,
+            asset_registry_module._WINDOWS_FILE_ATTRIBUTE_NORMAL
+            | asset_registry_module._WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+            None,
+        )
+        msvcrt.open_osfhandle.assert_called_once_with(
+            1234,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0),
+        )
+        fdopen.assert_called_once_with(5678, "rb")
+        kernel32.CloseHandle.assert_not_called()
+
+    def test_windows_validation_stream_closes_fd_when_wrapping_fails(
+        self,
+    ) -> None:
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        msvcrt = MagicMock()
+        msvcrt.open_osfhandle.return_value = 5678
+
+        with (
+            patch.object(asset_registry_module.os, "name", "nt"),
+            patch.object(
+                asset_registry_module,
+                "_windows_included_file_read_api",
+                return_value=kernel32,
+            ),
+            patch.dict(sys.modules, {"msvcrt": msvcrt}),
+            patch.object(
+                asset_registry_module.os,
+                "fdopen",
+                side_effect=MemoryError("injected wrapper failure"),
+            ),
+            patch.object(asset_registry_module.os, "close") as close,
+            self.assertRaisesRegex(MemoryError, "injected wrapper failure"),
+        ):
+            asset_registry_module._open_included_file_validation_stream(
+                os.path.join(self.gm_dir, "payload.bin"),
+                deny_writes=True,
+            )
+
+        close.assert_called_once_with(5678)
+        kernel32.CloseHandle.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_final_receipt_denies_writes_while_hashing(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            "payload.bin",
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        real_read = asset_registry_module._read_included_file_validation_chunk
+        blocked_paths: list[str] = []
+
+        def assert_write_sharing_is_denied(opened_file: BinaryIO) -> bytes:
+            if not blocked_paths:
+                for path in (source_path, output_path):
+                    with self.assertRaises(OSError) as raised:
+                        with open(path, "r+b"):
+                            pass
+                    self.assertEqual(
+                        getattr(raised.exception, "winerror", None),
+                        32,
+                    )
+                    blocked_paths.append(path)
+            return real_read(opened_file)
+
+        with patch.object(
+            asset_registry_module,
+            "_read_included_file_validation_chunk",
+            side_effect=assert_write_sharing_is_denied,
+        ):
+            converter.revalidate_publication(
+                publication,
+                validate_content=True,
+            )
+
+        self.assertEqual(blocked_paths, [source_path, output_path])
+
+    def test_unavailable_receipts_are_not_rehashed_at_boundaries(self) -> None:
+        self._write_included_source("payload.bin", b"expected payload")
+        self._write_included_output("payload.bin", b"stale____payload")
+        converter = self._converter()
+        publication = converter.prepare_published_entries()
+        self.assertEqual(publication.included_file_receipts, ())
+        self.assertEqual(len(publication.unavailable_included_files), 1)
+
+        payload_bytes_read = 0
+        real_read = asset_registry_module._read_included_file_validation_chunk
+
+        def counting_read(opened_file: BinaryIO) -> bytes:
+            nonlocal payload_bytes_read
+            chunk = real_read(opened_file)
+            payload_bytes_read += len(chunk)
+            return chunk
+
+        with patch.object(
+            asset_registry_module,
+            "_read_included_file_validation_chunk",
+            side_effect=counting_read,
+        ):
+            converter.revalidate_publication(
+                publication,
+                validate_content=False,
+            )
+            converter.revalidate_publication(
+                publication,
+                validate_content=True,
+            )
+
+        self.assertEqual(payload_bytes_read, 0)
+
     def test_windows_path_handle_fingerprint_match_ignores_only_ctime(
         self,
     ) -> None:
@@ -2656,22 +3112,26 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ASSET_REGISTRY_RELATIVE_PATH,
         )
         converter = self._converter()
-        real_revalidate = converter.revalidate_published_entries
-        validation_calls = 0
+        real_revalidate = converter.revalidate_publication
+        validation_phases: list[bool] = []
 
         def delete_then_revalidate(
-            entries: tuple[AssetRegistryEntry, ...],
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
         ) -> None:
-            nonlocal validation_calls
-            validation_calls += 1
-            if validation_calls == 1:
+            validation_phases.append(validate_content)
+            if not validate_content:
                 os.unlink(output_path)
-            real_revalidate(entries)
+            real_revalidate(
+                publication,
+                validate_content=validate_content,
+            )
 
         with (
             patch.object(
                 converter,
-                "revalidate_published_entries",
+                "revalidate_publication",
                 side_effect=delete_then_revalidate,
             ),
             self.assertRaisesRegex(
@@ -2681,7 +3141,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         ):
             converter.convert_all()
 
-        self.assertEqual(validation_calls, 1)
+        self.assertEqual(validation_phases, [False])
         self.assertFalse(os.path.exists(registry_path))
         self.assertEqual(
             converter.conversion_step_result(
@@ -2694,11 +3154,83 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ),
         )
 
+    def test_source_same_size_change_before_registry_publish_fails_closed(
+        self,
+    ) -> None:
+        payload = b"matching payload"
+        replacement = b"tampered payload"
+        self.assertEqual(len(replacement), len(payload))
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
+        source_path = os.path.join(
+            self.gm_dir,
+            "datafiles",
+            "payload.bin",
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        source_stat = os.lstat(source_path)
+        source_identity = source_stat.st_dev, source_stat.st_ino
+        converter = self._converter()
+        real_revalidate = converter.revalidate_publication
+        validation_phases: list[bool] = []
+        mutated = False
+
+        def mutate_then_revalidate(
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
+        ) -> None:
+            nonlocal mutated
+            validation_phases.append(validate_content)
+            if not validate_content and not mutated:
+                with open(source_path, "r+b", buffering=0) as source_file:
+                    source_file.write(replacement)
+                    os.fsync(source_file.fileno())
+                os.utime(
+                    source_path,
+                    ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+                )
+                self.assertEqual(
+                    (os.lstat(source_path).st_dev, os.lstat(source_path).st_ino),
+                    source_identity,
+                )
+                self.assertEqual(os.lstat(source_path).st_size, len(payload))
+                self.assertEqual(
+                    os.lstat(source_path).st_mtime_ns,
+                    source_stat.st_mtime_ns,
+                )
+                mutated = True
+            real_revalidate(
+                publication,
+                validate_content=validate_content,
+            )
+
+        with (
+            patch.object(
+                converter,
+                "revalidate_publication",
+                side_effect=mutate_then_revalidate,
+            ),
+            self.assertRaisesRegex(OSError, "publication inputs changed"),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(mutated)
+        self.assertEqual(validation_phases[0], False)
+        self.assertIn(validation_phases, ([False], [False, True]))
+        self.assertFalse(os.path.exists(registry_path))
+
     def test_output_byte_change_after_registry_publish_removes_registry(
         self,
     ) -> None:
-        self._write_included_source("payload.bin", b"matching payload")
-        self._write_included_output("payload.bin", b"matching payload")
+        payload = b"matching payload"
+        replacement = b"tampered payload"
+        self.assertEqual(len(replacement), len(payload))
+        self._write_included_source("payload.bin", payload)
+        self._write_included_output("payload.bin", payload)
         output_path = os.path.join(
             self.godot_dir,
             "included_files",
@@ -2708,24 +3240,44 @@ class TestAssetRegistryConverter(unittest.TestCase):
             self.godot_dir,
             ASSET_REGISTRY_RELATIVE_PATH,
         )
+        output_stat = os.lstat(output_path)
+        output_identity = output_stat.st_dev, output_stat.st_ino
         converter = self._converter()
-        real_revalidate = converter.revalidate_published_entries
-        validation_calls = 0
+        real_revalidate = converter.revalidate_publication
+        validation_phases: list[bool] = []
 
         def mutate_then_revalidate(
-            entries: tuple[AssetRegistryEntry, ...],
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
         ) -> None:
-            nonlocal validation_calls
-            validation_calls += 1
-            if validation_calls == 2:
-                with open(output_path, "wb") as output_file:
-                    output_file.write(b"changed after publication")
-            real_revalidate(entries)
+            validation_phases.append(validate_content)
+            if validate_content:
+                with open(output_path, "r+b", buffering=0) as output_file:
+                    output_file.write(replacement)
+                    os.fsync(output_file.fileno())
+                os.utime(
+                    output_path,
+                    ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+                )
+                self.assertEqual(
+                    (os.lstat(output_path).st_dev, os.lstat(output_path).st_ino),
+                    output_identity,
+                )
+                self.assertEqual(os.lstat(output_path).st_size, len(payload))
+                self.assertEqual(
+                    os.lstat(output_path).st_mtime_ns,
+                    output_stat.st_mtime_ns,
+                )
+            real_revalidate(
+                publication,
+                validate_content=validate_content,
+            )
 
         with (
             patch.object(
                 converter,
-                "revalidate_published_entries",
+                "revalidate_publication",
                 side_effect=mutate_then_revalidate,
             ),
             self.assertRaisesRegex(
@@ -2735,7 +3287,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         ):
             converter.convert_all()
 
-        self.assertEqual(validation_calls, 2)
+        self.assertEqual(validation_phases, [False, True])
         self.assertFalse(os.path.exists(registry_path))
         self.assertEqual(
             converter.conversion_step_result(
@@ -2771,24 +3323,28 @@ class TestAssetRegistryConverter(unittest.TestCase):
         previous_stat = os.lstat(registry_path)
         previous_identity = previous_stat.st_dev, previous_stat.st_ino
         converter = self._converter()
-        real_revalidate = converter.revalidate_published_entries
-        validation_calls = 0
+        real_revalidate = converter.revalidate_publication
+        validation_phases: list[bool] = []
 
         def mutate_then_revalidate(
-            entries: tuple[AssetRegistryEntry, ...],
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
         ) -> None:
-            nonlocal validation_calls
-            validation_calls += 1
-            if validation_calls == 2:
+            validation_phases.append(validate_content)
+            if validate_content:
                 with open(output_path, "wb") as output_file:
                     output_file.write(b"changed after publication")
-            real_revalidate(entries)
+            real_revalidate(
+                publication,
+                validate_content=validate_content,
+            )
 
         try:
             with (
                 patch.object(
                     converter,
-                    "revalidate_published_entries",
+                    "revalidate_publication",
                     side_effect=mutate_then_revalidate,
                 ),
                 self.assertRaisesRegex(
@@ -2798,7 +3354,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ):
                 converter.convert_all()
 
-            self.assertEqual(validation_calls, 2)
+            self.assertEqual(validation_phases, [False, True])
             current_stat = os.lstat(registry_path)
             self.assertEqual(
                 (current_stat.st_dev, current_stat.st_ino),

@@ -13,9 +13,14 @@ from typing import Any, cast
 from unittest.mock import patch
 
 from src import cli
+from src.conversion import asset_registry as asset_registry_module
 from src.conversion import conversion_manifest as conversion_manifest_module
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
-from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
+from src.conversion.asset_registry import (
+    AssetRegistryConverter,
+    AssetRegistryEntry,
+    AssetRegistryPublication,
+)
 from src.conversion.conversion_manifest import (
     CONVERSION_ATTEMPT_RELATIVE_PATH,
     CONVERSION_MANIFEST_RELATIVE_PATH,
@@ -955,23 +960,28 @@ class TestConversionManifest(unittest.TestCase):
             manifest_before,
             attempt_before,
         ) = self._included_publication_fixture("delete-boundary")
-        real_revalidate = AssetRegistryConverter.revalidate_published_entries
-        validation_calls = 0
+        real_revalidate = AssetRegistryConverter.revalidate_publication
+        validation_phases: list[bool] = []
 
         def delete_then_revalidate(
             converter: AssetRegistryConverter,
-            entries: tuple[AssetRegistryEntry, ...],
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
         ) -> None:
-            nonlocal validation_calls
-            validation_calls += 1
-            if validation_calls == 1:
+            validation_phases.append(validate_content)
+            if not validate_content:
                 output_path.unlink()
-            real_revalidate(converter, entries)
+            real_revalidate(
+                converter,
+                publication,
+                validate_content=validate_content,
+            )
 
         with (
             patch.object(
                 AssetRegistryConverter,
-                "revalidate_published_entries",
+                "revalidate_publication",
                 new=delete_then_revalidate,
             ),
             self.assertRaisesRegex(
@@ -991,7 +1001,7 @@ class TestConversionManifest(unittest.TestCase):
                 attempt_outcome=self._successful_outcome(),
             )
 
-        self.assertEqual(validation_calls, 1)
+        self.assertEqual(validation_phases, [False])
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
         self.assertEqual(self._temporary_artifact_files(godot_dir), [])
@@ -1008,23 +1018,40 @@ class TestConversionManifest(unittest.TestCase):
             manifest_before,
             attempt_before,
         ) = self._included_publication_fixture("change-after-publish")
-        real_revalidate = AssetRegistryConverter.revalidate_published_entries
-        validation_calls = 0
+        output_stat = output_path.stat()
+        replacement = b"tampered included payload"
+        self.assertEqual(len(replacement), output_stat.st_size)
+        real_revalidate = AssetRegistryConverter.revalidate_publication
+        validation_phases: list[bool] = []
 
         def mutate_then_revalidate(
             converter: AssetRegistryConverter,
-            entries: tuple[AssetRegistryEntry, ...],
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
         ) -> None:
-            nonlocal validation_calls
-            validation_calls += 1
-            if validation_calls == 2:
-                output_path.write_bytes(b"changed after manifest publication")
-            real_revalidate(converter, entries)
+            validation_phases.append(validate_content)
+            if validate_content:
+                with output_path.open("r+b", buffering=0) as output_file:
+                    output_file.write(replacement)
+                    os.fsync(output_file.fileno())
+                os.utime(
+                    output_path,
+                    ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+                )
+                mutated_stat = output_path.stat()
+                self.assertEqual(mutated_stat.st_size, output_stat.st_size)
+                self.assertEqual(mutated_stat.st_mtime_ns, output_stat.st_mtime_ns)
+            real_revalidate(
+                converter,
+                publication,
+                validate_content=validate_content,
+            )
 
         with (
             patch.object(
                 AssetRegistryConverter,
-                "revalidate_published_entries",
+                "revalidate_publication",
                 new=mutate_then_revalidate,
             ),
             self.assertRaisesRegex(
@@ -1044,10 +1071,84 @@ class TestConversionManifest(unittest.TestCase):
                 attempt_outcome=self._successful_outcome(),
             )
 
-        self.assertEqual(validation_calls, 2)
+        self.assertEqual(validation_phases, [False, True])
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
         self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+
+    def test_included_file_manifest_publication_reads_payload_six_times(
+        self,
+    ) -> None:
+        (
+            gm_dir,
+            godot_dir,
+            output_path,
+            _manifest_path,
+            _attempt_path,
+            _manifest_before,
+            _attempt_before,
+        ) = self._included_publication_fixture("read-budget")
+        payload_size = output_path.stat().st_size
+        real_read_chunk = cast(
+            Callable[[Any], bytes],
+            getattr(
+                asset_registry_module,
+                "_read_included_file_validation_chunk",
+            ),
+        )
+        real_revalidate = AssetRegistryConverter.revalidate_publication
+        payload_bytes_read = 0
+        phase_reads: list[tuple[bool, int]] = []
+
+        def count_payload_bytes(opened_file: Any) -> bytes:
+            nonlocal payload_bytes_read
+            chunk = real_read_chunk(opened_file)
+            payload_bytes_read += len(chunk)
+            return chunk
+
+        def record_phase_reads(
+            converter: AssetRegistryConverter,
+            publication: AssetRegistryPublication,
+            *,
+            validate_content: bool,
+        ) -> None:
+            before = payload_bytes_read
+            real_revalidate(
+                converter,
+                publication,
+                validate_content=validate_content,
+            )
+            phase_reads.append((validate_content, payload_bytes_read - before))
+
+        with (
+            patch.object(
+                asset_registry_module,
+                "_read_included_file_validation_chunk",
+                new=count_payload_bytes,
+            ),
+            patch.object(
+                AssetRegistryConverter,
+                "revalidate_publication",
+                new=record_phase_reads,
+            ),
+        ):
+            write_conversion_artifacts(
+                str(gm_dir),
+                str(godot_dir),
+                target_platform="windows",
+                enabled_converters=(),
+                output_snapshot=capture_conversion_output_snapshot(
+                    str(godot_dir)
+                ),
+                manifest_outcome=self._successful_outcome(),
+                attempt_outcome=self._successful_outcome(),
+            )
+
+        self.assertEqual(
+            phase_reads,
+            [(False, 0), (True, 2 * payload_size)],
+        )
+        self.assertEqual(payload_bytes_read, 6 * payload_size)
 
     def test_outcome_steps_must_match_enabled_conversion_plan(self) -> None:
         godot_dir = self.temp_dir / "godot"

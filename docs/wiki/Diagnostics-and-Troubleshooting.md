@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.30 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -26,6 +26,8 @@ Paths below are relative to the generated Godot project unless a report director
 The JSON diagnostic entries can include `source_path`, line and column, resource and event/API context, a manifest entry, tracking issue, and workaround. Start with the first `error`, then unsupported warnings, then other warnings.
 
 The JSON/Markdown pair uses one verified report-directory binding for capture, staging, ordered replacement, rollback, invalidation and cleanup. POSIX hosts use descriptor-relative no-follow operations; Windows retains reparse-checked, no-delete-share handles and write-through moves. When an explicit external report root is missing, GM2Godot creates and durability-syncs each parent entry before descending. Ordinary failures restore the complete prior pair, but a hard crash between the two file commits is not yet pair-atomic, so keep the reports with the latest attempt evidence rather than treating either filename alone as a generation marker.
+
+The four static compatibility reports use the same retained binding as one deterministic ordered transaction. Rendering completes before publication; the transaction then snapshots and backs up every target, commits and durability-syncs each new report, and validates the complete result. An ordinary failure restores the prior bytes and modes or reports a verified recovery artifact when rollback cannot safely finish; it no longer deletes the prior set.
 
 ## Terminal outcomes
 

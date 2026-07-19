@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.31 - 2026-07-19
+
+- Anchored the four CLI static compatibility reports to one shared verified-directory byte-artifact transaction for exact snapshots, private staging, backups, deterministic ordered commits, durability barriers, rollback, cleanup, and final receipt validation.
+- Replaced destructive report-set invalidation with exact prior-byte and mode restoration after render, stage, replacement, sync, interruption, or validation failure, including portable mode preservation when descriptor chmod is unavailable.
+- Added focused failure, ordering, hard-link, physical POSIX directory-replacement, native Windows relocation, and exact Godot 4.7.1 regression coverage while preserving the stable report paths and GameMaker LTS 2026 compatibility surface.
+
 ## 0.7.30 - 2026-07-19
 
 - Anchored conversion-attempt and canonical-manifest staging, backup reads, attempt-first replacement, rollback, recovery retention, stale cleanup, durability barriers, and final receipts to one shared verified-directory byte-artifact transaction.

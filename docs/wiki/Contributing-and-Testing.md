@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.33 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-19
+> **Last reviewed:** 2026-07-20
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -106,6 +106,17 @@ Included Files transaction changes must retain the subprocess hard-exit recovery
 ```
 
 The publication test stops the child process at every forward transaction phase from the staged journal through commit-marker retirement, then requires recovery to select one complete generation. The two cleanup tests independently hard-exit after quarantine or removal for owned backup, staging, stable-record, and temporary-record state. Run the native Windows Included Files workflow when changing lock, move, junction, read-only, or cleanup behavior; modeled `os.name` tests are not a substitute for NTFS and Win32 coverage. Preserve the public `res://included_files/` and registry paths, reject unknown reserved-path state, and keep the documented prohibition on conversion alongside a live game or non-cooperating writer.
+
+Worker-scheduling changes must also retain the deterministic 10,000-source submission bound, changed/unchanged failure and cancellation admission checks, and cross-worker output equivalence:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_worker_window_bounds_ten_thousand_sources \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_changed_generation_stops_admission_after_worker_failure \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_unchanged_receipts_stop_admission_after_worker_failure \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_cancellation_stops_worker_admission_within_window \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_worker_counts_produce_identical_output_and_diagnostics
+```
 
 Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
 

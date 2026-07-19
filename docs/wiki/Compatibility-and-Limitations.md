@@ -1,8 +1,8 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.33 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-19
+> **Last reviewed:** 2026-07-20
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting)
 
@@ -65,6 +65,8 @@ The packaged Linux GUI intentionally excludes Qt's optional TIFF image-format pl
 ## Conversion concurrency and recovery generations
 
 Only one GM2Godot converter may recover or publish Included Files for a destination project at a time. A cooperative operating-system lock rejects a second converter; retry it after the active conversion exits. If the process or machine stops during publication, the next conversion uses a durable journal and commit marker to restore the complete previous Included Files root/registry pair or finalize the complete committed pair. Do not delete transaction artifacts by hand: unknown or changed reserved-path content is deliberately preserved and rejected so GM2Godot cannot mistake user data for its own.
+
+Within one conversion, Included File receipt and copy workers use a bounded submission window of at most twice the configured worker count. Cancellation or a terminal worker failure stops further admission and preserves the prior complete generation; increasing the worker count changes throughput, not path assignment, registry receipts, or sorted diagnostics.
 
 The conversion attempt/canonical-manifest pair has its own persistent `.gm2godot-conversion.lock`, durable transaction journal, and generation pointer inside `gm2godot/`. Interruption before the pointer switch restores the complete previous pair; interruption after it verifies and finalizes the complete new pair. The stable public filenames and existing consumer schemas remain unchanged. Recovery records are size-bounded, and malformed, redirected, mounted, hard-linked, replaced, or unknown reserved state is preserved and rejected without following or deleting it.
 

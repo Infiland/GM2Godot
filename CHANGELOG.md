@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.33 - 2026-07-20
+
+- Bounded unchanged-generation receipt validation and changed-generation Included Files staging to at most twice the configured worker count, so future and submission bookkeeping no longer scales with the complete source set.
+- Stopped admitting work after cancellation or the first observed terminal worker failure, then cancelled or drained only the bounded remainder while preserving the previous complete root/registry generation.
+- Added a deterministic 10,000-source window probe, failure/cancellation admission tests, cross-worker output/receipt/diagnostic equivalence coverage, and exact Godot 4.7.1 and GameMaker LTS 2026 compatibility validation.
+
 ## 0.7.32 - 2026-07-19
 
 - Published `conversion_attempt.json` and the optional canonical `conversion_manifest.json` as one recoverable generation using a durable transaction journal and persistent commit pointer while preserving both stable public paths and JSON schemas.

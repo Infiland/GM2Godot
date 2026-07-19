@@ -380,14 +380,34 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             binary_source.parent.mkdir(parents=True, exist_ok=True)
             binary_source.write_bytes(bytes((0, 1, 127, 128, 255)))
 
-            IncludedFilesConverter(
+            included_files_converter = IncludedFilesConverter(
                 os.fspath(gm_project_dir),
                 os.fspath(project_dir),
                 log_callback=lambda _message: None,
                 progress_callback=lambda _value: None,
                 conversion_running=lambda: True,
                 max_workers=1,
-            ).convert_all()
+            )
+            included_files_converter.convert_all()
+            published_root = project_dir / "included_files"
+            published_registry = (
+                project_dir
+                / "gm2godot"
+                / "gml_included_file_registry.gd"
+            )
+            published_root_identity = published_root.stat().st_ino
+            published_registry_identity = published_registry.stat().st_ino
+            published_registry_content = published_registry.read_bytes()
+            included_files_converter.convert_all()
+            self.assertEqual(published_root.stat().st_ino, published_root_identity)
+            self.assertEqual(
+                published_registry.stat().st_ino,
+                published_registry_identity,
+            )
+            self.assertEqual(
+                published_registry.read_bytes(),
+                published_registry_content,
+            )
 
             self.assertEqual(
                 (

@@ -10,7 +10,8 @@ import sys
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import BinaryIO, Callable, cast
+from functools import lru_cache
+from typing import Any, BinaryIO, Callable, cast
 
 from src.localization import get_localized
 from src.conversion.atomic_generated_text import (
@@ -66,6 +67,7 @@ _PathFingerprint = tuple[int, int, int, int, int, int]
 _PathHandleBinding = tuple[int, int, int, int, int, int]
 _HandleState = tuple[int, int, int, int, int, int, int]
 _IncludedSourceFingerprint = tuple[int, int, int, int, int, int]
+_IncludedSourceDirectoryIdentity = tuple[str, _PathIdentity]
 _INCLUDED_FILES_ROOT_NAME = "included_files"
 _INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
 
@@ -73,6 +75,23 @@ _INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
 @dataclass(frozen=True)
 class _IncludedCopyReceipt:
     source_fingerprint: _IncludedSourceFingerprint
+    byte_count: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class _IncludedSourceBinding:
+    filesystem_path: str
+    canonical_path: str
+    directory_identities: tuple[_IncludedSourceDirectoryIdentity, ...]
+    lexical_state: _HandleState
+    path_state: _HandleState
+    handle_state: _HandleState
+
+
+@dataclass(frozen=True)
+class _IncludedNoOpSourceReceipt:
+    binding: _IncludedSourceBinding
     byte_count: int
     sha256: str
 
@@ -129,6 +148,13 @@ _DIRECTORY_OPEN_FLAGS = (
     | getattr(os, "O_DIRECTORY", 0)
     | getattr(os, "O_NOFOLLOW", 0)
 )
+
+_WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_OPEN_EXISTING = 3
+_WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
 
 
 def _included_descriptor_paths_supported() -> bool:
@@ -449,13 +475,110 @@ def _included_source_fingerprint(
     )
 
 
+def _read_included_validation_chunk(opened_file: BinaryIO) -> bytes:
+    """Read one validation chunk through a deterministic accounting seam."""
+
+    return opened_file.read(1024 * 1024)
+
+
+@lru_cache(maxsize=1)
+def _windows_included_file_read_api() -> Any:
+    if os.name != "nt":
+        raise OSError("Windows Included File read handles are unavailable")
+    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    kernel32.CreateFileW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_int
+    return kernel32
+
+
+def _open_included_file_validation_stream(
+    path: str,
+    *,
+    deny_writes: bool,
+    no_follow: bool = False,
+) -> BinaryIO:
+    """Open a validation stream with requested sharing and link semantics."""
+
+    if os.name != "nt":
+        if no_follow:
+            file_descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                return os.fdopen(file_descriptor, "rb")
+            except BaseException:
+                os.close(file_descriptor)
+                raise
+        return open(path, "rb")
+    if not deny_writes and not no_follow:
+        return open(path, "rb")
+
+    kernel32 = _windows_included_file_read_api()
+    handle_value = kernel32.CreateFileW(
+        os.path.abspath(path),
+        _WINDOWS_GENERIC_READ,
+        _WINDOWS_FILE_SHARE_READ,
+        None,
+        _WINDOWS_OPEN_EXISTING,
+        _WINDOWS_FILE_ATTRIBUTE_NORMAL
+        | (_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT if no_follow else 0)
+        | _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle_value is None or handle_value == invalid_handle:
+        get_last_error = cast(
+            Callable[[], int],
+            getattr(ctypes, "get_last_error"),
+        )
+        error_number = get_last_error()
+        format_error = cast(
+            Callable[[int], str],
+            getattr(ctypes, "FormatError"),
+        )
+        raise OSError(
+            error_number,
+            format_error(error_number).strip(),
+            path,
+        )
+
+    handle = cast(int, handle_value)
+    try:
+        import msvcrt
+
+        file_descriptor = msvcrt.open_osfhandle(
+            handle,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0),
+        )
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(file_descriptor, "rb")
+    except BaseException:
+        os.close(file_descriptor)
+        raise
+
+
 def _digest_open_included_file(
     opened_file: BinaryIO,
 ) -> tuple[int, str]:
     digest = hashlib.sha256()
     byte_count = 0
     while True:
-        chunk = opened_file.read(1024 * 1024)
+        chunk = _read_included_validation_chunk(opened_file)
         if not chunk:
             break
         digest.update(chunk)
@@ -470,41 +593,38 @@ def _digest_included_regular_file(
     expected_fingerprint = _included_path_fingerprint(expected_stat)
     expected_binding = _included_path_handle_binding(expected_stat)
     expected_ctime_ns = expected_stat.st_ctime_ns
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    file_descriptor = os.open(path, flags)
-    try:
-        opened_stat = os.fstat(file_descriptor)
+    with _open_included_file_validation_stream(
+        path,
+        deny_writes=True,
+        no_follow=True,
+    ) as opened_file:
+        opened_stat = os.fstat(opened_file.fileno())
         if (
             not stat.S_ISREG(opened_stat.st_mode)
             or _included_path_handle_binding(opened_stat) != expected_binding
         ):
             raise OSError(f"Included Files file changed before hashing: {path}")
         opened_state = _included_handle_state(opened_stat)
-        with os.fdopen(file_descriptor, "rb") as opened_file:
-            file_descriptor = -1
-            byte_count, content_sha256 = _digest_open_included_file(opened_file)
-            current_opened_stat = os.fstat(opened_file.fileno())
-            if (
-                _included_handle_state(current_opened_stat) != opened_state
-                or byte_count != expected_stat.st_size
-            ):
-                raise OSError(
-                    f"Included Files file changed while hashing: {path}"
-                )
+        byte_count, content_sha256 = _digest_open_included_file(opened_file)
+        current_opened_stat = os.fstat(opened_file.fileno())
+        if (
+            _included_handle_state(current_opened_stat) != opened_state
+            or byte_count != expected_stat.st_size
+        ):
+            raise OSError(
+                f"Included Files file changed while hashing: {path}"
+            )
 
-            current_stat = os.lstat(path)
-            if (
-                _included_output_path_is_redirected(path, current_stat)
-                or not stat.S_ISREG(current_stat.st_mode)
-                or _included_path_fingerprint(current_stat) != expected_fingerprint
-                or current_stat.st_ctime_ns != expected_ctime_ns
-            ):
-                raise OSError(
-                    f"Included Files file changed while hashing: {path}"
-                )
-    finally:
-        if file_descriptor >= 0:
-            os.close(file_descriptor)
+        current_stat = os.lstat(path)
+        if (
+            _included_output_path_is_redirected(path, current_stat)
+            or not stat.S_ISREG(current_stat.st_mode)
+            or _included_path_fingerprint(current_stat) != expected_fingerprint
+            or current_stat.st_ctime_ns != expected_ctime_ns
+        ):
+            raise OSError(
+                f"Included Files file changed while hashing: {path}"
+            )
     return content_sha256
 
 
@@ -564,6 +684,60 @@ def _verify_fallback_directory_ancestors(
             raise OSError(
                 f"Included Files directory ancestor changed: {directory_path}"
             )
+
+
+def _capture_included_source_directory_identities(
+    project_root: str,
+    source_path: str,
+) -> tuple[str, tuple[_IncludedSourceDirectoryIdentity, ...]]:
+    canonical_root = os.path.normcase(os.path.realpath(project_root))
+    canonical_path = os.path.normcase(os.path.realpath(source_path))
+    try:
+        contained = (
+            os.path.commonpath((canonical_root, canonical_path))
+            == canonical_root
+        )
+    except ValueError:
+        contained = False
+    if not contained or canonical_path == canonical_root:
+        raise OSError(
+            "GameMaker Included File source escapes the selected project: "
+            f"{source_path}"
+        )
+
+    directory_path = canonical_root
+    directory_identities: list[_IncludedSourceDirectoryIdentity] = []
+    relative_directory = os.path.relpath(
+        os.path.dirname(canonical_path),
+        canonical_root,
+    )
+    components = (
+        ()
+        if relative_directory == os.curdir
+        else tuple(relative_directory.split(os.sep))
+    )
+    for component in (None, *components):
+        if component is not None:
+            directory_path = os.path.join(directory_path, component)
+        directory_stat = os.lstat(directory_path)
+        if (
+            _included_output_path_is_redirected(
+                directory_path,
+                directory_stat,
+            )
+            or not stat.S_ISDIR(directory_stat.st_mode)
+        ):
+            raise OSError(
+                "GameMaker Included File source directory is redirected or "
+                f"invalid: {directory_path}"
+            )
+        directory_identities.append(
+            (
+                directory_path,
+                (directory_stat.st_dev, directory_stat.st_ino),
+            )
+        )
+    return canonical_path, tuple(directory_identities)
 
 
 def _included_directory_identity(path: str) -> _PathIdentity | None:
@@ -831,6 +1005,8 @@ def _capture_included_tree_from_fd(
     relative_directory: str,
     display_path: str,
     verify_binding: Callable[[], None],
+    *,
+    include_content: bool,
 ) -> list[_IncludedTreeEntry]:
     verify_binding()
     try:
@@ -882,6 +1058,7 @@ def _capture_included_tree_from_fd(
                         relative_path,
                         entry_path,
                         verify_child_binding,
+                        include_content=include_content,
                     )
                 )
             finally:
@@ -899,11 +1076,15 @@ def _capture_included_tree_from_fd(
         elif stat.S_ISREG(entry_stat.st_mode):
             kind = "file"
             ctime_ns = entry_stat.st_ctime_ns
-            content_sha256 = _digest_included_regular_file_at(
-                directory_fd,
-                name,
-                entry_stat,
-                entry_path,
+            content_sha256 = (
+                _digest_included_regular_file_at(
+                    directory_fd,
+                    name,
+                    entry_stat,
+                    entry_path,
+                )
+                if include_content
+                else None
             )
         else:
             raise OSError(
@@ -925,6 +1106,8 @@ def _capture_included_tree_from_fd(
 def _capture_included_tree_descriptor(
     root_path: str,
     expected_parent_identity: _PathIdentity | None,
+    *,
+    include_content: bool,
 ) -> _IncludedTreeSnapshot:
     parent_fd, root_name = _open_pinned_included_parent(root_path)
     parent_identity = _directory_identity_from_fd(parent_fd)
@@ -969,6 +1152,7 @@ def _capture_included_tree_descriptor(
                 "",
                 root_path,
                 verify_root_binding,
+                include_content=include_content,
             )
         finally:
             os.close(root_fd)
@@ -995,6 +1179,8 @@ def _after_included_fallback_tree_directory_scan(_path: str) -> None:
 def _capture_included_tree_fallback(
     root_path: str,
     expected_parent_identity: _PathIdentity | None,
+    *,
+    include_content: bool,
 ) -> _IncludedTreeSnapshot:
     root_parent_identities = _capture_fallback_directory_ancestors(
         os.path.dirname(os.path.abspath(root_path))
@@ -1063,9 +1249,13 @@ def _capture_included_tree_fallback(
                 kind = "file"
                 ctime_ns = entry_stat.st_ctime_ns
                 _verify_fallback_directory_ancestors(directory_identities)
-                content_sha256 = _digest_included_regular_file(
-                    entry_path,
-                    entry_stat,
+                content_sha256 = (
+                    _digest_included_regular_file(
+                        entry_path,
+                        entry_stat,
+                    )
+                    if include_content
+                    else None
                 )
             else:
                 raise OSError(
@@ -1106,15 +1296,18 @@ def _capture_included_tree(
     root_path: str,
     *,
     expected_parent_identity: _PathIdentity | None = None,
+    include_content: bool = True,
 ) -> _IncludedTreeSnapshot:
     if _included_descriptor_paths_supported():
         return _capture_included_tree_descriptor(
             root_path,
             expected_parent_identity,
+            include_content=include_content,
         )
     return _capture_included_tree_fallback(
         root_path,
         expected_parent_identity,
+        include_content=include_content,
     )
 
 
@@ -1132,6 +1325,89 @@ def _verify_included_tree_snapshot(
         != expected
     ):
         raise OSError(f"Included Files tree changed during conversion: {root_path}")
+
+
+def _included_tree_without_content(
+    snapshot: _IncludedTreeSnapshot,
+) -> _IncludedTreeSnapshot:
+    return _IncludedTreeSnapshot(
+        root_fingerprint=snapshot.root_fingerprint,
+        entries=tuple(
+            _IncludedTreeEntry(
+                relative_path=entry.relative_path,
+                kind=entry.kind,
+                fingerprint=entry.fingerprint,
+                ctime_ns=entry.ctime_ns,
+                content_sha256=None,
+            )
+            for entry in snapshot.entries
+        ),
+    )
+
+
+def _verify_included_tree_snapshot_metadata(
+    root_path: str,
+    expected: _IncludedTreeSnapshot,
+    *,
+    expected_parent_identity: _PathIdentity | None = None,
+) -> None:
+    current = _capture_included_tree(
+        root_path,
+        expected_parent_identity=expected_parent_identity,
+        include_content=False,
+    )
+    if current != _included_tree_without_content(expected):
+        raise OSError(
+            f"Included Files tree metadata changed during conversion: {root_path}"
+        )
+
+
+def _included_tree_matches_planned_paths(
+    snapshot: _IncludedTreeSnapshot,
+    assigned_paths: set[str],
+) -> bool:
+    if snapshot.identity is None:
+        return False
+    expected_directories = {
+        "/".join(path.split("/")[:component_count])
+        for path in assigned_paths
+        for component_count in range(1, len(path.split("/")))
+    }
+    actual_files = {
+        entry.relative_path
+        for entry in snapshot.entries
+        if entry.kind == "file"
+    }
+    actual_directories = {
+        entry.relative_path
+        for entry in snapshot.entries
+        if entry.kind == "directory"
+    }
+    if actual_files != assigned_paths or actual_directories != expected_directories:
+        return False
+    return all(
+        entry.content_sha256 is not None and entry.fingerprint[5] == 1
+        for entry in snapshot.entries
+        if entry.kind == "file"
+    )
+
+
+def _included_tree_matches_source_receipts(
+    snapshot: _IncludedTreeSnapshot,
+    assigned_receipts: dict[str, _IncludedNoOpSourceReceipt],
+) -> bool:
+    entries_by_path = {
+        entry.relative_path: entry
+        for entry in snapshot.entries
+        if entry.kind == "file"
+    }
+    return all(
+        assigned_path in entries_by_path
+        and entries_by_path[assigned_path].fingerprint[3]
+        == receipt.byte_count
+        and entries_by_path[assigned_path].content_sha256 == receipt.sha256
+        for assigned_path, receipt in assigned_receipts.items()
+    )
 
 
 def _verify_staged_included_inventory(
@@ -3536,6 +3812,18 @@ def _publish_confined_included_output(
     )
 
 
+def _before_included_unchanged_source_revalidation() -> None:
+    """Narrow test seam before the second stable source-content pass."""
+
+
+def _before_included_unchanged_public_revalidation() -> None:
+    """Narrow test seam before rehashing the candidate public generation."""
+
+
+def _before_included_unchanged_final_revalidation() -> None:
+    """Narrow test seam before final source and public identity checks."""
+
+
 class IncludedFilesConverter(BaseConverter):
     def __init__(self, gm_project_path: StrPath, godot_project_path: StrPath, log_callback: LogCallback = print,
                  progress_callback: ProgressCallback | None = None, conversion_running: ConversionRunning | None = None,
@@ -3625,6 +3913,7 @@ class IncludedFilesConverter(BaseConverter):
         *,
         owner_source_path: str,
         resource: str,
+        deny_writes: bool = False,
     ) -> tuple[BinaryIO, os.stat_result] | None:
         """Open a contained regular file and pin it against late path swaps."""
         resolved = self._resolve_discovered_project_source(
@@ -3638,7 +3927,10 @@ class IncludedFilesConverter(BaseConverter):
             return None
 
         try:
-            source_file = open(resolved.filesystem_path, "rb")
+            source_file = _open_included_file_validation_stream(
+                resolved.filesystem_path,
+                deny_writes=deny_writes,
+            )
         except OSError:
             return None
 
@@ -3675,6 +3967,253 @@ class IncludedFilesConverter(BaseConverter):
             source_file.close()
             return None
         return source_file, opened_stat
+
+    def _capture_pinned_included_source_binding(
+        self,
+        source: _IncludedFileSource,
+        source_file: BinaryIO,
+        expected_stat: os.stat_result,
+    ) -> _IncludedSourceBinding:
+        resolved = self._resolve_discovered_project_source(
+            source.filesystem_path,
+            owner_source_path=source.owner_source_path,
+            resource=source.relative_path,
+            resource_type="included_file",
+            field="discovered datafiles file",
+        )
+        if resolved is None:
+            raise OSError(
+                "GameMaker Included File source changed during unchanged-"
+                f"generation validation: {source.relative_path}"
+            )
+
+        lexical_stat = os.lstat(resolved.filesystem_path)
+        path_stat = os.stat(resolved.filesystem_path)
+        handle_stat = os.fstat(source_file.fileno())
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or not stat.S_ISREG(handle_stat.st_mode)
+            or not os.path.samestat(expected_stat, path_stat)
+            or not os.path.samestat(path_stat, handle_stat)
+            or _included_handle_state(handle_stat)
+            != _included_handle_state(expected_stat)
+            or _included_path_handle_binding(path_stat)
+            != _included_path_handle_binding(handle_stat)
+        ):
+            raise OSError(
+                "GameMaker Included File source changed during unchanged-"
+                f"generation validation: {source.relative_path}"
+            )
+        canonical_path, directory_identities = (
+            _capture_included_source_directory_identities(
+                self.gm_project_path,
+                resolved.filesystem_path,
+            )
+        )
+        _verify_fallback_directory_ancestors(directory_identities)
+        return _IncludedSourceBinding(
+            filesystem_path=os.path.normcase(
+                os.path.abspath(resolved.filesystem_path)
+            ),
+            canonical_path=canonical_path,
+            directory_identities=directory_identities,
+            lexical_state=_included_handle_state(lexical_stat),
+            path_state=_included_handle_state(path_stat),
+            handle_state=_included_handle_state(handle_stat),
+        )
+
+    def _capture_unchanged_source_receipt(
+        self,
+        source: _IncludedFileSource,
+        *,
+        deny_writes: bool,
+    ) -> _IncludedNoOpSourceReceipt:
+        if not self.conversion_running():
+            raise _IncludedOutputSetCancelled()
+        opened_source = self._open_confined_source_file(
+            source.filesystem_path,
+            owner_source_path=source.owner_source_path,
+            resource=source.relative_path,
+            deny_writes=deny_writes,
+        )
+        if opened_source is None:
+            raise OSError(
+                "GameMaker Included File source became unavailable during "
+                f"unchanged-generation validation: {source.relative_path}"
+            )
+        source_file, source_stat = opened_source
+        with source_file:
+            if source_file.tell() != 0:
+                raise OSError(
+                    "GameMaker Included File validation stream did not start "
+                    f"at offset zero: {source.relative_path}"
+                )
+            before_binding = self._capture_pinned_included_source_binding(
+                source,
+                source_file,
+                source_stat,
+            )
+            byte_count, sha256 = _digest_open_included_file(source_file)
+            after_binding = self._capture_pinned_included_source_binding(
+                source,
+                source_file,
+                source_stat,
+            )
+            if (
+                after_binding != before_binding
+                or byte_count != source_stat.st_size
+            ):
+                raise OSError(
+                    "GameMaker Included File source changed while validating "
+                    f"an unchanged generation: {source.relative_path}"
+                )
+        if not self.conversion_running():
+            raise _IncludedOutputSetCancelled()
+        return _IncludedNoOpSourceReceipt(
+            binding=before_binding,
+            byte_count=byte_count,
+            sha256=sha256,
+        )
+
+    def _collect_unchanged_source_receipts(
+        self,
+        sources: tuple[_IncludedFileSource, ...],
+        *,
+        deny_writes: bool,
+    ) -> dict[str, _IncludedNoOpSourceReceipt]:
+        receipts: dict[str, _IncludedNoOpSourceReceipt] = {}
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures: dict[
+                Future[_IncludedNoOpSourceReceipt],
+                _IncludedFileSource,
+            ] = {
+                executor.submit(
+                    self._capture_unchanged_source_receipt,
+                    source,
+                    deny_writes=deny_writes,
+                ): source
+                for source in sources
+            }
+            for future in as_completed(futures):
+                source = futures[future]
+                receipts[source.relative_path] = future.result()
+        return receipts
+
+    def _revalidate_unchanged_source_bindings(
+        self,
+        sources: tuple[_IncludedFileSource, ...],
+        receipts: dict[str, _IncludedNoOpSourceReceipt],
+    ) -> None:
+        for source in sources:
+            opened_source = self._open_confined_source_file(
+                source.filesystem_path,
+                owner_source_path=source.owner_source_path,
+                resource=source.relative_path,
+                deny_writes=True,
+            )
+            if opened_source is None:
+                raise OSError(
+                    "GameMaker Included File source became unavailable during "
+                    f"final unchanged-generation validation: {source.relative_path}"
+                )
+            source_file, source_stat = opened_source
+            with source_file:
+                current_binding = self._capture_pinned_included_source_binding(
+                    source,
+                    source_file,
+                    source_stat,
+                )
+            if current_binding != receipts[source.relative_path].binding:
+                raise OSError(
+                    "GameMaker Included File source changed during final "
+                    f"unchanged-generation validation: {source.relative_path}"
+                )
+
+    def _unchanged_included_generation_matches(
+        self,
+        sources: tuple[_IncludedFileSource, ...],
+        assignments_by_source: dict[str, IncludedFilePathAssignment],
+        expected_registry_content: bytes,
+        previous_root_snapshot: _IncludedTreeSnapshot,
+        previous_registry_snapshot: _IncludedRegistrySnapshot,
+        project_identity: _PathIdentity,
+        public_root_path: str,
+    ) -> bool:
+        assigned_paths = {
+            assignments_by_source[source.relative_path].assigned_output_path
+            for source in sources
+        }
+        if (
+            previous_registry_snapshot.directory_identity is None
+            or previous_registry_snapshot.file_identity is None
+            or previous_registry_snapshot.content != expected_registry_content
+            or not _included_tree_matches_planned_paths(
+                previous_root_snapshot,
+                assigned_paths,
+            )
+        ):
+            return False
+
+        first_receipts = self._collect_unchanged_source_receipts(
+            sources,
+            deny_writes=False,
+        )
+        assigned_receipts = {
+            assignments_by_source[source.relative_path].assigned_output_path:
+                first_receipts[source.relative_path]
+            for source in sources
+        }
+        if not _included_tree_matches_source_receipts(
+            previous_root_snapshot,
+            assigned_receipts,
+        ):
+            return False
+
+        _before_included_unchanged_source_revalidation()
+        second_receipts = self._collect_unchanged_source_receipts(
+            sources,
+            deny_writes=True,
+        )
+        if second_receipts != first_receipts:
+            raise OSError(
+                "GameMaker Included File sources changed during unchanged-"
+                "generation validation"
+            )
+
+        _before_included_unchanged_public_revalidation()
+        _verify_included_tree_snapshot(
+            public_root_path,
+            previous_root_snapshot,
+            expected_parent_identity=project_identity,
+        )
+        _verify_included_registry_snapshot(
+            self.godot_project_path,
+            previous_registry_snapshot,
+            expected_project_identity=project_identity,
+        )
+
+        _before_included_unchanged_final_revalidation()
+        self._revalidate_unchanged_source_bindings(
+            sources,
+            first_receipts,
+        )
+        _verify_included_tree_snapshot_metadata(
+            public_root_path,
+            previous_root_snapshot,
+            expected_parent_identity=project_identity,
+        )
+        _verify_included_registry_snapshot(
+            self.godot_project_path,
+            previous_registry_snapshot,
+            expected_project_identity=project_identity,
+        )
+        _verify_included_project_identity(
+            self.godot_project_path,
+            project_identity,
+        )
+        if not self.conversion_running():
+            raise _IncludedOutputSetCancelled()
+        return True
 
     def _list_confined_directory(
         self,
@@ -4208,6 +4747,14 @@ class IncludedFilesConverter(BaseConverter):
         all_files = list(plan.available_files)
         if path_assignments:
             self._report_included_file_path_collisions(path_assignments)
+        emitted_logical_paths = {
+            source.relative_path for source in all_files
+        }
+        staged_registry_text = render_included_file_registry(
+            path_assignments,
+            emitted_logical_paths,
+        )
+        expected_registry_content = staged_registry_text.encode("utf-8")
 
         project_identity = _ensure_included_output_project_root(
             self.godot_project_path
@@ -4246,6 +4793,33 @@ class IncludedFilesConverter(BaseConverter):
         active_error: BaseException | None = None
         transaction_committed = False
         try:
+            if self._unchanged_included_generation_matches(
+                tuple(all_files),
+                assignments_by_source,
+                expected_registry_content,
+                previous_root_snapshot,
+                previous_registry_snapshot,
+                project_identity,
+                public_root_path,
+            ):
+                for completed_count, source in enumerate(all_files, start=1):
+                    self._resource_started(source.relative_path)
+                    self._resource_completed(source.relative_path)
+                    if self.compact_logging:
+                        self._safe_log_progress(
+                            os.path.basename(source.relative_path),
+                            completed_count,
+                            len(all_files),
+                        )
+                    else:
+                        self._safe_log(
+                            get_localized(
+                                "Console_Convertor_IncludedFiles_Unchanged"
+                            ).format(path=source.relative_path)
+                        )
+                self._safe_progress(100)
+                return
+
             (
                 stage_container_path,
                 stage_container_identity,
@@ -4364,13 +4938,6 @@ class IncludedFilesConverter(BaseConverter):
                 assigned_receipts,
             )
 
-            emitted_logical_paths = {
-                source.relative_path for source in all_files
-            }
-            staged_registry_text = render_included_file_registry(
-                path_assignments,
-                emitted_logical_paths,
-            )
             staged_registry_path = os.path.join(
                 stage_container_path,
                 "gml_included_file_registry.gd",

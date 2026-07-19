@@ -153,6 +153,7 @@
 "Console_Convertor_IncludedFiles_Complete" : "Konvertierung eingeschlossener Dateien abgeschlossen.",
 "Console_Convertor_IncludedFiles_Stopped" : "Konvertierung eingeschlossener Dateien gestoppt.",
 "Console_Convertor_IncludedFiles_Copied" : "Kopiert: {path}",
+"Console_Convertor_IncludedFiles_Unchanged" : "Unverändert: {path}",
 "Console_Convertor_IncludedFiles_Error_NotFound" : "Kein Ordner mit eingeschlossenen Dateien (datafiles) im GameMaker-Projekt gefunden.",
 
 "Icon_Error_PhotoImage" : "Fehler beim Setzen des Icons mit PhotoImage: {error}",

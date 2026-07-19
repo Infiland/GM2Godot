@@ -908,27 +908,21 @@ class TestDiagnosticCollector(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             _write_report_pair(root, b"stale json\n", b"stale markdown\n")
-            real_unlink = VerifiedDirectory.unlink
 
-            def fail_json_unlink(
-                binding: VerifiedDirectory,
-                name: str,
-                *,
-                expected_identity: tuple[int, int],
-            ) -> BaseException | None:
-                if name == "conversion_diagnostics.json":
+            def fail_json_invalidation(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                if (
+                    phase == "before_backup"
+                    and name == "conversion_diagnostics.json"
+                ):
                     raise PermissionError("json is locked")
-                return real_unlink(
-                    binding,
-                    name,
-                    expected_identity=expected_identity,
-                )
 
-            with patch.object(
-                VerifiedDirectory,
-                "unlink",
-                autospec=True,
-                side_effect=fail_json_unlink,
+            with patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_json_invalidation,
             ):
                 invalidate_conversion_diagnostic_reports(root)
 

@@ -575,12 +575,24 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self._mark_native_windows_tree_read_only(
             transaction.staged_root_path
         )
+        staged_root_snapshot = included_files_module._capture_included_tree(
+            transaction.staged_root_path,
+            expected_parent_identity=transaction.stage_container_identity,
+        )
+        staged_container_snapshot = (
+            included_files_module._included_stage_container_snapshot(
+                transaction.project_identity,
+                transaction.stage_container_path,
+                transaction.stage_container_identity,
+                staged_root_snapshot,
+                transaction.staged_registry_identity,
+                transaction.staged_registry_content,
+            )
+        )
         return replace(
             transaction,
-            staged_root_snapshot=included_files_module._capture_included_tree(
-                transaction.staged_root_path,
-                expected_parent_identity=transaction.stage_container_identity,
-            ),
+            staged_container_snapshot=staged_container_snapshot,
+            staged_root_snapshot=staged_root_snapshot,
         )
 
     def _pair_snapshot(self) -> tuple[int, dict[str, bytes], int, bytes]:
@@ -1518,6 +1530,110 @@ IncludedFilesConverter(
             ),
             stage_name,
         )
+
+    def test_fallback_stage_allocation_preserves_colliding_file(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        first_token = "a" * 16
+        second_token = "b" * 16
+        colliding_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + first_token
+            + ".stage",
+        )
+        colliding_content = b"user-owned stage collision\n"
+        with open(colliding_path, "wb") as colliding_file:
+            colliding_file.write(colliding_content)
+        colliding_stat = os.lstat(colliding_path)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(
+                included_files_module.secrets,
+                "token_hex",
+                side_effect=[first_token, second_token],
+            ) as token_hex,
+        ):
+            stage_path, _stage_identity = (
+                included_files_module._create_included_output_stage(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+
+        self.assertEqual(
+            os.path.basename(stage_path),
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + second_token
+            + ".stage",
+        )
+        self.assertEqual(token_hex.call_count, 2)
+        current_colliding_stat = os.lstat(colliding_path)
+        self.assertEqual(
+            (current_colliding_stat.st_dev, current_colliding_stat.st_ino),
+            (colliding_stat.st_dev, colliding_stat.st_ino),
+        )
+        with open(colliding_path, "rb") as colliding_file:
+            self.assertEqual(colliding_file.read(), colliding_content)
+
+    def test_fallback_stage_allocation_exhaustion_preserves_collision(
+        self,
+    ) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        colliding_token = "c" * 16
+        colliding_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            + colliding_token
+            + ".stage",
+        )
+        colliding_content = b"persistent user-owned stage collision\n"
+        with open(colliding_path, "wb") as colliding_file:
+            colliding_file.write(colliding_content)
+        colliding_stat = os.lstat(colliding_path)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(
+                included_files_module.secrets,
+                "token_hex",
+                return_value=colliding_token,
+            ) as token_hex,
+            self.assertRaisesRegex(
+                OSError,
+                "Could not allocate Included Files staging directory",
+            ),
+        ):
+            included_files_module._create_included_output_stage(
+                self.godot_dir,
+                project_identity,
+            )
+
+        self.assertEqual(token_hex.call_count, 100)
+        current_colliding_stat = os.lstat(colliding_path)
+        self.assertEqual(
+            (current_colliding_stat.st_dev, current_colliding_stat.st_ino),
+            (colliding_stat.st_dev, colliding_stat.st_ino),
+        )
+        with open(colliding_path, "rb") as colliding_file:
+            self.assertEqual(colliding_file.read(), colliding_content)
 
     def test_project_lock_initialization_recovers_after_hard_exit(self) -> None:
         interruption_script = """
@@ -8697,6 +8813,10 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
             rejection_count=0,
         )
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "the persistent Windows project lock blocks root relocation",
+    )
     def test_fallback_project_root_swap_cleans_external_stage_before_copy(
         self,
     ) -> None:
@@ -8781,6 +8901,30 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
                 os.unlink(self.godot_dir)
             if os.path.isdir(moved_project):
                 original_rename(moved_project, self.godot_dir)
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_project_lock_blocks_root_relocation(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        moved_project = os.path.join(self.outside_dir, "moved_project")
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        try:
+            with self.assertRaises(OSError):
+                os.rename(self.godot_dir, moved_project)
+        finally:
+            included_files_module._release_included_project_lock(project_lock)
+            if not os.path.lexists(self.godot_dir) and os.path.isdir(moved_project):
+                os.rename(moved_project, self.godot_dir)
+
+        self.assertTrue(os.path.isdir(self.godot_dir))
+        self.assertFalse(os.path.lexists(moved_project))
+        self._assert_no_project_transaction_debris(self.godot_dir)
 
     def test_fallback_rejects_mocked_windows_junction(self) -> None:
         managed_root = os.path.join(self.godot_dir, "included_files")

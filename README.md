@@ -26,7 +26,7 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 - **Customizable Conversion**: Choose conversion groups or specific converter keys
 - **Compatibility Roadmap**: Tracks current and missing GameMaker-to-Godot coverage in [`todo-list/`](todo-list/README.md)
 
-`res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` are one converter-owned output set. Ordinary conversion failures and cancellation preserve the previous pair, but the two publication steps are not process-crash-atomic. Until [#727](https://github.com/Infiland/GM2Godot/issues/727) is implemented, do not convert a project while a live game or another converter is accessing that output.
+`res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` are published as one recoverable converter-owned generation. A durable journal and commit marker make the next conversion select and verify either the complete previous generation or the complete committed generation after an interruption, while a cooperative per-project lock rejects another GM2Godot converter. While the stable journal exists, relative GML reads fail closed to `user://` instead of observing either public path. Format-v2 registry entries bind emitted files to their byte counts and SHA-256 hashes so the Godot runtime does not advertise a missing or mismatched packaged file. The public `res://` paths remain stable. Do not convert while a live game or a non-cooperating writer is accessing the generated project; they do not participate in the converter lock and may retain already-open or cached state.
 
 ## What GM2Godot Is and Isn't
 
@@ -48,7 +48,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.26`.
+Current source version: `0.7.27`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

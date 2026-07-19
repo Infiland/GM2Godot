@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from src.conversion.atomic_generated_text import (
@@ -27,19 +27,27 @@ class IncludedFileRegistryEntry:
     canonical_path: str
     assigned_path: str
     emitted: bool
+    byte_count: int | None = None
+    content_sha256: str | None = None
 
     def to_godot_dict(self) -> JsonDict:
-        return {
+        payload: JsonDict = {
             "logical_path": self.logical_path,
             "canonical_path": self.canonical_path,
             "assigned_path": self.assigned_path,
             "emitted": self.emitted,
         }
+        if self.byte_count is not None:
+            payload["byte_count"] = self.byte_count
+        if self.content_sha256 is not None:
+            payload["content_sha256"] = self.content_sha256
+        return payload
 
 
 def build_included_file_registry_entries(
     assignments: Iterable[IncludedFilePathAssignment],
     emitted_logical_paths: Collection[str],
+    content_receipts: Mapping[str, tuple[int, str]] | None = None,
 ) -> tuple[IncludedFileRegistryEntry, ...]:
     """Return stable runtime entries for one finalized conversion attempt.
 
@@ -49,15 +57,30 @@ def build_included_file_registry_entries(
     """
 
     emitted_paths = set(emitted_logical_paths)
-    entries = (
-        IncludedFileRegistryEntry(
-            logical_path=assignment.original_logical_path,
-            canonical_path=assignment.canonical_lookup_path,
-            assigned_path=assignment.assigned_output_path,
-            emitted=assignment.original_logical_path in emitted_paths,
+    entries: list[IncludedFileRegistryEntry] = []
+    for assignment in assignments:
+        logical_path = assignment.original_logical_path
+        emitted = logical_path in emitted_paths
+        receipt = (
+            content_receipts.get(logical_path)
+            if content_receipts is not None and emitted
+            else None
         )
-        for assignment in assignments
-    )
+        if content_receipts is not None and emitted and receipt is None:
+            raise ValueError(
+                "Missing Included File content receipt for emitted path: "
+                + logical_path
+            )
+        entries.append(
+            IncludedFileRegistryEntry(
+                logical_path=logical_path,
+                canonical_path=assignment.canonical_lookup_path,
+                assigned_path=assignment.assigned_output_path,
+                emitted=emitted,
+                byte_count=receipt[0] if receipt is not None else None,
+                content_sha256=receipt[1] if receipt is not None else None,
+            )
+        )
     return tuple(
         sorted(
             entries,
@@ -72,6 +95,8 @@ def build_included_file_registry_entries(
 
 def render_included_file_registry_script(
     entries: Iterable[IncludedFileRegistryEntry],
+    *,
+    require_content_receipts: bool = False,
 ) -> str:
     ordered_entries = sorted(
         entries,
@@ -90,8 +115,10 @@ def render_included_file_registry_script(
     )
     return (
         "extends RefCounted\n\n"
-        "const FORMAT_VERSION = 1\n"
+        f"const FORMAT_VERSION = {2 if require_content_receipts else 1}\n"
         f"const INCLUDED_FILES = {entries_literal}\n\n"
+        "static func gml_included_file_registry_format_version():\n"
+        "\treturn FORMAT_VERSION\n\n"
         "static func gml_included_file_registry_entries():\n"
         "\treturn INCLUDED_FILES\n"
     )
@@ -100,6 +127,7 @@ def render_included_file_registry_script(
 def render_included_file_registry(
     assignments: Iterable[IncludedFilePathAssignment],
     emitted_logical_paths: Collection[str],
+    content_receipts: Mapping[str, tuple[int, str]] | None = None,
 ) -> str:
     """Render the authoritative registry for one Included Files output set."""
 
@@ -107,7 +135,9 @@ def render_included_file_registry(
         build_included_file_registry_entries(
             assignments,
             emitted_logical_paths,
-        )
+            content_receipts,
+        ),
+        require_content_receipts=content_receipts is not None,
     )
 
 
@@ -115,6 +145,7 @@ def write_included_file_registry(
     godot_project_path: str,
     assignments: Iterable[IncludedFilePathAssignment],
     emitted_logical_paths: Collection[str],
+    content_receipts: Mapping[str, tuple[int, str]] | None = None,
 ) -> str:
     """Atomically publish the Included File lookup registry."""
 
@@ -127,6 +158,7 @@ def write_included_file_registry(
         render_included_file_registry(
             assignments,
             emitted_logical_paths,
+            content_receipts,
         ),
         confinement_root=godot_project_path,
     )

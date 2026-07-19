@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -34,6 +35,456 @@ def _write_text(path: Path, content: str) -> None:
 
 
 class TestFilesIniJsonGodotSmoke(unittest.TestCase):
+    def test_recovered_committed_included_generation_boots_without_mixing(
+        self,
+    ) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        version_result = subprocess.run(
+            [godot_binary, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(version_result.returncode, 0, version_result.stdout)
+        if not version_result.stdout.strip().startswith("4.7.1."):
+            self.skipTest(
+                "Exact Godot 4.7.1 required; found "
+                + version_result.stdout.strip()
+            )
+
+        interruption_script = textwrap.dedent(
+            """\
+            import os
+            import sys
+
+            from src.conversion import included_files as included_files_module
+            from src.conversion.included_files import IncludedFilesConverter
+
+            gm_path, godot_path = sys.argv[1:]
+
+            def stop_after_phase(phase: str) -> None:
+                if phase == "generation-committed":
+                    os._exit(86)
+
+            included_files_module._after_included_transaction_phase = stop_after_phase
+            IncludedFilesConverter(
+                gm_path,
+                godot_path,
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=1,
+            ).convert_all()
+            """
+        )
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const IncludedRegistry = preload("res://gm2godot/gml_included_file_registry.gd")
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _read_included_text(logical_path):
+            \tvar handle = GMRuntime.gml_file_text_open_read(logical_path)
+            \tvar value = GMRuntime.gml_file_text_read_string(handle)
+            \tGMRuntime.gml_file_text_close(handle)
+            \treturn value
+
+            func _ready():
+            \tif not _check(IncludedRegistry.gml_included_file_registry_format_version() == 2, "recovered registry format mismatch"):
+            \t\treturn
+            \tvar entries = IncludedRegistry.gml_included_file_registry_entries()
+            \tif not _check(entries is Array and entries.size() == 2, "recovered registry did not describe exactly the new generation"):
+            \t\treturn
+            \tvar logical_paths = []
+            \tfor entry in entries:
+            \t\tvar logical_path = str(entry.get("logical_path", ""))
+            \t\tvar assigned_path = str(entry.get("assigned_path", ""))
+            \t\tvar packaged_path = "res://included_files/" + assigned_path
+            \t\tlogical_paths.append(logical_path)
+            \t\tif not _check(bool(entry.get("emitted", false)), "registry advertised a non-emitted Included File"):
+            \t\t\treturn
+            \t\tif not _check(assigned_path == logical_path, "unexpected recovered path assignment"):
+            \t\t\treturn
+            \t\tif not _check(FileAccess.file_exists(packaged_path), "registry advertised an absent Included File"):
+            \t\t\treturn
+            \t\tif not _check(FileAccess.get_size(packaged_path) == int(entry.get("byte_count", -1)), "registry byte receipt mismatched its payload"):
+            \t\t\treturn
+            \t\tif not _check(FileAccess.get_sha256(packaged_path).to_lower() == str(entry.get("content_sha256", "")).to_lower(), "registry hash receipt mismatched its payload"):
+            \t\t\treturn
+            \tlogical_paths.sort()
+            \tif not _check(logical_paths == ["new_only.txt", "shared.txt"], "registry exposed an old or incomplete generation"):
+            \t\treturn
+            \tif not _check(not FileAccess.file_exists("res://included_files/old_only.txt"), "old generation payload remained public"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("old_only.txt", false) == "user://gm2godot/old_only.txt", "old logical path resolved to packaged data"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_file_exists("old_only.txt"), "old logical path remained readable"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("new_only.txt", false) == "res://included_files/new_only.txt", "new-only logical path did not resolve through the recovered registry"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("shared.txt", false) == "res://included_files/shared.txt", "updated logical path did not resolve through the recovered registry"):
+            \t\treturn
+            \tif not _check(_read_included_text("new_only.txt") == "NEW_ONLY_GENERATION", "new-only payload mismatch"):
+            \t\treturn
+            \tif not _check(_read_included_text("shared.txt") == "NEW_SHARED_GENERATION", "shared payload came from the old generation"):
+            \t\treturn
+            \tif not _check(not FileAccess.file_exists("res://.gm2godot-included-files-transaction.json"), "recovery journal remained at runtime"):
+            \t\treturn
+            \tif not _check(not FileAccess.file_exists("res://.gm2godot-included-files-commit.json"), "commit marker remained at runtime"):
+            \t\treturn
+
+            \tprint("RECOVERED_INCLUDED_GENERATION_GODOT_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            gm_project_dir = workspace / "gamemaker"
+            datafiles_dir = gm_project_dir / "datafiles"
+            project_dir = workspace / "godot"
+            _write_text(datafiles_dir / "old_only.txt", "OLD_ONLY_GENERATION\n")
+            _write_text(datafiles_dir / "shared.txt", "OLD_SHARED_GENERATION\n")
+
+            recovery_logs: list[str] = []
+            converter = IncludedFilesConverter(
+                os.fspath(gm_project_dir),
+                os.fspath(project_dir),
+                log_callback=recovery_logs.append,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=1,
+            )
+            converter.convert_all()
+
+            (datafiles_dir / "old_only.txt").unlink()
+            _write_text(datafiles_dir / "shared.txt", "NEW_SHARED_GENERATION\n")
+            _write_text(datafiles_dir / "new_only.txt", "NEW_ONLY_GENERATION\n")
+
+            project_root = Path(__file__).resolve().parents[1]
+            environment = os.environ.copy()
+            existing_python_path = environment.get("PYTHONPATH")
+            environment["PYTHONPATH"] = (
+                os.fspath(project_root)
+                if not existing_python_path
+                else os.fspath(project_root)
+                + os.pathsep
+                + existing_python_path
+            )
+            interrupted = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    interruption_script,
+                    os.fspath(gm_project_dir),
+                    os.fspath(project_dir),
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
+                env=environment,
+                cwd=project_root,
+            )
+            self.assertEqual(interrupted.returncode, 86, interrupted.stdout)
+
+            published_root = project_dir / "included_files"
+            published_registry = (
+                project_dir / "gm2godot" / "gml_included_file_registry.gd"
+            )
+
+            def published_snapshot() -> tuple[
+                tuple[int, int],
+                dict[str, bytes],
+                tuple[int, int],
+                bytes,
+            ]:
+                root_stat = published_root.stat()
+                registry_stat = published_registry.stat()
+                files = {
+                    path.relative_to(published_root).as_posix(): path.read_bytes()
+                    for path in published_root.rglob("*")
+                    if path.is_file()
+                }
+                return (
+                    (root_stat.st_dev, root_stat.st_ino),
+                    files,
+                    (registry_stat.st_dev, registry_stat.st_ino),
+                    published_registry.read_bytes(),
+                )
+
+            committed_snapshot = published_snapshot()
+            self.assertEqual(
+                committed_snapshot[1],
+                {
+                    "new_only.txt": b"NEW_ONLY_GENERATION\n",
+                    "shared.txt": b"NEW_SHARED_GENERATION\n",
+                },
+            )
+            self.assertIn(b'"logical_path": "new_only.txt"', committed_snapshot[3])
+            self.assertIn(b'"logical_path": "shared.txt"', committed_snapshot[3])
+            self.assertNotIn(b'"logical_path": "old_only.txt"', committed_snapshot[3])
+            self.assertTrue(
+                os.path.lexists(
+                    project_dir
+                    / ".gm2godot-included-files-transaction.json"
+                )
+            )
+            self.assertTrue(
+                os.path.lexists(
+                    project_dir / ".gm2godot-included-files-commit.json"
+                )
+            )
+
+            recovery_logs.clear()
+            converter.convert_all()
+            self.assertTrue(
+                any(message.startswith("Recovered: ") for message in recovery_logs),
+                recovery_logs,
+            )
+            self.assertEqual(published_snapshot(), committed_snapshot)
+            self.assertFalse(
+                os.path.lexists(
+                    project_dir
+                    / ".gm2godot-included-files-transaction.json"
+                )
+            )
+            self.assertFalse(
+                os.path.lexists(
+                    project_dir / ".gm2godot-included-files-commit.json"
+                )
+            )
+
+            recovery_logs.clear()
+            converter.convert_all()
+            self.assertEqual(published_snapshot(), committed_snapshot)
+            self.assertFalse(
+                any(message.startswith("Recovered: ") for message in recovery_logs),
+                recovery_logs,
+            )
+
+            _write_text(
+                project_dir / "project.godot",
+                textwrap.dedent(
+                    f"""\
+                    [application]
+                    config/name="GM2Godot Recovery {workspace.name}"
+                    """
+                ),
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            result = subprocess.run(
+                [
+                    godot_binary,
+                    "--headless",
+                    "--path",
+                    str(project_dir),
+                    "smoke.tscn",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "RECOVERED_INCLUDED_GENERATION_GODOT_OK",
+            result.stdout,
+        )
+
+    def test_included_files_fail_closed_while_transaction_journal_exists(
+        self,
+    ) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        version_result = subprocess.run(
+            [godot_binary, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(version_result.returncode, 0, version_result.stdout)
+        if not version_result.stdout.strip().startswith("4.7.1."):
+            self.skipTest(
+                "Exact Godot 4.7.1 required; found "
+                + version_result.stdout.strip()
+            )
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const IncludedRegistry = preload("res://gm2godot/gml_included_file_registry.gd")
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tif not _check(IncludedRegistry.gml_included_file_registry_format_version() == 1, "registry was not downgraded to format v1"):
+            \t\treturn
+            \tif not _check(FileAccess.file_exists("res://included_files/packaged.txt"), "packaged file fixture is missing"):
+            \t\treturn
+            \tif not _check(DirAccess.dir_exists_absolute("res://included_files/packaged_folder"), "packaged directory fixture is missing"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("Packaged.txt", false) == "user://gm2godot/Packaged.txt", "transaction exposed a packaged file"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_file_exists("Packaged.txt"), "transaction made a packaged file readable"):
+            \t\treturn
+            \tif not _check(GMRuntime._gml_file_resolve_path("Packaged Folder", false, true) == "user://gm2godot/Packaged Folder", "transaction exposed a packaged directory"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_directory_exists("Packaged Folder"), "transaction made a packaged directory readable"):
+            \t\treturn
+
+            \tprint("INCLUDED_FILE_JOURNAL_FAIL_CLOSED_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        for journal_kind in ("file", "directory"):
+            with self.subTest(journal_kind=journal_kind):
+                with tempfile.TemporaryDirectory() as tmp:
+                    workspace = Path(tmp)
+                    project_dir = workspace / "godot"
+                    _write_text(
+                        project_dir / "included_files" / "packaged.txt",
+                        "packaged file\n",
+                    )
+                    _write_text(
+                        project_dir
+                        / "included_files"
+                        / "packaged_folder"
+                        / "Nested.txt",
+                        "nested packaged file\n",
+                    )
+
+                    registry_path = (
+                        project_dir
+                        / "gm2godot"
+                        / "gml_included_file_registry.gd"
+                    )
+                    _write_text(
+                        registry_path,
+                        textwrap.dedent(
+                            """\
+                            extends RefCounted
+
+                            const FORMAT_VERSION = 2
+                            const INCLUDED_FILES = [
+                            \t{
+                            \t\t"assigned_path": "packaged.txt",
+                            \t\t"canonical_path": "packaged.txt",
+                            \t\t"emitted": true,
+                            \t\t"logical_path": "Packaged.txt"
+                            \t}
+                            ]
+
+                            static func gml_included_file_registry_format_version():
+                            \treturn FORMAT_VERSION
+
+                            static func gml_included_file_registry_entries():
+                            \treturn INCLUDED_FILES
+                            """
+                        ),
+                    )
+                    registry_text = registry_path.read_text(encoding="utf-8")
+                    self.assertIn("const FORMAT_VERSION = 2", registry_text)
+                    registry_path.write_text(
+                        registry_text.replace(
+                            "const FORMAT_VERSION = 2",
+                            "const FORMAT_VERSION = 1",
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+
+                    _write_text(
+                        project_dir / "project.godot",
+                        "[application]\nconfig/name=\"Journal Gate "
+                        + journal_kind
+                        + "\"\n",
+                    )
+                    write_gml_runtime(str(project_dir))
+                    _write_text(project_dir / "smoke.gd", smoke_script)
+                    _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+                    journal_path = (
+                        project_dir
+                        / ".gm2godot-included-files-transaction.json"
+                    )
+                    if journal_kind == "file":
+                        _write_text(journal_path, "{}\n")
+                    else:
+                        journal_path.mkdir()
+
+                    result = subprocess.run(
+                        [
+                            godot_binary,
+                            "--headless",
+                            "--path",
+                            str(project_dir),
+                            "smoke.tscn",
+                        ],
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=30,
+                    )
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(
+                    "INCLUDED_FILE_JOURNAL_FAIL_CLOSED_OK",
+                    result.stdout,
+                )
+
     def test_files_ini_json_and_path_mapping(self) -> None:
         godot_binary = _find_godot_binary()
         if godot_binary is None:
@@ -141,6 +592,10 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             \tif not _check(GMRuntime.gml_file_resolve_path("Ghost File.txt", false) == "user://gm2godot/Ghost File.txt", "planned but unemitted logical path fell through to canonical payload"):
             \t\treturn
             \tif not _check(not GMRuntime.gml_file_exists("Ghost File.txt"), "planned but unemitted logical path selected canonical payload"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("Tampered.txt", false) == "user://gm2godot/Tampered.txt", "content-mismatched Included File did not fail closed"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_file_exists("Tampered.txt"), "content-mismatched Included File was exposed"):
             \t\treturn
 
             \tGMRuntime.gml_file_delete(" Leading.txt")
@@ -363,6 +818,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                 "Gone File.txt": "target removed after conversion\n",
                 "gone_file.txt": "canonical payload must not leak\n",
                 "ghost_file.txt": "unavailable alias must not leak\n",
+                "Tampered.txt": "trusted payload\n",
             }
             for relative_path, payload in collision_payloads.items():
                 _write_text(
@@ -465,6 +921,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             )
             self.assertTrue(missing_assigned_target.is_file())
             missing_assigned_target.unlink()
+            (
+                project_dir / "included_files" / "tampered.txt"
+            ).write_text("altered payload\n", encoding="utf-8")
 
             _write_text(project_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(project_dir))

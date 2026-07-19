@@ -7,7 +7,7 @@
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:9279b17b1b53b7439ffb2928598f1028cb7e70dca8d8b0018981920fc0298e21",
+    "gm2godot/gml_runtime.gd": "sha256:4811acc186c077ed6dfd9a9747cfa2aede23085f350ebb0a13bc6c0d51108044",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
     "gm2godot/managers/gm_async.gd": "sha256:d0a73997476f0e889892f85a6c343fc5b44fecdf9fa547e943902632aedf9df3",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",

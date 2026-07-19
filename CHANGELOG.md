@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.27 - 2026-07-19
+
+- Published the Included Files root and runtime registry as one journaled, recoverable generation: interruption before the durable commit marker restores the exact previous pair, while interruption after it verifies and finalizes the complete new pair on the next conversion.
+- Serialized recovery and publication with a persistent project-local operating-system lock, durable POSIX directory synchronization and Windows write-through moves, strict size-bounded record recovery, cross-device and mount-boundary rejection, confined Windows recovery paths, and bounded-memory snapshot-driven tombstones that preserve unknown reserved-path replacements.
+- Added format-v2 runtime registry content receipts so Godot 4.7.1 verifies each packaged file's byte count and SHA-256 before exposing it, plus subprocess hard-exit coverage across every forward publication boundary and the owned cleanup quarantine/removal boundaries.
+
 ## 0.7.26 - 2026-07-19
 - Hardened native Windows Included Files cleanup so identity-verified read-only transaction files and directories are made writable only inside recoverable quarantine, with attributes restored when deletion fails and shared hard-link aliases preserved fail-closed.
 - Added native NTFS junction and read-only transaction tests covering managed roots, nested trees, registry and staging directories, backup destinations, successful cleanup, commit failure, cancellation, and rollback.

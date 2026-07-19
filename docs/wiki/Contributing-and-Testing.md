@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.26 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.27 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -95,6 +95,17 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
 ```
 
 Documentation-only changes do not require Pyright or the Python suite unless the change also touches tests/code or verification was explicitly requested. Link and page-source checks should still pass.
+
+Included Files transaction changes must retain the subprocess hard-exit recovery test, not only exception-path tests:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit
+```
+
+The publication test stops the child process at every forward transaction phase from the staged journal through commit-marker retirement, then requires recovery to select one complete generation. The two cleanup tests independently hard-exit after quarantine or removal for owned backup, staging, stable-record, and temporary-record state. Run the native Windows Included Files workflow when changing lock, move, junction, read-only, or cleanup behavior; modeled `os.name` tests are not a substitute for NTFS and Win32 coverage. Preserve the public `res://included_files/` and registry paths, reject unknown reserved-path state, and keep the documented prohibition on conversion alongside a live game or non-cooperating writer.
 
 ## Pull requests and issues
 

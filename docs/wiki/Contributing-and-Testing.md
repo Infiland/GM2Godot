@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -106,6 +106,17 @@ Included Files transaction changes must retain the subprocess hard-exit recovery
 ```
 
 The publication test stops the child process at every forward transaction phase from the staged journal through commit-marker retirement, then requires recovery to select one complete generation. The two cleanup tests independently hard-exit after quarantine or removal for owned backup, staging, stable-record, and temporary-record state. Run the native Windows Included Files workflow when changing lock, move, junction, read-only, or cleanup behavior; modeled `os.name` tests are not a substitute for NTFS and Win32 coverage. Preserve the public `res://included_files/` and registry paths, reject unknown reserved-path state, and keep the documented prohibition on conversion alongside a live game or non-cooperating writer.
+
+Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_conversion_manifest.TestConversionManifest.test_subprocess_interruption_recovers_every_generation_boundary \
+  tests.test_conversion_manifest.TestConversionManifest.test_subprocess_interruption_recovers_every_rollback_boundary \
+  tests.test_conversion_manifest.TestConversionManifest.test_first_publication_rollback_resumes_after_hard_exit
+```
+
+These tests cover the durable journal temporary and promotion, both public files, every directory barrier, the generation-pointer switch, rollback, temporary cleanup, and journal retirement. Preserve the stable attempt/manifest paths and schemas, the persistent operating-system lock and pointer, bounded canonical records, strict legacy digest migration, and fail-closed handling for unknown recovery state.
 
 ## Pull requests and issues
 

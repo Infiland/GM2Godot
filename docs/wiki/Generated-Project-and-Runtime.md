@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -198,12 +198,15 @@ Important trust rules:
 
 - Unsafe destinations rejected during preflight are not modified and do not receive an attempt ledger.
 - A partial canonical manifest is written only when every requested converter step completed; its partiality comes from skipped or failed resources.
-- `conversion_attempt.json` is committed before `conversion_manifest.json` through one verified `gm2godot/` directory binding. Each file replacement is atomic, but the pair is not one multi-file crash-atomic transaction.
-- Consumers must compare `conversion_attempt.json` → `canonical_manifest.sha256` with the actual canonical manifest. A mismatch means publication was interrupted.
+- `conversion_attempt.json` and the optional `conversion_manifest.json` are published as one recoverable generation through a verified `gm2godot/` directory binding. A durable `.gm2godot-conversion-transaction.json` records the complete previous and desired pair before either public file changes; `.gm2godot-conversion-generation.json` is the sole commit pointer.
+- Recovery under `.gm2godot-conversion.lock` restores the complete previous pair when the transaction has no matching pointer, or verifies and finalizes the complete new pair after the pointer switch. The public filenames and format-v1/format-v2 JSON schemas do not change.
+- Consumers should still compare `conversion_attempt.json` → `canonical_manifest.sha256` with the actual canonical manifest as a defense against later replacement or corruption. After migration to the generation pointer, a digest mismatch is rejected recovery state, not a normal interrupted-publication result.
 - `canonical_manifest.status = preserved` is transaction-relative. It does not prove that an older manifest describes the destination after a failed or cancelled attempt.
 - `generated_files` describes files changed from the conversion’s initial output snapshot; it intentionally does not claim ownership of every unchanged pre-existing file.
 
-The exact schemas and transaction rules are defined by [`conversion_manifest.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_manifest.py), [`conversion_outcome.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_outcome.py), and their [manifest tests](https://github.com/Infiland/GM2Godot/blob/main/tests/test_conversion_manifest.py).
+The first 0.7.32 publication accepts a legacy pair only when its existing attempt digest agrees with the canonical bytes, or both files are absent. A mismatched, malformed, redirected, mounted, hard-linked, or otherwise replaced pair/recovery record is preserved and rejected for manual inspection. Recovery records are canonical JSON capped at 32 MiB and each embedded artifact is capped at 64 MiB uncompressed, so damaged or hostile state cannot request unbounded parsing.
+
+The exact schemas and transaction rules are defined by [`conversion_manifest.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_manifest.py), [`conversion_artifact_generation.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_artifact_generation.py), [`conversion_outcome.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_outcome.py), and their [manifest tests](https://github.com/Infiland/GM2Godot/blob/main/tests/test_conversion_manifest.py).
 
 ### Anchored report publication confinement
 

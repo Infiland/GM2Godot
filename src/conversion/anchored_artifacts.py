@@ -1334,16 +1334,23 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         mode: int | None,
         suffix: str,
         phase_name: str = "stage",
+        staged_name: str | None = None,
     ) -> StagedArtifact:
         target_leaf = _safe_leaf(target_name)
         self.phase(f"before_{phase_name}", target_leaf)
         descriptor = -1
         staged_leaf = ""
         identity: PathIdentity | None = None
-        for _attempt in range(100):
-            staged_leaf = (
+        candidates = (
+            (_safe_leaf(staged_name),)
+            if staged_name is not None
+            else tuple(
                 f".{target_leaf}.{secrets.token_hex(8)}{suffix}"
+                for _attempt in range(100)
             )
+        )
+        for candidate in candidates:
+            staged_leaf = candidate
             try:
                 descriptor = self.directory.open_file(
                     staged_leaf,
@@ -1646,6 +1653,8 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         self,
         staged: StagedArtifact,
         name: str,
+        *,
+        tombstone_name: str | None = None,
     ) -> tuple[StagedArtifact | None, BaseException | None]:
         leaf = _safe_leaf(name)
         self.verify_staged(staged, name=leaf)
@@ -1660,6 +1669,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 mode=staged.target_mode,
                 suffix=".tombstone",
                 phase_name="tombstone_stage",
+                staged_name=tombstone_name,
             )
             displaced = StagedArtifact(
                 directory_path=self.path,

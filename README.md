@@ -48,7 +48,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.31`.
+Current source version: `0.7.32`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
@@ -231,7 +231,7 @@ After destination preflight, every terminal run writes format-v1 `conversion_att
 | `preserved` | `false` | `unverified` | Digest of an existing regular file left untouched by this publication |
 | `absent` | `false` | `unavailable` | `null`; no canonical manifest exists |
 
-Each ledger file is replaced atomically from the same directory. The pair is committed attempt-first and canonical-last rather than through one multi-file atomic operation, so consumers must verify that the canonical file matches `canonical_manifest.sha256`; a mismatch identifies an interrupted publication. `current_output=verified` applies to the digest-matching canonical. `status` describes this artifact-publication transaction, not whole-run provenance. A preserved file may come from an earlier run or an earlier phase of the same invocation; preserving it does not validate its format or prove that it describes the current destination. Inspect the latest attempt ledger before trusting it after failed or cancelled work.
+The two public ledger paths and JSON schemas stay stable, but their publication is one recoverable generation. GM2Godot durably records the complete prior and desired pair before replacing the attempt and optional canonical manifest, then switches one persistent generation pointer as the commit decision. Recovery under a project-local operating-system lock restores the prior pair before that switch or verifies the new pair afterward. Consumers should still verify `canonical_manifest.sha256` as defense against later replacement or corruption, but a mismatch is rejected recovery state rather than a normal interrupted-publication result. `status` remains transaction-relative, not whole-run provenance; inspect the latest attempt before trusting preserved output after failed or cancelled work.
 
 Conversion exit codes are stable for CI:
 

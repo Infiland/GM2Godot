@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -14,7 +16,11 @@ from unittest.mock import patch
 
 from src import cli
 from src.conversion import asset_registry as asset_registry_module
+from src.conversion import (
+    conversion_artifact_generation as generation_module,
+)
 from src.conversion import conversion_manifest as conversion_manifest_module
+from src.conversion.anchored_artifacts import ByteArtifactTransaction
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
 from src.conversion.asset_registry import (
     AssetRegistryConverter,
@@ -26,6 +32,7 @@ from src.conversion.conversion_manifest import (
     CONVERSION_MANIFEST_RELATIVE_PATH,
     build_conversion_manifest,
     capture_conversion_output_snapshot,
+    recover_conversion_artifacts,
     write_conversion_artifacts,
 )
 from src.conversion.conversion_outcome import (
@@ -645,15 +652,23 @@ class TestConversionManifest(unittest.TestCase):
     ) -> None:
         godot_dir = self.temp_dir / "godot"
         godot_dir.mkdir()
-        commits: list[tuple[str, str]] = []
+        durable_steps: list[tuple[str, str]] = []
 
         def record_commits(
             phase: str,
             directory_path: str,
             name: str | None,
         ) -> None:
-            if phase == "after_commit" and name is not None:
-                commits.append((directory_path, name))
+            if (
+                phase
+                in {
+                    "generation_journal_prepared",
+                    "generation_artifact_durable",
+                    "generation_committed",
+                }
+                and name is not None
+            ):
+                durable_steps.append((directory_path, name))
 
         with patch(
             "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
@@ -663,15 +678,507 @@ class TestConversionManifest(unittest.TestCase):
 
         artifact_directory = os.path.abspath(godot_dir / "gm2godot")
         self.assertEqual(
-            commits,
+            durable_steps,
             [
+                (
+                    artifact_directory,
+                    generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+                ),
                 (artifact_directory, "conversion_attempt.json"),
                 (artifact_directory, "conversion_manifest.json"),
+                (
+                    artifact_directory,
+                    generation_module.CONVERSION_GENERATION_POINTER_NAME,
+                ),
             ],
         )
         self.assertTrue(Path(cast(str, manifest_path)).is_file())
         self.assertTrue(Path(attempt_path).is_file())
         self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+
+    def test_subprocess_interruption_recovers_every_generation_boundary(
+        self,
+    ) -> None:
+        phases = (
+            ("generation_journal_stage_created", 1, False),
+            ("generation_journal_staged", 1, False),
+            ("generation_journal_published", 1, False),
+            ("generation_journal_prepared", 1, False),
+            ("generation_artifact_stage_created", 1, False),
+            ("generation_artifact_staged", 1, False),
+            ("generation_artifact_published", 1, False),
+            ("generation_artifact_durable", 1, False),
+            ("generation_artifact_stage_created", 2, False),
+            ("generation_artifact_staged", 2, False),
+            ("generation_artifact_published", 2, False),
+            ("generation_artifact_durable", 2, False),
+            ("generation_pointer_stage_created", 1, False),
+            ("generation_pointer_staged", 1, False),
+            ("generation_pointer_published", 1, True),
+            ("generation_committed", 1, True),
+            ("generation_temporary_cleanup_complete", 1, True),
+            ("generation_journal_unlinked", 1, True),
+            ("generation_journal_removed", 1, True),
+        )
+        control_dir = self.temp_dir / "generation-control"
+        control_dir.mkdir()
+        partial_outcome = self._partial_outcome()
+        self._write_artifacts(
+            control_dir,
+            manifest_outcome=partial_outcome,
+            attempt_outcome=partial_outcome,
+        )
+        expected_new = self._artifact_pair_snapshot(control_dir)
+
+        for index, (phase, occurrence, committed) in enumerate(phases):
+            with self.subTest(phase=phase, occurrence=occurrence):
+                godot_dir = self.temp_dir / f"generation-boundary-{index}"
+                godot_dir.mkdir()
+                self._write_artifacts(godot_dir)
+                expected_previous = self._artifact_pair_snapshot(godot_dir)
+
+                interrupted = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="publish",
+                    phase=phase,
+                    occurrence=occurrence,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+
+                recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    expected_new if committed else expected_previous,
+                )
+                self._assert_artifact_pair_digest_matches(godot_dir)
+                self.assertEqual(
+                    self._generation_transaction_debris(godot_dir),
+                    (),
+                )
+
+    def test_subprocess_interruption_recovers_every_rollback_boundary(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "generation_journal_stage_created",
+                "generation_journal_published",
+            ),
+            (
+                "generation_journal_stage_created",
+                "generation_journal_promoted",
+            ),
+            (
+                "generation_artifact_durable",
+                "generation_artifact_stage_created",
+            ),
+            ("generation_artifact_durable", "generation_artifact_staged"),
+            (
+                "generation_artifact_durable",
+                "generation_rollback_artifact_published",
+            ),
+            (
+                "generation_artifact_durable",
+                "generation_rollback_artifact_durable",
+            ),
+            ("generation_artifact_durable", "generation_rollback_complete"),
+            (
+                "generation_pointer_staged",
+                "generation_temporary_removed",
+            ),
+            (
+                "generation_artifact_durable",
+                "generation_temporary_cleanup_complete",
+            ),
+            ("generation_artifact_durable", "generation_journal_unlinked"),
+            ("generation_artifact_durable", "generation_journal_removed"),
+        )
+        for index, (forward_phase, recovery_phase) in enumerate(cases):
+            with self.subTest(
+                forward_phase=forward_phase,
+                recovery_phase=recovery_phase,
+            ):
+                godot_dir = self.temp_dir / f"rollback-boundary-{index}"
+                godot_dir.mkdir()
+                self._write_artifacts(godot_dir)
+                expected_previous = self._artifact_pair_snapshot(godot_dir)
+
+                interrupted = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="publish",
+                    phase=forward_phase,
+                    occurrence=1,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+                interrupted_recovery = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="recover",
+                    phase=recovery_phase,
+                    occurrence=1,
+                )
+                self.assertEqual(
+                    interrupted_recovery.returncode,
+                    86,
+                    interrupted_recovery.stdout + interrupted_recovery.stderr,
+                )
+
+                recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    expected_previous,
+                )
+                self._assert_artifact_pair_digest_matches(godot_dir)
+                self.assertEqual(
+                    self._generation_transaction_debris(godot_dir),
+                    (),
+                )
+
+    def test_attempt_only_generation_recovery_preserves_canonical(
+        self,
+    ) -> None:
+        control_dir = self.temp_dir / "attempt-only-control"
+        control_dir.mkdir()
+        self._write_artifacts(control_dir)
+        canonical_before = (
+            control_dir / CONVERSION_MANIFEST_RELATIVE_PATH
+        ).read_bytes()
+        self._write_artifacts(
+            control_dir,
+            manifest_outcome=None,
+            attempt_outcome=self._failed_outcome(),
+        )
+        expected_failed = self._artifact_pair_snapshot(control_dir)
+
+        for index, (phase, committed) in enumerate(
+            (
+                ("generation_artifact_durable", False),
+                ("generation_pointer_published", True),
+            )
+        ):
+            with self.subTest(phase=phase):
+                godot_dir = self.temp_dir / f"attempt-only-{index}"
+                godot_dir.mkdir()
+                self._write_artifacts(godot_dir)
+                expected_previous = self._artifact_pair_snapshot(godot_dir)
+
+                interrupted = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="attempt-only",
+                    phase=phase,
+                    occurrence=1,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+                recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    expected_failed if committed else expected_previous,
+                )
+                self.assertEqual(
+                    (godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH).read_bytes(),
+                    canonical_before,
+                )
+                self._assert_artifact_pair_digest_matches(godot_dir)
+
+    def test_first_attempt_only_generation_recovers_absent_canonical(
+        self,
+    ) -> None:
+        for index, (phase, committed) in enumerate(
+            (
+                ("generation_artifact_durable", False),
+                ("generation_pointer_published", True),
+            )
+        ):
+            with self.subTest(phase=phase):
+                godot_dir = self.temp_dir / f"first-attempt-only-{index}"
+                godot_dir.mkdir()
+                interrupted = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="attempt-only",
+                    phase=phase,
+                    occurrence=1,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+
+                recover_conversion_artifacts(str(godot_dir))
+
+                attempt_path = godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH
+                manifest_path = godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH
+                self.assertEqual(attempt_path.exists(), committed)
+                self.assertFalse(manifest_path.exists())
+                if committed:
+                    attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+                    self.assertEqual(
+                        attempt["canonical_manifest"]["status"],
+                        "absent",
+                    )
+                    self.assertIsNone(attempt["canonical_manifest"]["sha256"])
+                self._assert_artifact_pair_digest_matches(godot_dir)
+                self.assertEqual(
+                    self._generation_transaction_debris(godot_dir),
+                    (),
+                )
+
+    def test_first_publication_rollback_resumes_after_hard_exit(
+        self,
+    ) -> None:
+        godot_dir = self.temp_dir / "first-publication-rollback"
+        godot_dir.mkdir()
+        interrupted = self._run_generation_subprocess(
+            godot_dir,
+            operation="attempt-only",
+            phase="generation_artifact_durable",
+            occurrence=1,
+        )
+        self.assertEqual(
+            interrupted.returncode,
+            86,
+            interrupted.stdout + interrupted.stderr,
+        )
+        interrupted_recovery = self._run_generation_subprocess(
+            godot_dir,
+            operation="recover",
+            phase="generation_rollback_artifact_published",
+            occurrence=1,
+        )
+        self.assertEqual(
+            interrupted_recovery.returncode,
+            86,
+            interrupted_recovery.stdout + interrupted_recovery.stderr,
+        )
+
+        recover_conversion_artifacts(str(godot_dir))
+
+        self.assertEqual(
+            self._artifact_pair_snapshot(godot_dir),
+            ((None, None), (None, None)),
+        )
+        self.assertEqual(
+            self._generation_transaction_debris(godot_dir),
+            (),
+        )
+
+    def test_lock_initialization_recovers_after_hard_exit(self) -> None:
+        for index, phase in enumerate(
+            ("generation_lock_initialized", "generation_lock_durable")
+        ):
+            with self.subTest(phase=phase):
+                godot_dir = self.temp_dir / f"lock-initialization-{index}"
+                godot_dir.mkdir()
+                interrupted = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="attempt-only",
+                    phase=phase,
+                    occurrence=1,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+
+                recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    ((None, None), (None, None)),
+                )
+                lock_path = (
+                    godot_dir
+                    / "gm2godot"
+                    / generation_module.CONVERSION_GENERATION_LOCK_NAME
+                )
+                self.assertEqual(lock_path.read_bytes(), b"\x00")
+
+        empty_lock_dir = self.temp_dir / "empty-lock-initialization"
+        (empty_lock_dir / "gm2godot").mkdir(parents=True)
+        empty_lock_path = (
+            empty_lock_dir
+            / "gm2godot"
+            / generation_module.CONVERSION_GENERATION_LOCK_NAME
+        )
+        empty_lock_path.write_bytes(b"")
+
+        recover_conversion_artifacts(str(empty_lock_dir))
+
+        self.assertEqual(empty_lock_path.read_bytes(), b"\x00")
+
+    def test_malformed_and_unknown_recovery_state_is_preserved(self) -> None:
+        for index, (name, content) in enumerate(
+            (
+                (
+                    generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+                    b"{not canonical json\n",
+                ),
+                (
+                    ".gm2godot-conversion-unknown.state",
+                    b"unknown reserved state\n",
+                ),
+            )
+        ):
+            with self.subTest(name=name):
+                godot_dir = self.temp_dir / f"malformed-state-{index}"
+                godot_dir.mkdir()
+                self._write_artifacts(godot_dir)
+                pair_before = self._artifact_pair_snapshot(godot_dir)
+                reserved_path = godot_dir / "gm2godot" / name
+                reserved_path.write_bytes(content)
+
+                with self.assertRaises(OSError):
+                    recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    pair_before,
+                )
+                self.assertEqual(reserved_path.read_bytes(), content)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX links are required")
+    def test_redirected_and_hardlinked_recovery_records_are_preserved(
+        self,
+    ) -> None:
+        for index, redirected in enumerate((True, False)):
+            with self.subTest(redirected=redirected):
+                godot_dir = self.temp_dir / f"linked-record-{index}"
+                godot_dir.mkdir()
+                self._write_artifacts(godot_dir)
+                pair_before = self._artifact_pair_snapshot(godot_dir)
+                pointer_path = (
+                    godot_dir
+                    / "gm2godot"
+                    / generation_module.CONVERSION_GENERATION_POINTER_NAME
+                )
+                external_path = self.temp_dir / f"external-pointer-{index}"
+                if redirected:
+                    pointer_content = pointer_path.read_bytes()
+                    pointer_path.unlink()
+                    external_path.write_bytes(pointer_content)
+                    pointer_path.symlink_to(external_path)
+                else:
+                    os.link(pointer_path, external_path)
+                    pointer_content = external_path.read_bytes()
+
+                with self.assertRaises(OSError):
+                    recover_conversion_artifacts(str(godot_dir))
+
+                self.assertEqual(
+                    self._artifact_pair_snapshot(godot_dir),
+                    pair_before,
+                )
+                self.assertEqual(external_path.read_bytes(), pointer_content)
+                if redirected:
+                    self.assertTrue(pointer_path.is_symlink())
+                else:
+                    self.assertGreaterEqual(pointer_path.stat().st_nlink, 2)
+
+    def test_mounted_recovery_record_is_rejected_without_mutation(self) -> None:
+        godot_dir = self.temp_dir / "mounted-record"
+        godot_dir.mkdir()
+        self._write_artifacts(godot_dir)
+        pair_before = self._artifact_pair_snapshot(godot_dir)
+        pointer_path = (
+            godot_dir
+            / "gm2godot"
+            / generation_module.CONVERSION_GENERATION_POINTER_NAME
+        )
+        pointer_before = pointer_path.read_bytes()
+        real_ismount = os.path.ismount
+
+        def model_pointer_mount(path: str) -> bool:
+            return os.path.normcase(os.path.abspath(path)) == os.path.normcase(
+                os.path.abspath(pointer_path)
+            ) or real_ismount(path)
+
+        with (
+            patch.object(
+                generation_module.os.path,
+                "ismount",
+                side_effect=model_pointer_mount,
+            ),
+            self.assertRaisesRegex(OSError, "mounted"),
+        ):
+            recover_conversion_artifacts(str(godot_dir))
+
+        self.assertEqual(
+            self._artifact_pair_snapshot(godot_dir),
+            pair_before,
+        )
+        self.assertEqual(pointer_path.read_bytes(), pointer_before)
+
+    def test_legacy_digest_mismatch_is_rejected_before_migration(self) -> None:
+        godot_dir, manifest_path, attempt_path, _, _ = self._existing_artifacts()
+        manifest_path.write_bytes(b'{"externally": "mismatched"}\n')
+        pair_before = self._artifact_pair_snapshot(godot_dir)
+
+        with self.assertRaisesRegex(OSError, "digest mismatch"):
+            self._write_artifacts(godot_dir)
+
+        self.assertEqual(
+            self._artifact_pair_snapshot(godot_dir),
+            pair_before,
+        )
+        self.assertFalse(
+            (
+                attempt_path.parent
+                / generation_module.CONVERSION_GENERATION_POINTER_NAME
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                attempt_path.parent
+                / generation_module.CONVERSION_GENERATION_JOURNAL_NAME
+            ).exists()
+        )
+
+    def test_generation_lock_rejects_concurrent_recovery(self) -> None:
+        godot_dir = self.temp_dir / "generation-lock"
+        godot_dir.mkdir()
+        self._write_artifacts(godot_dir)
+        pair_before = self._artifact_pair_snapshot(godot_dir)
+
+        with ByteArtifactTransaction.open(
+            str(godot_dir),
+            "gm2godot",
+            create=False,
+            description="conversion artifact directory",
+        ) as transaction:
+            with generation_module.ConversionArtifactGenerationLock.acquire(
+                transaction
+            ):
+                concurrent = self._run_generation_subprocess(
+                    godot_dir,
+                    operation="recover",
+                    phase="phase-that-must-not-run",
+                    occurrence=1,
+                )
+
+        self.assertNotEqual(concurrent.returncode, 0)
+        self.assertIn(
+            "already publishing or recovering",
+            concurrent.stderr,
+        )
+        self.assertEqual(
+            self._artifact_pair_snapshot(godot_dir),
+            pair_before,
+        )
 
     def test_attempt_only_preserves_canonical_bytes_and_records_exact_digest(
         self,
@@ -772,6 +1279,10 @@ class TestConversionManifest(unittest.TestCase):
             ".conversion_attempt.json.stale.tmp",
             ".conversion_attempt.json.abcdefgh.recovery.backup",
             ".conversion_manifest.json.stale.backup",
+            generation_module.CONVERSION_GENERATION_LOCK_NAME,
+            generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+            generation_module.CONVERSION_GENERATION_POINTER_NAME,
+            (".conversion_attempt.json." + ("a" * 32) + ".generation-desired.tmp"),
         )
         for filename in excluded_names:
             (artifact_dir / filename).write_text(filename, encoding="utf-8")
@@ -1208,14 +1719,22 @@ class TestConversionManifest(unittest.TestCase):
 
     def test_stage_and_canonical_commit_failures_restore_existing_pair(self) -> None:
         cases = (
-            ("before_stage", "conversion_manifest.json", "staging failed"),
+            (
+                "before_generation_desired_stage",
+                "conversion_manifest.json",
+                "staging failed",
+            ),
             ("before_commit", "conversion_manifest.json", "commit failed"),
         )
         for phase, name, message in cases:
             with self.subTest(phase=phase):
-                godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-                    self._existing_artifacts(self.temp_dir / phase)
-                )
+                (
+                    godot_dir,
+                    manifest_path,
+                    attempt_path,
+                    manifest_before,
+                    attempt_before,
+                ) = self._existing_artifacts(self.temp_dir / phase)
 
                 def fail_selected_phase(
                     current_phase: str,
@@ -1238,7 +1757,7 @@ class TestConversionManifest(unittest.TestCase):
                 self.assertEqual(attempt_path.read_bytes(), attempt_before)
                 self.assertEqual(self._temporary_artifact_files(godot_dir), [])
 
-    def test_final_publication_revalidates_the_complete_pair(self) -> None:
+    def test_final_publication_preserves_unknown_pair_replacement(self) -> None:
         godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
             self._existing_artifacts()
         )
@@ -1249,7 +1768,10 @@ class TestConversionManifest(unittest.TestCase):
             _directory_path: str,
             name: str | None,
         ) -> None:
-            if phase == "after_commit" and name == "conversion_manifest.json":
+            if (
+                phase == "generation_artifact_durable"
+                and name == "conversion_manifest.json"
+            ):
                 attempt_path.write_bytes(corrupted_attempt)
 
         with (
@@ -1257,23 +1779,28 @@ class TestConversionManifest(unittest.TestCase):
                 "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=corrupt_attempt_after_canonical,
             ),
-            self.assertRaisesRegex(OSError, "content changed") as raised,
+            self.assertRaisesRegex(
+                OSError,
+                "Unknown replacement",
+            ) as raised,
         ):
             self._write_artifacts(godot_dir)
 
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
+        self.assertNotEqual(manifest_path.read_bytes(), manifest_before)
         self.assertEqual(attempt_path.read_bytes(), corrupted_attempt)
-        recovery_files = list(
-            attempt_path.parent.glob(f".{attempt_path.name}.*.backup")
+        self.assertTrue(
+            (
+                attempt_path.parent
+                / generation_module.CONVERSION_GENERATION_JOURNAL_NAME
+            ).is_file()
         )
-        self.assertEqual(len(recovery_files), 1)
-        self.assertEqual(recovery_files[0].read_bytes(), attempt_before)
         self.assertTrue(
             any(
                 "rollback also failed" in note
                 for note in getattr(raised.exception, "__notes__", ())
             )
         )
+        self.assertNotEqual(attempt_before, corrupted_attempt)
 
     def test_stale_cleanup_preserves_canonical_recovery_until_canonical_update(
         self,
@@ -1345,7 +1872,7 @@ class TestConversionManifest(unittest.TestCase):
             nonlocal changed
             if (
                 not changed
-                and phase == "after_stage"
+                and phase == "generation_artifact_staged"
                 and name == "conversion_attempt.json"
             ):
                 changed = True
@@ -1356,7 +1883,7 @@ class TestConversionManifest(unittest.TestCase):
                 "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
                 side_effect=change_after_attempt_stage,
             ),
-            self.assertRaisesRegex(OSError, "Artifact changed"),
+            self.assertRaisesRegex(OSError, "Unknown replacement"),
         ):
             self._write_artifacts(
                 godot_dir,
@@ -1367,7 +1894,12 @@ class TestConversionManifest(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(manifest_path.read_bytes(), external_manifest)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+        self.assertTrue(
+            (
+                manifest_path.parent
+                / generation_module.CONVERSION_GENERATION_JOURNAL_NAME
+            ).is_file()
+        )
 
     @unittest.skipIf(os.name == "nt", "Exact POSIX modes are unavailable")
     def test_existing_and_new_artifact_modes_remain_exact(self) -> None:
@@ -1397,29 +1929,46 @@ class TestConversionManifest(unittest.TestCase):
         self,
     ) -> None:
         cases = [
-            ("before_stale_recovery", None, 1),
-            ("before_stage", "conversion_attempt.json", 1),
-            ("before_stage", "conversion_manifest.json", 1),
-            ("before_backup", "conversion_attempt.json", 1),
-            ("before_backup", "conversion_manifest.json", 1),
-            ("before_commit", "conversion_attempt.json", 1),
-            ("before_commit", "conversion_manifest.json", 1),
-            ("before_durability", "conversion_attempt.json", 1),
-            ("before_durability", "conversion_manifest.json", 1),
-            ("before_sync", None, 1),
-            ("before_sync", None, 2),
-            ("before_sync", None, 3),
-            ("before_sync", None, 4),
-            ("before_cleanup", None, 1),
-            ("before_cleanup", None, 2),
+            (
+                "before_generation_journal_stage",
+                generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+            ),
+            (
+                "before_commit",
+                generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+            ),
+            (
+                "generation_journal_prepared",
+                generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+            ),
+            ("before_generation_desired_stage", "conversion_attempt.json"),
+            ("before_commit", "conversion_attempt.json"),
+            ("generation_artifact_durable", "conversion_attempt.json"),
+            ("before_generation_desired_stage", "conversion_manifest.json"),
+            ("before_commit", "conversion_manifest.json"),
+            ("generation_artifact_durable", "conversion_manifest.json"),
+            (
+                "before_generation_pointer_stage",
+                generation_module.CONVERSION_GENERATION_POINTER_NAME,
+            ),
+            (
+                "before_commit",
+                generation_module.CONVERSION_GENERATION_POINTER_NAME,
+            ),
+            (
+                "generation_committed",
+                generation_module.CONVERSION_GENERATION_POINTER_NAME,
+            ),
+            ("generation_temporary_cleanup_complete", None),
+            (
+                "generation_journal_unlinked",
+                generation_module.CONVERSION_GENERATION_JOURNAL_NAME,
+            ),
         ]
-        for index, (selected_phase, selected_name, selected_occurrence) in enumerate(
-            cases
-        ):
+        for index, (selected_phase, selected_name) in enumerate(cases):
             with self.subTest(
                 phase=selected_phase,
                 name=selected_name,
-                occurrence=selected_occurrence,
             ):
                 godot_dir, _, _, _, _ = self._existing_artifacts(
                     self.temp_dir / f"boundary-{index}"
@@ -1432,7 +1981,6 @@ class TestConversionManifest(unittest.TestCase):
                 stale.write_bytes(b"owned stale backup\n")
                 outside = godot_dir / "outside-hardlink.json"
                 outside.write_bytes(b"outside hardlink sentinel\n")
-                matching_calls = 0
                 swapped = False
                 replacement_before: dict[
                     str,
@@ -1444,16 +1992,13 @@ class TestConversionManifest(unittest.TestCase):
                     directory_path: str,
                     name: str | None,
                 ) -> None:
-                    nonlocal matching_calls, replacement_before, swapped
+                    nonlocal replacement_before, swapped
                     if (
                         phase != selected_phase
                         or name != selected_name
                         or os.path.abspath(directory_path)
                         != os.path.abspath(artifact_directory)
                     ):
-                        return
-                    matching_calls += 1
-                    if matching_calls != selected_occurrence:
                         return
                     swapped = True
                     os.rename(artifact_directory, parked)
@@ -1500,8 +2045,11 @@ class TestConversionManifest(unittest.TestCase):
         self,
     ) -> None:
         cases = (
-            ("before_rollback", None),
-            ("before_recovery_stage", "conversion_attempt.json"),
+            ("before_generation_previous_stage", "conversion_attempt.json"),
+            (
+                "generation_rollback_artifact_published",
+                "conversion_attempt.json",
+            ),
         )
         for selected_phase, selected_name in cases:
             with self.subTest(phase=selected_phase):
@@ -1604,7 +2152,7 @@ class TestConversionManifest(unittest.TestCase):
             _name: str | None,
         ) -> None:
             nonlocal relocation_checked
-            if phase != "before_stage" or relocation_checked:
+            if phase != "before_generation_journal_stage" or relocation_checked:
                 return
             relocation_checked = True
             with self.assertRaises(OSError):
@@ -1710,6 +2258,185 @@ class TestConversionManifest(unittest.TestCase):
             attempt_outcome=selected_attempt_outcome,
         )
 
+    @staticmethod
+    def _artifact_pair_snapshot(
+        godot_dir: Path,
+    ) -> tuple[
+        tuple[bytes | None, int | None],
+        tuple[bytes | None, int | None],
+    ]:
+        values: list[tuple[bytes | None, int | None]] = []
+        for relative_path in (
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+            CONVERSION_MANIFEST_RELATIVE_PATH,
+        ):
+            path = godot_dir / relative_path
+            if not path.exists():
+                values.append((None, None))
+                continue
+            path_stat = path.stat()
+            values.append(
+                (
+                    path.read_bytes(),
+                    stat.S_IMODE(path_stat.st_mode),
+                )
+            )
+        return cast(
+            tuple[
+                tuple[bytes | None, int | None],
+                tuple[bytes | None, int | None],
+            ],
+            tuple(values),
+        )
+
+    def _assert_artifact_pair_digest_matches(
+        self,
+        godot_dir: Path,
+    ) -> None:
+        attempt_path = godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH
+        manifest_path = godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH
+        if not attempt_path.exists():
+            self.assertFalse(manifest_path.exists())
+            return
+        attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+        canonical = cast(
+            dict[str, object],
+            attempt["canonical_manifest"],
+        )
+        if not manifest_path.exists():
+            self.assertEqual(canonical["status"], "absent")
+            self.assertIsNone(canonical["sha256"])
+            return
+        self.assertEqual(
+            canonical["sha256"],
+            "sha256:" + hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        )
+
+    @staticmethod
+    def _generation_transaction_debris(
+        godot_dir: Path,
+    ) -> tuple[str, ...]:
+        artifact_dir = godot_dir / "gm2godot"
+        allowed = {
+            "conversion_attempt.json",
+            "conversion_manifest.json",
+            generation_module.CONVERSION_GENERATION_LOCK_NAME,
+            generation_module.CONVERSION_GENERATION_POINTER_NAME,
+        }
+        return tuple(
+            sorted(
+                path.name for path in artifact_dir.iterdir() if path.name not in allowed
+            )
+        )
+
+    def _run_generation_subprocess(
+        self,
+        godot_dir: Path,
+        *,
+        operation: str,
+        phase: str,
+        occurrence: int,
+    ) -> subprocess.CompletedProcess[str]:
+        script = """
+import os
+import sys
+
+from src.conversion import anchored_artifacts as anchored_module
+from src.conversion.conversion_manifest import (
+    capture_conversion_output_snapshot,
+    recover_conversion_artifacts,
+    write_conversion_artifacts,
+)
+from src.conversion.conversion_outcome import (
+    ConversionCounts,
+    ConversionOutcome,
+    ConversionStepLedger,
+)
+
+gm_path, godot_path, operation, requested_phase, occurrence_text = sys.argv[1:]
+requested_occurrence = int(occurrence_text)
+matches = 0
+
+def stop_at_phase(
+    current_phase: str,
+    _directory_path: str,
+    _name: str | None,
+) -> None:
+    global matches
+    if current_phase != requested_phase:
+        return
+    matches += 1
+    if matches == requested_occurrence:
+        os._exit(86)
+
+anchored_module._before_anchored_artifact_phase = stop_at_phase
+if operation == "recover":
+    recover_conversion_artifacts(godot_path)
+elif operation == "publish":
+    steps = ConversionStepLedger.from_requested(("scripts", "objects"))
+    steps = steps.start("scripts").complete("scripts")
+    steps = steps.start("objects").complete("objects")
+    outcome = ConversionOutcome(
+        state="partial",
+        steps=steps,
+        resources=ConversionCounts(requested=1, skipped=1),
+    )
+    write_conversion_artifacts(
+        gm_path,
+        godot_path,
+        target_platform="windows",
+        enabled_converters=outcome.steps.requested,
+        output_snapshot=capture_conversion_output_snapshot(godot_path),
+        manifest_outcome=outcome,
+        attempt_outcome=outcome,
+    )
+elif operation == "attempt-only":
+    steps = ConversionStepLedger.from_requested(("scripts", "objects"))
+    steps = steps.start("scripts").complete("scripts")
+    steps = steps.start("objects").fail("objects")
+    outcome = ConversionOutcome(
+        state="failed",
+        steps=steps,
+        failed_step="objects",
+        failure_phase="runtime",
+    )
+    write_conversion_artifacts(
+        gm_path,
+        godot_path,
+        target_platform="windows",
+        enabled_converters=outcome.steps.requested,
+        output_snapshot=capture_conversion_output_snapshot(godot_path),
+        manifest_outcome=None,
+        attempt_outcome=outcome,
+    )
+else:
+    raise AssertionError(f"Unknown subprocess operation: {operation}")
+"""
+        environment = os.environ.copy()
+        existing_python_path = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            str(PROJECT_ROOT)
+            if not existing_python_path
+            else str(PROJECT_ROOT) + os.pathsep + existing_python_path
+        )
+        return subprocess.run(
+            (
+                sys.executable,
+                "-c",
+                script,
+                str(FIXTURE_ROOT),
+                str(godot_dir),
+                operation,
+                phase,
+                str(occurrence),
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=environment,
+        )
+
     def _included_publication_fixture(
         self,
         name: str,
@@ -1738,8 +2465,9 @@ class TestConversionManifest(unittest.TestCase):
         output_path.write_bytes(payload)
         manifest_path = artifact_dir / "conversion_manifest.json"
         attempt_path = artifact_dir / "conversion_attempt.json"
-        manifest_before = b"previous canonical manifest\n"
-        attempt_before = b"previous conversion attempt\n"
+        manifest_before, attempt_before = self._legacy_artifact_pair_bytes(
+            state="success",
+        )
         manifest_path.write_bytes(manifest_before)
         attempt_path.write_bytes(attempt_before)
         return (
@@ -1802,8 +2530,9 @@ class TestConversionManifest(unittest.TestCase):
         manifest_path = selected_godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH
         attempt_path = selected_godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH
         manifest_path.parent.mkdir(parents=True)
-        manifest_before = b'{"format_version": 1, "generated_files": []}\n'
-        attempt_before = b'{"format_version": 1, "attempt": {"state": "success"}}\n'
+        manifest_before, attempt_before = self._legacy_artifact_pair_bytes(
+            state="success",
+        )
         manifest_path.write_bytes(manifest_before)
         attempt_path.write_bytes(attempt_before)
         return (
@@ -1815,17 +2544,68 @@ class TestConversionManifest(unittest.TestCase):
         )
 
     @staticmethod
+    def _legacy_artifact_pair_bytes(
+        *,
+        state: str,
+    ) -> tuple[bytes, bytes]:
+        manifest = (
+            json.dumps(
+                {
+                    "format_version": 2,
+                    "conversion": {"state": state},
+                    "generated_files": [],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        attempt = (
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "attempt": {"state": state},
+                    "canonical_manifest": {
+                        "path": "gm2godot/conversion_manifest.json",
+                        "status": "updated",
+                        "updated": True,
+                        "current_output": "verified",
+                        "sha256": "sha256:" + hashlib.sha256(manifest).hexdigest(),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        return manifest, attempt
+
+    @staticmethod
     def _temporary_artifact_files(godot_dir: Path) -> list[Path]:
         artifact_dir = godot_dir / "gm2godot"
         if not artifact_dir.exists():
             return []
+        old_transaction_files = [
+            *artifact_dir.glob(".conversion_manifest.json.*.tmp"),
+            *artifact_dir.glob(".conversion_manifest.json.*.backup"),
+            *artifact_dir.glob(".conversion_attempt.json.*.tmp"),
+            *artifact_dir.glob(".conversion_attempt.json.*.backup"),
+        ]
+        generation_files = [
+            path
+            for path in artifact_dir.iterdir()
+            if path.name
+            not in {
+                generation_module.CONVERSION_GENERATION_LOCK_NAME,
+                generation_module.CONVERSION_GENERATION_POINTER_NAME,
+            }
+            and generation_module.is_conversion_generation_auxiliary(path.name)
+        ]
         return sorted(
-            [
-                *artifact_dir.glob(".conversion_manifest.json.*.tmp"),
-                *artifact_dir.glob(".conversion_manifest.json.*.backup"),
-                *artifact_dir.glob(".conversion_attempt.json.*.tmp"),
-                *artifact_dir.glob(".conversion_attempt.json.*.backup"),
-            ]
+            {
+                *old_transaction_files,
+                *generation_files,
+            }
         )
 
 

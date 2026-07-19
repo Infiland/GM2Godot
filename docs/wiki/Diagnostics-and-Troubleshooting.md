@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.31 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.32 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -69,17 +69,19 @@ Use `--allow-partial` in CI only after the skipped/failed resources are intentio
 
 ## Attempt ledger versus trusted manifest
 
-`conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” These are independent questions: a late report failure or cancellation can happen after a valid canonical candidate was committed, while another failed attempt can leave an older canonical file in place.
+`conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” These remain distinct records, but they are now committed and recovered as one generation: a late report failure or cancellation can refer to a valid canonical candidate, while another failed attempt can deliberately preserve an older canonical file.
 
 Read `canonical_manifest` in the attempt ledger:
 
 | `status` | `updated` | `current_output` | How to interpret it |
 | --- | ---: | --- | --- |
-| `updated` | `true` | `verified` | This publication committed a canonical manifest last. Verify the file's raw-byte SHA-256 against the ledger before consuming it. |
+| `updated` | `true` | `verified` | This generation committed a new canonical manifest with the attempt ledger. Verify the file's raw-byte SHA-256 against the ledger before consuming it. |
 | `preserved` | `false` | `unverified` | A regular canonical file already existed and was left untouched. Its recorded digest identifies those bytes, but preservation does not prove that its schema or contents describe the current destination or latest attempt. |
 | `absent` | `false` | `unavailable` | No canonical manifest exists; `sha256` is `null`. |
 
-The digest string is `sha256:` followed by the lowercase hash of the raw `conversion_manifest.json` bytes. Staging, backup reads, attempt-first replacement, canonical-last replacement, rollback, recovery and cleanup stay on one verified `gm2godot/` directory binding through final receipt validation; POSIX uses descriptor-relative no-follow operations and Windows retains a reparse-checked handle that denies directory deletion. The two files are still not one multi-file crash-atomic unit. A missing canonical file or digest mismatch can therefore identify an interrupted pair publication. Do not trust the canonical manifest until the digest matches.
+The digest string is `sha256:` followed by the lowercase hash of the raw `conversion_manifest.json` bytes. Before either public file changes, GM2Godot durably records the complete previous and desired pair in `.gm2godot-conversion-transaction.json`. It publishes the attempt first and canonical manifest second through one verified directory binding, then atomically switches `.gm2godot-conversion-generation.json`. Recovery under the project-local operating-system lock restores the prior pair before that switch or verifies the new pair after it. POSIX uses descriptor-relative no-follow operations and directory `fsync()`; Windows retains a reparse-checked handle, nonblocking byte-range lock, and write-through moves.
+
+The generation pointer persists; the transaction journal is removed only after the selected pair and cleanup are verified. A hard exit during journal staging, either public replacement, the pointer switch, rollback, or cleanup therefore recovers to one complete pair. Continue checking the digest as defense in depth, but a mismatch is no longer a normal interrupted-publication state after migration. The first 0.7.32 publication migrates only a digest-consistent legacy pair (or a fully absent pair); pre-existing mismatch and malformed, redirected, mounted, hard-linked, replaced, oversized, or unknown reserved state are preserved and rejected instead of guessed at or deleted.
 
 Even when the digest matches, inspect both records:
 
@@ -128,6 +130,7 @@ With a binary available, validation asks Godot to import supported asset types a
 | Converted output runs but differs from GameMaker | Check [Compatibility and Limitations](Compatibility-and-Limitations), `architecture_policy.json`, platform capabilities, and the affected resource/API report. Create the smallest fixture that preserves the mismatch. |
 | Another GM2Godot conversion is already publishing or recovering Included Files | Let the active converter finish, then retry. A leftover lock file is normal and does not itself mean the lock is held; do not delete it. Close any live game or editor operation using Included Files before retrying. |
 | Included Files recovery rejects an invalid journal, commit marker, staging path, or unknown replacement | Preserve the named paths and the full error. GM2Godot intentionally leaves unknown content untouched rather than guessing ownership. Do not delete or rename it until you have backed up the destination and identified whether it is converter-owned; attach the artifacts and diagnostics to a bug report if ownership is unclear. |
+| Conversion artifact recovery rejects its journal, generation pointer, lock, public pair, or reserved temporary state | Preserve the complete `gm2godot/` directory and error. Do not edit the digest, pointer, or recovery records to force acceptance. Back up the destination, identify any non-cooperating writer or pre-0.7.32 mismatch, and attach the preserved state to a bug report if ownership is unclear. |
 | An Included Files recovery record exceeds the 16 MiB canonical size limit | Preserve the generated project and error. Unknown or oversized reserved-path content is intentionally not parsed or deleted. If the record came from an unusually large valid project, report the Included File count and path shape so the recovery format can be improved without silently raising the parser-memory ceiling. |
 | A hidden `.gm2godot-included-cleanup.*` entry remains after a Windows machine power loss | Do not move it onto either public Included Files path or delete it by guesswork. Windows can replay a completed hidden deletion without replaying the write-through public generation moves; preserve the project and attach the entry plus recovery diagnostics to a bug report so ownership can be verified safely. |
 | A packaged Included File exists on disk but generated file APIs treat it as missing | Format-v2 registries require the exact recorded byte count and SHA-256. Hand edits, an incomplete external copy, or concurrent publication make the packaged candidate unavailable. Close the live game, restore the source input, and rerun conversion so the root and registry are regenerated together. |

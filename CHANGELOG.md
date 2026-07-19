@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.28 - 2026-07-19
+
+- Anchored architecture-policy publication and restoration to one retained destination-directory binding, using descriptor-relative POSIX operations, no-delete-share Win32 handles, write-through Windows moves, and an explicit verified-path fallback.
+- Added a reusable ordered byte-artifact transaction with exact snapshots, receipts, modes, per-entry concurrency checks, reverse rollback continuation, recovery retention, cleanup, and write-through absence tombstones on Windows.
+- Added adversarial directory-replacement, rollback, receipt-drift, read-only hardlink, native junction, relocation, Unicode long-path, and exact Godot 4.7.1 validation coverage.
+
 ## 0.7.27 - 2026-07-19
 
 - Published the Included Files root and runtime registry as one journaled, recoverable generation: interruption before the durable commit marker restores the exact previous pair, while interruption after it verifies and finalizes the complete new pair on the next conversion.

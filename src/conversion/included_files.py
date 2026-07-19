@@ -11,10 +11,10 @@ import secrets
 import stat
 import sys
 import tempfile
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, BinaryIO, Callable, cast
+from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
 from src.localization import get_localized
 from src.conversion.atomic_generated_text import (
@@ -84,6 +84,7 @@ _INCLUDED_FILES_COMMIT_TEMP_PREFIX = ".gm2godot-included-files-commit."
 _INCLUDED_FILES_STAGE_MARKER_NAME = ".gm2godot-included-files-stage.json"
 _INCLUDED_FILES_CLEANUP_PREFIX = ".gm2godot-included-cleanup."
 _INCLUDED_FILES_RECOVERY_FORMAT_VERSION = 1
+_INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER = 2
 # Recovery records duplicate tree metadata and registry generations. A
 # representative committed record is about 2 KiB per Included File, so 16 MiB
 # accommodates roughly 8,000 files while keeping adversarial JSON object
@@ -102,6 +103,76 @@ _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
     | {f"COM{suffix}" for suffix in "123456789¹²³"}
     | {f"LPT{suffix}" for suffix in "123456789¹²³"}
 )
+
+_IncludedWorkerItem = TypeVar("_IncludedWorkerItem")
+_IncludedWorkerResult = TypeVar("_IncludedWorkerResult")
+
+
+def _run_bounded_included_worker_phase(
+    items: Iterable[_IncludedWorkerItem],
+    *,
+    max_workers: int,
+    conversion_running: ConversionRunning,
+    submit: Callable[
+        [ThreadPoolExecutor, _IncludedWorkerItem],
+        Future[_IncludedWorkerResult],
+    ],
+    consume: Callable[
+        [_IncludedWorkerItem, Future[_IncludedWorkerResult]],
+        bool,
+    ],
+) -> bool:
+    """Run an Included Files phase with concurrency-proportional bookkeeping."""
+    if max_workers < 1:
+        raise ValueError("Included Files max_workers must be at least one")
+
+    window_size = max_workers * _INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER
+    item_iterator = iter(items)
+    pending: dict[Future[_IncludedWorkerResult], _IncludedWorkerItem] = {}
+    input_exhausted = False
+    accepting_work = conversion_running()
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        while accepting_work:
+            while not input_exhausted and len(pending) < window_size:
+                if not conversion_running():
+                    accepting_work = False
+                    break
+                try:
+                    item = next(item_iterator)
+                except StopIteration:
+                    input_exhausted = True
+                    break
+                pending[submit(executor, item)] = item
+
+            if not accepting_work or not pending:
+                break
+
+            done, _not_done = wait(
+                tuple(pending),
+                return_when=FIRST_COMPLETED,
+            )
+            completed = tuple(
+                (future, pending[future])
+                for future in tuple(pending)
+                if future in done
+            )
+            for future, _item in completed:
+                del pending[future]
+
+            for future, item in completed:
+                if not consume(item, future):
+                    accepting_work = False
+                    break
+                if not conversion_running():
+                    accepting_work = False
+                    break
+
+        return accepting_work and input_exhausted and not pending
+    finally:
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 @dataclass(frozen=True)
@@ -8373,21 +8444,33 @@ class IncludedFilesConverter(BaseConverter):
         deny_writes: bool,
     ) -> dict[str, _IncludedNoOpSourceReceipt]:
         receipts: dict[str, _IncludedNoOpSourceReceipt] = {}
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures: dict[
-                Future[_IncludedNoOpSourceReceipt],
-                _IncludedFileSource,
-            ] = {
-                executor.submit(
-                    self._capture_unchanged_source_receipt,
-                    source,
-                    deny_writes=deny_writes,
-                ): source
-                for source in sources
-            }
-            for future in as_completed(futures):
-                source = futures[future]
-                receipts[source.relative_path] = future.result()
+
+        def submit_receipt(
+            executor: ThreadPoolExecutor,
+            source: _IncludedFileSource,
+        ) -> Future[_IncludedNoOpSourceReceipt]:
+            return executor.submit(
+                self._capture_unchanged_source_receipt,
+                source,
+                deny_writes=deny_writes,
+            )
+
+        def consume_receipt(
+            source: _IncludedFileSource,
+            future: Future[_IncludedNoOpSourceReceipt],
+        ) -> bool:
+            receipts[source.relative_path] = future.result()
+            return True
+
+        phase_completed = _run_bounded_included_worker_phase(
+            sources,
+            max_workers=self.max_workers,
+            conversion_running=self.conversion_running,
+            submit=submit_receipt,
+            consume=consume_receipt,
+        )
+        if not phase_completed:
+            raise _IncludedOutputSetCancelled()
         return receipts
 
     def _revalidate_unchanged_source_bindings(
@@ -9168,61 +9251,72 @@ class IncludedFilesConverter(BaseConverter):
             processed_files = 0
             total_files = len(all_files)
             try:
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                    futures_map: dict[
-                        Future[
-                            tuple[
-                                str,
-                                bool,
-                                _IncludedCopyReceipt | None,
-                            ]
-                            | None
-                        ],
-                        str,
-                    ] = {}
-                    for source in all_files:
-                        assignment = assignments_by_source[source.relative_path]
-                        staged_output_path = os.path.join(
-                            staged_root_path,
-                            *assignment.assigned_output_path.split("/"),
-                        )
-                        future = executor.submit(
-                            self._process_file,
-                            source.filesystem_path,
-                            staged_output_path,
-                            source.relative_path,
-                            source.owner_source_path,
-                        )
-                        futures_map[future] = source.relative_path
+                def submit_copy(
+                    executor: ThreadPoolExecutor,
+                    source: _IncludedFileSource,
+                ) -> Future[
+                    tuple[str, bool, _IncludedCopyReceipt | None] | None
+                ]:
+                    assignment = assignments_by_source[source.relative_path]
+                    staged_output_path = os.path.join(
+                        staged_root_path,
+                        *assignment.assigned_output_path.split("/"),
+                    )
+                    return executor.submit(
+                        self._process_file,
+                        source.filesystem_path,
+                        staged_output_path,
+                        source.relative_path,
+                        source.owner_source_path,
+                    )
 
-                    for future in as_completed(futures_map):
-                        try:
-                            result = future.result()
-                        except BaseException as error:
-                            worker_failed = True
-                            if first_worker_error is None:
-                                first_worker_error = error
-                            continue
-                        if result is None:
-                            worker_cancelled = True
-                            continue
-                        processed_files += 1
-                        relative_path, copied, copy_receipt = result
-                        if copied:
-                            if copy_receipt is None:
-                                worker_failed = True
-                                continue
-                            successful_logical_paths.add(relative_path)
-                            copy_receipts[relative_path] = copy_receipt
-                        else:
-                            worker_failed = True
-                        if total_files:
-                            self._safe_progress(
-                                min(
-                                    99,
-                                    int((processed_files / total_files) * 99),
-                                )
+                def consume_copy(
+                    _source: _IncludedFileSource,
+                    future: Future[
+                        tuple[str, bool, _IncludedCopyReceipt | None] | None
+                    ],
+                ) -> bool:
+                    nonlocal worker_failed
+                    nonlocal worker_cancelled
+                    nonlocal first_worker_error
+                    nonlocal processed_files
+
+                    try:
+                        result = future.result()
+                    except BaseException as error:
+                        worker_failed = True
+                        if first_worker_error is None:
+                            first_worker_error = error
+                        return False
+                    if result is None:
+                        worker_cancelled = True
+                        return False
+
+                    processed_files += 1
+                    relative_path, copied, copy_receipt = result
+                    if copied and copy_receipt is not None:
+                        successful_logical_paths.add(relative_path)
+                        copy_receipts[relative_path] = copy_receipt
+                    else:
+                        worker_failed = True
+                    if total_files:
+                        self._safe_progress(
+                            min(
+                                99,
+                                int((processed_files / total_files) * 99),
                             )
+                        )
+                    return not worker_failed
+
+                phase_completed = _run_bounded_included_worker_phase(
+                    all_files,
+                    max_workers=self.max_workers,
+                    conversion_running=self.conversion_running,
+                    submit=submit_copy,
+                    consume=consume_copy,
+                )
+                if not phase_completed and not worker_failed:
+                    worker_cancelled = True
             finally:
                 self._active_output_project_path = None
 

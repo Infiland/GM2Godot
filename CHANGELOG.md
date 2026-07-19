@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.24 - 2026-07-19
+
+- Reused attempt-local Included File receipts across asset-registry and manifest publication, reducing successful matching Included File validation from 12x payload reads to at most 6x while binding reuse to the exact source, generated output, assigned path, and output generation.
+- Preserved final SHA-256 and path-versus-handle identity checks, with Win32 read handles denying concurrent write/delete sharing while the final receipts are hashed, so content mutation, path replacement, hard-link substitution, redirected paths, and directory swaps still fail closed.
+
 ## 0.7.23 - 2026-07-19
 
 - Replaced read-only generated text outputs on Windows through identity-bound handles, no-replace quarantine moves, and POSIX-style read-only disposition without path-level chmod or cleanup races.

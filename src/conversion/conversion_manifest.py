@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from typing import TypeAlias, cast
 
 from src.conversion.architecture_policy import build_architecture_policy_report
-from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
+from src.conversion.asset_registry import (
+    AssetRegistryConverter,
+    AssetRegistryEntry,
+    AssetRegistryPublication,
+)
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.conversion_plan import build_conversion_plan, conversion_step_map
 from src.conversion.generated_paths import (
@@ -152,15 +156,15 @@ def write_conversion_artifacts(
 
     manifest_content: bytes | None = None
     manifest_asset_converter: AssetRegistryConverter | None = None
-    manifest_asset_entries: tuple[AssetRegistryEntry, ...] = ()
+    manifest_asset_publication: AssetRegistryPublication | None = None
     if manifest_outcome is not None:
         manifest_asset_converter = _asset_registry_converter(
             gm_project_path,
             godot_project_path,
             macro_configuration=target_platform,
         )
-        manifest_asset_entries = (
-            manifest_asset_converter.build_published_entries()
+        manifest_asset_publication = (
+            manifest_asset_converter.prepare_published_entries()
         )
         manifest_payload = _build_conversion_manifest(
             gm_project_path,
@@ -169,7 +173,7 @@ def write_conversion_artifacts(
             enabled_converter_keys=enabled_converter_keys,
             output_snapshot=output_snapshot,
             conversion_outcome=manifest_outcome,
-            asset_entries=manifest_asset_entries,
+            asset_entries=manifest_asset_publication.entries,
         )
         manifest_content = _serialize_json(manifest_payload)
         manifest_status = "updated"
@@ -286,9 +290,11 @@ def write_conversion_artifacts(
                 if (
                     target_path == manifest_path
                     and manifest_asset_converter is not None
+                    and manifest_asset_publication is not None
                 ):
-                    manifest_asset_converter.revalidate_published_entries(
-                        manifest_asset_entries
+                    manifest_asset_converter.revalidate_publication(
+                        manifest_asset_publication,
+                        validate_content=False,
                     )
                 staged_artifact = staged[target_path]
                 backup = backups[target_path]
@@ -314,9 +320,11 @@ def write_conversion_artifacts(
                 if (
                     target_path == manifest_path
                     and manifest_asset_converter is not None
+                    and manifest_asset_publication is not None
                 ):
-                    manifest_asset_converter.revalidate_published_entries(
-                        manifest_asset_entries
+                    manifest_asset_converter.revalidate_publication(
+                        manifest_asset_publication,
+                        validate_content=True,
                     )
             _verify_artifact_directory(
                 godot_project_path,
@@ -1525,7 +1533,7 @@ def _asset_registry_entries(
         godot_project_path,
         macro_configuration=macro_configuration,
     )
-    return converter.build_published_entries()
+    return converter.prepare_published_entries().entries
 
 
 def _asset_registry_converter(

@@ -48,7 +48,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.18`.
+Current source version: `0.7.19`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.
@@ -60,7 +60,15 @@ To build a local macOS distributable (`.app` + `.dmg`), run `bash build_macos.sh
 
 ### Prerequisites
 
-- Python 3.12 or later
+- Use the native, reproducible baseline for your host:
+
+  | Host | Python | Constraint |
+  | --- | --- | --- |
+  | Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.txt` |
+  | macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.txt` |
+  | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.txt` |
+
+  Other Python patch versions and architectures are not the reviewed dependency baseline.
 
 ### Setup
 
@@ -70,25 +78,75 @@ git clone https://github.com/Infiland/GM2Godot
 cd GM2Godot
 ```
 
-2. **Create a Virtual Environment** (recommended)
-```bash
-python3 -m venv venv
-```
+2. **Create and Activate a Virtual Environment**
 
-3. **Activate the Virtual Environment**
-- On macOS/Linux:
+Use the exact interpreter from the table above. After activation, `python --version` must report the listed patch version.
+
+Linux x64:
+
 ```bash
+python3.12 -m venv venv
 source venv/bin/activate
-```
-- On Windows:
-```bash
-venv\Scripts\activate
+python --version  # Python 3.12.13
 ```
 
-4. **Install Dependencies**
+macOS arm64:
+
 ```bash
-pip install -r requirements.txt
+python3.12 -m venv venv
+source venv/bin/activate
+python --version  # Python 3.12.10
 ```
+
+Windows x64 (PowerShell):
+
+```powershell
+py -3.12 -m venv venv
+.\venv\Scripts\Activate.ps1
+python --version  # Python 3.12.10
+```
+
+3. **Install the Constrained Dependency Graph**
+
+Bootstrap the exact pip version and install runtime dependencies with the constraint for the current host. Both commands deliberately disable the package cache and source distributions.
+
+Linux x64:
+
+```bash
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt -r requirements.txt
+```
+
+macOS arm64:
+
+```bash
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-macos-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-macos-py312.txt -r requirements.txt
+```
+
+Windows x64 (PowerShell):
+
+```powershell
+$env:PIP_CONFIG_FILE = "nul"
+python -m pip --isolated --disable-pip-version-check --no-input install `
+  --no-cache-dir --only-binary=:all: `
+  --constraint constraints/requirements-windows-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install `
+  --no-cache-dir --only-binary=:all: `
+  --constraint constraints/requirements-windows-py312.txt -r requirements.txt
+```
+
+`PIP_CONFIG_FILE` points at the platform null device and `--isolated` ignores user settings, so local pip configuration cannot weaken the reviewed install policy. The committed constraints are compiled from `requirements-lock.in` on their matching native hosts by [`.github/workflows/dependency-locks.yml`](.github/workflows/dependency-locks.yml); the current generator pin is `pip-tools==7.6.0`. Pull requests and pushes use preference-seeded `refresh=locked` generation. A manual run can use `refresh=locked`, `refresh=all`, or `refresh=package`; package refreshes also require the normalized `refresh_package` name. Each native job self-hosts its candidate and compares two clean-install receipts before uploading evidence. When a refresh changes a constraint, the final committed-equality gate intentionally fails until the reviewed native result is committed and the workflow is rerun. A generator upgrade may first require committing the uploaded self-hosted result. Do not generate one platform's constraint from another platform.
 
 ## Usage
 
@@ -202,14 +260,34 @@ To contribute:
 ```text
 You are setting up the GM2Godot project.
 
-Ensure Python 3.12 or later is installed.
+Use exactly one supported native dependency baseline:
+- Linux x64: CPython 3.12.13 with constraints/requirements-linux-py312.txt
+- macOS arm64: CPython 3.12.10 with constraints/requirements-macos-py312.txt
+- Windows x64: CPython 3.12.10 with constraints/requirements-windows-py312.txt
 
-Create and activate a virtual environment:
-python3 -m venv venv
-source venv/bin/activate  # On Windows use: venv\Scripts\activate
+Create and activate a virtual environment with that exact interpreter. Confirm the
+active environment with python --version before installing anything.
 
-Install dependencies from requirements.txt:
-pip install -r requirements.txt
+Set PIP_CONFIG_FILE to /dev/null on Linux or macOS, or lowercase nul in Windows
+PowerShell. Bootstrap pip==26.1.2 and install requirements.txt with python -m pip,
+--isolated, --disable-pip-version-check, --no-input, --no-cache-dir,
+--only-binary=:all:, and the matching --constraint file. For example, on Linux
+x64:
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: --constraint constraints/requirements-linux-py312.txt -r requirements.txt
+
+The null config file and isolated mode prevent machine-local pip settings from
+changing the reviewed install behavior.
+
+Never generate a constraint for one platform on another platform. Pull requests
+and pushes use preference-seeded refresh=locked generation. Manual workflow runs
+accept refresh=locked, refresh=all, or refresh=package with a normalized
+refresh_package. Candidates are compiled from requirements-lock.in; the current
+generator pin is pip-tools==7.6.0. The native workflow self-hosts each candidate,
+compares two clean installs, and uploads evidence before intentionally failing
+when a changed result has not yet been committed. A generator upgrade may require
+committing the self-hosted result and rerunning.
 
 The project uses PySide6 (not Tkinter). Required packages are:
 - Pillow

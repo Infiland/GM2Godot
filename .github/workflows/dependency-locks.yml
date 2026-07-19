@@ -3,30 +3,36 @@ name: Dependency Locks
 on:
   pull_request:
     branches: [main]
-    paths:
-      - '.github/workflows/dependency-locks.yml'
-      - 'requirements.txt'
-      - 'requirements-tooling.txt'
-      - 'requirements-lock.in'
-      - 'constraints/**'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/dependency-locks.yml'
-      - 'requirements.txt'
-      - 'requirements-tooling.txt'
-      - 'requirements-lock.in'
-      - 'constraints/**'
   workflow_dispatch:
+    inputs:
+      refresh:
+        description: Dependency refresh policy
+        required: true
+        default: locked
+        type: choice
+        options:
+          - locked
+          - all
+          - package
+      refresh_package:
+        description: Normalized distribution name for a package refresh
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: dependency-locks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   generate:
-    name: ${{ matrix.platform }} / Python ${{ matrix.python-version }}
+    name: ${{ matrix.platform }} / Python ${{ matrix.python_version }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -34,65 +40,207 @@ jobs:
           - platform: linux-x64
             runner: ubuntu-24.04
             architecture: x64
-            python-version: '3.12.13'
+            python_version: '3.12.13'
             constraint: requirements-linux-py312.txt
+            expected_platform: linux
+            expected_machine: x86_64
+            venv_python: bin/python
+            pip_config_file: /dev/null
           - platform: macos-arm64
             runner: macos-26
             architecture: arm64
-            python-version: '3.12.10'
+            python_version: '3.12.10'
             constraint: requirements-macos-py312.txt
+            expected_platform: darwin
+            expected_machine: arm64
+            venv_python: bin/python
+            pip_config_file: /dev/null
           - platform: windows-x64
             runner: windows-2025
             architecture: x64
-            python-version: '3.12.10'
+            python_version: '3.12.10'
             constraint: requirements-windows-py312.txt
+            expected_platform: win32
+            expected_machine: AMD64
+            venv_python: Scripts/python.exe
+            pip_config_file: nul
     env:
-      PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      PIP_NO_CACHE_DIR: '1'
-      PIP_ONLY_BINARY: ':all:'
-      GENERATED_DIR: dependency-locks/generated
-      COMMITTED_DIR: constraints
+      PIP_CONFIG_FILE: ${{ matrix.pip_config_file }}
+      PLATFORM_LABEL: ${{ matrix.platform }}
+      EXPECTED_PYTHON: ${{ matrix.python_version }}
+      EXPECTED_PLATFORM: ${{ matrix.expected_platform }}
+      EXPECTED_MACHINE: ${{ matrix.expected_machine }}
+      COMMITTED_CONSTRAINT: constraints/${{ matrix.constraint }}
+      WORK_ROOT: dependency-locks
+      WORK_DIR: dependency-locks/work
+      ARTIFACT_DIR: dependency-locks/artifact
+      CANDIDATE_CONSTRAINT: dependency-locks/artifact/candidate/${{ matrix.constraint }}
+      SELFHOST_CONSTRAINT: dependency-locks/artifact/selfhost/${{ matrix.constraint }}
+      RECEIPT_DIR: dependency-locks/artifact/receipts
+      CURRENT_ENV: dependency-locks/work/current-generator
+      CURRENT_PYTHON: dependency-locks/work/current-generator/${{ matrix.venv_python }}
+      CURRENT_COMPILE_CACHE: dependency-locks/work/current-pip-tools-cache
+      CANDIDATE_ENV: dependency-locks/work/candidate-generator
+      CANDIDATE_PYTHON: dependency-locks/work/candidate-generator/${{ matrix.venv_python }}
+      CANDIDATE_COMPILE_CACHE: dependency-locks/work/candidate-pip-tools-cache
+      VENV_PYTHON: ${{ matrix.venv_python }}
+      REFRESH_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh || 'locked' }}
+      REFRESH_PACKAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_package || '' }}
+      CUSTOM_COMPILE_COMMAND: >-
+        python -I scripts/compile_dependency_lock.py --resolver=backtracking --strip-extras
+        --allow-unsafe --no-emit-index-url --no-emit-trusted-host
+        --no-emit-find-links --no-emit-options --no-config
+        "--pip-args=--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:"
+        --output-file=constraints/${{ matrix.constraint }} requirements-lock.in
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
-      - name: Set up Python
+      - name: Set up exact native Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python_version }}
           architecture: ${{ matrix.architecture }}
 
-      - name: Install the lock generator
+      - name: Validate native tuple and committed constraint
+        shell: bash
+        run: |
+          test -f "$COMMITTED_CONSTRAINT"
+          test ! -L "$COMMITTED_CONSTRAINT"
+          if [[ -e "$WORK_ROOT" || -L "$WORK_ROOT" ]]; then
+            echo "Refusing to reuse dependency lock work root: $WORK_ROOT" >&2
+            exit 1
+          fi
+          mkdir -p "$WORK_DIR" "$(dirname "$CANDIDATE_CONSTRAINT")" \
+            "$(dirname "$SELFHOST_CONSTRAINT")" "$RECEIPT_DIR"
+          python - <<'PY'
+          import os
+          import platform
+          from pathlib import Path
+          import sys
+
+          from scripts.verify_dependency_environment import load_constraint
+
+          observed = (platform.python_version(), sys.platform, platform.machine())
+          expected = (
+              os.environ["EXPECTED_PYTHON"],
+              os.environ["EXPECTED_PLATFORM"],
+              os.environ["EXPECTED_MACHINE"],
+          )
+          if observed != expected:
+              raise SystemExit(f"Native tuple mismatch: expected {expected!r}, observed {observed!r}")
+
+          policy = load_constraint(Path(os.environ["COMMITTED_CONSTRAINT"]))
+          try:
+              current_pip = policy.pins["pip"]
+              current_pip_tools = policy.pins["pip-tools"]
+          except KeyError as error:
+              raise SystemExit(f"Committed constraint lacks generator pin: {error.args[0]}") from error
+
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="\n") as output:
+              output.write(f"CURRENT_PIP={current_pip}\n")
+              output.write(f"CURRENT_PIP_TOOLS={current_pip_tools}\n")
+          PY
+
+      - name: Validate refresh request
+        shell: bash
+        run: |
+          case "$REFRESH_MODE" in
+            locked|all)
+              if [[ -n "$REFRESH_PACKAGE" ]]; then
+                echo "refresh_package is valid only when refresh=package" >&2
+                exit 1
+              fi
+              ;;
+            package)
+              if [[ -z "$REFRESH_PACKAGE" ]]; then
+                echo "refresh_package is required when refresh=package" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported refresh mode: $REFRESH_MODE" >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$REFRESH_MODE" == package ]]; then
+            python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.verify_dependency_environment import (
+              load_constraint,
+              normalize_name,
+              PolicyError,
+          )
+
+          raw_name = os.environ["REFRESH_PACKAGE"]
+          try:
+              normalized_name = normalize_name(raw_name)
+          except PolicyError as error:
+              raise SystemExit(str(error)) from error
+          if raw_name != normalized_name:
+              raise SystemExit(
+                  f"refresh_package must already be normalized as {normalized_name!r}"
+              )
+          native_constraint_paths = (
+              Path("constraints/requirements-linux-py312.txt"),
+              Path("constraints/requirements-macos-py312.txt"),
+              Path("constraints/requirements-windows-py312.txt"),
+          )
+          try:
+              native_policies = tuple(load_constraint(path) for path in native_constraint_paths)
+          except PolicyError as error:
+              raise SystemExit(str(error)) from error
+          if not any(normalized_name in policy.pins for policy in native_policies):
+              raise SystemExit(
+                  f"refresh_package {normalized_name!r} is absent from every supported "
+                  "committed native dependency graph"
+              )
+          PY
+          fi
+
+      - name: Create and verify committed lock generator
         shell: bash
         env:
-          COMMITTED_CONSTRAINT: ${{ env.COMMITTED_DIR }}/${{ matrix.constraint }}
+          CONSTRAINT: ${{ env.COMMITTED_CONSTRAINT }}
         run: |
-          generator_constraint_args=()
-          if [[ -f "$COMMITTED_CONSTRAINT" ]]; then
-            generator_constraint_args=(--constraint "$COMMITTED_CONSTRAINT")
-            echo "Constraining generator dependencies with $COMMITTED_CONSTRAINT"
-          else
-            echo "No committed constraint is available; using exact generator pins for initial bootstrap."
-          fi
-          python -m pip install \
+          python -m venv "$CURRENT_ENV"
+          "$CURRENT_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
             --no-cache-dir \
             --only-binary=:all: \
-            "${generator_constraint_args[@]}" \
-            pip==26.1.2 \
-            pip-tools==7.6.0
+            --constraint "$CONSTRAINT" \
+            "pip==$CURRENT_PIP"
+          "$CURRENT_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --constraint "$CONSTRAINT" \
+            "pip-tools==$CURRENT_PIP_TOOLS"
+          "$CURRENT_PYTHON" scripts/verify_dependency_environment.py \
+            --constraint "$CONSTRAINT" \
+            --mode subset \
+            --require pip \
+            --require pip-tools \
+            --expected-python "$EXPECTED_PYTHON" \
+            --expected-platform "$EXPECTED_PLATFORM" \
+            --expected-machine "$EXPECTED_MACHINE" \
+            --expected-pip "$CURRENT_PIP" \
+            --output "$RECEIPT_DIR/current-generator.json"
 
-      - name: Generate native constraints
+      - name: Generate preference-seeded candidate constraint
         shell: bash
-        env:
-          GENERATED_CONSTRAINT: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
-          CUSTOM_COMPILE_COMMAND: >-
-            PIP_NO_CACHE_DIR=1 PIP_ONLY_BINARY=:all:
-            python -m piptools compile --resolver=backtracking --strip-extras
-            --allow-unsafe --no-emit-index-url --no-emit-trusted-host
-            --no-emit-find-links --no-emit-options --no-config
-            --output-file=constraints/${{ matrix.constraint }} requirements-lock.in
         run: |
-          mkdir -p "$GENERATED_DIR"
-          python -m piptools compile \
+          refresh_args=()
+          case "$REFRESH_MODE" in
+            all)
+              refresh_args=(--upgrade)
+              ;;
+            package)
+              refresh_args=(--upgrade-package "$REFRESH_PACKAGE")
+              ;;
+          esac
+
+          cp "$COMMITTED_CONSTRAINT" "$CANDIDATE_CONSTRAINT"
+          "$CURRENT_PYTHON" -I scripts/compile_dependency_lock.py \
             --resolver=backtracking \
             --strip-extras \
             --allow-unsafe \
@@ -101,27 +249,243 @@ jobs:
             --no-emit-find-links \
             --no-emit-options \
             --no-config \
-            --output-file="$GENERATED_CONSTRAINT" \
+            "--pip-args=--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:" \
+            --cache-dir="$CURRENT_COMPILE_CACHE" \
+            "${refresh_args[@]}" \
+            --output-file="$CANDIDATE_CONSTRAINT" \
             requirements-lock.in
 
-      - name: Upload generated constraints
+      - name: Read candidate generator pins
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.verify_dependency_environment import load_constraint
+
+          policy = load_constraint(Path(os.environ["CANDIDATE_CONSTRAINT"]))
+          try:
+              candidate_pip = policy.pins["pip"]
+              candidate_pip_tools = policy.pins["pip-tools"]
+          except KeyError as error:
+              raise SystemExit(f"Candidate constraint lacks generator pin: {error.args[0]}") from error
+
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="\n") as output:
+              output.write(f"CANDIDATE_PIP={candidate_pip}\n")
+              output.write(f"CANDIDATE_PIP_TOOLS={candidate_pip_tools}\n")
+          PY
+
+      - name: Create and verify candidate lock generator
+        shell: bash
+        env:
+          CONSTRAINT: ${{ env.CANDIDATE_CONSTRAINT }}
+        run: |
+          python -m venv "$CANDIDATE_ENV"
+          "$CANDIDATE_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --constraint "$CONSTRAINT" \
+            "pip==$CANDIDATE_PIP"
+          "$CANDIDATE_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --constraint "$CONSTRAINT" \
+            "pip-tools==$CANDIDATE_PIP_TOOLS"
+          "$CANDIDATE_PYTHON" scripts/verify_dependency_environment.py \
+            --constraint "$CONSTRAINT" \
+            --mode subset \
+            --require pip \
+            --require pip-tools \
+            --expected-python "$EXPECTED_PYTHON" \
+            --expected-platform "$EXPECTED_PLATFORM" \
+            --expected-machine "$EXPECTED_MACHINE" \
+            --expected-pip "$CANDIDATE_PIP" \
+            --output "$RECEIPT_DIR/candidate-generator.json"
+
+      - name: Regenerate constraint with candidate generator
+        shell: bash
+        run: |
+          refresh_args=()
+          case "$REFRESH_MODE" in
+            all)
+              refresh_args=(--upgrade)
+              ;;
+            package)
+              refresh_args=(--upgrade-package "$REFRESH_PACKAGE")
+              ;;
+          esac
+
+          cp "$CANDIDATE_CONSTRAINT" "$SELFHOST_CONSTRAINT"
+          "$CANDIDATE_PYTHON" -I scripts/compile_dependency_lock.py \
+            --resolver=backtracking \
+            --strip-extras \
+            --allow-unsafe \
+            --no-emit-index-url \
+            --no-emit-trusted-host \
+            --no-emit-find-links \
+            --no-emit-options \
+            --no-config \
+            "--pip-args=--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:" \
+            --cache-dir="$CANDIDATE_COMPILE_CACHE" \
+            "${refresh_args[@]}" \
+            --output-file="$SELFHOST_CONSTRAINT" \
+            requirements-lock.in
+
+      - name: Perform two clean complete graph installs
+        shell: bash
+        env:
+          CONSTRAINT: ${{ env.CANDIDATE_CONSTRAINT }}
+        run: |
+          for run_number in 1 2; do
+            fresh_env="$WORK_DIR/fresh-$run_number"
+            fresh_python="$fresh_env/$VENV_PYTHON"
+            test ! -e "$fresh_env"
+            python -m venv "$fresh_env"
+            "$fresh_python" -m pip --isolated --disable-pip-version-check --no-input install \
+              --no-cache-dir \
+              --only-binary=:all: \
+              --constraint "$CONSTRAINT" \
+              "pip==$CANDIDATE_PIP"
+            "$fresh_python" -m pip --isolated --disable-pip-version-check --no-input install \
+              --no-cache-dir \
+              --only-binary=:all: \
+              --constraint "$CONSTRAINT" \
+              -r requirements-lock.in
+            "$fresh_python" scripts/verify_dependency_environment.py \
+              --constraint "$CONSTRAINT" \
+              --mode complete \
+              --require pip \
+              --require pip-tools \
+              --require Pillow \
+              --require markdown2 \
+              --require requests \
+              --require PySide6 \
+              --require PyInstaller \
+              --require pyright \
+              --require ruff \
+              --expected-python "$EXPECTED_PYTHON" \
+              --expected-platform "$EXPECTED_PLATFORM" \
+              --expected-machine "$EXPECTED_MACHINE" \
+              --expected-pip "$CANDIDATE_PIP" \
+              --output "$RECEIPT_DIR/fresh-$run_number.json"
+          done
+
+      - name: Write dependency evidence manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from scripts.verify_dependency_environment import load_constraint, pin_fingerprint
+
+          def constraint_evidence(environment_name: str) -> dict[str, object]:
+              path = Path(os.environ[environment_name])
+              policy = load_constraint(path)
+              return {
+                  "path": path.as_posix(),
+                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                  "pin_fingerprint": pin_fingerprint(policy.pins),
+                  "pin_count": len(policy.pins),
+              }
+
+          expected_receipt_names = {
+              "candidate-generator.json",
+              "current-generator.json",
+              "fresh-1.json",
+              "fresh-2.json",
+          }
+          receipt_directory = Path(os.environ["RECEIPT_DIR"])
+          receipt_paths = sorted(receipt_directory.glob("*.json"))
+          observed_receipt_names = {path.name for path in receipt_paths}
+          if observed_receipt_names != expected_receipt_names:
+              raise SystemExit(
+                  "Dependency evidence receipts differ from policy: "
+                  f"expected={sorted(expected_receipt_names)!r}, "
+                  f"observed={sorted(observed_receipt_names)!r}"
+              )
+
+          receipts: dict[str, object] = {}
+          for path in receipt_paths:
+              receipt = json.loads(path.read_text(encoding="utf-8"))
+              receipts[path.name] = {
+                  "status": receipt.get("status"),
+                  "installed_fingerprint": receipt.get("observation", {}).get(
+                      "installed_fingerprint"
+                  ),
+                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+              }
+
+          manifest = {
+              "schema_version": 1,
+              "platform": os.environ["PLATFORM_LABEL"],
+              "environment": {
+                  "python_full_version": os.environ["EXPECTED_PYTHON"],
+                  "sys_platform": os.environ["EXPECTED_PLATFORM"],
+                  "platform_machine": os.environ["EXPECTED_MACHINE"],
+              },
+              "refresh": {
+                  "mode": os.environ["REFRESH_MODE"],
+                  "package": os.environ["REFRESH_PACKAGE"],
+              },
+              "generators": {
+                  "committed": {
+                      "pip": os.environ["CURRENT_PIP"],
+                      "pip-tools": os.environ["CURRENT_PIP_TOOLS"],
+                  },
+                  "candidate": {
+                      "pip": os.environ["CANDIDATE_PIP"],
+                      "pip-tools": os.environ["CANDIDATE_PIP_TOOLS"],
+                  },
+              },
+              "constraints": {
+                  "committed": constraint_evidence("COMMITTED_CONSTRAINT"),
+                  "candidate": constraint_evidence("CANDIDATE_CONSTRAINT"),
+                  "selfhost": constraint_evidence("SELFHOST_CONSTRAINT"),
+              },
+              "receipts": receipts,
+          }
+          output_path = Path(os.environ["ARTIFACT_DIR"]) / "manifest.json"
+          output_path.write_text(
+              json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload dependency lock evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dependency-lock-${{ matrix.platform }}-py${{ matrix.python-version }}
-          path: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
-          if-no-files-found: error
+          name: dependency-lock-${{ matrix.platform }}-py${{ matrix.python_version }}
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: warn
           retention-days: 7
           archive: true
 
-      - name: Compare committed constraints
+      - name: Enforce self-hosting and committed repeatability
         shell: bash
-        env:
-          GENERATED_CONSTRAINT: ${{ env.GENERATED_DIR }}/${{ matrix.constraint }}
-          COMMITTED_CONSTRAINT: ${{ env.COMMITTED_DIR }}/${{ matrix.constraint }}
         run: |
-          if [[ ! -f "$COMMITTED_CONSTRAINT" ]]; then
-            echo "Missing committed constraint: $COMMITTED_CONSTRAINT" >&2
-            echo "Download the dependency-lock-${{ matrix.platform }} artifact and commit it at that path." >&2
-            exit 1
+          status=0
+
+          if ! git diff --no-index --exit-code -- \
+            "$CANDIDATE_CONSTRAINT" "$SELFHOST_CONSTRAINT"; then
+            echo "Candidate generator did not reproduce its own native constraint." >&2
+            status=1
           fi
-          git diff --no-index --exit-code -- "$COMMITTED_CONSTRAINT" "$GENERATED_CONSTRAINT"
+
+          if ! git diff --no-index --exit-code -- \
+            "$RECEIPT_DIR/fresh-1.json" "$RECEIPT_DIR/fresh-2.json"; then
+            echo "Two clean native installs produced different normalized receipts." >&2
+            status=1
+          fi
+
+          if ! git diff --no-index --exit-code -- \
+            "$COMMITTED_CONSTRAINT" "$CANDIDATE_CONSTRAINT"; then
+            echo "Committed native constraint is stale; review the uploaded candidate artifact." >&2
+            status=1
+          fi
+
+          exit "$status"

@@ -8,17 +8,52 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      PIP_CONFIG_FILE: /dev/null
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.13'
+          architecture: x64
 
-      - name: Install test dependencies
-        run: pip install -r requirements.txt
+      - name: Install and verify test dependencies
+        run: |
+          venv_dir="$RUNNER_TEMP/gm2godot-tests-linux-venv"
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python -m venv "$venv_dir"
+          venv_bin="$venv_dir/bin"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
+          printf '%s\n' "$venv_bin" >> "$GITHUB_PATH"
+          export VIRTUAL_ENV="$venv_dir"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-linux-py312.txt \
+            pip==26.1.2
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-linux-py312.txt \
+            -r requirements.txt
+          python scripts/verify_dependency_environment.py \
+            --constraint constraints/requirements-linux-py312.txt \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --expected-python 3.12.13 \
+            --expected-platform linux \
+            --expected-machine x86_64 \
+            --expected-pip 26.1.2 \
+            --output "$RUNNER_TEMP/tests-linux-dependencies.json"
 
       - name: Install Qt system dependencies
         run: |
@@ -29,18 +64,58 @@ jobs:
         run: python -m unittest discover tests/ -v
 
   windows-artifact-transactions:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
+    env:
+      PIP_CONFIG_FILE: nul
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.10'
+          architecture: x64
 
-      - name: Install test dependencies
-        run: pip install -r requirements.txt
+      - name: Install and verify test dependencies
+        shell: bash
+        run: |
+          venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-tests-windows-venv"
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python -m venv "$venv_dir"
+          venv_bin="$venv_dir/Scripts"
+          venv_native="$(cygpath -w "$venv_dir")"
+          venv_path_native="$(cygpath -w "$venv_bin")"
+          github_env_file="$(cygpath -u "$GITHUB_ENV")"
+          github_path_file="$(cygpath -u "$GITHUB_PATH")"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
+          printf '%s\n' "$venv_path_native" >> "$github_path_file"
+          export VIRTUAL_ENV="$venv_native"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            pip==26.1.2
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            -r requirements.txt
+          python scripts/verify_dependency_environment.py \
+            --constraint constraints/requirements-windows-py312.txt \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --expected-python 3.12.10 \
+            --expected-platform win32 \
+            --expected-machine AMD64 \
+            --expected-pip 26.1.2 \
+            --output "$RUNNER_TEMP/tests-windows-dependencies.json"
 
       - name: Run Windows outcome and artifact transaction tests
         run: >-

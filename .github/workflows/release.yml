@@ -754,32 +754,99 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2025
             name: windows
             ext: .exe
             pyinstaller_mode: --onefile
-          - os: macos-latest
+            python_version: '3.12.10'
+            python_architecture: x64
+            constraint: constraints/requirements-windows-py312.txt
+            pip_config_file: nul
+            expected_platform: win32
+            expected_machine: AMD64
+          - os: macos-26
             name: macos
             ext: ""
             pyinstaller_mode: --onedir
-          - os: ubuntu-latest
+            python_version: '3.12.10'
+            python_architecture: arm64
+            constraint: constraints/requirements-macos-py312.txt
+            pip_config_file: /dev/null
+            expected_platform: darwin
+            expected_machine: arm64
+          - os: ubuntu-24.04
             name: linux
             ext: ""
             pyinstaller_mode: --onefile
+            python_version: '3.12.13'
+            python_architecture: x64
+            constraint: constraints/requirements-linux-py312.txt
+            pip_config_file: /dev/null
+            expected_platform: linux
+            expected_machine: x86_64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
+    env:
+      PIP_CONFIG_FILE: ${{ matrix.pip_config_file }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python_version }}
+          architecture: ${{ matrix.python_architecture }}
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt pyinstaller
+      - name: Install and verify dependencies
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-release-${{ matrix.name }}-venv"
+            venv_bin="$venv_dir/Scripts"
+            venv_native="$(cygpath -w "$venv_dir")"
+            venv_path_native="$(cygpath -w "$venv_bin")"
+            github_env_file="$(cygpath -u "$GITHUB_ENV")"
+            github_path_file="$(cygpath -u "$GITHUB_PATH")"
+          else
+            venv_dir="$RUNNER_TEMP/gm2godot-release-${{ matrix.name }}-venv"
+            venv_bin="$venv_dir/bin"
+            venv_native="$venv_dir"
+            venv_path_native="$venv_bin"
+            github_env_file="$GITHUB_ENV"
+            github_path_file="$GITHUB_PATH"
+          fi
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python -m venv "$venv_dir"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
+          printf '%s\n' "$venv_path_native" >> "$github_path_file"
+          export VIRTUAL_ENV="$venv_native"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint "${{ matrix.constraint }}" \
+            pip==26.1.2
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint "${{ matrix.constraint }}" \
+            -r requirements.txt PyInstaller==6.21.0
+          python scripts/verify_dependency_environment.py \
+            --constraint "${{ matrix.constraint }}" \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --require PyInstaller \
+            --expected-python "${{ matrix.python_version }}" \
+            --expected-platform "${{ matrix.expected_platform }}" \
+            --expected-machine "${{ matrix.expected_machine }}" \
+            --expected-pip 26.1.2 \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
 
       - name: Build executable
         run: |
@@ -788,7 +855,7 @@ jobs:
           else
             SEP=":"
           fi
-          pyinstaller ${{ matrix.pyinstaller_mode }} \
+          python -m PyInstaller ${{ matrix.pyinstaller_mode }} \
             --windowed \
             --clean \
             --name GM2Godot \

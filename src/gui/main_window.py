@@ -47,7 +47,7 @@ class UpdateCheckWorker(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, *, check_for_updates_on_startup: bool = True) -> None:
         super().__init__()
         self.setWindowTitle(get_localized("Menu_Title").format(version=get_version()))
         self.resize(800, 600)
@@ -69,7 +69,8 @@ class MainWindow(QMainWindow):
         self._release_notes = ReleaseNotesDialog(self)
         self._init_ui()
         self._create_menu()
-        self._check_for_updates_on_startup()
+        if check_for_updates_on_startup:
+            self._check_for_updates_on_startup()
 
         # Timer
         self._timer = QTimer(self)

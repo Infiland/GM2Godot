@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.21 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.22 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -47,7 +47,7 @@ Three separate platform questions are easy to confuse:
 
 | Question | Current contract |
 | --- | --- |
-| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. This is the **conversion host**. |
+| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
 | **What does `--target-platform` select?** | The CLI accepts `windows`, `macos`, or `linux`. This is a **GameMaker source/configuration filter** used for target-specific project options, conditional GML and macros, and capability-report context. It does not filter the project's resource inventory. It defaults from the conversion host. |
 | **Where can the generated game be exported?** | The generated project targets Godot 4.7.1, but GM2Godot does not certify a complete export for a platform. Godot export templates and presets, signing, permissions, SDKs, native extensions, store services, and target-device tests remain separate work. |
 
@@ -59,6 +59,8 @@ Selecting `--target-platform windows`, for example, does **not** create or valid
 - The output and automated smoke-test target is the official **[Godot 4.7.1](https://godotengine.org/article/maintenance-release-godot-4-7-1/)** build at commit `a13da4feb`. Other Godot versions may parse the project, but they are not the compatibility target for this release.
 - GM2Godot expects an editable GameMaker project with a `.yyp` and its `.yy`, GML, and asset files. Compiled executables are not supported input.
 - A generated project is a migration starting point. Keep the original GameMaker project, convert into a separate destination, and compare behavior before replacing any production workflow.
+
+The packaged Linux GUI intentionally excludes Qt's optional TIFF image-format plugin because the pinned Qt wheel requests the obsolete `libtiff.so.5` ABI, while Ubuntu 24.04 provides ABI-major 6. GM2Godot's interface loads its committed PNG assets and does not use that Qt plugin; GameMaker sprite and icon conversion continues through Pillow and is unaffected. Ubuntu's `libegl1` and `libgl1` packages remain required because the pinned QtGui library links directly to EGL and GL. The release build fails if the TIFF exclusion drifts or any required Qt GUI/XCB library remains unresolved.
 
 ## Known limitation areas
 

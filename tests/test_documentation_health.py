@@ -171,6 +171,38 @@ class TestDocumentationHealth(unittest.TestCase):
             "sha256sum --check --strict SHA256SUMS",
             installation,
         )
+        macos_source = installation.partition("### macOS\n")[2].partition(
+            "### Linux\n"
+        )[0]
+        linux_source = installation.partition("### Linux\n")[2].partition(
+            "## Verify the source installation\n"
+        )[0]
+        self.assertNotIn("packaging/linux/qt-xcb-runtime-packages.txt", macos_source)
+        self.assertIn("packaging/linux/qt-xcb-runtime-packages.txt", linux_source)
+        self.assertIn("sudo apt-get install", linux_source)
+        linux_release_readme = readme.partition(
+            "The packaged Linux artifact is validated"
+        )[2].partition("## Installation")[0]
+        linux_release_installation = installation.partition(
+            "Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline"
+        )[2].partition("### Verify a release download")[0]
+        runtime_packages = tuple(
+            line.strip()
+            for line in (
+                PROJECT_ROOT
+                / "packaging"
+                / "linux"
+                / "qt-xcb-runtime-packages.txt"
+            )
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        for runtime_package in runtime_packages:
+            with self.subTest(runtime_package=runtime_package):
+                self.assertIn(runtime_package, linux_release_readme)
+                self.assertIn(runtime_package, linux_release_installation)
+        self.assertIn("only validated packaged-Linux baseline", installation)
         self.assertIn("not a signature or proof of publisher identity", installation)
         self.assertIn("exactly five unique, non-empty assets", release_maintenance)
         self.assertIn(

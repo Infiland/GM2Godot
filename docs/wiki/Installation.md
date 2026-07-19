@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.21 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.22 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -16,7 +16,19 @@ Download the asset for your operating system from [GitHub Releases](https://gith
 | --- | --- | --- |
 | Windows | `GM2Godot-windows.zip` | Extract the archive, then run `GM2Godot.exe`. |
 | macOS | `GM2Godot-macos.dmg` or `GM2Godot-macos.zip` | Open the DMG and copy `GM2Godot.app` to Applications, or extract the ZIP and launch the app. |
-| Linux | `GM2Godot-linux.zip` | Extract the archive and run `./GM2Godot`. If the executable bit was lost during download or extraction, run `chmod +x GM2Godot` once. |
+| Linux | `GM2Godot-linux.zip` | On the validated Ubuntu 24.04 x86_64 baseline, extract the archive and run `./GM2Godot`. If the executable bit was lost during download or extraction, run `chmod +x GM2Godot` once. |
+
+Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. PyInstaller does not bundle glibc, so glibc 2.39 is necessary; it is not by itself a portability guarantee for other distributions, which remain unverified and must also provide compatible system, OpenGL/EGL, and X11 libraries. The reviewed package manifest installs Ubuntu's `libegl1` and `libgl1` providers required by QtGui together with the XCB client libraries. The build rejects unresolved shared-library warnings and launches the executable extracted from the final ZIP through Qt's real `qxcb` platform under Xvfb before upload. A normal graphical X11 session, or XWayland when using a Wayland desktop, is still required at runtime.
+
+On a minimal installation of that baseline, install the reviewed host libraries before launching the downloaded executable:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends \
+  libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+  libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 \
+  libxcb-util1 libxcb-xkb1
+```
 
 ### Verify a release download
 
@@ -34,7 +46,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.21`.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.22`.
 
 ## Run from source
 
@@ -91,6 +103,12 @@ python main.py
 ```bash
 git clone https://github.com/Infiland/GM2Godot.git
 cd GM2Godot
+mapfile -t qt_packages < <(
+  sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' \
+    packaging/linux/qt-xcb-runtime-packages.txt
+)
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends "${qt_packages[@]}"
 python3.12 -m venv venv
 source venv/bin/activate
 python --version  # Python 3.12.13
@@ -115,6 +133,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.21`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.7.22`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

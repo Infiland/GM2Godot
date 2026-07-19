@@ -4466,29 +4466,17 @@ class TestCIWorkflows(unittest.TestCase):
             "packaging/macos/GM2Godot.spec\n",
             release_build,
         )
-        self.assertEqual(
-            non_macos_build,
-            "if [ \"$RUNNER_OS\" = \"Windows\" ]; then\n"
-            '  SEP=";"\n'
-            "else\n"
-            '  SEP=":"\n'
-            "fi\n"
-            "python -m PyInstaller ${{ matrix.pyinstaller_mode }} \\\n"
-            "  --windowed \\\n"
-            "  --clean \\\n"
-            "  --name GM2Godot \\\n"
-            "  --icon img/Logo.png \\\n"
-            "  --hidden-import markdown2 \\\n"
-            "  --hidden-import PIL \\\n"
-            "  --hidden-import PySide6.QtWidgets \\\n"
-            "  --hidden-import PySide6.QtCore \\\n"
-            "  --hidden-import PySide6.QtGui \\\n"
-            '  --add-data "img${SEP}img" \\\n'
-            '  --add-data "src${SEP}src" \\\n'
-            '  --add-data "Languages${SEP}Languages" \\\n'
-            '  --add-data "Current Language${SEP}." \\\n'
-            "  main.py\n",
-        )
+        for required in (
+            "additional_hooks=()",
+            'if [ "$RUNNER_OS" = "Windows" ]; then',
+            "additional_hooks=(--additional-hooks-dir packaging/linux/hooks)",
+            "python -m PyInstaller ${{ matrix.pyinstaller_mode }}",
+            '"${additional_hooks[@]}"',
+            '--add-data "Current Language${SEP}."',
+            'main.py 2>&1 | tee "$pyinstaller_log"',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, non_macos_build)
 
         self.assertIn(
             "      - name: Verify macOS bundle metadata\n"
@@ -4518,6 +4506,182 @@ class TestCIWorkflows(unittest.TestCase):
             release_build.index("      - name: Verify macOS bundle metadata\n"),
             release_build.index("      - name: Upload macOS artifacts\n"),
         )
+
+    def test_linux_release_build_proves_packaged_xcb_gui(self) -> None:
+        release = (
+            PROJECT_ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        release_build = _workflow_job_section(release, "build")
+        dependency_install = _workflow_run_script(
+            release,
+            "Install Linux GUI build and smoke dependencies",
+        )
+        build_script = _workflow_run_script(release, "Build executable")
+        archive_check = _workflow_run_script(
+            release,
+            "Verify Linux bundled Qt runtime",
+        )
+        packaged_smoke = _workflow_run_script(
+            release,
+            "Verify packaged Linux GUI",
+        )
+
+        package_manifest = (
+            PROJECT_ROOT
+            / "packaging"
+            / "linux"
+            / "qt-xcb-runtime-packages.txt"
+        )
+        packages = tuple(
+            line.strip()
+            for line in package_manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        self.assertEqual(
+            packages,
+            (
+                "libegl1",
+                "libgl1",
+                "libxkbcommon-x11-0",
+                "libxcb-cursor0",
+                "libxcb-icccm4",
+                "libxcb-image0",
+                "libxcb-keysyms1",
+                "libxcb-render-util0",
+                "libxcb-shape0",
+                "libxcb-util1",
+                "libxcb-xkb1",
+            ),
+        )
+        self.assertEqual(len(packages), len(set(packages)))
+
+        for step_name in (
+            "Install Linux GUI build and smoke dependencies",
+            "Verify Linux bundled Qt runtime",
+            "Verify packaged Linux GUI",
+        ):
+            with self.subTest(step_guard=step_name):
+                self.assertIn(
+                    f"      - name: {step_name}\n"
+                    "        if: matrix.name == 'linux'\n",
+                    release_build,
+                )
+        for required in (
+            'package_manifest="packaging/linux/qt-xcb-runtime-packages.txt"',
+            'if [ "${#qt_packages[@]}" -ne 11 ]; then',
+            "sudo apt-get update",
+            "sudo apt-get install --yes --no-install-recommends",
+            '"${qt_packages[@]}"',
+            "xvfb",
+        ):
+            with self.subTest(script="dependency install", required=required):
+                self.assertIn(required, dependency_install)
+
+        for required in (
+            "additional_hooks=(--additional-hooks-dir packaging/linux/hooks)",
+            '2>&1 | tee "$pyinstaller_log"',
+            "warning_status=0",
+            'grep -Fq "WARNING: Library not found:" "$pyinstaller_log" '
+            "|| warning_status=$?",
+            'if [ "$warning_status" -eq 0 ]; then',
+            'if [ "$warning_status" -ne 1 ]; then',
+            "Unable to inspect the Linux PyInstaller warning log.",
+        ):
+            with self.subTest(script="PyInstaller", required=required):
+                self.assertIn(required, build_script)
+
+        bundled_members = (
+            "PySide6/Qt/plugins/platforms/libqxcb.so",
+            "libxkbcommon-x11.so.0",
+            "libxcb-cursor.so.0",
+            "libxcb-icccm.so.4",
+            "libxcb-image.so.0",
+            "libxcb-keysyms.so.1",
+            "libxcb-render-util.so.0",
+            "libxcb-shape.so.0",
+            "libxcb-util.so.1",
+            "libxcb-xkb.so.1",
+        )
+        self.assertIn(
+            "pyi-archive_viewer --list --recursive --brief dist/GM2Godot",
+            archive_check,
+        )
+        self.assertIn(
+            "sed -n -e 's/^ //p' \"$inventory\" > "
+            '"$normalized_inventory"',
+            archive_check,
+        )
+        for member in bundled_members:
+            with self.subTest(archive_member=member):
+                self.assertIn(member, archive_check)
+        self.assertIn(
+            "PySide6/Qt/plugins/imageformats/libqtiff.so",
+            archive_check,
+        )
+        for required in (
+            'grep -Fxq -- "$required" "$normalized_inventory" || member_status=$?',
+            'if [ "$member_status" -eq 1 ]; then',
+            'if [ "$member_status" -ne 0 ]; then',
+            "missing required Qt/XCB member",
+            'grep -Fxq -- "PySide6/Qt/plugins/imageformats/libqtiff.so"',
+            'if [ "$tiff_status" -eq 0 ]; then',
+            'if [ "$tiff_status" -ne 1 ]; then',
+            "unsupported Qt TIFF plugin remained",
+            "exit 1",
+        ):
+            with self.subTest(archive_policy=required):
+                self.assertIn(required, archive_check)
+        self.assertNotIn("grep -Fq", archive_check)
+
+        linux_verifier = (
+            PROJECT_ROOT / "scripts" / "verify_linux_gui_artifact.py"
+        )
+        self.assertTrue(linux_verifier.is_file())
+        verifier_source = linux_verifier.read_text(encoding="utf-8")
+        for required in (
+            'Path("/usr/bin/xvfb-run")',
+            '"--error-file=/dev/stderr"',
+            '"QT_QPA_PLATFORM": "xcb"',
+            '"QT_DEBUG_PLUGINS": "1"',
+            "member.compress_type != zipfile.ZIP_DEFLATED",
+            "start_new_session=True",
+            "GM2Godot packaged GUI ready\\n",
+        ):
+            with self.subTest(verifier_policy=required):
+                self.assertIn(required, verifier_source)
+        self.assertEqual(
+            packaged_smoke,
+            "python -I scripts/verify_linux_gui_artifact.py \\\n"
+            '  --archive "$GITHUB_WORKSPACE/GM2Godot-linux.zip"\n',
+        )
+        self.assertNotIn("main.py", packaged_smoke)
+        self.assertNotIn("dist/GM2Godot", packaged_smoke)
+        self.assertNotIn("sleep ", packaged_smoke)
+
+        for earlier, later in (
+            (
+                "      - name: Install Linux GUI build and smoke dependencies\n",
+                "      - name: Build executable\n",
+            ),
+            (
+                "      - name: Build executable\n",
+                "      - name: Verify Linux bundled Qt runtime\n",
+            ),
+            (
+                "      - name: Verify Linux bundled Qt runtime\n",
+                "      - name: Package build\n",
+            ),
+            (
+                "      - name: Zip release\n",
+                "      - name: Verify packaged Linux GUI\n",
+            ),
+            (
+                "      - name: Verify packaged Linux GUI\n",
+                "      - name: Upload artifact\n",
+            ),
+        ):
+            with self.subTest(earlier=earlier.strip(), later=later.strip()):
+                self.assertLess(release_build.index(earlier), release_build.index(later))
 
     def test_windows_build_cleanup_guard_deletes_only_original_owned_directory(
         self,
@@ -4593,12 +4757,12 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn("python -m unittest discover tests/ -v", linux_job)
         self.assertIn(
-            "sudo apt-get install --yes --no-install-recommends libegl1",
+            "sudo apt-get install --yes --no-install-recommends libegl1 libgl1",
             linux_job,
         )
         self.assertLess(
             linux_job.index(
-                "sudo apt-get install --yes --no-install-recommends libegl1"
+                "sudo apt-get install --yes --no-install-recommends libegl1 libgl1"
             ),
             linux_job.index("python -m unittest discover tests/ -v"),
         )

@@ -12,7 +12,7 @@ import stat
 import sys
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
@@ -83,13 +83,20 @@ _INCLUDED_FILES_JOURNAL_TEMP_PREFIX = ".gm2godot-included-files-journal."
 _INCLUDED_FILES_COMMIT_TEMP_PREFIX = ".gm2godot-included-files-commit."
 _INCLUDED_FILES_STAGE_MARKER_NAME = ".gm2godot-included-files-stage.json"
 _INCLUDED_FILES_CLEANUP_PREFIX = ".gm2godot-included-cleanup."
-_INCLUDED_FILES_RECOVERY_FORMAT_VERSION = 1
+_INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION = 1
+_INCLUDED_FILES_RECOVERY_FORMAT_VERSION = 2
+_INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION = 1
 _INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER = 2
-# Recovery records duplicate tree metadata and registry generations. A
-# representative committed record is about 2 KiB per Included File, so 16 MiB
-# accommodates roughly 8,000 files while keeping adversarial JSON object
-# amplification within a defensible desktop-process memory ceiling.
+# The canonical cap is a parser-memory safety boundary, not a scaling knob.
+# Format v2 removes repeated field names and uses fixed-width integer metadata
+# so its exact serialized size can be preflighted before payload staging.
 _INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES = 16 * 1024 * 1024
+_INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES = 100_000
+_INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS = 16
+_INCLUDED_FILES_RECOVERY_INTEGER_MAX = (
+    1 << (_INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS * 4)
+) - 1
+_INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256 = "0" * 64
 _INCLUDED_FILES_LOCK_CONTENT = b"GM2Godot Included Files lock v1\n"
 _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
     {
@@ -243,6 +250,12 @@ class _IncludedRegistrySnapshot:
 
 
 @dataclass(frozen=True)
+class _IncludedRecoveryRecordSizes:
+    journal_bytes: int
+    commit_bytes: int
+
+
+@dataclass(frozen=True)
 class _IncludedOutputSetTransaction:
     project_identity: _PathIdentity
     stage_container_path: str
@@ -256,10 +269,16 @@ class _IncludedOutputSetTransaction:
     staged_registry_content: bytes
     previous_root_snapshot: _IncludedTreeSnapshot
     previous_registry_snapshot: _IncludedRegistrySnapshot
+    recovery_record_sizes: _IncludedRecoveryRecordSizes | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True)
 class _IncludedRecoveryJournal:
+    format_version: int
     transaction_id: str
     transaction: _IncludedOutputSetTransaction
     root_backup_path: str
@@ -271,6 +290,7 @@ class _IncludedRecoveryJournal:
 
 @dataclass(frozen=True)
 class _IncludedCommitMarker:
+    format_version: int
     transaction_id: str
     project_identity: _PathIdentity
     root_identity: _PathIdentity
@@ -2340,7 +2360,7 @@ def _write_included_stage_marker(
     marker_path = os.path.join(stage_path, _INCLUDED_FILES_STAGE_MARKER_NAME)
     content = _included_recovery_record_content(
         {
-            "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            "format_version": _INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION,
             "state": "staging",
             "project_identity": _included_identity_payload(project_identity),
             "stage_identity": _included_identity_payload(stage_identity),
@@ -4207,7 +4227,51 @@ def _included_identity_payload(identity: _PathIdentity | None) -> list[int] | No
     return None if identity is None else [identity[0], identity[1]]
 
 
+def _included_recovery_compact_integer_payload(
+    value: int,
+    label: str,
+) -> str:
+    if (
+        type(value) is not int
+        or value < 0
+        or value > _INCLUDED_FILES_RECOVERY_INTEGER_MAX
+    ):
+        raise OSError(f"Included Files recovery {label} is outside uint64")
+    return f"{value:0{_INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS}x}"
+
+
+def _included_compact_identity_payload(
+    identity: _PathIdentity | None,
+) -> list[str] | None:
+    if identity is None:
+        return None
+    return [
+        _included_recovery_compact_integer_payload(
+            identity[0],
+            "identity device",
+        ),
+        _included_recovery_compact_integer_payload(
+            identity[1],
+            "identity inode",
+        ),
+    ]
+
+
+def _included_compact_fingerprint_payload(
+    fingerprint: _PathFingerprint,
+) -> list[str]:
+    return [
+        _included_recovery_compact_integer_payload(
+            component,
+            "fingerprint component",
+        )
+        for component in fingerprint
+    ]
+
+
 def _included_tree_snapshot_payload(snapshot: _IncludedTreeSnapshot) -> dict[str, Any]:
+    """Serialize the legacy format-v1 tree representation."""
+
     return {
         "root_fingerprint": (
             None
@@ -4227,9 +4291,46 @@ def _included_tree_snapshot_payload(snapshot: _IncludedTreeSnapshot) -> dict[str
     }
 
 
+def _included_compact_tree_snapshot_payload(
+    snapshot: _IncludedTreeSnapshot,
+) -> list[Any]:
+    """Serialize a format-v2 tree without per-entry field-name repetition."""
+
+    if len(snapshot.entries) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
+        raise OSError("Included Files recovery tree has too many entries")
+    return [
+        (
+            None
+            if snapshot.root_fingerprint is None
+            else _included_compact_fingerprint_payload(
+                snapshot.root_fingerprint
+            )
+        ),
+        [
+            [
+                entry.relative_path,
+                "f" if entry.kind == "file" else "d",
+                _included_compact_fingerprint_payload(entry.fingerprint),
+                (
+                    None
+                    if entry.ctime_ns is None
+                    else _included_recovery_compact_integer_payload(
+                        entry.ctime_ns,
+                        "entry ctime",
+                    )
+                ),
+                entry.content_sha256,
+            ]
+            for entry in snapshot.entries
+        ],
+    ]
+
+
 def _included_registry_snapshot_payload(
     snapshot: _IncludedRegistrySnapshot,
 ) -> dict[str, Any]:
+    """Serialize the legacy format-v1 registry representation."""
+
     return {
         "directory_identity": _included_identity_payload(
             snapshot.directory_identity
@@ -4244,9 +4345,31 @@ def _included_registry_snapshot_payload(
     }
 
 
-def _included_recovery_journal_payload(
+def _included_compact_registry_snapshot_payload(
+    snapshot: _IncludedRegistrySnapshot,
+) -> list[Any]:
+    return [
+        _included_compact_identity_payload(snapshot.directory_identity),
+        _included_compact_identity_payload(snapshot.file_identity),
+        (
+            None
+            if snapshot.file_mode is None
+            else _included_recovery_compact_integer_payload(
+                snapshot.file_mode,
+                "registry mode",
+            )
+        ),
+        (
+            None
+            if snapshot.content is None
+            else base64.b64encode(snapshot.content).decode("ascii")
+        ),
+    ]
+
+
+def _included_registry_backup_location(
     journal: _IncludedRecoveryJournal,
-) -> dict[str, Any]:
+) -> str:
     transaction = journal.transaction
     project_path = os.path.dirname(transaction.stage_container_path)
     registry_directory = os.path.dirname(_included_registry_path(project_path))
@@ -4261,8 +4384,16 @@ def _included_recovery_journal_payload(
         registry_backup_location = "registry"
     else:
         raise OSError("Included File registry backup escaped its managed parents")
+    return registry_backup_location
+
+
+def _included_recovery_journal_payload_v1(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    transaction = journal.transaction
+    registry_backup_location = _included_registry_backup_location(journal)
     return {
-        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "format_version": _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
         "state": "prepared",
         "transaction_id": journal.transaction_id,
         "project_identity": _included_identity_payload(transaction.project_identity),
@@ -4299,10 +4430,82 @@ def _included_recovery_journal_payload(
     }
 
 
-def _included_tree_snapshot_sha256(snapshot: _IncludedTreeSnapshot) -> str:
+def _included_recovery_journal_payload_v2(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    transaction = journal.transaction
+    registry_backup_location = _included_registry_backup_location(journal)
+    return {
+        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "state": "prepared",
+        "transaction_id": journal.transaction_id,
+        "project_identity": _included_compact_identity_payload(
+            transaction.project_identity
+        ),
+        "stage_container_name": os.path.basename(
+            transaction.stage_container_path
+        ),
+        "stage_container_identity": _included_compact_identity_payload(
+            transaction.stage_container_identity
+        ),
+        "staged_container_snapshot": _included_compact_tree_snapshot_payload(
+            transaction.staged_container_snapshot
+        ),
+        "staged_root_snapshot": _included_compact_tree_snapshot_payload(
+            transaction.staged_root_snapshot
+        ),
+        "staged_registry_identity": _included_compact_identity_payload(
+            transaction.staged_registry_identity
+        ),
+        "staged_registry_mode": _included_recovery_compact_integer_payload(
+            transaction.staged_registry_mode,
+            "staged registry mode",
+        ),
+        "staged_registry_content_base64": base64.b64encode(
+            transaction.staged_registry_content
+        ).decode("ascii"),
+        "previous_root_snapshot": _included_compact_tree_snapshot_payload(
+            transaction.previous_root_snapshot
+        ),
+        "previous_registry_snapshot": _included_compact_registry_snapshot_payload(
+            transaction.previous_registry_snapshot
+        ),
+        "root_backup_name": os.path.basename(journal.root_backup_path),
+        "registry_backup_name": os.path.basename(journal.registry_backup_path),
+        "registry_backup_location": registry_backup_location,
+        "registry_directory_identity": _included_compact_identity_payload(
+            journal.registry_directory_identity
+        ),
+        "registry_directory_created": journal.registry_directory_created,
+    }
+
+
+def _included_recovery_journal_payload(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    if journal.format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        return _included_recovery_journal_payload_v1(journal)
+    if journal.format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        return _included_recovery_journal_payload_v2(journal)
+    raise OSError("Unsupported Included Files recovery journal format")
+
+
+def _included_tree_snapshot_sha256(
+    snapshot: _IncludedTreeSnapshot,
+    format_version: int,
+) -> str:
+    if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        payload: Any = _included_tree_snapshot_payload(snapshot)
+        compact = False
+    elif format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        payload = _included_compact_tree_snapshot_payload(snapshot)
+        compact = True
+    else:
+        raise OSError("Unsupported Included Files recovery tree digest format")
     return hashlib.sha256(
-        _included_recovery_record_content(
-            {"tree_snapshot": _included_tree_snapshot_payload(snapshot)}
+        _included_serialized_json_content(
+            {"tree_snapshot": payload},
+            compact=compact,
         )
     ).hexdigest()
 
@@ -4315,11 +4518,13 @@ def _included_commit_marker_from_journal(
     if root_identity is None:
         raise AssertionError("A committed Included Files root must be present")
     return _IncludedCommitMarker(
+        format_version=journal.format_version,
         transaction_id=journal.transaction_id,
         project_identity=transaction.project_identity,
         root_identity=root_identity,
         root_snapshot_sha256=_included_tree_snapshot_sha256(
-            transaction.staged_root_snapshot
+            transaction.staged_root_snapshot,
+            journal.format_version,
         ),
         registry_directory_identity=journal.registry_directory_identity,
         registry_identity=transaction.staged_registry_identity,
@@ -4329,13 +4534,19 @@ def _included_commit_marker_from_journal(
     )
 
 
-def _included_commit_marker_payload(
+def _included_commit_marker_payload_v1(
     journal: _IncludedRecoveryJournal,
 ) -> dict[str, Any]:
-    marker = _included_commit_marker_from_journal(journal)
-    journal_payload = _included_recovery_journal_payload(journal)
+    versioned_journal = replace(
+        journal,
+        format_version=_INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+    )
+    marker = _included_commit_marker_from_journal(versioned_journal)
+    journal_payload = _included_recovery_journal_payload_v1(
+        versioned_journal
+    )
     return {
-        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "format_version": _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
         "state": "committed",
         "transaction_id": marker.transaction_id,
         "project_identity": _included_identity_payload(marker.project_identity),
@@ -4351,6 +4562,349 @@ def _included_commit_marker_payload(
             _included_recovery_record_content(journal_payload)
         ).hexdigest(),
     }
+
+
+def _included_commit_marker_payload_v2(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    versioned_journal = replace(
+        journal,
+        format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+    )
+    marker = _included_commit_marker_from_journal(versioned_journal)
+    journal_payload = _included_recovery_journal_payload_v2(
+        versioned_journal
+    )
+    return {
+        "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        "state": "committed",
+        "transaction_id": marker.transaction_id,
+        "project_identity": _included_compact_identity_payload(
+            marker.project_identity
+        ),
+        "root_identity": _included_compact_identity_payload(
+            marker.root_identity
+        ),
+        "root_snapshot_sha256": marker.root_snapshot_sha256,
+        "registry_directory_identity": _included_compact_identity_payload(
+            marker.registry_directory_identity
+        ),
+        "registry_identity": _included_compact_identity_payload(
+            marker.registry_identity
+        ),
+        "registry_content_sha256": marker.registry_content_sha256,
+        "recovery_journal": journal_payload,
+        "recovery_journal_sha256": hashlib.sha256(
+            _included_recovery_record_content(journal_payload)
+        ).hexdigest(),
+    }
+
+
+def _included_commit_marker_payload(
+    journal: _IncludedRecoveryJournal,
+) -> dict[str, Any]:
+    if journal.format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        return _included_commit_marker_payload_v1(journal)
+    if journal.format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        return _included_commit_marker_payload_v2(journal)
+    raise OSError("Unsupported Included Files recovery commit format")
+
+
+def _included_recovery_record_sizes(
+    journal: _IncludedRecoveryJournal,
+) -> _IncludedRecoveryRecordSizes:
+    journal_content = _included_recovery_record_content(
+        _included_recovery_journal_payload(journal)
+    )
+    commit_content = _included_recovery_record_content(
+        _included_commit_marker_payload(journal)
+    )
+    return _IncludedRecoveryRecordSizes(
+        journal_bytes=len(journal_content),
+        commit_bytes=len(commit_content),
+    )
+
+
+def _included_preflight_placeholder_snapshots(
+    project_identity: _PathIdentity,
+    assigned_byte_counts: dict[str, int],
+    staged_registry_content: bytes,
+) -> tuple[
+    _PathIdentity,
+    _IncludedTreeSnapshot,
+    _IncludedTreeSnapshot,
+    _PathIdentity,
+    int,
+]:
+    if len(assigned_byte_counts) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
+        raise OSError("Included Files recovery tree has too many entries")
+    device = project_identity[0]
+    used_inodes = {project_identity[1]}
+    next_inode = _INCLUDED_FILES_RECOVERY_INTEGER_MAX
+
+    def allocate_identity() -> _PathIdentity:
+        nonlocal next_inode
+        while next_inode in used_inodes:
+            next_inode -= 1
+        if next_inode < 0:
+            raise OSError("Could not allocate Included Files preflight identity")
+        identity = (device, next_inode)
+        used_inodes.add(next_inode)
+        next_inode -= 1
+        return identity
+
+    def fingerprint(
+        identity: _PathIdentity,
+        mode: int,
+        size: int,
+    ) -> _PathFingerprint:
+        return (identity[0], identity[1], mode, size, 0, 1)
+
+    assigned_paths = sorted(assigned_byte_counts)
+    directory_paths = sorted(
+        {
+            "/".join(path.split("/")[:component_count])
+            for path in assigned_paths
+            for component_count in range(1, len(path.split("/")))
+        }
+    )
+    if len(assigned_paths) + len(directory_paths) > (
+        _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES
+    ):
+        raise OSError("Included Files recovery tree has too many entries")
+    for relative_path in (*directory_paths, *assigned_paths):
+        _included_recovery_relative_path(relative_path)
+
+    staged_root_identity = allocate_identity()
+    staged_root_fingerprint = fingerprint(
+        staged_root_identity,
+        stat.S_IFDIR | 0o755,
+        0,
+    )
+    entry_kinds = {
+        **{path: "directory" for path in directory_paths},
+        **{path: "file" for path in assigned_paths},
+    }
+    staged_root_entries: list[_IncludedTreeEntry] = []
+    for relative_path in sorted(entry_kinds):
+        kind = entry_kinds[relative_path]
+        identity = allocate_identity()
+        if kind == "directory":
+            staged_root_entries.append(
+                _IncludedTreeEntry(
+                    relative_path=relative_path,
+                    kind=kind,
+                    fingerprint=fingerprint(
+                        identity,
+                        stat.S_IFDIR | 0o755,
+                        0,
+                    ),
+                    ctime_ns=None,
+                    content_sha256=None,
+                )
+            )
+        else:
+            byte_count = assigned_byte_counts[relative_path]
+            staged_root_entries.append(
+                _IncludedTreeEntry(
+                    relative_path=relative_path,
+                    kind=kind,
+                    fingerprint=fingerprint(
+                        identity,
+                        stat.S_IFREG | 0o600,
+                        byte_count,
+                    ),
+                    ctime_ns=0,
+                    content_sha256=(
+                        _INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256
+                    ),
+                )
+            )
+    staged_root_snapshot = _IncludedTreeSnapshot(
+        root_fingerprint=staged_root_fingerprint,
+        entries=tuple(staged_root_entries),
+    )
+
+    stage_container_identity = allocate_identity()
+    stage_marker_identity = allocate_identity()
+    staged_registry_identity = allocate_identity()
+    staged_registry_mode = 0o600
+    stage_marker_content = _included_recovery_record_content(
+        {
+            "format_version": _INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION,
+            "state": "staging",
+            "project_identity": _included_identity_payload(project_identity),
+            "stage_identity": _included_identity_payload(
+                stage_container_identity
+            ),
+        }
+    )
+    container_entries = [
+        _IncludedTreeEntry(
+            relative_path=_INCLUDED_FILES_STAGE_MARKER_NAME,
+            kind="file",
+            fingerprint=fingerprint(
+                stage_marker_identity,
+                stat.S_IFREG | 0o600,
+                len(stage_marker_content),
+            ),
+            ctime_ns=0,
+            content_sha256=hashlib.sha256(stage_marker_content).hexdigest(),
+        ),
+        _IncludedTreeEntry(
+            relative_path=_INCLUDED_FILES_ROOT_NAME,
+            kind="directory",
+            fingerprint=staged_root_fingerprint,
+            ctime_ns=None,
+            content_sha256=None,
+        ),
+        *(
+            _IncludedTreeEntry(
+                relative_path=(
+                    _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path
+                ),
+                kind=entry.kind,
+                fingerprint=entry.fingerprint,
+                ctime_ns=entry.ctime_ns,
+                content_sha256=entry.content_sha256,
+            )
+            for entry in staged_root_entries
+        ),
+        _IncludedTreeEntry(
+            relative_path="gml_included_file_registry.gd",
+            kind="file",
+            fingerprint=fingerprint(
+                staged_registry_identity,
+                stat.S_IFREG | staged_registry_mode,
+                len(staged_registry_content),
+            ),
+            ctime_ns=0,
+            content_sha256=hashlib.sha256(
+                staged_registry_content
+            ).hexdigest(),
+        ),
+    ]
+    staged_container_snapshot = _IncludedTreeSnapshot(
+        root_fingerprint=fingerprint(
+            stage_container_identity,
+            stat.S_IFDIR | 0o700,
+            0,
+        ),
+        entries=tuple(
+            sorted(
+                container_entries,
+                key=lambda entry: entry.relative_path,
+            )
+        ),
+    )
+    return (
+        stage_container_identity,
+        staged_container_snapshot,
+        staged_root_snapshot,
+        staged_registry_identity,
+        staged_registry_mode,
+    )
+
+
+def _preflight_included_recovery_record_sizes(
+    project_path: str,
+    project_identity: _PathIdentity,
+    assigned_byte_counts: dict[str, int],
+    staged_registry_content: bytes,
+    previous_root_snapshot: _IncludedTreeSnapshot,
+    previous_registry_snapshot: _IncludedRegistrySnapshot,
+) -> _IncludedRecoveryRecordSizes:
+    """Serialize exact-size format-v2 stand-ins before payload staging."""
+
+    try:
+        (
+            stage_container_identity,
+            staged_container_snapshot,
+            staged_root_snapshot,
+            staged_registry_identity,
+            staged_registry_mode,
+        ) = _included_preflight_placeholder_snapshots(
+            project_identity,
+            assigned_byte_counts,
+            staged_registry_content,
+        )
+        token = "0" * 16
+        stage_container_path = os.path.join(
+            project_path,
+            _INCLUDED_FILES_STAGE_PREFIX + token + ".stage",
+        )
+        registry_directory_path = os.path.dirname(
+            _included_registry_path(project_path)
+        )
+        registry_directory_created = (
+            previous_registry_snapshot.directory_identity is None
+        )
+        registry_directory_identity = (
+            previous_registry_snapshot.directory_identity
+            or (
+                project_identity[0],
+                _INCLUDED_FILES_RECOVERY_INTEGER_MAX - 4,
+            )
+        )
+        registry_backup_parent = (
+            registry_directory_path
+            if previous_registry_snapshot.file_identity is not None
+            else project_path
+        )
+        transaction = _IncludedOutputSetTransaction(
+            project_identity=project_identity,
+            stage_container_path=stage_container_path,
+            stage_container_identity=stage_container_identity,
+            staged_container_snapshot=staged_container_snapshot,
+            staged_root_path=os.path.join(
+                stage_container_path,
+                _INCLUDED_FILES_ROOT_NAME,
+            ),
+            staged_root_snapshot=staged_root_snapshot,
+            staged_registry_path=os.path.join(
+                stage_container_path,
+                "gml_included_file_registry.gd",
+            ),
+            staged_registry_identity=staged_registry_identity,
+            staged_registry_mode=staged_registry_mode,
+            staged_registry_content=staged_registry_content,
+            previous_root_snapshot=previous_root_snapshot,
+            previous_registry_snapshot=previous_registry_snapshot,
+        )
+        journal = _IncludedRecoveryJournal(
+            format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            transaction_id="0" * 32,
+            transaction=transaction,
+            root_backup_path=os.path.join(
+                project_path,
+                f".included_files.{token}.backup",
+            ),
+            registry_backup_path=os.path.join(
+                registry_backup_parent,
+                f".gml_included_file_registry.gd.{token}.backup",
+            ),
+            registry_directory_path=registry_directory_path,
+            registry_directory_identity=registry_directory_identity,
+            registry_directory_created=registry_directory_created,
+        )
+        return _included_recovery_record_sizes(journal)
+    except OSError as error:
+        raise OSError(
+            "Included Files recovery metadata preflight failed before payload "
+            f"staging: {error}"
+        ) from error
+
+
+def _verify_included_recovery_record_sizes(
+    expected: _IncludedRecoveryRecordSizes,
+    journal: _IncludedRecoveryJournal,
+) -> None:
+    actual = _included_recovery_record_sizes(journal)
+    if actual != expected:
+        raise OSError(
+            "Included Files recovery metadata changed after its byte-accurate "
+            "preflight"
+        )
 
 
 def _included_recovery_dict(value: Any, label: str) -> dict[str, Any]:
@@ -4377,6 +4931,16 @@ def _included_recovery_int(value: Any, label: str) -> int:
     return value
 
 
+def _included_recovery_compact_int(value: Any, label: str) -> int:
+    if (
+        not isinstance(value, str)
+        or len(value) != _INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return int(value, 16)
+
+
 def _included_recovery_identity(
     value: Any,
     label: str,
@@ -4397,6 +4961,47 @@ def _included_recovery_identity(
     return (first, second)
 
 
+def _included_recovery_compact_identity(
+    value: Any,
+    label: str,
+    *,
+    optional: bool = False,
+) -> _PathIdentity | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, list):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    components = cast(list[Any], value)
+    if len(components) != 2:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return (
+        _included_recovery_compact_int(components[0], label),
+        _included_recovery_compact_int(components[1], label),
+    )
+
+
+def _included_recovery_identity_for_format(
+    value: Any,
+    label: str,
+    format_version: int,
+    *,
+    optional: bool = False,
+) -> _PathIdentity | None:
+    if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        return _included_recovery_identity(
+            value,
+            label,
+            optional=optional,
+        )
+    if format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        return _included_recovery_compact_identity(
+            value,
+            label,
+            optional=optional,
+        )
+    raise OSError("Unsupported Included Files recovery identity format")
+
+
 def _included_recovery_fingerprint(value: Any, label: str) -> _PathFingerprint:
     if not isinstance(value, list):
         raise OSError(f"Invalid Included Files recovery {label}")
@@ -4409,6 +5014,24 @@ def _included_recovery_fingerprint(value: Any, label: str) -> _PathFingerprint:
     if any(component < 0 for component in fingerprint):
         raise OSError(f"Invalid Included Files recovery {label}")
     return cast(_PathFingerprint, fingerprint)
+
+
+def _included_recovery_compact_fingerprint(
+    value: Any,
+    label: str,
+) -> _PathFingerprint:
+    if not isinstance(value, list):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    components = cast(list[Any], value)
+    if len(components) != 6:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    return cast(
+        _PathFingerprint,
+        tuple(
+            _included_recovery_compact_int(component, label)
+            for component in components
+        ),
+    )
 
 
 def _included_recovery_sha256(value: Any, label: str) -> str | None:
@@ -4504,7 +5127,7 @@ def _included_recovery_tree_entry_path(
     return absolute_entry
 
 
-def _included_tree_snapshot_from_payload(
+def _included_tree_snapshot_from_payload_v1(
     value: Any,
     label: str,
 ) -> _IncludedTreeSnapshot:
@@ -4527,6 +5150,8 @@ def _included_tree_snapshot_from_payload(
     if not isinstance(entries_value, list):
         raise OSError(f"Invalid Included Files recovery {label} entries")
     raw_entries = cast(list[Any], entries_value)
+    if len(raw_entries) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
+        raise OSError(f"Included Files recovery {label} has too many entries")
     entries: list[_IncludedTreeEntry] = []
     seen_paths: set[str] = set()
     for raw_entry in raw_entries:
@@ -4589,6 +5214,18 @@ def _included_tree_snapshot_from_payload(
                 content_sha256=content_sha256,
             )
         )
+    return _validated_included_tree_snapshot(
+        root_fingerprint,
+        entries,
+        label,
+    )
+
+
+def _validated_included_tree_snapshot(
+    root_fingerprint: _PathFingerprint | None,
+    entries: list[_IncludedTreeEntry],
+    label: str,
+) -> _IncludedTreeSnapshot:
     if root_fingerprint is None and entries:
         raise OSError(f"Invalid Included Files recovery absent {label}")
     if root_fingerprint is not None and not stat.S_ISDIR(root_fingerprint[2]):
@@ -4620,7 +5257,121 @@ def _included_tree_snapshot_from_payload(
     )
 
 
-def _included_registry_snapshot_from_payload(
+def _included_tree_snapshot_from_payload_v2(
+    value: Any,
+    label: str,
+) -> _IncludedTreeSnapshot:
+    if not isinstance(value, list):
+        raise OSError(f"Invalid Included Files recovery {label}")
+    components = cast(list[Any], value)
+    if len(components) != 2:
+        raise OSError(f"Invalid Included Files recovery {label}")
+    root_value, entries_value = components
+    root_fingerprint = (
+        None
+        if root_value is None
+        else _included_recovery_compact_fingerprint(
+            root_value,
+            label + " root fingerprint",
+        )
+    )
+    if not isinstance(entries_value, list):
+        raise OSError(f"Invalid Included Files recovery {label} entries")
+    raw_entries = cast(list[Any], entries_value)
+    if len(raw_entries) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
+        raise OSError(f"Included Files recovery {label} has too many entries")
+
+    entries: list[_IncludedTreeEntry] = []
+    seen_paths: set[str] = set()
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, list):
+            raise OSError(f"Invalid Included Files recovery {label} entry")
+        entry_components = cast(list[Any], raw_entry)
+        if len(entry_components) != 5:
+            raise OSError(f"Invalid Included Files recovery {label} entry")
+        (
+            path_value,
+            kind_value,
+            fingerprint_value,
+            ctime_value,
+            digest_value,
+        ) = entry_components
+        relative_path = _included_recovery_relative_path(path_value)
+        if relative_path in seen_paths:
+            raise OSError(
+                f"Duplicate Included Files recovery tree path: {relative_path}"
+            )
+        seen_paths.add(relative_path)
+        if kind_value == "f":
+            kind = "file"
+        elif kind_value == "d":
+            kind = "directory"
+        else:
+            raise OSError(
+                f"Invalid Included Files recovery tree kind: {relative_path}"
+            )
+        fingerprint = _included_recovery_compact_fingerprint(
+            fingerprint_value,
+            label + " entry fingerprint",
+        )
+        expected_kind = stat.S_IFREG if kind == "file" else stat.S_IFDIR
+        if stat.S_IFMT(fingerprint[2]) != expected_kind:
+            raise OSError(
+                f"Invalid Included Files recovery tree mode: {relative_path}"
+            )
+        ctime_ns = (
+            None
+            if ctime_value is None
+            else _included_recovery_compact_int(
+                ctime_value,
+                label + " entry ctime",
+            )
+        )
+        content_sha256 = _included_recovery_sha256(
+            digest_value,
+            label + " entry content digest",
+        )
+        if kind == "directory":
+            if ctime_ns is not None or content_sha256 is not None:
+                raise OSError(
+                    "Invalid Included Files recovery directory receipt: "
+                    + relative_path
+                )
+        elif ctime_ns is None or content_sha256 is None:
+            raise OSError(
+                "Incomplete Included Files recovery file receipt: "
+                + relative_path
+            )
+        entries.append(
+            _IncludedTreeEntry(
+                relative_path=relative_path,
+                kind=kind,
+                fingerprint=fingerprint,
+                ctime_ns=ctime_ns,
+                content_sha256=content_sha256,
+            )
+        )
+    return _validated_included_tree_snapshot(
+        root_fingerprint,
+        entries,
+        label,
+    )
+
+
+def _included_tree_snapshot_from_payload(
+    value: Any,
+    label: str,
+    *,
+    format_version: int = _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+) -> _IncludedTreeSnapshot:
+    if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        return _included_tree_snapshot_from_payload_v1(value, label)
+    if format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        return _included_tree_snapshot_from_payload_v2(value, label)
+    raise OSError("Unsupported Included Files recovery tree format")
+
+
+def _included_registry_snapshot_from_payload_v1(
     value: Any,
 ) -> _IncludedRegistrySnapshot:
     payload = _included_recovery_dict(value, "registry snapshot")
@@ -4675,6 +5426,74 @@ def _included_registry_snapshot_from_payload(
         file_mode=file_mode,
         content=content,
     )
+
+
+def _included_registry_snapshot_from_payload_v2(
+    value: Any,
+) -> _IncludedRegistrySnapshot:
+    if not isinstance(value, list):
+        raise OSError("Invalid Included Files recovery registry snapshot")
+    components = cast(list[Any], value)
+    if len(components) != 4:
+        raise OSError("Invalid Included Files recovery registry snapshot")
+    (
+        directory_identity_value,
+        file_identity_value,
+        file_mode_value,
+        content_value,
+    ) = components
+    directory_identity = _included_recovery_compact_identity(
+        directory_identity_value,
+        "registry directory identity",
+        optional=True,
+    )
+    file_identity = _included_recovery_compact_identity(
+        file_identity_value,
+        "registry file identity",
+        optional=True,
+    )
+    file_mode = (
+        None
+        if file_mode_value is None
+        else _included_recovery_compact_int(
+            file_mode_value,
+            "registry file mode",
+        )
+    )
+    if file_mode is not None and stat.S_IMODE(file_mode) != file_mode:
+        raise OSError("Invalid Included File registry recovery mode")
+    content = (
+        None
+        if content_value is None
+        else _included_recovery_bytes(content_value, "registry content")
+    )
+    if file_identity is None:
+        if file_mode is not None or content is not None:
+            raise OSError("Invalid absent Included File registry recovery state")
+    elif directory_identity is None or file_mode is None or content is None:
+        raise OSError("Incomplete Included File registry recovery state")
+    elif file_identity[0] != directory_identity[0]:
+        raise OSError(
+            "Invalid cross-device Included File registry recovery state"
+        )
+    return _IncludedRegistrySnapshot(
+        directory_identity=directory_identity,
+        file_identity=file_identity,
+        file_mode=file_mode,
+        content=content,
+    )
+
+
+def _included_registry_snapshot_from_payload(
+    value: Any,
+    *,
+    format_version: int = _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+) -> _IncludedRegistrySnapshot:
+    if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
+        return _included_registry_snapshot_from_payload_v1(value)
+    if format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
+        return _included_registry_snapshot_from_payload_v2(value)
+    raise OSError("Unsupported Included Files recovery registry format")
 
 
 def _included_recovery_token(value: Any, length: int, label: str) -> str:
@@ -4738,7 +5557,11 @@ def _included_recovery_journal_from_payload(
         "journal format version",
     )
     if (
-        format_version != _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        format_version
+        not in {
+            _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+            _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        }
         or payload.get("state") != "prepared"
     ):
         raise OSError("Unsupported Included Files recovery journal")
@@ -4747,9 +5570,10 @@ def _included_recovery_journal_from_payload(
         32,
         "transaction id",
     )
-    recorded_project_identity = _included_recovery_identity(
+    recorded_project_identity = _included_recovery_identity_for_format(
         payload.get("project_identity"),
         "project identity",
+        format_version,
     )
     if recorded_project_identity != project_identity:
         raise OSError("Godot project root changed since Included Files interruption")
@@ -4759,33 +5583,45 @@ def _included_recovery_journal_from_payload(
         suffix=".stage",
         label="stage container",
     )
-    stage_container_identity = _included_recovery_identity(
+    stage_container_identity = _included_recovery_identity_for_format(
         payload.get("stage_container_identity"),
         "stage container identity",
+        format_version,
     )
     if stage_container_identity is None:
         raise OSError("Missing Included Files recovery stage identity")
     staged_container_snapshot = _included_tree_snapshot_from_payload(
         payload.get("staged_container_snapshot"),
         "staged container snapshot",
+        format_version=format_version,
     )
     if staged_container_snapshot.identity != stage_container_identity:
         raise OSError("Included Files recovery stage snapshot identity mismatch")
     staged_root_snapshot = _included_tree_snapshot_from_payload(
         payload.get("staged_root_snapshot"),
         "staged root snapshot",
+        format_version=format_version,
     )
     if staged_root_snapshot.identity is None:
         raise OSError("Missing Included Files recovery staged root")
-    staged_registry_identity = _included_recovery_identity(
+    staged_registry_identity = _included_recovery_identity_for_format(
         payload.get("staged_registry_identity"),
         "staged registry identity",
+        format_version,
     )
     if staged_registry_identity is None:
         raise OSError("Missing Included Files recovery staged registry")
-    staged_registry_mode = _included_recovery_int(
-        payload.get("staged_registry_mode"),
-        "staged registry mode",
+    staged_registry_mode = (
+        _included_recovery_int(
+            payload.get("staged_registry_mode"),
+            "staged registry mode",
+        )
+        if format_version
+        == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
+        else _included_recovery_compact_int(
+            payload.get("staged_registry_mode"),
+            "staged registry mode",
+        )
     )
     if (
         staged_registry_mode < 0
@@ -4799,9 +5635,11 @@ def _included_recovery_journal_from_payload(
     previous_root_snapshot = _included_tree_snapshot_from_payload(
         payload.get("previous_root_snapshot"),
         "previous root snapshot",
+        format_version=format_version,
     )
     previous_registry_snapshot = _included_registry_snapshot_from_payload(
-        payload.get("previous_registry_snapshot")
+        payload.get("previous_registry_snapshot"),
+        format_version=format_version,
     )
     staged_entries = {
         entry.relative_path: entry
@@ -4812,7 +5650,7 @@ def _included_recovery_journal_from_payload(
     staged_marker_entry = staged_entries.get(_INCLUDED_FILES_STAGE_MARKER_NAME)
     expected_stage_marker_content = _included_recovery_record_content(
         {
-            "format_version": _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            "format_version": _INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION,
             "state": "staging",
             "project_identity": _included_identity_payload(project_identity),
             "stage_identity": _included_identity_payload(stage_container_identity),
@@ -4886,9 +5724,10 @@ def _included_recovery_journal_from_payload(
     )
     if registry_backup_location != expected_registry_backup_location:
         raise OSError("Included File registry recovery backup location disagrees")
-    registry_directory_identity = _included_recovery_identity(
+    registry_directory_identity = _included_recovery_identity_for_format(
         payload.get("registry_directory_identity"),
         "registry directory identity",
+        format_version,
     )
     if registry_directory_identity is None:
         raise OSError("Missing Included File registry recovery directory")
@@ -4963,6 +5802,7 @@ def _included_recovery_journal_from_payload(
         previous_registry_snapshot=previous_registry_snapshot,
     )
     return _IncludedRecoveryJournal(
+        format_version=format_version,
         transaction_id=transaction_id,
         transaction=transaction,
         root_backup_path=os.path.join(project_path, root_backup_name),
@@ -5255,16 +6095,37 @@ def _included_lock_initialization_record_state(
     )
 
 
-def _included_recovery_record_content(payload: dict[str, Any]) -> bytes:
-    content = (
-        json.dumps(
+def _included_serialized_json_content(
+    payload: Any,
+    *,
+    compact: bool,
+) -> bytes:
+    if compact:
+        rendered = json.dumps(
+            payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    else:
+        rendered = json.dumps(
             payload,
             ensure_ascii=True,
             indent=2,
             sort_keys=True,
         )
-        + "\n"
-    ).encode("utf-8")
+    return (rendered + "\n").encode("utf-8")
+
+
+def _included_recovery_record_content(payload: dict[str, Any]) -> bytes:
+    format_version = payload.get("format_version")
+    content = _included_serialized_json_content(
+        payload,
+        compact=(
+            type(format_version) is int
+            and format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        ),
+    )
     if len(content) > _INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES:
         raise OSError(
             "Generated Included Files recovery record exceeds the canonical "
@@ -5461,7 +6322,11 @@ def _included_commit_marker_and_journal_from_payload(
         "commit marker format version",
     )
     if (
-        format_version != _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        format_version
+        not in {
+            _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+            _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        }
         or payload.get("state") != "committed"
     ):
         raise OSError("Unsupported Included Files recovery commit marker")
@@ -5470,23 +6335,27 @@ def _included_commit_marker_and_journal_from_payload(
         32,
         "commit transaction id",
     )
-    recorded_project_identity = _included_recovery_identity(
+    recorded_project_identity = _included_recovery_identity_for_format(
         payload.get("project_identity"),
         "commit project identity",
+        format_version,
     )
     if recorded_project_identity != project_identity:
         raise OSError("Included Files commit marker belongs to another project")
-    root_identity = _included_recovery_identity(
+    root_identity = _included_recovery_identity_for_format(
         payload.get("root_identity"),
         "commit root identity",
+        format_version,
     )
-    registry_directory_identity = _included_recovery_identity(
+    registry_directory_identity = _included_recovery_identity_for_format(
         payload.get("registry_directory_identity"),
         "commit registry directory identity",
+        format_version,
     )
-    registry_identity = _included_recovery_identity(
+    registry_identity = _included_recovery_identity_for_format(
         payload.get("registry_identity"),
         "commit registry identity",
+        format_version,
     )
     root_snapshot_sha256 = _included_recovery_sha256(
         payload.get("root_snapshot_sha256"),
@@ -5505,6 +6374,7 @@ def _included_commit_marker_and_journal_from_payload(
     ):
         raise OSError("Incomplete Included Files recovery commit marker")
     marker = _IncludedCommitMarker(
+        format_version=format_version,
         transaction_id=transaction_id,
         project_identity=project_identity,
         root_identity=root_identity,
@@ -5534,6 +6404,8 @@ def _included_commit_marker_and_journal_from_payload(
         project_identity,
         journal_payload,
     )
+    if journal.format_version != format_version:
+        raise OSError("Included Files commit recovery journal format mismatch")
     if marker != _included_commit_marker_from_journal(journal):
         raise OSError("Included Files commit recovery journal disagrees with marker")
     return marker, journal
@@ -5549,7 +6421,10 @@ def _verify_included_commit_marker_generation(
     )
     if (
         root_snapshot.identity != marker.root_identity
-        or _included_tree_snapshot_sha256(root_snapshot)
+        or _included_tree_snapshot_sha256(
+            root_snapshot,
+            marker.format_version,
+        )
         != marker.root_snapshot_sha256
     ):
         raise OSError("Committed Included Files root generation is unavailable")
@@ -6340,7 +7215,7 @@ def _included_stage_marker_matches(
             payload.get("format_version"),
             "stage marker format version",
         )
-        == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+        == _INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION
         and payload.get("state") == "staging"
         and _included_recovery_identity(
             payload.get("project_identity"),
@@ -7221,7 +8096,7 @@ def _commit_included_output_set(
     registry_directory_path = os.path.dirname(final_registry_path)
     registry_backup_path = _unique_included_transaction_path(
         registry_directory_path
-        if transaction.previous_registry_snapshot.directory_identity is not None
+        if transaction.previous_registry_snapshot.file_identity is not None
         else project_path,
         "gml_included_file_registry.gd",
     )
@@ -7273,6 +8148,39 @@ def _commit_included_output_set(
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
 
+        expected_record_sizes = transaction.recovery_record_sizes
+        if expected_record_sizes is None:
+            raise OSError(
+                "Included Files recovery metadata was not preflighted before "
+                "payload staging"
+            )
+        provisional_registry_directory_identity = (
+            transaction.previous_registry_snapshot.directory_identity
+            or (
+                transaction.project_identity[0],
+                _INCLUDED_FILES_RECOVERY_INTEGER_MAX,
+            )
+        )
+        provisional_journal = _IncludedRecoveryJournal(
+            format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            transaction_id="0" * 32,
+            transaction=transaction,
+            root_backup_path=root_backup_path,
+            registry_backup_path=registry_backup_path,
+            registry_directory_path=registry_directory_path,
+            registry_directory_identity=(
+                provisional_registry_directory_identity
+            ),
+            registry_directory_created=(
+                transaction.previous_registry_snapshot.directory_identity
+                is None
+            ),
+        )
+        _verify_included_recovery_record_sizes(
+            expected_record_sizes,
+            provisional_journal,
+        )
+
         (
             registry_directory_path,
             registry_directory_identity,
@@ -7289,6 +8197,7 @@ def _commit_included_output_set(
             "gml_included_file_registry.gd",
         )
         recovery_journal = _IncludedRecoveryJournal(
+            format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
             transaction_id=secrets.token_hex(16),
             transaction=transaction,
             root_backup_path=root_backup_path,
@@ -7296,6 +8205,10 @@ def _commit_included_output_set(
             registry_directory_path=registry_directory_path,
             registry_directory_identity=registry_directory_identity,
             registry_directory_created=registry_directory_created,
+        )
+        _verify_included_recovery_record_sizes(
+            expected_record_sizes,
+            recovery_journal,
         )
         journal_identity = _publish_included_recovery_record(
             project_path,
@@ -8381,6 +9294,36 @@ class IncludedFilesConverter(BaseConverter):
             return None
         return source_file, opened_stat
 
+    def _preflight_included_source_byte_counts(
+        self,
+        sources: tuple[_IncludedFileSource, ...],
+    ) -> dict[str, int]:
+        """Capture byte counts without reading or staging payload bodies."""
+
+        byte_counts: dict[str, int] = {}
+        for source in sources:
+            if not self.conversion_running():
+                raise _IncludedOutputSetCancelled()
+            opened_source = self._open_confined_source_file(
+                source.filesystem_path,
+                owner_source_path=source.owner_source_path,
+                resource=source.relative_path,
+            )
+            if opened_source is None:
+                raise OSError(
+                    "GameMaker Included File source became unavailable during "
+                    "recovery-record preflight: "
+                    + source.relative_path
+                )
+            source_file, source_stat = opened_source
+            with source_file:
+                _included_recovery_compact_integer_payload(
+                    source_stat.st_size,
+                    "source byte count",
+                )
+                byte_counts[source.relative_path] = source_stat.st_size
+        return byte_counts
+
     def _capture_pinned_included_source_binding(
         self,
         source: _IncludedFileSource,
@@ -9277,6 +10220,39 @@ class IncludedFilesConverter(BaseConverter):
                 self._safe_progress(100)
                 return
 
+            source_byte_counts = self._preflight_included_source_byte_counts(
+                tuple(all_files)
+            )
+            preflight_registry_content = render_included_file_registry(
+                path_assignments,
+                emitted_logical_paths,
+                {
+                    logical_path: (
+                        source_byte_counts[logical_path],
+                        _INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256,
+                    )
+                    for logical_path in emitted_logical_paths
+                },
+            ).encode("utf-8")
+            assigned_byte_counts = {
+                assignments_by_source[
+                    source.relative_path
+                ].assigned_output_path: source_byte_counts[
+                    source.relative_path
+                ]
+                for source in all_files
+            }
+            recovery_record_sizes = (
+                _preflight_included_recovery_record_sizes(
+                    self.godot_project_path,
+                    project_identity,
+                    assigned_byte_counts,
+                    preflight_registry_content,
+                    previous_root_snapshot,
+                    previous_registry_snapshot,
+                )
+            )
+
             (
                 stage_container_path,
                 stage_container_identity,
@@ -9473,6 +10449,7 @@ class IncludedFilesConverter(BaseConverter):
                 staged_registry_content=staged_registry_content,
                 previous_root_snapshot=previous_root_snapshot,
                 previous_registry_snapshot=previous_registry_snapshot,
+                recovery_record_sizes=recovery_record_sizes,
             )
             # From this handoff onward, only manifest-bound transaction
             # cleanup may remove the stage, including after rollback.

@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.34 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.35 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-20
 
@@ -64,7 +64,7 @@ The packaged Linux GUI intentionally excludes Qt's optional TIFF image-format pl
 
 ## Conversion concurrency and recovery generations
 
-Only one GM2Godot converter may recover or publish Included Files for a destination project at a time. A cooperative operating-system lock rejects a second converter; retry it after the active conversion exits. If the process or machine stops during publication, the next conversion uses a durable journal and commit marker to restore the complete previous Included Files root/registry pair or finalize the complete committed pair. Do not delete transaction artifacts by hand: unknown or changed reserved-path content is deliberately preserved and rejected so GM2Godot cannot mistake user data for its own.
+Only one GM2Godot converter may recover or publish Included Files for a destination project at a time. A cooperative operating-system lock rejects a second converter; retry it after the active conversion exits. If the process or machine stops during publication, the next conversion uses a durable journal and commit marker to restore the complete previous Included Files root/registry pair or finalize the complete committed pair. New format-v2 recovery records compact each tree entry into a strict fixed-width row, making the exact serialized journal and commit sizes knowable before payload staging; existing format-v1 records remain recoverable and every canonical record retains the 16 MiB limit. Do not delete transaction artifacts by hand: unknown or changed reserved-path content is deliberately preserved and rejected so GM2Godot cannot mistake user data for its own.
 
 Within one conversion, Included File receipt and copy workers use a bounded submission window of at most twice the configured worker count. Cancellation or a terminal worker failure stops further admission and preserves the prior complete generation; increasing the worker count changes throughput, not path assignment, registry receipts, or sorted diagnostics.
 

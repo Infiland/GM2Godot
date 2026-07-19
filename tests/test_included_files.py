@@ -689,6 +689,97 @@ IncludedFilesConverter(
             interrupted.stdout + interrupted.stderr,
         )
 
+    def _rewrite_included_recovery_records_as_v1(
+        self,
+        project_path: str,
+        project_identity: tuple[int, int],
+    ) -> int:
+        rewritten = 0
+        for name in sorted(os.listdir(project_path)):
+            if not (
+                name
+                in {
+                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                }
+                or (
+                    name.startswith(
+                        included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                    )
+                    and name.endswith(".tmp")
+                )
+                or (
+                    name.startswith(
+                        included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                    )
+                    and name.endswith(".tmp")
+                )
+            ):
+                continue
+            record_path = os.path.join(project_path, name)
+            record = included_files_module._read_included_recovery_record(
+                record_path,
+                project_identity,
+            )
+            if record is None:
+                continue
+            payload = record[1]
+            state = payload.get("state")
+            if state == "prepared":
+                journal = (
+                    included_files_module._included_recovery_journal_from_payload(
+                        project_path,
+                        project_identity,
+                        payload,
+                    )
+                )
+                legacy_journal = replace(
+                    journal,
+                    format_version=(
+                        included_files_module._INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
+                    ),
+                )
+                legacy_payload = (
+                    included_files_module._included_recovery_journal_payload_v1(
+                        legacy_journal
+                    )
+                )
+            elif state == "committed":
+                _marker, journal = (
+                    included_files_module._included_commit_marker_and_journal_from_payload(
+                        project_path,
+                        payload,
+                        project_identity,
+                    )
+                )
+                legacy_journal = replace(
+                    journal,
+                    format_version=(
+                        included_files_module._INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
+                    ),
+                )
+                legacy_payload = (
+                    included_files_module._included_commit_marker_payload_v1(
+                        legacy_journal
+                    )
+                )
+            else:
+                continue
+            with open(record_path, "wb") as record_file:
+                record_file.write(
+                    included_files_module._included_recovery_record_content(
+                        legacy_payload
+                    )
+                )
+                record_file.flush()
+                os.fsync(record_file.fileno())
+            rewritten += 1
+        included_files_module._sync_included_directory(
+            project_path,
+            project_identity,
+        )
+        return rewritten
+
     def test_recovery_parsers_reject_ambiguous_json_types(
         self,
     ) -> None:
@@ -1275,6 +1366,9 @@ IncludedFilesConverter(
     def _run_interrupted_conversion(
         self,
         phase: str,
+        *,
+        gm_path: str | None = None,
+        godot_path: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         interruption_script = """
 import os
@@ -1310,8 +1404,8 @@ IncludedFilesConverter(
                 sys.executable,
                 "-c",
                 interruption_script,
-                self.gm_dir,
-                self.godot_dir,
+                self.gm_dir if gm_path is None else gm_path,
+                self.godot_dir if godot_path is None else godot_path,
                 phase,
             ),
             check=False,
@@ -2256,10 +2350,287 @@ included_files_module._acquire_included_project_lock(
                 project_identity,
                 filename=destination_name,
                 temporary_prefix=temporary_prefix,
-                payload={"state": "x" * 128},
+                payload={
+                    "format_version": (
+                        included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                    ),
+                    "state": "x" * 128,
+                },
             )
 
         self.assertEqual(set(os.listdir(self.godot_dir)), original_names)
+
+    def test_changed_generation_size_preflight_precedes_payload_staging(
+        self,
+    ) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+
+        with (
+            patch.object(
+                included_files_module,
+                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                1024,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+            ) as create_stage,
+            patch.object(
+                included_files_module,
+                "_prepare_included_registry_directory",
+            ) as prepare_registry,
+            patch.object(
+                included_files_module,
+                "_publish_included_recovery_record",
+            ) as publish_record,
+            self.assertRaisesRegex(
+                OSError,
+                "preflight failed before payload staging",
+            ),
+        ):
+            converter.convert_all()
+
+        create_stage.assert_not_called()
+        prepare_registry.assert_not_called()
+        publish_record.assert_not_called()
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    def test_compact_tree_parser_is_strict_bounded_and_deterministic(
+        self,
+    ) -> None:
+        snapshot = self._recovery_cleanup_snapshot("nested/payload.bin")
+        compact_payload = (
+            included_files_module._included_compact_tree_snapshot_payload(
+                snapshot
+            )
+        )
+        self.assertEqual(
+            included_files_module._included_tree_snapshot_from_payload(
+                compact_payload,
+                "compact test tree",
+                format_version=(
+                    included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                ),
+            ),
+            snapshot,
+        )
+        record_payload = {
+            "format_version": (
+                included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+            ),
+            "state": "test",
+            "tree": compact_payload,
+        }
+        content = included_files_module._included_recovery_record_content(
+            record_payload
+        )
+        self.assertEqual(
+            content,
+            included_files_module._included_recovery_record_content(
+                json.loads(content.decode("utf-8"))
+            ),
+        )
+        self.assertNotIn(b"\n  ", content)
+
+        malformed_payloads: list[list[object]] = []
+        extra_column = json.loads(json.dumps(compact_payload))
+        extra_column[1][0].append(None)
+        malformed_payloads.append(extra_column)
+        unknown_kind = json.loads(json.dumps(compact_payload))
+        unknown_kind[1][0][1] = "directory"
+        malformed_payloads.append(unknown_kind)
+        short_integer = json.loads(json.dumps(compact_payload))
+        short_integer[1][0][2][0] = "0" * 15
+        malformed_payloads.append(short_integer)
+        duplicate_path = json.loads(json.dumps(compact_payload))
+        duplicate_path[1].append(list(duplicate_path[1][0]))
+        malformed_payloads.append(duplicate_path)
+        unsorted_paths = json.loads(json.dumps(compact_payload))
+        unsorted_paths[1].reverse()
+        malformed_payloads.append(unsorted_paths)
+
+        for index, malformed_payload in enumerate(malformed_payloads):
+            with (
+                self.subTest(case=index),
+                self.assertRaises(OSError),
+            ):
+                included_files_module._included_tree_snapshot_from_payload(
+                    malformed_payload,
+                    "compact test tree",
+                    format_version=(
+                        included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                    ),
+                )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES",
+                len(snapshot.entries) - 1,
+            ),
+            self.assertRaisesRegex(OSError, "too many entries"),
+        ):
+            included_files_module._included_tree_snapshot_from_payload(
+                compact_payload,
+                "compact test tree",
+                format_version=(
+                    included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                ),
+            )
+
+    def test_ten_thousand_entry_compact_records_publish_and_recover_below_cap(
+        self,
+    ) -> None:
+        entry_count = 10_000
+        for index in range(entry_count):
+            with open(
+                os.path.join(
+                    self.datafiles_dir,
+                    f"entry-{index:05d}.txt",
+                ),
+                "wb",
+            ) as source_file:
+                source_file.write(b"x")
+
+        self._converter(max_workers=4).convert_all()
+        with open(
+            os.path.join(self.datafiles_dir, "entry-00000.txt"),
+            "wb",
+        ) as source_file:
+            source_file.write(b"y")
+
+        captured_sizes: (
+            included_files_module._IncludedRecoveryRecordSizes | None
+        ) = None
+        original_commit = included_files_module._commit_included_output_set
+
+        def capture_commit(
+            project_path: str,
+            transaction: included_files_module._IncludedOutputSetTransaction,
+            conversion_running: Callable[[], bool],
+        ) -> tuple[str, ...]:
+            nonlocal captured_sizes
+            captured_sizes = transaction.recovery_record_sizes
+            return original_commit(
+                project_path,
+                transaction,
+                conversion_running,
+            )
+
+        def interrupt_after_commit(phase: str) -> None:
+            if phase == "generation-committed":
+                raise OSError("simulated committed interruption")
+
+        with (
+            patch.object(
+                included_files_module,
+                "_commit_included_output_set",
+                side_effect=capture_commit,
+            ),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=interrupt_after_commit,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "simulated committed interruption",
+            ),
+        ):
+            self._converter(max_workers=4).convert_all()
+
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        journal_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+        )
+        commit_path = os.path.join(
+            self.godot_dir,
+            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+        )
+        journal_record = included_files_module._read_included_recovery_record(
+            journal_path,
+            project_identity,
+        )
+        commit_record = included_files_module._read_included_recovery_record(
+            commit_path,
+            project_identity,
+        )
+        if journal_record is None or commit_record is None:
+            self.fail("committed generation did not retain both records")
+        self.assertEqual(
+            journal_record[1]["format_version"],
+            included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        )
+        self.assertEqual(
+            commit_record[1]["format_version"],
+            included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+        )
+        actual_sizes = included_files_module._IncludedRecoveryRecordSizes(
+            journal_bytes=os.path.getsize(journal_path),
+            commit_bytes=os.path.getsize(commit_path),
+        )
+        self.assertEqual(captured_sizes, actual_sizes)
+        self.assertEqual(
+            actual_sizes,
+            included_files_module._IncludedRecoveryRecordSizes(
+                journal_bytes=13_865_860,
+                commit_bytes=13_866_493,
+            ),
+        )
+        self.assertLess(
+            actual_sizes.journal_bytes,
+            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+        )
+        self.assertLess(
+            actual_sizes.commit_bytes,
+            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+        )
+
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        try:
+            recovery_message = (
+                included_files_module._recover_included_output_set(
+                    self.godot_dir,
+                    project_identity,
+                )
+            )
+        finally:
+            included_files_module._release_included_project_lock(
+                project_lock
+            )
+        self.assertIsNotNone(recovery_message)
+        self.assertEqual(
+            len(
+                os.listdir(
+                    os.path.join(self.godot_dir, "included_files")
+                )
+            ),
+            entry_count,
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                "included_files",
+                "entry-00000.txt",
+            ),
+            "rb",
+        ) as output_file:
+            self.assertEqual(output_file.read(), b"y")
+        self._assert_no_transaction_debris()
 
     def test_recovery_record_staging_syncs_parent_before_durable_phase(
         self,
@@ -2562,6 +2933,114 @@ IncludedFilesConverter(
                         pair_snapshot(godot_path)[1],
                         {"new.txt": b"new generation"},
                     )
+
+    def test_format_v1_records_recover_at_every_publication_boundary(
+        self,
+    ) -> None:
+        phases = (
+            ("journal-record-staged", False),
+            ("journal-prepared", False),
+            ("previous-root-backed-up", False),
+            ("new-root-published", False),
+            ("previous-registry-backed-up", False),
+            ("new-registry-published", False),
+            ("commit-record-staged", False),
+            ("generation-committed", True),
+            ("journal-removed", True),
+            ("commit-marker-removed", True),
+        )
+        for phase, committed in phases:
+            with (
+                self.subTest(phase=phase),
+                tempfile.TemporaryDirectory() as gm_path,
+                tempfile.TemporaryDirectory() as godot_path,
+            ):
+                datafiles_path = os.path.join(gm_path, "datafiles")
+                os.mkdir(datafiles_path)
+                old_source_path = os.path.join(datafiles_path, "old.txt")
+                with open(old_source_path, "wb") as source_file:
+                    source_file.write(b"old generation")
+                converter = IncludedFilesConverter(
+                    gm_path,
+                    godot_path,
+                    log_callback=lambda _message: None,
+                    progress_callback=lambda _value: None,
+                    conversion_running=lambda: True,
+                    max_workers=1,
+                )
+                converter.convert_all()
+                os.unlink(old_source_path)
+                with open(
+                    os.path.join(datafiles_path, "new.txt"),
+                    "wb",
+                ) as source_file:
+                    source_file.write(b"new generation")
+
+                interrupted = self._run_interrupted_conversion(
+                    phase,
+                    gm_path=gm_path,
+                    godot_path=godot_path,
+                )
+                self.assertEqual(
+                    interrupted.returncode,
+                    86,
+                    interrupted.stdout + interrupted.stderr,
+                )
+                project_identity = (
+                    included_files_module._ensure_included_output_project_root(
+                        godot_path
+                    )
+                )
+                rewritten = self._rewrite_included_recovery_records_as_v1(
+                    godot_path,
+                    project_identity,
+                )
+                if phase == "commit-marker-removed":
+                    self.assertEqual(rewritten, 0)
+                else:
+                    self.assertGreaterEqual(rewritten, 1)
+
+                project_lock = (
+                    included_files_module._acquire_included_project_lock(
+                        godot_path,
+                        project_identity,
+                    )
+                )
+                try:
+                    included_files_module._recover_included_output_set(
+                        godot_path,
+                        project_identity,
+                    )
+                finally:
+                    included_files_module._release_included_project_lock(
+                        project_lock
+                    )
+
+                root_path = os.path.join(godot_path, "included_files")
+                observed_files: dict[str, bytes] = {}
+                for directory, _subdirectories, filenames in os.walk(
+                    root_path
+                ):
+                    for filename in filenames:
+                        file_path = os.path.join(directory, filename)
+                        relative_path = os.path.relpath(
+                            file_path,
+                            root_path,
+                        ).replace(os.sep, "/")
+                        with open(file_path, "rb") as output_file:
+                            observed_files[relative_path] = output_file.read()
+                self.assertEqual(
+                    observed_files,
+                    (
+                        {"new.txt": b"new generation"}
+                        if committed
+                        else {"old.txt": b"old generation"}
+                    ),
+                )
+                self.assertEqual(
+                    _included_files_transaction_debris(godot_path),
+                    (),
+                )
 
     def test_first_publication_rollback_is_idempotent_after_registry_publish(
         self,
@@ -3674,11 +4153,19 @@ IncludedFilesConverter(
         _commit_identity, commit_payload = commit_record
         forged_payload = json.loads(json.dumps(commit_payload))
         embedded_journal = forged_payload["recovery_journal"]
-        staged_entries = embedded_journal["staged_container_snapshot"]["entries"]
-        forged_entry = next(
-            entry for entry in staged_entries if entry["kind"] == "file"
-        )
-        forged_entry["relative_path"] = "safe/D:evil"
+        staged_snapshot = embedded_journal["staged_container_snapshot"]
+        if embedded_journal["format_version"] == 1:
+            staged_entries = staged_snapshot["entries"]
+            forged_entry = next(
+                entry for entry in staged_entries if entry["kind"] == "file"
+            )
+            forged_entry["relative_path"] = "safe/D:evil"
+        else:
+            staged_entries = staged_snapshot[1]
+            forged_entry = next(
+                entry for entry in staged_entries if entry[1] == "f"
+            )
+            forged_entry[0] = "safe/D:evil"
         forged_payload["recovery_journal_sha256"] = hashlib.sha256(
             included_files_module._included_recovery_record_content(
                 embedded_journal

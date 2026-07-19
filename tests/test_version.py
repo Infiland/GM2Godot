@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_7_22(self) -> None:
-        self.assertEqual(get_version(), "0.7.22")
+    def test_release_version_is_0_7_23(self) -> None:
+        self.assertEqual(get_version(), "0.7.23")
 
     def test_release_surfaces_match_source_version(self) -> None:
         changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")

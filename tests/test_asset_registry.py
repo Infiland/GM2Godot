@@ -2748,6 +2748,79 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ),
         )
 
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_late_output_failure_restores_readonly_registry(
+        self,
+    ) -> None:
+        self._write_included_source("payload.bin", b"matching payload")
+        self._write_included_output("payload.bin", b"matching payload")
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.bin",
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            ASSET_REGISTRY_RELATIVE_PATH,
+        )
+        previous_content = b"previous read-only registry\n"
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "wb") as registry_file:
+            registry_file.write(previous_content)
+        os.chmod(registry_path, stat.S_IREAD)
+        previous_stat = os.lstat(registry_path)
+        previous_identity = previous_stat.st_dev, previous_stat.st_ino
+        converter = self._converter()
+        real_revalidate = converter.revalidate_published_entries
+        validation_calls = 0
+
+        def mutate_then_revalidate(
+            entries: tuple[AssetRegistryEntry, ...],
+        ) -> None:
+            nonlocal validation_calls
+            validation_calls += 1
+            if validation_calls == 2:
+                with open(output_path, "wb") as output_file:
+                    output_file.write(b"changed after publication")
+            real_revalidate(entries)
+
+        try:
+            with (
+                patch.object(
+                    converter,
+                    "revalidate_published_entries",
+                    side_effect=mutate_then_revalidate,
+                ),
+                self.assertRaisesRegex(
+                    OSError,
+                    "publication inputs changed",
+                ),
+            ):
+                converter.convert_all()
+
+            self.assertEqual(validation_calls, 2)
+            current_stat = os.lstat(registry_path)
+            self.assertEqual(
+                (current_stat.st_dev, current_stat.st_ino),
+                previous_identity,
+            )
+            self.assertFalse(current_stat.st_mode & stat.S_IWRITE)
+            with open(registry_path, "rb") as registry_file:
+                self.assertEqual(registry_file.read(), previous_content)
+            transaction_prefix = f".{os.path.basename(registry_path)}."
+            self.assertFalse(
+                any(
+                    name.startswith(transaction_prefix)
+                    for name in os.listdir(os.path.dirname(registry_path))
+                )
+            )
+        finally:
+            try:
+                if stat.S_ISREG(os.lstat(registry_path).st_mode):
+                    os.chmod(registry_path, stat.S_IWRITE)
+            except OSError:
+                pass
+
     def test_project_yyp_link_is_rejected_before_disk_fallback(self) -> None:
         self._write_resource(
             "sprites",
@@ -3877,6 +3950,45 @@ class TestAssetRegistryConverter(unittest.TestCase):
             )
         )
 
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_auxiliary_outputs_replace_readonly_files(
+        self,
+    ) -> None:
+        for output_kind in ("group_report", "timeline_script"):
+            with self.subTest(output_kind=output_kind):
+                output_path = self._auxiliary_output_path(output_kind)
+                _write_file(output_path, "previous auxiliary output\n")
+                os.chmod(output_path, stat.S_IREAD)
+                previous_stat = os.lstat(output_path)
+                previous_identity = previous_stat.st_dev, previous_stat.st_ino
+                try:
+                    self._publish_auxiliary_output(output_kind)
+
+                    current_stat = os.lstat(output_path)
+                    self.assertNotEqual(
+                        (current_stat.st_dev, current_stat.st_ino),
+                        previous_identity,
+                    )
+                    self.assertFalse(current_stat.st_mode & stat.S_IWRITE)
+                    with open(output_path, "r", encoding="utf-8") as output_file:
+                        self.assertNotEqual(
+                            output_file.read(),
+                            "previous auxiliary output\n",
+                        )
+                    staged_prefix = f".{os.path.basename(output_path)}."
+                    self.assertFalse(
+                        any(
+                            name.startswith(staged_prefix)
+                            for name in os.listdir(os.path.dirname(output_path))
+                        )
+                    )
+                finally:
+                    try:
+                        if stat.S_ISREG(os.lstat(output_path).st_mode):
+                            os.chmod(output_path, stat.S_IWRITE)
+                    except OSError:
+                        pass
+
     def test_auxiliary_outputs_refuse_final_symlinks_without_mutating_referents(
         self,
     ) -> None:
@@ -3956,12 +4068,12 @@ class TestAssetRegistryConverter(unittest.TestCase):
             with self.subTest(force_fallback=force_fallback):
                 patcher = (
                     patch(
-                        "src.conversion.asset_registry._confined_asset_output_supported",
+                        "src.conversion.atomic_generated_text._confined_asset_output_supported",
                         return_value=False,
                     )
                     if force_fallback
                     else patch(
-                        "src.conversion.asset_registry._confined_asset_output_supported",
+                        "src.conversion.atomic_generated_text._confined_asset_output_supported",
                         wraps=None,
                     )
                 )
@@ -4000,7 +4112,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         ):
             with self.subTest(patched_name=patched_name):
                 with patch(
-                    f"src.conversion.asset_registry.{patched_name}",
+                    f"src.conversion.atomic_generated_text.{patched_name}",
                     side_effect=OSError(error_message),
                 ):
                     with self.assertRaisesRegex(OSError, error_message):

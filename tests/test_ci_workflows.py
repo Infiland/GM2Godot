@@ -4791,6 +4791,7 @@ class TestCIWorkflows(unittest.TestCase):
             "tests.test_architecture_policy",
             "tests.test_converter",
             "tests.test_cli",
+            "tests.test_atomic_generated_text",
             "tests.test_included_files.TestIncludedFilesManagedRootTransaction",
             "tests.test_included_files.TestIncludedFilesConverterOutputContainment",
         ):

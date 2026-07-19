@@ -384,6 +384,112 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
             raise
         return binding
 
+    @classmethod
+    def open_or_create(
+        cls,
+        path: str,
+        *,
+        description: str,
+    ) -> "VerifiedDirectory":
+        """Create a missing directory chain through verified parent bindings.
+
+        Every component is opened without following its final entry, and every
+        parent crosses its durability barrier before the implementation
+        descends into the child. Repeating the barrier for an existing final
+        component makes a retry complete a prior creation whose parent sync
+        failed after the directory became visible.
+        """
+        absolute_path = os.path.abspath(path)
+        components: list[str] = []
+        existing_parent = absolute_path
+        while True:
+            parent_path, component = os.path.split(existing_parent)
+            if not component:
+                return cls.open(absolute_path, description=description)
+            components.append(_safe_leaf(component))
+            try:
+                parent_stat = os.lstat(parent_path)
+            except FileNotFoundError:
+                existing_parent = parent_path
+                continue
+            if _path_is_redirected(parent_path, parent_stat) or not stat.S_ISDIR(
+                parent_stat.st_mode
+            ):
+                raise OSError(
+                    f"Refusing redirected or non-directory {description} parent: "
+                    f"{parent_path}"
+                )
+            existing_parent = parent_path
+            break
+
+        binding = cls.open(
+            existing_parent,
+            description=f"{description} parent",
+        )
+        try:
+            ordered_components = tuple(reversed(components))
+            for index, component in enumerate(ordered_components):
+                child_path = binding.child_path(component)
+                try:
+                    child_stat = binding.stat(component)
+                except FileNotFoundError:
+                    try:
+                        binding.mkdir(component)
+                    except FileExistsError:
+                        pass
+                    child_stat = binding.stat(component)
+                if _path_is_redirected(child_path, child_stat) or not stat.S_ISDIR(
+                    child_stat.st_mode
+                ):
+                    raise OSError(
+                        f"Refusing redirected or non-directory {description}: "
+                        f"{child_path}"
+                    )
+                child_identity = (child_stat.st_dev, child_stat.st_ino)
+                child_description = (
+                    description
+                    if index == len(ordered_components) - 1
+                    else f"{description} parent"
+                )
+                child = binding.open_child(
+                    component,
+                    expected_identity=child_identity,
+                    description=child_description,
+                )
+                try:
+                    binding.sync()
+                    child.verify_path()
+                    binding.verify_path()
+                except BaseException as error:
+                    try:
+                        child.close()
+                    except BaseException as close_error:
+                        error.add_note(
+                            f"Could not close rejected {child_description} binding: "
+                            f"{close_error}"
+                        )
+                    raise
+                try:
+                    binding.close()
+                except BaseException as error:
+                    try:
+                        child.close()
+                    except BaseException as close_error:
+                        error.add_note(
+                            f"Could not close {child_description} binding: {close_error}"
+                        )
+                    raise
+                binding = child
+            return binding
+        except BaseException as error:
+            try:
+                binding.close()
+            except BaseException as close_error:
+                error.add_note(
+                    f"Could not close {description} creation binding: {close_error}"
+                )
+            raise
+
     def __exit__(
         self,
         _exc_type: object,
@@ -807,12 +913,21 @@ class AnchoredArtifactDirectory(
         relative_directory: str,
         *,
         create: bool,
+        create_root: bool = False,
         description: str,
     ) -> "AnchoredArtifactDirectory":
         child_name = _safe_leaf(relative_directory)
-        root = VerifiedDirectory.open(
-            root_path,
-            description=f"{description} root",
+        root_description = f"{description} root"
+        root = (
+            VerifiedDirectory.open_or_create(
+                root_path,
+                description=root_description,
+            )
+            if create_root
+            else VerifiedDirectory.open(
+                root_path,
+                description=root_description,
+            )
         )
         child_path = root.child_path(child_name)
         directory: VerifiedDirectory | None = None
@@ -1050,6 +1165,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         relative_directory: str,
         *,
         create: bool,
+        create_root: bool = False,
         description: str,
     ) -> "ByteArtifactTransaction":
         return cls(
@@ -1057,6 +1173,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 root_path,
                 relative_directory,
                 create=create,
+                create_root=create_root,
                 description=description,
             )
         )

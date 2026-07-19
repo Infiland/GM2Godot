@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.29 - 2026-07-19
+
+- Anchored diagnostic JSON/Markdown capture, publication, restoration, invalidation, rollback, recovery retention and cleanup to the shared verified-directory byte-artifact transaction.
+- Bound snapshots and receipts to both the report root and `gm2godot/` identities, with component-by-component creation and parent durability barriers for missing external report roots.
+- Preserved stable paths, Markdown-first ordered commit, exact modes, read-only handling and ordinary-failure rollback; added physical replacement coverage across pair phases and documented that hard-crash pair atomicity remains future work.
+
 ## 0.7.28 - 2026-07-19
 
 - Anchored architecture-policy publication and restoration to one retained destination-directory binding, using descriptor-relative POSIX operations, no-delete-share Win32 handles, write-through Windows moves, and an explicit verified-path fallback.

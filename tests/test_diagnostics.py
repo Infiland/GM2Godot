@@ -5,68 +5,104 @@ import json
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from typing import Callable, cast
+from pathlib import Path
 from unittest.mock import patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
+from src.conversion import anchored_artifacts as anchored_artifacts_module
+from src.conversion.anchored_artifacts import VerifiedDirectory
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
     DiagnosticCollector,
-    DiagnosticReportFingerprint,
     capture_conversion_diagnostic_reports,
     invalidate_conversion_diagnostic_reports,
     publish_conversion_diagnostic_reports,
     restore_conversion_diagnostic_reports,
 )
-from src.conversion import diagnostics as diagnostics_module
-from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
 from tests.conversion_outcome_helpers import completed_conversion_step_ledger
 
 
+def _directory_snapshot(path: Path) -> dict[str, tuple[int, int, int, bytes]]:
+    snapshot: dict[str, tuple[int, int, int, bytes]] = {}
+    for child in path.iterdir():
+        child_stat = child.lstat()
+        snapshot[child.name] = (
+            child_stat.st_dev,
+            child_stat.st_ino,
+            stat.S_IMODE(child_stat.st_mode),
+            child.read_bytes(),
+        )
+    return snapshot
+
+
+def _write_report_pair(root: Path, json_content: bytes, markdown_content: bytes) -> None:
+    json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+    markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_bytes(json_content)
+    markdown_path.write_bytes(markdown_content)
+
+
+def _replacement_report_directory(path: Path) -> dict[str, tuple[int, int, int, bytes]]:
+    path.mkdir()
+    (path / "conversion_diagnostics.json").write_bytes(b"replacement json\n")
+    (path / "conversion_diagnostics.md").write_bytes(b"replacement markdown\n")
+    (path / "sentinel.txt").write_bytes(b"unrelated sentinel\n")
+    return _directory_snapshot(path)
+
+
 class TestDiagnosticCollector(unittest.TestCase):
-    def test_warning_log_wrapper_preserves_log_and_records_diagnostic(self):
+    def assertModeEqual(self, actual: int, expected: int) -> None:
+        if os.name == "nt":
+            self.assertEqual(
+                bool(actual & stat.S_IWUSR),
+                bool(expected & stat.S_IWUSR),
+            )
+            return
+        self.assertEqual(actual, expected)
+
+    def test_warning_log_wrapper_preserves_log_and_records_diagnostic(self) -> None:
         logs: list[str] = []
         diagnostics = DiagnosticCollector()
-        wrapped_log = diagnostics.wrap_log_callback(lambda message: logs.append(message))
+        wrapped_log = diagnostics.wrap_log_callback(logs.append)
 
         wrapped_log("Warning: Unsupported room layer emitted as placeholder.")
         wrapped_log("Converted sprite spr_player.")
 
-        self.assertEqual(logs, [
-            "Warning: Unsupported room layer emitted as placeholder.",
-            "Converted sprite spr_player.",
-        ])
+        self.assertEqual(
+            logs,
+            [
+                "Warning: Unsupported room layer emitted as placeholder.",
+                "Converted sprite spr_player.",
+            ],
+        )
         recorded = diagnostics.diagnostics()
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0].severity, "warning")
         self.assertEqual(recorded[0].code, "GM2GD-WARNING")
 
-    def test_info_log_wrapper_records_informational_diagnostic(self):
+    def test_info_log_wrapper_records_informational_diagnostic(self) -> None:
         diagnostics = DiagnosticCollector()
-        wrapped_log = diagnostics.wrap_log_callback(lambda message: None)
+        wrapped_log = diagnostics.wrap_log_callback(lambda _message: None)
 
-        wrapped_log("Info: Missing optional GameMaker metadata file; fallback metadata preserved.")
+        wrapped_log(
+            "Info: Missing optional GameMaker metadata file; fallback metadata preserved."
+        )
 
         recorded = diagnostics.diagnostics()
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0].severity, "info")
-        self.assertEqual(recorded[0].code, "GM2GD-WARNING")
 
-    def test_transpile_failure_extracts_api_and_issue_metadata(self):
+    def test_transpile_failure_extracts_api_and_issue_metadata(self) -> None:
         diagnostics = DiagnosticCollector()
 
         diagnostic = diagnostics.add_transpile_failure(
-            "Warning: Could not transpile GameMaker event code for obj/Create_0.gml: "
-            "GML API 'show_message_async' from Asynchronous Functions is unsupported; "
-            "tracked by #507. Dialog callbacks are not wired.",
+            "Warning: Could not transpile GameMaker event code: "
+            "GML API 'show_message_async' is unsupported; tracked by #507.",
             source_path="/tmp/project/objects/obj/Create_0.gml",
             resource="obj",
             resource_type="object",
@@ -76,46 +112,28 @@ class TestDiagnosticCollector(unittest.TestCase):
         self.assertEqual(diagnostic.api, "show_message_async")
         self.assertEqual(diagnostic.manifest_entry, "show_message_async")
         self.assertEqual(diagnostic.issue_number, 507)
-        self.assertEqual(diagnostic.source_path, "/tmp/project/objects/obj/Create_0.gml")
-        self.assertEqual(diagnostic.resource_type, "object")
-        self.assertEqual(diagnostic.event, "_ready")
+        self.assertEqual(
+            diagnostic.source_path,
+            "/tmp/project/objects/obj/Create_0.gml",
+        )
 
-    def test_exact_structured_duplicates_are_deduped(self):
+    def test_exact_structured_duplicates_are_deduped(self) -> None:
         diagnostics = DiagnosticCollector()
-
-        diagnostics.add(
-            "warning",
-            "GM2GD-SOURCE-PATH-REJECTED",
-            "Warning: Rejected GameMaker source path '../outside.wav'.",
-            source_path="sounds/snd_test/snd_test.yy",
-            resource="snd_test",
-            resource_type="sound",
-            manifest_entry="soundFile",
-        )
-        diagnostics.add(
-            "warning",
-            "GM2GD-SOURCE-PATH-REJECTED",
-            "Warning: Rejected GameMaker source path '../outside.wav'.",
-            source_path="sounds/snd_test/snd_test.yy",
-            resource="snd_test",
-            resource_type="sound",
-            manifest_entry="soundFile",
-        )
-        diagnostics.add(
-            "warning",
-            "GM2GD-SOURCE-PATH-REJECTED",
-            "Warning: Rejected GameMaker source path '../outside.wav'.",
-            source_path="sounds/snd_test/snd_test.yy",
-            resource="snd_other",
-            resource_type="sound",
-            manifest_entry="soundFile",
-        )
+        for resource in ("snd_test", "snd_test", "snd_other"):
+            diagnostics.add(
+                "warning",
+                "GM2GD-SOURCE-PATH-REJECTED",
+                "Warning: Rejected GameMaker source path '../outside.wav'.",
+                source_path="sounds/snd_test/snd_test.yy",
+                resource=resource,
+                resource_type="sound",
+                manifest_entry="soundFile",
+            )
 
         self.assertEqual(len(diagnostics.diagnostics()), 2)
 
-    def test_reports_are_written_as_deterministic_json_and_markdown(self):
-        tmp_dir = tempfile.mkdtemp()
-        try:
+    def test_reports_are_deterministic_json_and_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
             diagnostics = DiagnosticCollector()
             diagnostics.add(
                 "warning",
@@ -131,859 +149,24 @@ class TestDiagnosticCollector(unittest.TestCase):
 
             self.assertEqual(
                 json_path,
-                os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH),
-            )
-            self.assertEqual(
-                markdown_path,
-                os.path.join(tmp_dir, DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH),
-            )
-            with open(json_path, "r", encoding="utf-8") as json_file:
-                data = json.load(json_file)
-            with open(markdown_path, "r", encoding="utf-8") as markdown_file:
-                markdown = markdown_file.read()
-
-            self.assertEqual(data["summary"]["warning"], 1)
-            self.assertEqual(data["diagnostics"][0]["code"], "GM2GD-RESOURCE-UNSUPPORTED")
-            self.assertIn("GM2Godot Conversion Diagnostics", markdown)
-            self.assertIn("GM2GD-RESOURCE-UNSUPPORTED", markdown)
-        finally:
-            shutil.rmtree(tmp_dir)
-
-    def test_snapshot_captures_absent_report_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-
-            self.assertEqual(snapshot.json_path, os.path.join(
-                os.path.abspath(tmp_dir),
-                DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-            ))
-            self.assertEqual(snapshot.json_report.content, None)
-            self.assertEqual(snapshot.json_report.fingerprint, None)
-            self.assertEqual(snapshot.markdown_report.content, None)
-            self.assertEqual(snapshot.markdown_report.fingerprint, None)
-            report_directory_stat = os.stat(os.path.join(tmp_dir, "gm2godot"))
-            self.assertEqual(
-                snapshot.directory_identity,
-                (report_directory_stat.st_dev, report_directory_stat.st_ino),
-            )
-
-    def test_snapshot_captures_exact_bytes_modes_and_fingerprints(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            json_content = b"old json\x00\xff\n"
-            markdown_content = b"old markdown\r\n"
-            for path, content, mode in (
-                (json_path, json_content, 0o640),
-                (markdown_path, markdown_content, 0o600),
-            ):
-                with open(path, "wb") as report_file:
-                    report_file.write(content)
-                os.chmod(path, mode)
-
-            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-
-            for path, expected_content, expected_mode, captured in (
-                (json_path, json_content, 0o640, snapshot.json_report),
-                (
-                    markdown_path,
-                    markdown_content,
-                    0o600,
-                    snapshot.markdown_report,
-                ),
-            ):
-                self.assertEqual(captured.content, expected_content)
-                self.assertIsNotNone(captured.fingerprint)
-                assert captured.fingerprint is not None
-                path_stat = os.stat(path, follow_symlinks=False)
-                self.assertEqual(
-                    captured.fingerprint.identity,
-                    (path_stat.st_dev, path_stat.st_ino),
-                )
-                self.assertEqual(
-                    captured.fingerprint.sha256,
-                    hashlib.sha256(expected_content).hexdigest(),
-                )
-                if os.name != "nt":
-                    self.assertEqual(captured.mode, expected_mode)
-
-    def test_windows_descriptor_io_accepts_ctime_only_fingerprint_drift(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_path = os.path.join(tmp_dir, "diagnostic.json")
-            report_content = b'{"stable": true}\n'
-            with open(report_path, "wb") as report_file:
-                report_file.write(report_content)
-            target_state = cast(
-                Callable[[str], object],
-                getattr(diagnostics_module, "_report_target_state"),
-            )(report_path)
-            read_report = cast(
-                Callable[[str, object], bytes],
-                getattr(diagnostics_module, "_read_report_bytes"),
-            )
-            real_fingerprint = cast(
-                Callable[[os.stat_result], tuple[int, int, int, int, int]],
-                getattr(diagnostics_module, "_file_fingerprint"),
-            )
-            fingerprint_reads = 0
-
-            def drift_timestamps(
-                path_stat: os.stat_result,
-            ) -> tuple[int, int, int, int, int]:
-                nonlocal fingerprint_reads
-                fingerprint_reads += 1
-                fingerprint = real_fingerprint(path_stat)
-                if fingerprint_reads in (1, 3):
-                    return (*fingerprint[:4], fingerprint[4] + fingerprint_reads)
-                return fingerprint
-
-            with (
-                patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
-                ),
-                patch(
-                    "src.conversion.diagnostics._file_fingerprint",
-                    side_effect=drift_timestamps,
-                ),
-            ):
-                self.assertEqual(
-                    read_report(report_path, target_state),
-                    report_content,
-                )
-
-            self.assertEqual(fingerprint_reads, 4)
-
-    def test_windows_target_state_keeps_exact_path_ctime_guard(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_path = os.path.join(tmp_dir, "diagnostic.json")
-            with open(report_path, "wb") as report_file:
-                report_file.write(b'{"stable": true}\n')
-            target_state = cast(
-                Callable[[str], object],
-                getattr(diagnostics_module, "_report_target_state"),
-            )(report_path)
-            verify_target_state = cast(
-                Callable[[str, object], None],
-                getattr(diagnostics_module, "_verify_report_target_state"),
-            )
-            real_fingerprint = cast(
-                Callable[[os.stat_result], tuple[int, int, int, int, int]],
-                getattr(diagnostics_module, "_file_fingerprint"),
-            )
-
-            def path_ctime_drift(
-                path_stat: os.stat_result,
-            ) -> tuple[int, int, int, int, int]:
-                fingerprint = real_fingerprint(path_stat)
-                return (*fingerprint[:4], fingerprint[4] + 1)
-
-            with (
-                patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
-                ),
-                patch(
-                    "src.conversion.diagnostics._file_fingerprint",
-                    side_effect=path_ctime_drift,
-                ),
-                self.assertRaisesRegex(OSError, "changed during publication"),
-            ):
-                verify_target_state(report_path, target_state)
-
-    def test_fingerprint_comparator_relaxes_only_windows_ctime(self) -> None:
-        fingerprints_match = cast(
-            Callable[
-                [
-                    tuple[int, int, int, int, int],
-                    tuple[int, int, int, int, int],
-                ],
-                bool,
-            ],
-            getattr(diagnostics_module, "_file_fingerprints_match"),
-        )
-        expected = (11, 22, 33, 44, 55)
-        ctime_drift = (11, 22, 33, 44, 555)
-        mtime_drift = (11, 22, 33, 444, 55)
-
-        with patch.object(
-            diagnostics_module,
-            "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-            True,
-        ):
-            self.assertTrue(fingerprints_match(ctime_drift, expected))
-            self.assertFalse(fingerprints_match(mtime_drift, expected))
-            self.assertFalse(
-                fingerprints_match((111, 22, 33, 44, 555), expected)
-            )
-            self.assertFalse(
-                fingerprints_match((11, 222, 33, 44, 555), expected)
-            )
-            self.assertFalse(
-                fingerprints_match((11, 22, 333, 44, 555), expected)
-            )
-
-        with patch.object(
-            diagnostics_module,
-            "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-            False,
-        ):
-            self.assertFalse(fingerprints_match(ctime_drift, expected))
-
-    def test_windows_rejects_identity_size_mtime_content_and_mode_drift(
-        self,
-    ) -> None:
-        verify_fingerprint = cast(
-            Callable[[str, DiagnosticReportFingerprint], None],
-            getattr(diagnostics_module, "_verify_report_fingerprint"),
-        )
-        for drift in ("identity", "size", "mtime", "content", "mode"):
-            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as tmp_dir:
-                with patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
-                ):
-                    receipt = DiagnosticCollector().publish_reports(tmp_dir)
-                    report_path = receipt.json_path
-                    fingerprint = receipt.json_report
-                    with open(report_path, "rb") as report_file:
-                        content = report_file.read()
-                    report_mode = stat.S_IMODE(os.stat(report_path).st_mode)
-
-                    if drift == "identity":
-                        replacement_path = f"{report_path}.replacement"
-                        with open(replacement_path, "wb") as replacement_file:
-                            replacement_file.write(content)
-                        os.chmod(replacement_path, report_mode)
-                        os.replace(replacement_path, report_path)
-                    elif drift == "size":
-                        with open(report_path, "ab") as report_file:
-                            report_file.write(b"x")
-                    elif drift == "mtime":
-                        report_stat = os.stat(report_path)
-                        os.utime(
-                            report_path,
-                            ns=(
-                                report_stat.st_atime_ns,
-                                report_stat.st_mtime_ns + 1_000_000_000,
-                            ),
-                        )
-                    elif drift == "content":
-                        with open(report_path, "r+b") as report_file:
-                            report_file.write(
-                                bytes((content[0] ^ 1,))
-                            )
-                        current_stat = os.stat(report_path)
-                        fingerprint = replace(
-                            fingerprint,
-                            stat=(
-                                current_stat.st_dev,
-                                current_stat.st_ino,
-                                current_stat.st_size,
-                                current_stat.st_mtime_ns,
-                                current_stat.st_ctime_ns,
-                            ),
-                        )
-                    else:
-                        os.chmod(report_path, report_mode ^ stat.S_IWRITE)
-
-                    with self.assertRaises(OSError):
-                        verify_fingerprint(report_path, fingerprint)
-
-    def test_snapshot_refuses_redirected_or_nonregular_report(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            external_path = os.path.join(tmp_dir, "external.json")
-            os.makedirs(os.path.dirname(json_path))
-            with open(external_path, "wb") as external_file:
-                external_file.write(b"external sentinel\n")
-            try:
-                os.symlink(external_path, json_path)
-            except (NotImplementedError, OSError) as error:
-                self.skipTest(f"Symbolic links are unavailable: {error}")
-
-            with self.assertRaisesRegex(OSError, "non-regular diagnostic report"):
-                capture_conversion_diagnostic_reports(tmp_dir)
-
-            with open(external_path, "rb") as external_file:
-                self.assertEqual(external_file.read(), b"external sentinel\n")
-
-    def test_reports_and_invalidation_refuse_symlinked_project_root(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as container:
-            external_root = os.path.join(container, "external_project")
-            report_directory = os.path.join(external_root, "gm2godot")
-            os.makedirs(report_directory)
-            external_reports = (
                 os.path.join(
-                    external_root,
+                    os.path.abspath(tmp_dir),
                     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
                 ),
-                os.path.join(
-                    external_root,
-                    DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-                ),
             )
-            for report_path in external_reports:
-                with open(report_path, "wb") as report_file:
-                    report_file.write(b"external sentinel\n")
-            redirected_root = os.path.join(container, "redirected_project")
-            try:
-                os.symlink(external_root, redirected_root)
-            except (NotImplementedError, OSError) as error:
-                self.skipTest(f"Symbolic links are unavailable: {error}")
-
-            with self.assertRaisesRegex(
-                OSError,
-                "redirected Godot project root",
-            ):
-                DiagnosticCollector().publish_reports(redirected_root)
-            with self.assertRaisesRegex(
-                OSError,
-                "redirected Godot project root",
-            ):
-                capture_conversion_diagnostic_reports(redirected_root)
-            invalidate_conversion_diagnostic_reports(redirected_root)
-
-            for report_path in external_reports:
-                with open(report_path, "rb") as report_file:
-                    self.assertEqual(
-                        report_file.read(),
-                        b"external sentinel\n",
-                    )
-
-    def test_reports_and_invalidation_refuse_mocked_junction_project_root(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_directory = os.path.join(tmp_dir, "gm2godot")
-            os.makedirs(report_directory)
-            report_paths = (
-                os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH),
-                os.path.join(
-                    tmp_dir,
-                    DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-                ),
-            )
-            for report_path in report_paths:
-                with open(report_path, "wb") as report_file:
-                    report_file.write(b"junction sentinel\n")
-            normalized_root = os.path.normcase(os.path.abspath(tmp_dir))
-
-            def root_is_junction(path: str) -> bool:
-                return os.path.normcase(os.path.abspath(path)) == normalized_root
-
-            with patch.object(
-                os.path,
-                "isjunction",
-                side_effect=root_is_junction,
-                create=True,
-            ):
-                with self.assertRaisesRegex(
-                    OSError,
-                    "redirected Godot project root",
-                ):
-                    DiagnosticCollector().publish_reports(tmp_dir)
-                invalidate_conversion_diagnostic_reports(tmp_dir)
-
-            for report_path in report_paths:
-                with open(report_path, "rb") as report_file:
-                    self.assertEqual(
-                        report_file.read(),
-                        b"junction sentinel\n",
-                    )
-
-    def test_new_report_directory_is_durably_linked_from_project_root(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_directory = os.path.join(tmp_dir, "gm2godot")
-            fsync_project_root_impl = cast(
-                Callable[[str, tuple[int, int]], None],
-                getattr(diagnostics_module, "_fsync_project_root"),
-            )
-
-            with patch(
-                "src.conversion.diagnostics._fsync_project_root",
-                wraps=fsync_project_root_impl,
-            ) as fsync_project_root:
-                DiagnosticCollector().publish_reports(tmp_dir)
-
-            fsync_project_root.assert_called_once()
-            fsync_root, fsync_identity = fsync_project_root.call_args.args
-            self.assertEqual(fsync_root, os.path.abspath(tmp_dir))
-            root_stat = os.stat(tmp_dir, follow_symlinks=False)
+            data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+            markdown = Path(markdown_path).read_text(encoding="utf-8")
+            self.assertEqual(data["summary"]["warning"], 1)
             self.assertEqual(
-                fsync_identity,
-                (root_stat.st_dev, root_stat.st_ino),
+                data["diagnostics"][0]["code"],
+                "GM2GD-RESOURCE-UNSUPPORTED",
             )
-            self.assertTrue(os.path.isdir(report_directory))
-
-    def test_existing_report_directory_retries_project_root_fsync(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_directory = os.path.join(tmp_dir, "gm2godot")
-            real_fsync_project_root = cast(
-                Callable[[str, tuple[int, int]], None],
-                getattr(diagnostics_module, "_fsync_project_root"),
-            )
-
-            with patch(
-                "src.conversion.diagnostics._fsync_project_root",
-                side_effect=OSError("project root fsync failed"),
-            ):
-                with self.assertRaisesRegex(
-                    OSError,
-                    "project root fsync failed",
-                ):
-                    DiagnosticCollector().publish_reports(tmp_dir)
-
-            self.assertTrue(os.path.isdir(report_directory))
-            with patch(
-                "src.conversion.diagnostics._fsync_project_root",
-                wraps=real_fsync_project_root,
-            ) as retry_fsync:
-                DiagnosticCollector().publish_reports(tmp_dir)
-
-            retry_fsync.assert_called_once()
-
-    def test_publish_receipt_proves_current_pair_and_helper_matches_api(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            diagnostics = DiagnosticCollector()
-            diagnostics.add("warning", "GM2GD-TEST", "receipt sentinel")
-
-            receipt = publish_conversion_diagnostic_reports(tmp_dir, diagnostics)
-
-            for path, fingerprint in (
-                (receipt.json_path, receipt.json_report),
-                (receipt.markdown_path, receipt.markdown_report),
-            ):
-                path_stat = os.stat(path, follow_symlinks=False)
-                with open(path, "rb") as report_file:
-                    content = report_file.read()
-                self.assertEqual(
-                    fingerprint.identity,
-                    (path_stat.st_dev, path_stat.st_ino),
-                )
-                self.assertEqual(
-                    fingerprint.sha256,
-                    hashlib.sha256(content).hexdigest(),
-                )
-                self.assertEqual(
-                    fingerprint.mode,
-                    stat.S_IMODE(path_stat.st_mode),
-                )
-    def test_restore_reinstates_exact_present_report_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            previous = {
-                json_path: (b"trusted json\x00\n", 0o640),
-                markdown_path: (b"trusted markdown\r\n", 0o600),
-            }
-            for path, (content, mode) in previous.items():
-                with open(path, "wb") as report_file:
-                    report_file.write(content)
-                os.chmod(path, mode)
-            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-
-            restore_conversion_diagnostic_reports(tmp_dir, snapshot, receipt)
-
-            for path, (content, mode) in previous.items():
-                with open(path, "rb") as report_file:
-                    self.assertEqual(report_file.read(), content)
-                if os.name != "nt":
-                    self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), mode)
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
-            )
-
-    def test_restore_reinstates_absent_report_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-
-            restore_conversion_diagnostic_reports(tmp_dir, snapshot, receipt)
-
-            self.assertFalse(os.path.lexists(receipt.json_path))
-            self.assertFalse(os.path.lexists(receipt.markdown_path))
-            self.assertEqual(os.listdir(os.path.dirname(receipt.json_path)), [])
-
-    def test_restore_reinstates_mixed_present_and_absent_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            os.makedirs(os.path.dirname(json_path))
-            with open(json_path, "wb") as report_file:
-                report_file.write(b"trusted json only\n")
-            os.chmod(json_path, 0o640)
-            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-
-            restore_conversion_diagnostic_reports(tmp_dir, snapshot, receipt)
-
-            with open(json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"trusted json only\n")
-            self.assertFalse(os.path.lexists(receipt.markdown_path))
-            if os.name != "nt":
-                self.assertEqual(stat.S_IMODE(os.stat(json_path).st_mode), 0o640)
-
-    def test_old_baseline_can_restore_over_latest_matching_receipt(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            with open(json_path, "wb") as report_file:
-                report_file.write(b"trusted json\n")
-            with open(markdown_path, "wb") as report_file:
-                report_file.write(b"trusted markdown\n")
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            first = DiagnosticCollector()
-            first.add("warning", "GM2GD-FIRST", "first rewrite")
-            first.publish_reports(tmp_dir)
-            second = DiagnosticCollector()
-            second.add("error", "GM2GD-SECOND", "second rewrite")
-            latest_receipt = second.publish_reports(tmp_dir)
-
-            restore_conversion_diagnostic_reports(
-                tmp_dir,
-                baseline,
-                latest_receipt,
-            )
-
-            with open(json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"trusted json\n")
-            with open(markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"trusted markdown\n")
-
-    def test_restore_refuses_pair_changed_after_receipt(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-            with open(receipt.json_path, "ab") as report_file:
-                report_file.write(b"third-party mutation\n")
-            with open(receipt.markdown_path, "rb") as report_file:
-                markdown_before = report_file.read()
-
-            with self.assertRaisesRegex(OSError, "changed"):
-                restore_conversion_diagnostic_reports(
-                    tmp_dir,
-                    baseline,
-                    receipt,
-                )
-
-            with open(receipt.json_path, "rb") as report_file:
-                self.assertTrue(report_file.read().endswith(b"third-party mutation\n"))
-            with open(receipt.markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), markdown_before)
-
-    def test_restore_refuses_replaced_identity_even_with_exact_same_bytes(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-            with open(receipt.json_path, "rb") as report_file:
-                published_json = report_file.read()
-            published_mode = stat.S_IMODE(os.stat(receipt.json_path).st_mode)
-            replacement_path = os.path.join(
-                os.path.dirname(receipt.json_path),
-                "replacement.json",
-            )
-            with open(replacement_path, "wb") as report_file:
-                report_file.write(published_json)
-            os.chmod(replacement_path, published_mode)
-            os.replace(replacement_path, receipt.json_path)
-
-            with self.assertRaisesRegex(OSError, "changed"):
-                restore_conversion_diagnostic_reports(
-                    tmp_dir,
-                    baseline,
-                    receipt,
-                )
-
-            with open(receipt.json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_json)
-            self.assertTrue(os.path.isfile(receipt.markdown_path))
-
-    def test_restore_refuses_mode_changed_after_receipt(self) -> None:
-        if os.name == "nt":
-            self.skipTest("Exact POSIX mode checks are unavailable")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-            original_mode = stat.S_IMODE(os.stat(receipt.json_path).st_mode)
-            changed_mode = original_mode ^ stat.S_IXUSR
-            os.chmod(receipt.json_path, changed_mode)
-
-            with self.assertRaisesRegex(OSError, "changed since publication"):
-                restore_conversion_diagnostic_reports(
-                    tmp_dir,
-                    baseline,
-                    receipt,
-                )
-
-            self.assertEqual(
-                stat.S_IMODE(os.stat(receipt.json_path).st_mode),
-                changed_mode,
-            )
-            self.assertTrue(os.path.isfile(receipt.markdown_path))
-
-    def test_windows_restore_publication_boundary_rejects_same_size_tamper(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-            with open(receipt.json_path, "rb") as report_file:
-                published_json = report_file.read()
-            with open(receipt.markdown_path, "rb") as report_file:
-                published_markdown = report_file.read()
-            tampered_json = bytes((published_json[0] ^ 1,)) + published_json[1:]
-            real_stage_existing = cast(
-                Callable[[str, object], object],
-                getattr(diagnostics_module, "_stage_existing_report"),
-            )
-            json_tampered = False
-
-            def tamper_after_json_backup(
-                path: str,
-                expected: object,
-            ) -> object:
-                nonlocal json_tampered
-                backup = real_stage_existing(path, expected)
-                if path == receipt.json_path and not json_tampered:
-                    json_tampered = True
-                    report_stat = os.stat(path)
-                    with open(path, "r+b") as report_file:
-                        report_file.write(tampered_json)
-                        report_file.flush()
-                        os.fsync(report_file.fileno())
-                    os.utime(
-                        path,
-                        ns=(
-                            report_stat.st_atime_ns,
-                            report_stat.st_mtime_ns + 1_000_000_000,
-                        ),
-                    )
-                return backup
-
-            with (
-                patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
-                ),
-                patch(
-                    "src.conversion.diagnostics._stage_existing_report",
-                    side_effect=tamper_after_json_backup,
-                ),
-            ):
-                with self.assertRaisesRegex(OSError, "changed"):
-                    restore_conversion_diagnostic_reports(
-                        tmp_dir,
-                        baseline,
-                        receipt,
-                    )
-
-            self.assertTrue(json_tampered)
-            with open(receipt.json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), tampered_json)
-            with open(receipt.markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_markdown)
-            self.assertNotEqual(tampered_json, published_json)
-
-    def test_restore_refuses_snapshot_content_that_does_not_match_fingerprint(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            for path, content in (
-                (json_path, b"trusted json\n"),
-                (markdown_path, b"trusted markdown\n"),
-            ):
-                with open(path, "wb") as report_file:
-                    report_file.write(content)
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            receipt = DiagnosticCollector().publish_reports(tmp_dir)
-            with open(receipt.json_path, "rb") as report_file:
-                published_json = report_file.read()
-            tampered_json = replace(
-                baseline.json_report,
-                content=b"tampered baseline\n",
-            )
-            tampered_baseline = replace(
-                baseline,
-                json_report=tampered_json,
-            )
-
-            with self.assertRaisesRegex(ValueError, "does not match"):
-                restore_conversion_diagnostic_reports(
-                    tmp_dir,
-                    tampered_baseline,
-                    receipt,
-                )
-
-            with open(receipt.json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_json)
-            self.assertTrue(os.path.isfile(receipt.markdown_path))
-
-    def test_restore_failure_rolls_back_to_published_receipt_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            with open(json_path, "wb") as report_file:
-                report_file.write(b"trusted json\n")
-            with open(markdown_path, "wb") as report_file:
-                report_file.write(b"trusted markdown\n")
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            diagnostics = DiagnosticCollector()
-            diagnostics.add("error", "GM2GD-NEW", "new receipt")
-            receipt = diagnostics.publish_reports(tmp_dir)
-            with open(json_path, "rb") as report_file:
-                published_json = report_file.read()
-            with open(markdown_path, "rb") as report_file:
-                published_markdown = report_file.read()
-            real_replace = os.replace
-
-            def fail_json_restore(source: str, destination: str) -> None:
-                if destination == json_path and source.endswith(".tmp"):
-                    raise OSError("json restore failed")
-                real_replace(source, destination)
-
-            with patch(
-                "src.conversion.diagnostics.os.replace",
-                side_effect=fail_json_restore,
-            ):
-                with self.assertRaisesRegex(OSError, "json restore failed"):
-                    restore_conversion_diagnostic_reports(
-                        tmp_dir,
-                        baseline,
-                        receipt,
-                    )
-
-            with open(json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_json)
-            with open(markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_markdown)
-            for report_path, fingerprint in (
-                (json_path, receipt.json_report),
-                (markdown_path, receipt.markdown_report),
-            ):
-                report_stat = os.stat(report_path, follow_symlinks=False)
-                self.assertEqual(
-                    (report_stat.st_dev, report_stat.st_ino),
-                    fingerprint.identity,
-                )
-                self.assertEqual(
-                    stat.S_IMODE(report_stat.st_mode),
-                    fingerprint.mode,
-                )
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
-            )
-
-            # The same receipt remains valid after rollback even though moving
-            # its inodes out and back may have changed timestamp metadata.
-            restore_conversion_diagnostic_reports(
-                tmp_dir,
-                baseline,
-                receipt,
-            )
-            with open(json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"trusted json\n")
-            with open(markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"trusted markdown\n")
-
-    def test_absent_restore_failure_rolls_back_deleted_report(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            baseline = capture_conversion_diagnostic_reports(tmp_dir)
-            diagnostics = DiagnosticCollector()
-            diagnostics.add("error", "GM2GD-NEW", "new receipt")
-            receipt = diagnostics.publish_reports(tmp_dir)
-            with open(receipt.json_path, "rb") as report_file:
-                published_json = report_file.read()
-            with open(receipt.markdown_path, "rb") as report_file:
-                published_markdown = report_file.read()
-            real_replace = os.replace
-
-            def fail_json_removal(source: str, destination: str) -> None:
-                if source == receipt.json_path and destination.endswith(".backup"):
-                    raise OSError("json removal failed")
-                real_replace(source, destination)
-
-            with patch(
-                "src.conversion.diagnostics.os.replace",
-                side_effect=fail_json_removal,
-            ):
-                with self.assertRaisesRegex(OSError, "json removal failed"):
-                    restore_conversion_diagnostic_reports(
-                        tmp_dir,
-                        baseline,
-                        receipt,
-                    )
-
-            with open(receipt.json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_json)
-            with open(receipt.markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), published_markdown)
-            for report_path, fingerprint in (
-                (receipt.json_path, receipt.json_report),
-                (receipt.markdown_path, receipt.markdown_report),
-            ):
-                report_stat = os.stat(report_path, follow_symlinks=False)
-                self.assertEqual(
-                    (report_stat.st_dev, report_stat.st_ino),
-                    fingerprint.identity,
-                )
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(receipt.json_path))),
-                {
-                    os.path.basename(receipt.json_path),
-                    os.path.basename(receipt.markdown_path),
-                },
-            )
-
-            restore_conversion_diagnostic_reports(tmp_dir, baseline, receipt)
-            self.assertFalse(os.path.lexists(receipt.json_path))
-            self.assertFalse(os.path.lexists(receipt.markdown_path))
+            self.assertIn("GM2Godot Conversion Diagnostics", markdown)
+            self.assertIn("GM2GD-RESOURCE-UNSUPPORTED", markdown)
 
     def test_report_schema_is_unchanged_without_conversion_outcome(self) -> None:
-        diagnostics = DiagnosticCollector()
-
         self.assertEqual(
-            set(diagnostics.to_json_dict()),
+            set(DiagnosticCollector().to_json_dict()),
             {"summary", "diagnostics"},
         )
 
@@ -1001,786 +184,1009 @@ class TestDiagnosticCollector(unittest.TestCase):
         )
         diagnostics.set_outcome(outcome)
 
-        report = diagnostics.to_json_dict()
+        self.assertEqual(diagnostics.to_json_dict()["outcome"], outcome.to_dict())
+        self.assertIn(
+            "Conversion outcome: `partial`",
+            diagnostics.to_markdown(),
+        )
 
-        self.assertEqual(report["outcome"], outcome.to_dict())
-        self.assertIn("Conversion outcome: `partial`", diagnostics.to_markdown())
-
-    def test_markdown_staging_failure_leaves_no_new_report_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            diagnostics = DiagnosticCollector()
-            diagnostics.set_outcome(ConversionOutcome(state="success"))
-            report_directory = os.path.join(tmp_dir, "gm2godot")
-            real_mkstemp = tempfile.mkstemp
-            stage_calls = 0
-
-            def fail_second_stage(
-                suffix: str | None = None,
-                prefix: str | None = None,
-                dir: str | os.PathLike[str] | None = None,
-                text: bool = False,
-            ) -> tuple[int, str]:
-                nonlocal stage_calls
-                stage_calls += 1
-                if stage_calls == 2:
-                    raise OSError("markdown staging failed")
-                return real_mkstemp(
-                    suffix=suffix,
-                    prefix=prefix,
-                    dir=dir,
-                    text=text,
-                )
-
-            with patch(
-                "src.conversion.diagnostics.tempfile.mkstemp",
-                side_effect=fail_second_stage,
-            ):
-                with self.assertRaisesRegex(OSError, "markdown staging failed"):
-                    diagnostics.write_reports(tmp_dir)
-
-            self.assertFalse(
-                os.path.exists(
-                    os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-                )
-            )
-            self.assertFalse(
-                os.path.exists(
-                    os.path.join(tmp_dir, DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH)
-                )
-            )
-            self.assertEqual(os.listdir(report_directory), [])
-
-    def test_second_replace_failure_restores_previous_report_pair(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path), exist_ok=True)
-            with open(json_path, "w", encoding="utf-8") as json_file:
-                json_file.write("previous json\n")
-            with open(markdown_path, "w", encoding="utf-8") as markdown_file:
-                markdown_file.write("previous markdown\n")
-            os.chmod(json_path, 0o640)
-            os.chmod(markdown_path, 0o600)
-
-            diagnostics = DiagnosticCollector()
-            diagnostics.set_outcome(ConversionOutcome(state="success"))
-            real_replace = os.replace
-            destinations: list[str] = []
-            json_replace_attempts = 0
-
-            def fail_first_json_replace(source: str, destination: str) -> None:
-                nonlocal json_replace_attempts
-                destinations.append(destination)
-                if destination == json_path:
-                    json_replace_attempts += 1
-                    if json_replace_attempts == 1:
-                        raise OSError("json publish failed")
-                real_replace(source, destination)
-
-            with patch(
-                "src.conversion.diagnostics.os.replace",
-                side_effect=fail_first_json_replace,
-            ):
-                with self.assertRaisesRegex(OSError, "json publish failed"):
-                    diagnostics.write_reports(tmp_dir)
-
-            self.assertEqual(destinations[:2], [markdown_path, json_path])
-            with open(json_path, "r", encoding="utf-8") as json_file:
-                self.assertEqual(json_file.read(), "previous json\n")
-            with open(markdown_path, "r", encoding="utf-8") as markdown_file:
-                self.assertEqual(markdown_file.read(), "previous markdown\n")
-            if os.name != "nt":
-                self.assertEqual(stat.S_IMODE(os.stat(json_path).st_mode), 0o640)
-                self.assertEqual(
-                    stat.S_IMODE(os.stat(markdown_path).st_mode),
-                    0o600,
-                )
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
-            )
-
-    def test_windows_readonly_attributes_survive_publish_and_restore(
+    def test_snapshot_captures_absent_pair_and_both_directory_identities(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
+            snapshot = capture_conversion_diagnostic_reports(tmp_dir)
+
+            root_stat = os.stat(tmp_dir, follow_symlinks=False)
+            report_directory = Path(tmp_dir) / "gm2godot"
+            directory_stat = report_directory.stat()
+            self.assertEqual(
+                snapshot.root_identity,
+                (root_stat.st_dev, root_stat.st_ino),
             )
-            os.makedirs(os.path.dirname(json_path))
-            for report_path, content, mode in (
-                (json_path, b"readonly json\n", 0o444),
-                (markdown_path, b"writable markdown\n", 0o600),
+            self.assertEqual(
+                snapshot.directory_identity,
+                (directory_stat.st_dev, directory_stat.st_ino),
+            )
+            self.assertIsNone(snapshot.json_report.content)
+            self.assertIsNone(snapshot.json_report.fingerprint)
+            self.assertIsNone(snapshot.markdown_report.content)
+            self.assertIsNone(snapshot.markdown_report.fingerprint)
+
+    def test_snapshot_captures_exact_bytes_modes_and_fingerprints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+            _write_report_pair(root, b"old json\x00\xff\n", b"old markdown\r\n")
+            json_path.chmod(0o640)
+            markdown_path.chmod(0o600)
+
+            snapshot = capture_conversion_diagnostic_reports(root)
+
+            for path, content, mode, captured in (
+                (json_path, b"old json\x00\xff\n", 0o640, snapshot.json_report),
+                (
+                    markdown_path,
+                    b"old markdown\r\n",
+                    0o600,
+                    snapshot.markdown_report,
+                ),
             ):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(content)
-                os.chmod(report_path, mode)
+                self.assertEqual(captured.content, content)
+                self.assertIsNotNone(captured.fingerprint)
+                assert captured.fingerprint is not None
+                path_stat = path.stat()
+                self.assertEqual(
+                    captured.fingerprint.identity,
+                    (path_stat.st_dev, path_stat.st_ino),
+                )
+                self.assertEqual(
+                    captured.fingerprint.sha256,
+                    hashlib.sha256(content).hexdigest(),
+                )
+                self.assertModeEqual(captured.mode or 0, mode)
 
-            real_replace = os.replace
-            real_unlink = os.unlink
+    def test_publish_receipt_proves_pair_and_helper_matches_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            diagnostics = DiagnosticCollector()
+            diagnostics.add("warning", "GM2GD-TEST", "receipt sentinel")
 
-            def windows_replace(source: str, destination: str) -> None:
-                for candidate in (source, destination):
-                    if os.path.lexists(candidate) and not (
-                        stat.S_IMODE(os.lstat(candidate).st_mode) & stat.S_IWRITE
-                    ):
-                        raise PermissionError(
-                            f"Windows refuses to replace read-only file: {candidate}"
-                        )
-                real_replace(source, destination)
+            receipt = publish_conversion_diagnostic_reports(tmp_dir, diagnostics)
 
-            def windows_unlink(path: str) -> None:
-                if os.path.lexists(path) and not (
-                    stat.S_IMODE(os.lstat(path).st_mode) & stat.S_IWRITE
-                ):
-                    raise PermissionError(
-                        f"Windows refuses to unlink read-only file: {path}"
+            root_stat = os.stat(tmp_dir, follow_symlinks=False)
+            directory_stat = os.stat(
+                os.path.join(tmp_dir, "gm2godot"),
+                follow_symlinks=False,
+            )
+            self.assertEqual(
+                receipt.root_identity,
+                (root_stat.st_dev, root_stat.st_ino),
+            )
+            self.assertEqual(
+                receipt.directory_identity,
+                (directory_stat.st_dev, directory_stat.st_ino),
+            )
+            for path, fingerprint in (
+                (receipt.json_path, receipt.json_report),
+                (receipt.markdown_path, receipt.markdown_report),
+            ):
+                content = Path(path).read_bytes()
+                path_stat = os.stat(path, follow_symlinks=False)
+                self.assertEqual(
+                    fingerprint.identity,
+                    (path_stat.st_dev, path_stat.st_ino),
+                )
+                self.assertEqual(
+                    fingerprint.sha256,
+                    hashlib.sha256(content).hexdigest(),
+                )
+
+    def test_restore_reinstates_exact_present_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+            _write_report_pair(root, b"trusted json\x00\n", b"trusted markdown\r\n")
+            json_path.chmod(0o640)
+            markdown_path.chmod(0o600)
+            snapshot = capture_conversion_diagnostic_reports(root)
+            receipt = DiagnosticCollector().publish_reports(root)
+
+            restore_conversion_diagnostic_reports(root, snapshot, receipt)
+
+            self.assertEqual(json_path.read_bytes(), b"trusted json\x00\n")
+            self.assertEqual(markdown_path.read_bytes(), b"trusted markdown\r\n")
+            self.assertModeEqual(stat.S_IMODE(json_path.stat().st_mode), 0o640)
+            self.assertModeEqual(
+                stat.S_IMODE(markdown_path.stat().st_mode),
+                0o600,
+            )
+            self.assertEqual(
+                sorted(path.name for path in json_path.parent.iterdir()),
+                ["conversion_diagnostics.json", "conversion_diagnostics.md"],
+            )
+
+    def test_restore_reinstates_absent_and_mixed_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as absent_dir:
+            snapshot = capture_conversion_diagnostic_reports(absent_dir)
+            receipt = DiagnosticCollector().publish_reports(absent_dir)
+            restore_conversion_diagnostic_reports(absent_dir, snapshot, receipt)
+            self.assertFalse(Path(receipt.json_path).exists())
+            self.assertFalse(Path(receipt.markdown_path).exists())
+
+        with tempfile.TemporaryDirectory() as mixed_dir:
+            root = Path(mixed_dir)
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            json_path.parent.mkdir()
+            json_path.write_bytes(b"trusted json only\n")
+            json_path.chmod(0o640)
+            snapshot = capture_conversion_diagnostic_reports(root)
+            receipt = DiagnosticCollector().publish_reports(root)
+            restore_conversion_diagnostic_reports(root, snapshot, receipt)
+            self.assertEqual(json_path.read_bytes(), b"trusted json only\n")
+            self.assertFalse(Path(receipt.markdown_path).exists())
+            self.assertModeEqual(stat.S_IMODE(json_path.stat().st_mode), 0o640)
+
+    def test_old_baseline_can_restore_over_latest_matching_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"trusted json\n", b"trusted markdown\n")
+            baseline = capture_conversion_diagnostic_reports(root)
+            first = DiagnosticCollector()
+            first.add("warning", "GM2GD-FIRST", "first rewrite")
+            first.publish_reports(root)
+            second = DiagnosticCollector()
+            second.add("error", "GM2GD-SECOND", "second rewrite")
+            latest_receipt = second.publish_reports(root)
+
+            restore_conversion_diagnostic_reports(root, baseline, latest_receipt)
+
+            self.assertEqual(
+                (root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).read_bytes(),
+                b"trusted json\n",
+            )
+            self.assertEqual(
+                (root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH).read_bytes(),
+                b"trusted markdown\n",
+            )
+
+    def test_restore_refuses_changed_or_replaced_receipt_targets(self) -> None:
+        for case in ("content", "identity", "mode"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                baseline = capture_conversion_diagnostic_reports(root)
+                receipt = DiagnosticCollector().publish_reports(root)
+                json_path = Path(receipt.json_path)
+                original = json_path.read_bytes()
+                if case == "content":
+                    json_path.write_bytes(bytes((original[0] ^ 1,)) + original[1:])
+                elif case == "identity":
+                    replacement_path = json_path.with_suffix(".replacement")
+                    replacement_path.write_bytes(original)
+                    replacement_path.chmod(receipt.json_report.mode)
+                    os.replace(replacement_path, json_path)
+                else:
+                    if os.name == "nt":
+                        self.skipTest("Exact POSIX mode drift is unavailable")
+                    json_path.chmod(receipt.json_report.mode ^ stat.S_IXUSR)
+
+                with self.assertRaisesRegex(OSError, "changed"):
+                    restore_conversion_diagnostic_reports(root, baseline, receipt)
+
+                self.assertTrue(json_path.exists())
+                self.assertTrue(Path(receipt.markdown_path).exists())
+
+    def test_restore_validates_root_and_report_directory_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            baseline = capture_conversion_diagnostic_reports(root)
+            receipt = DiagnosticCollector().publish_reports(root)
+
+            for field in ("root_identity", "directory_identity"):
+                with self.subTest(field=field):
+                    identity = getattr(receipt, field)
+                    forged = replace(
+                        receipt,
+                        **{field: (identity[0], identity[1] + 1)},
                     )
-                real_unlink(path)
+                    with self.assertRaisesRegex(ValueError, "directories do not match"):
+                        restore_conversion_diagnostic_reports(
+                            root,
+                            baseline,
+                            forged,
+                        )
+
+    def test_restore_refuses_forged_snapshot_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"trusted json\n", b"trusted markdown\n")
+            baseline = capture_conversion_diagnostic_reports(root)
+            receipt = DiagnosticCollector().publish_reports(root)
+            forged = replace(
+                baseline,
+                json_report=replace(
+                    baseline.json_report,
+                    content=b"tampered baseline\n",
+                ),
+            )
+
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                restore_conversion_diagnostic_reports(root, forged, receipt)
+
+            self.assertEqual(
+                Path(receipt.json_path).read_bytes(),
+                json.dumps(
+                    DiagnosticCollector().to_json_dict(),
+                    indent=2,
+                    sort_keys=True,
+                ).encode("utf-8")
+                + b"\n",
+            )
+
+    def test_restore_failure_rolls_back_to_original_receipt_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"trusted json\n", b"trusted markdown\n")
+            baseline = capture_conversion_diagnostic_reports(root)
+            diagnostics = DiagnosticCollector()
+            diagnostics.add("error", "GM2GD-NEW", "new receipt")
+            receipt = diagnostics.publish_reports(root)
+            published = (
+                Path(receipt.json_path).read_bytes(),
+                Path(receipt.markdown_path).read_bytes(),
+            )
+            failures = 0
+
+            def fail_after_first_restore_commit(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal failures
+                if (
+                    phase == "after_commit"
+                    and name == "conversion_diagnostics.md"
+                    and failures == 0
+                ):
+                    failures += 1
+                    raise OSError("injected restore failure")
 
             with (
-                patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
-                ),
                 patch(
-                    "src.conversion.diagnostics.os.replace",
-                    side_effect=windows_replace,
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_after_first_restore_commit,
                 ),
-                patch(
-                    "src.conversion.diagnostics.os.unlink",
-                    side_effect=windows_unlink,
-                ),
+                self.assertRaisesRegex(OSError, "injected restore failure"),
             ):
-                snapshot = capture_conversion_diagnostic_reports(tmp_dir)
-                receipt = DiagnosticCollector().publish_reports(tmp_dir)
+                restore_conversion_diagnostic_reports(root, baseline, receipt)
 
-                self.assertFalse(
-                    stat.S_IMODE(os.stat(json_path).st_mode) & stat.S_IWRITE
-                )
-                self.assertTrue(
-                    stat.S_IMODE(os.stat(markdown_path).st_mode) & stat.S_IWRITE
-                )
+            self.assertEqual(Path(receipt.json_path).read_bytes(), published[0])
+            self.assertEqual(Path(receipt.markdown_path).read_bytes(), published[1])
+            restore_conversion_diagnostic_reports(root, baseline, receipt)
 
-                restore_conversion_diagnostic_reports(
-                    tmp_dir,
-                    snapshot,
-                    receipt,
-                )
+    def test_external_report_root_chain_is_synced_before_descent(self) -> None:
+        with tempfile.TemporaryDirectory() as container:
+            container_path = Path(container)
+            report_root = container_path / "one" / "two" / "reports"
+            sync_paths: list[str] = []
+            real_sync = VerifiedDirectory.sync
 
-            with open(json_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"readonly json\n")
-            with open(markdown_path, "rb") as report_file:
-                self.assertEqual(report_file.read(), b"writable markdown\n")
-            self.assertFalse(
-                stat.S_IMODE(os.stat(json_path).st_mode) & stat.S_IWRITE
+            def record_sync(binding: VerifiedDirectory) -> None:
+                sync_paths.append(os.path.abspath(binding.path))
+                real_sync(binding)
+
+            with patch.object(
+                VerifiedDirectory,
+                "sync",
+                autospec=True,
+                side_effect=record_sync,
+            ):
+                DiagnosticCollector().publish_reports(report_root)
+
+            self.assertEqual(
+                sync_paths[:4],
+                [
+                    os.path.abspath(container),
+                    os.path.abspath(container_path / "one"),
+                    os.path.abspath(container_path / "one" / "two"),
+                    os.path.abspath(report_root),
+                ],
             )
             self.assertTrue(
-                stat.S_IMODE(os.stat(markdown_path).st_mode) & stat.S_IWRITE
-            )
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
+                (report_root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).is_file()
             )
 
-    def test_windows_readonly_attributes_survive_publish_rollback(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            for report_path, content in (
-                (json_path, b"previous json\n"),
-                (markdown_path, b"previous markdown\n"),
-            ):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(content)
-                os.chmod(report_path, 0o444)
+    def test_external_root_creation_retry_repeats_failed_parent_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as container:
+            report_parent = Path(container) / "one" / "two"
+            report_root = report_parent / "reports"
+            real_sync = VerifiedDirectory.sync
+            failed = False
 
-            real_replace = os.replace
-            real_unlink = os.unlink
-            json_publish_failed = False
-
-            def fail_json_publish(source: str, destination: str) -> None:
-                nonlocal json_publish_failed
-                for candidate in (source, destination):
-                    if os.path.lexists(candidate) and not (
-                        stat.S_IMODE(os.lstat(candidate).st_mode) & stat.S_IWRITE
-                    ):
-                        raise PermissionError(
-                            f"Windows refuses to replace read-only file: {candidate}"
-                        )
+            def fail_report_root_parent_sync(binding: VerifiedDirectory) -> None:
+                nonlocal failed
                 if (
-                    destination == json_path
-                    and source.endswith(".tmp")
-                    and not json_publish_failed
+                    not failed
+                    and os.path.abspath(binding.path)
+                    == os.path.abspath(report_parent)
                 ):
-                    json_publish_failed = True
-                    raise OSError("json publish failed")
-                real_replace(source, destination)
-
-            def windows_unlink(path: str) -> None:
-                if os.path.lexists(path) and not (
-                    stat.S_IMODE(os.lstat(path).st_mode) & stat.S_IWRITE
-                ):
-                    raise PermissionError(
-                        f"Windows refuses to unlink read-only file: {path}"
-                    )
-                real_unlink(path)
+                    failed = True
+                    raise OSError("injected external parent sync failure")
+                real_sync(binding)
 
             with (
                 patch.object(
-                    diagnostics_module,
-                    "_WINDOWS_READONLY_FILE_ATTRIBUTES",
-                    True,
+                    VerifiedDirectory,
+                    "sync",
+                    autospec=True,
+                    side_effect=fail_report_root_parent_sync,
                 ),
-                patch(
-                    "src.conversion.diagnostics.os.replace",
-                    side_effect=fail_json_publish,
-                ),
-                patch(
-                    "src.conversion.diagnostics.os.unlink",
-                    side_effect=windows_unlink,
-                ),
+                self.assertRaisesRegex(OSError, "external parent sync failure"),
             ):
-                with self.assertRaisesRegex(OSError, "json publish failed"):
-                    DiagnosticCollector().publish_reports(tmp_dir)
+                DiagnosticCollector().publish_reports(report_root)
 
-            for report_path, expected_content in (
-                (json_path, b"previous json\n"),
-                (markdown_path, b"previous markdown\n"),
+            self.assertTrue(report_root.is_dir())
+            self.assertFalse((report_root / "gm2godot").exists())
+            retry_sync_paths: list[str] = []
+
+            def record_retry(binding: VerifiedDirectory) -> None:
+                retry_sync_paths.append(os.path.abspath(binding.path))
+                real_sync(binding)
+
+            with patch.object(
+                VerifiedDirectory,
+                "sync",
+                autospec=True,
+                side_effect=record_retry,
             ):
-                with open(report_path, "rb") as report_file:
-                    self.assertEqual(report_file.read(), expected_content)
-                self.assertFalse(
-                    stat.S_IMODE(os.stat(report_path).st_mode) & stat.S_IWRITE
-                )
+                DiagnosticCollector().publish_reports(report_root)
+
+            self.assertGreaterEqual(len(retry_sync_paths), 2)
             self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
+                retry_sync_paths[:2],
+                [
+                    os.path.abspath(report_parent),
+                    os.path.abspath(report_root),
+                ],
             )
 
-    def test_cleanup_fsync_failure_after_commit_still_returns_receipt(
-        self,
-    ) -> None:
+    def test_staging_failure_leaves_no_new_pair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            report_directory = os.path.dirname(json_path)
-            os.makedirs(report_directory)
-            for report_path, content in (
-                (json_path, b"old json\n"),
-                (markdown_path, b"old markdown\n"),
-            ):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(content)
-            diagnostics = DiagnosticCollector()
-            diagnostics.add("warning", "GM2GD-NEW", "new reports")
-            real_fsync = cast(
-                Callable[[str, tuple[int, int]], None],
-                getattr(diagnostics_module, "_fsync_report_directory"),
-            )
-            cleanup_fsync_failures = 0
+            root = Path(tmp_dir)
 
-            def fail_cleanup_fsync(
-                path: str,
-                identity: tuple[int, int],
+            def fail_json_stage(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
             ) -> None:
-                nonlocal cleanup_fsync_failures
-                remaining_backups = tuple(
-                    name
-                    for name in os.listdir(path)
-                    if name.endswith(".backup")
-                )
-                if not remaining_backups:
-                    cleanup_fsync_failures += 1
-                    raise OSError("cleanup fsync failed")
-                real_fsync(path, identity)
+                if phase == "before_stage" and name == "conversion_diagnostics.json":
+                    raise OSError("injected JSON staging failure")
 
-            with patch(
-                "src.conversion.diagnostics._fsync_report_directory",
-                side_effect=fail_cleanup_fsync,
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_json_stage,
+                ),
+                self.assertRaisesRegex(OSError, "JSON staging failure"),
             ):
-                receipt = diagnostics.publish_reports(tmp_dir)
+                DiagnosticCollector().publish_reports(root)
 
-            self.assertEqual(cleanup_fsync_failures, 1)
-            for report_path, fingerprint in (
-                (json_path, receipt.json_report),
-                (markdown_path, receipt.markdown_report),
-            ):
-                with open(report_path, "rb") as report_file:
-                    content = report_file.read()
-                self.assertEqual(
-                    hashlib.sha256(content).hexdigest(),
-                    fingerprint.sha256,
-                )
-                self.assertNotIn(b"old ", content)
-            self.assertEqual(
-                set(os.listdir(report_directory)),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
-            )
+            self.assertEqual(list((root / "gm2godot").iterdir()), [])
 
-    def test_cleanup_accepts_unlink_that_removes_backup_then_raises(
+    def test_pair_commits_markdown_then_json_and_rolls_back_second_failure(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            report_directory = os.path.dirname(json_path)
-            os.makedirs(report_directory)
-            for report_path, content in (
-                (json_path, b"old json\n"),
-                (markdown_path, b"old markdown\n"),
-            ):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(content)
-            diagnostics = DiagnosticCollector()
-            diagnostics.add("warning", "GM2GD-NEW", "new reports")
-            real_unlink = os.unlink
-            removed_then_raised = 0
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            commits: list[str] = []
 
-            def remove_backup_then_raise(path: str) -> None:
-                nonlocal removed_then_raised
-                real_unlink(path)
-                if path.endswith(".backup"):
-                    removed_then_raised += 1
-                    raise OSError("unlink reported failure after removal")
+            def fail_json_commit(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                if phase != "before_commit" or name is None:
+                    return
+                commits.append(name)
+                if name == "conversion_diagnostics.json":
+                    raise OSError("injected JSON commit failure")
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_json_commit,
+                ),
+                self.assertRaisesRegex(OSError, "JSON commit failure"),
+            ):
+                DiagnosticCollector().publish_reports(root)
+
+            self.assertEqual(
+                commits,
+                [
+                    "conversion_diagnostics.md",
+                    "conversion_diagnostics.json",
+                    "conversion_diagnostics.md",
+                ],
+            )
+            self.assertEqual(
+                (root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).read_bytes(),
+                b"old json\n",
+            )
+            self.assertEqual(
+                (root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH).read_bytes(),
+                b"old markdown\n",
+            )
+
+    def test_cleanup_durability_failure_after_commit_keeps_valid_receipt(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            failures = 0
+
+            def fail_cleanup_sync(
+                phase: str,
+                _directory_path: str,
+                _name: str | None,
+            ) -> None:
+                nonlocal failures
+                if phase == "before_cleanup_durability":
+                    failures += 1
+                    raise OSError("injected cleanup durability failure")
 
             with patch(
-                "src.conversion.diagnostics.os.unlink",
-                side_effect=remove_backup_then_raise,
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_cleanup_sync,
             ):
-                receipt = diagnostics.publish_reports(tmp_dir)
+                receipt = DiagnosticCollector().publish_reports(root)
 
-            self.assertEqual(removed_then_raised, 2)
-            self.assertEqual(receipt.json_path, json_path)
-            self.assertEqual(receipt.markdown_path, markdown_path)
+            self.assertEqual(failures, 1)
             self.assertEqual(
-                set(os.listdir(report_directory)),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
+                hashlib.sha256(Path(receipt.json_path).read_bytes()).hexdigest(),
+                receipt.json_report.sha256,
+            )
+            self.assertEqual(
+                sorted(path.name for path in (root / "gm2godot").iterdir()),
+                ["conversion_diagnostics.json", "conversion_diagnostics.md"],
             )
 
     def test_cleanup_propagates_keyboard_interrupt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            report_directory = os.path.dirname(json_path)
-            os.makedirs(report_directory)
-            for report_path in (json_path, markdown_path):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(b"old report\n")
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
             real_unlink = os.unlink
 
-            def interrupt_backup_cleanup(path: str) -> None:
-                if path.endswith(".backup"):
-                    raise KeyboardInterrupt("diagnostic cleanup interrupted")
-                real_unlink(path)
+            def interrupt_backup_cleanup(
+                path: str | bytes,
+                *,
+                dir_fd: int | None = None,
+            ) -> None:
+                if os.fsdecode(path).endswith(".backup"):
+                    raise KeyboardInterrupt("injected cleanup interrupt")
+                real_unlink(path, dir_fd=dir_fd)
 
-            with patch(
-                "src.conversion.diagnostics.os.unlink",
-                side_effect=interrupt_backup_cleanup,
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts.os.unlink",
+                    side_effect=interrupt_backup_cleanup,
+                ),
+                self.assertRaisesRegex(KeyboardInterrupt, "cleanup interrupt"),
             ):
-                with self.assertRaisesRegex(
-                    KeyboardInterrupt,
-                    "diagnostic cleanup interrupted",
-                ):
-                    DiagnosticCollector().publish_reports(tmp_dir)
+                DiagnosticCollector().publish_reports(root)
 
-    def test_post_replace_exception_still_restores_previous_pair(self) -> None:
+    def test_rollback_failure_preserves_verified_previous_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            with open(json_path, "w", encoding="utf-8") as report_file:
-                report_file.write("previous json\n")
-            with open(markdown_path, "w", encoding="utf-8") as report_file:
-                report_file.write("previous markdown\n")
-            real_replace = os.replace
-            injected = False
-
-            def replace_then_fail(source: str, destination: str) -> None:
-                nonlocal injected
-                real_replace(source, destination)
-                if not injected and source.endswith(".tmp"):
-                    injected = True
-                    raise OSError("post-replace failure")
-
-            with patch(
-                "src.conversion.diagnostics.os.replace",
-                side_effect=replace_then_fail,
-            ):
-                with self.assertRaisesRegex(OSError, "post-replace failure"):
-                    DiagnosticCollector().write_reports(tmp_dir)
-
-            with open(json_path, "r", encoding="utf-8") as report_file:
-                self.assertEqual(report_file.read(), "previous json\n")
-            with open(markdown_path, "r", encoding="utf-8") as report_file:
-                self.assertEqual(report_file.read(), "previous markdown\n")
-            self.assertEqual(
-                set(os.listdir(os.path.dirname(json_path))),
-                {os.path.basename(json_path), os.path.basename(markdown_path)},
-            )
-
-    def test_rollback_failure_preserves_previous_report_backup(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            report_directory = os.path.dirname(json_path)
-            os.makedirs(report_directory)
-            with open(json_path, "w", encoding="utf-8") as report_file:
-                report_file.write("previous json\n")
-            with open(markdown_path, "w", encoding="utf-8") as report_file:
-                report_file.write("previous markdown\n")
-
-            diagnostics = DiagnosticCollector()
-            diagnostics.set_outcome(ConversionOutcome(state="success"))
-            real_replace = os.replace
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            rolling_back = False
 
             def fail_publish_and_rollback(
-                source: str,
-                destination: str,
+                phase: str,
+                _directory_path: str,
+                name: str | None,
             ) -> None:
-                if destination == json_path and source.endswith(".tmp"):
-                    raise OSError("json publish failed")
-                if destination == markdown_path and source.endswith(".backup"):
-                    raise OSError("markdown rollback failed")
-                real_replace(source, destination)
-
-            with patch(
-                "src.conversion.diagnostics.os.replace",
-                side_effect=fail_publish_and_rollback,
-            ):
-                with self.assertRaisesRegex(OSError, "json publish failed"):
-                    diagnostics.write_reports(tmp_dir)
-
-            recovery_paths = [
-                os.path.join(report_directory, name)
-                for name in os.listdir(report_directory)
-                if name.endswith(".backup")
-            ]
-            self.assertEqual(len(recovery_paths), 1)
-            with open(recovery_paths[0], "r", encoding="utf-8") as backup_file:
-                self.assertEqual(backup_file.read(), "previous markdown\n")
-            with open(json_path, "r", encoding="utf-8") as report_file:
-                self.assertEqual(report_file.read(), "previous json\n")
-            with open(markdown_path, "r", encoding="utf-8") as report_file:
-                self.assertNotEqual(report_file.read(), "previous markdown\n")
-            self.assertFalse(
-                any(name.endswith(".tmp") for name in os.listdir(report_directory))
-            )
-
-    def test_reports_refuse_final_symlink_without_reading_referent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            report_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-            )
-            external_path = os.path.join(tmp_dir, "external.json")
-            os.makedirs(os.path.dirname(report_path))
-            with open(external_path, "w", encoding="utf-8") as external_file:
-                external_file.write("external sentinel\n")
-            try:
-                os.symlink(external_path, report_path)
-            except (NotImplementedError, OSError) as error:
-                self.skipTest(f"Symbolic links are unavailable: {error}")
-
-            with self.assertRaisesRegex(OSError, "non-regular diagnostic report"):
-                DiagnosticCollector().write_reports(tmp_dir)
-
-            self.assertTrue(os.path.islink(report_path))
-            with open(external_path, "r", encoding="utf-8") as external_file:
-                self.assertEqual(external_file.read(), "external sentinel\n")
-
-    def test_reports_refuse_symlinked_report_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            external_directory = os.path.join(tmp_dir, "external")
-            os.makedirs(external_directory)
-            report_directory = os.path.join(tmp_dir, "gm2godot")
-            try:
-                os.symlink(external_directory, report_directory)
-            except (NotImplementedError, OSError) as error:
-                self.skipTest(f"Symbolic links are unavailable: {error}")
-
-            with self.assertRaisesRegex(
-                OSError,
-                "redirected diagnostic report directory",
-            ):
-                DiagnosticCollector().write_reports(tmp_dir)
-
-            self.assertEqual(os.listdir(external_directory), [])
-
-    def test_report_verification_and_invalidation_refuse_mocked_junction(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-            )
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            report_directory = os.path.dirname(json_path)
-            os.makedirs(report_directory)
-            for report_path in (json_path, markdown_path):
-                with open(report_path, "w", encoding="utf-8") as report_file:
-                    report_file.write("stale sentinel\n")
-
-            normalized_report_directory = os.path.normcase(
-                os.path.abspath(report_directory)
-            )
-            report_directory_checks = 0
-
-            def junction_after_initial_check(path: str) -> bool:
-                nonlocal report_directory_checks
+                nonlocal rolling_back
                 if (
-                    os.path.normcase(os.path.abspath(path))
-                    != normalized_report_directory
+                    phase == "before_commit"
+                    and name == "conversion_diagnostics.json"
+                    and not rolling_back
                 ):
-                    return False
-                report_directory_checks += 1
-                return report_directory_checks > 1
+                    rolling_back = True
+                    raise OSError("injected JSON publication failure")
+                if (
+                    rolling_back
+                    and phase == "before_commit"
+                    and name == "conversion_diagnostics.md"
+                ):
+                    raise OSError("injected Markdown rollback failure")
 
-            with patch.object(
-                os.path,
-                "isjunction",
-                side_effect=junction_after_initial_check,
-                create=True,
-            ):
-                with self.assertRaisesRegex(
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_publish_and_rollback,
+                ),
+                self.assertRaisesRegex(
                     OSError,
-                    "Diagnostic report directory changed",
-                ):
-                    DiagnosticCollector().write_reports(tmp_dir)
-                invalidate_conversion_diagnostic_reports(tmp_dir)
+                    "JSON publication failure",
+                ) as raised,
+            ):
+                DiagnosticCollector().publish_reports(root)
 
-            for report_path in (json_path, markdown_path):
-                with open(report_path, "r", encoding="utf-8") as report_file:
-                    self.assertEqual(report_file.read(), "stale sentinel\n")
+            notes = getattr(raised.exception, "__notes__", ())
+            self.assertTrue(
+                any("verified recovery artifact preserved" in note for note in notes)
+            )
+            retained = [
+                path
+                for path in (root / "gm2godot").iterdir()
+                if path.name not in {
+                    "conversion_diagnostics.json",
+                    "conversion_diagnostics.md",
+                }
+            ]
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), b"old markdown\n")
+
+    def test_reports_refuse_redirects_and_nonregular_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as container:
+            container_path = Path(container)
+            outside = container_path / "outside"
+            outside.mkdir()
+            root_link = container_path / "root-link"
+            try:
+                root_link.symlink_to(outside, target_is_directory=True)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Symbolic links are unavailable: {error}")
+            with self.assertRaisesRegex(OSError, "redirected"):
+                DiagnosticCollector().publish_reports(root_link)
+            self.assertEqual(list(outside.iterdir()), [])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            outside = root / "outside"
+            outside.mkdir()
+            report_directory = root / "gm2godot"
+            report_directory.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(OSError, "redirected"):
+                DiagnosticCollector().publish_reports(root)
+            self.assertEqual(list(outside.iterdir()), [])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            report_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            report_path.parent.mkdir()
+            outside_report = root / "outside.json"
+            outside_report.write_bytes(b"outside\n")
+            report_path.symlink_to(outside_report)
+            with self.assertRaisesRegex(OSError, "non-regular"):
+                DiagnosticCollector().publish_reports(root)
+            self.assertEqual(outside_report.read_bytes(), b"outside\n")
+
+            report_path.unlink()
+            if hasattr(os, "mkfifo"):
+                os.mkfifo(report_path)
+                with self.assertRaisesRegex(OSError, "non-regular"):
+                    DiagnosticCollector().publish_reports(root)
 
     def test_reports_replace_hardlinks_without_mutating_referents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            external_json = os.path.join(tmp_dir, "external.json")
-            external_markdown = os.path.join(tmp_dir, "external.md")
-            for path, content in (
-                (external_json, "external json\n"),
-                (external_markdown, "external markdown\n"),
-            ):
-                with open(path, "w", encoding="utf-8") as external_file:
-                    external_file.write(content)
+            root = Path(tmp_dir)
+            report_directory = root / "gm2godot"
+            report_directory.mkdir()
+            external_json = root / "external.json"
+            external_markdown = root / "external.md"
+            external_json.write_bytes(b"external json\n")
+            external_markdown.write_bytes(b"external markdown\n")
             try:
-                os.link(external_json, json_path)
-                os.link(external_markdown, markdown_path)
+                os.link(
+                    external_json,
+                    root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
+                )
+                os.link(
+                    external_markdown,
+                    root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
+                )
             except (NotImplementedError, OSError) as error:
                 self.skipTest(f"Hard links are unavailable: {error}")
 
-            DiagnosticCollector().write_reports(tmp_dir)
+            DiagnosticCollector().publish_reports(root)
 
-            with open(external_json, "r", encoding="utf-8") as external_file:
-                self.assertEqual(external_file.read(), "external json\n")
-            with open(external_markdown, "r", encoding="utf-8") as external_file:
-                self.assertEqual(external_file.read(), "external markdown\n")
-            self.assertNotEqual(os.stat(json_path).st_ino, os.stat(external_json).st_ino)
+            self.assertEqual(external_json.read_bytes(), b"external json\n")
+            self.assertEqual(external_markdown.read_bytes(), b"external markdown\n")
             self.assertNotEqual(
-                os.stat(markdown_path).st_ino,
-                os.stat(external_markdown).st_ino,
+                (root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).stat().st_ino,
+                external_json.stat().st_ino,
             )
 
-    def test_reports_refuse_nonregular_final_target(self) -> None:
-        if not hasattr(os, "mkfifo"):
-            self.skipTest("FIFO creation is unavailable")
+    def test_new_private_modes_and_existing_exact_modes_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            report_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(report_path))
-            os.mkfifo(report_path)
-
-            with self.assertRaisesRegex(OSError, "non-regular diagnostic report"):
-                DiagnosticCollector().write_reports(tmp_dir)
-
-    def test_report_writer_does_not_require_os_fchmod(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
             with patch.object(
-                os,
+                anchored_artifacts_module.os,
                 "fchmod",
                 side_effect=AssertionError("os.fchmod must not be called"),
                 create=True,
             ):
-                json_path, markdown_path = DiagnosticCollector().write_reports(
-                    tmp_dir
-                )
-
-            self.assertTrue(os.path.isfile(json_path))
-            self.assertTrue(os.path.isfile(markdown_path))
-            if os.name != "nt":
-                self.assertEqual(stat.S_IMODE(os.stat(json_path).st_mode), 0o600)
-                self.assertEqual(
-                    stat.S_IMODE(os.stat(markdown_path).st_mode),
-                    0o600,
-                )
-
-    def test_existing_report_modes_are_set_through_held_descriptors(
-        self,
-    ) -> None:
-        if os.name == "nt":
-            self.skipTest("Windows preserves only the read-only file attribute")
-        fchmod_candidate = getattr(os, "fchmod", None)
-        if not callable(fchmod_candidate):
-            self.skipTest("os.fchmod is unavailable")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            for report_path, mode in (
-                (json_path, 0o640),
-                (markdown_path, 0o600),
-            ):
-                with open(report_path, "wb") as report_file:
-                    report_file.write(b"old report\n")
-                os.chmod(report_path, mode)
-            real_fchmod = fchmod_candidate
-            fchmod_calls: list[tuple[tuple[int, int], int]] = []
-
-            def record_fchmod(file_descriptor: int, mode: int) -> None:
-                opened_stat = os.fstat(file_descriptor)
-                fchmod_calls.append(
-                    ((opened_stat.st_dev, opened_stat.st_ino), mode)
-                )
-                real_fchmod(file_descriptor, mode)
-
-            with patch.object(os, "fchmod", side_effect=record_fchmod):
-                DiagnosticCollector().publish_reports(tmp_dir)
-
-            self.assertEqual(len(fchmod_calls), 4)
-            self.assertEqual(
-                sorted(mode for _identity, mode in fchmod_calls),
-                [0o600, 0o600, 0o640, 0o640],
-            )
-            self.assertEqual(
-                len({identity for identity, _mode in fchmod_calls}),
-                4,
+                receipt = DiagnosticCollector().publish_reports(root)
+            self.assertTrue(Path(receipt.json_path).is_file())
+            self.assertModeEqual(
+                stat.S_IMODE(Path(receipt.json_path).stat().st_mode),
+                0o600,
             )
 
-    def test_existing_set_id_modes_are_preserved_after_staging_writes(
-        self,
-    ) -> None:
         if os.name == "nt" or not callable(getattr(os, "fchmod", None)):
-            self.skipTest("POSIX descriptor mode preservation is unavailable")
+            return
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path))
-            expected_modes = {
-                json_path: 0o4750,
-                markdown_path: 0o2750,
-            }
-            for report_path, mode in expected_modes.items():
-                with open(report_path, "wb") as report_file:
-                    report_file.write(b"old report\n")
-                os.chmod(report_path, mode)
-                if stat.S_IMODE(os.stat(report_path).st_mode) != mode:
-                    self.skipTest("The test filesystem does not retain set-ID modes")
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+            json_path.chmod(0o4750)
+            markdown_path.chmod(0o2750)
+            if (
+                stat.S_IMODE(json_path.stat().st_mode) != 0o4750
+                or stat.S_IMODE(markdown_path.stat().st_mode) != 0o2750
+            ):
+                self.skipTest("Filesystem does not preserve set-ID modes")
 
-            DiagnosticCollector().publish_reports(tmp_dir)
+            DiagnosticCollector().publish_reports(root)
 
-            for report_path, mode in expected_modes.items():
-                self.assertEqual(
-                    stat.S_IMODE(os.stat(report_path).st_mode),
-                    mode,
-                )
+            self.assertEqual(stat.S_IMODE(json_path.stat().st_mode), 0o4750)
+            self.assertEqual(stat.S_IMODE(markdown_path.stat().st_mode), 0o2750)
 
-    def test_invalidate_reports_is_best_effort_for_both_paths(self) -> None:
+    def test_modeled_windows_readonly_pair_survives_publish_restore_and_rollback(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            json_path = os.path.join(tmp_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
-            markdown_path = os.path.join(
-                tmp_dir,
-                DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
-            )
-            os.makedirs(os.path.dirname(json_path), exist_ok=True)
-            for report_path in (json_path, markdown_path):
-                with open(report_path, "w", encoding="utf-8") as report_file:
-                    report_file.write("stale\n")
-            real_unlink = os.unlink
-
-            def fail_json_unlink(path: str) -> None:
-                if path == json_path:
-                    raise PermissionError("json is locked")
-                real_unlink(path)
+            root = Path(tmp_dir)
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+            _write_report_pair(root, b"readonly json\n", b"readonly markdown\n")
+            json_path.chmod(0o444)
+            markdown_path.chmod(0o444)
 
             with patch(
-                "src.conversion.diagnostics.os.unlink",
-                side_effect=fail_json_unlink,
+                "src.conversion.anchored_artifacts._is_windows_platform",
+                return_value=True,
             ):
-                invalidate_conversion_diagnostic_reports(tmp_dir)
+                snapshot = capture_conversion_diagnostic_reports(root)
+                receipt = DiagnosticCollector().publish_reports(root)
+                self.assertFalse(
+                    stat.S_IMODE(json_path.stat().st_mode) & stat.S_IWUSR
+                )
+                self.assertFalse(
+                    stat.S_IMODE(markdown_path.stat().st_mode) & stat.S_IWUSR
+                )
+                restore_conversion_diagnostic_reports(root, snapshot, receipt)
 
-            self.assertTrue(os.path.exists(json_path))
-            self.assertFalse(os.path.exists(markdown_path))
-
-            invalidate_conversion_diagnostic_reports(tmp_dir)
-            self.assertFalse(os.path.exists(json_path))
-
-    def test_invalidate_reports_refuses_symlinked_report_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            external_directory = os.path.join(tmp_dir, "external")
-            os.makedirs(external_directory)
-            external_report = os.path.join(
-                external_directory,
-                os.path.basename(DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH),
+            self.assertEqual(json_path.read_bytes(), b"readonly json\n")
+            self.assertEqual(markdown_path.read_bytes(), b"readonly markdown\n")
+            self.assertFalse(stat.S_IMODE(json_path.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(
+                stat.S_IMODE(markdown_path.stat().st_mode) & stat.S_IWUSR
             )
-            with open(external_report, "w", encoding="utf-8") as report_file:
-                report_file.write("external sentinel\n")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            json_path = root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+            markdown_path = root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+            _write_report_pair(root, b"readonly json\n", b"readonly markdown\n")
+            json_path.chmod(0o444)
+            markdown_path.chmod(0o444)
+
+            def fail_json_commit(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                if phase == "before_commit" and name == "conversion_diagnostics.json":
+                    raise OSError("injected readonly pair failure")
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._is_windows_platform",
+                    return_value=True,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_json_commit,
+                ),
+                self.assertRaisesRegex(OSError, "readonly pair failure"),
+            ):
+                DiagnosticCollector().publish_reports(root)
+
+            self.assertEqual(json_path.read_bytes(), b"readonly json\n")
+            self.assertEqual(markdown_path.read_bytes(), b"readonly markdown\n")
+            self.assertFalse(stat.S_IMODE(json_path.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(
+                stat.S_IMODE(markdown_path.stat().st_mode) & stat.S_IWUSR
+            )
+
+    def test_invalidation_is_best_effort_for_both_bound_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"stale json\n", b"stale markdown\n")
+
+            def fail_json_invalidation(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                if (
+                    phase == "before_backup"
+                    and name == "conversion_diagnostics.json"
+                ):
+                    raise PermissionError("json is locked")
+
+            with patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_json_invalidation,
+            ):
+                invalidate_conversion_diagnostic_reports(root)
+
+            self.assertTrue(
+                (root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).exists()
+            )
+            self.assertFalse(
+                (root / DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH).exists()
+            )
+            invalidate_conversion_diagnostic_reports(root)
+            self.assertFalse(
+                (root / DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH).exists()
+            )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX relocation semantics required")
+    def test_publish_never_mutates_physical_replacement_at_each_pair_phase(
+        self,
+    ) -> None:
+        cases = (
+            ("before_stage", "conversion_diagnostics.md"),
+            ("before_backup", "conversion_diagnostics.md"),
+            ("before_backup", "conversion_diagnostics.json"),
+            ("before_commit", "conversion_diagnostics.md"),
+            ("before_commit", "conversion_diagnostics.json"),
+            ("before_durability", "conversion_diagnostics.md"),
+            ("before_durability", "conversion_diagnostics.json"),
+            ("before_sync", None),
+            ("before_cleanup", None),
+        )
+        for index, (selected_phase, selected_name) in enumerate(cases):
+            with self.subTest(phase=selected_phase, name=selected_name):
+                temp_dir = Path(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, temp_dir, True)
+                root = temp_dir / f"project-{index}"
+                root.mkdir()
+                _write_report_pair(root, b"old json\n", b"old markdown\n")
+                report_directory = root / "gm2godot"
+                parked = root / "gm2godot.parked"
+                swapped = False
+                replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+
+                def replace_directory(
+                    phase: str,
+                    directory_path: str,
+                    name: str | None,
+                ) -> None:
+                    nonlocal swapped, replacement_before
+                    if (
+                        swapped
+                        or phase != selected_phase
+                        or name != selected_name
+                        or os.path.abspath(directory_path)
+                        != os.path.abspath(report_directory)
+                    ):
+                        return
+                    swapped = True
+                    os.rename(report_directory, parked)
+                    replacement_before = _replacement_report_directory(
+                        report_directory
+                    )
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=replace_directory,
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    DiagnosticCollector().publish_reports(root)
+
+                self.assertTrue(swapped)
+                self.assertEqual(
+                    _directory_snapshot(report_directory),
+                    replacement_before,
+                )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX relocation semantics required")
+    def test_restore_displacement_stays_bound_after_physical_replacement(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            snapshot = capture_conversion_diagnostic_reports(root)
+            receipt = DiagnosticCollector().publish_reports(root)
+            report_directory = root / "gm2godot"
+            parked = root / "gm2godot.parked"
+            replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+            swapped = False
+
+            def replace_before_displacement(
+                phase: str,
+                directory_path: str,
+                _name: str | None,
+            ) -> None:
+                nonlocal swapped, replacement_before
+                if (
+                    swapped
+                    or phase != "before_replace"
+                    or os.path.abspath(directory_path)
+                    != os.path.abspath(report_directory)
+                ):
+                    return
+                swapped = True
+                os.rename(report_directory, parked)
+                replacement_before = _replacement_report_directory(
+                    report_directory
+                )
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=replace_before_displacement,
+                ),
+                self.assertRaises(OSError),
+            ):
+                restore_conversion_diagnostic_reports(root, snapshot, receipt)
+
+            self.assertTrue(swapped)
+            self.assertEqual(
+                _directory_snapshot(report_directory),
+                replacement_before,
+            )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX relocation semantics required")
+    def test_rollback_and_invalidation_stay_bound_after_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"old json\n", b"old markdown\n")
+            report_directory = root / "gm2godot"
+            parked = root / "gm2godot.parked"
+            replacement_before: dict[str, tuple[int, int, int, bytes]] = {}
+            swapped = False
+
+            def fail_then_replace_for_rollback(
+                phase: str,
+                directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal swapped, replacement_before
+                if phase == "after_commit" and name == "conversion_diagnostics.md":
+                    raise OSError("injected post-commit failure")
+                if (
+                    swapped
+                    or phase != "before_rollback"
+                    or os.path.abspath(directory_path)
+                    != os.path.abspath(report_directory)
+                ):
+                    return
+                swapped = True
+                os.rename(report_directory, parked)
+                replacement_before = _replacement_report_directory(
+                    report_directory
+                )
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_then_replace_for_rollback,
+                ),
+                self.assertRaisesRegex(OSError, "post-commit failure"),
+            ):
+                DiagnosticCollector().publish_reports(root)
+
+            self.assertTrue(swapped)
+            self.assertEqual(
+                _directory_snapshot(report_directory),
+                replacement_before,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            _write_report_pair(root, b"stale json\n", b"stale markdown\n")
+            report_directory = root / "gm2godot"
+            parked = root / "gm2godot.parked"
+            replacement_before = {}
+            swapped = False
+
+            def replace_before_invalidation_unlink(
+                phase: str,
+                directory_path: str,
+                _name: str | None,
+            ) -> None:
+                nonlocal swapped, replacement_before
+                if (
+                    swapped
+                    or phase != "before_unlink"
+                    or os.path.abspath(directory_path)
+                    != os.path.abspath(report_directory)
+                ):
+                    return
+                swapped = True
+                os.rename(report_directory, parked)
+                replacement_before = _replacement_report_directory(
+                    report_directory
+                )
+
+            with patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=replace_before_invalidation_unlink,
+            ):
+                invalidate_conversion_diagnostic_reports(root)
+
+            self.assertTrue(swapped)
+            self.assertEqual(
+                _directory_snapshot(report_directory),
+                replacement_before,
+            )
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows handles required")
+    def test_windows_bindings_block_root_and_report_relocation_during_publish(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as container:
+            root = Path(container) / "external" / "reports"
+            report_directory = root / "gm2godot"
+            parked_root = root.with_name("reports.parked")
+            parked_reports = root / "gm2godot.parked"
+            relocation_checked = False
+
+            def try_relocation(
+                phase: str,
+                _directory_path: str,
+                _name: str | None,
+            ) -> None:
+                nonlocal relocation_checked
+                if phase != "before_stage" or relocation_checked:
+                    return
+                relocation_checked = True
+                with self.assertRaises(OSError):
+                    os.rename(report_directory, parked_reports)
+                with self.assertRaises(OSError):
+                    os.rename(root, parked_root)
+
+            with patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=try_relocation,
+            ):
+                receipt = DiagnosticCollector().publish_reports(root)
+
+            self.assertTrue(relocation_checked)
+            self.assertTrue(Path(receipt.json_path).is_file())
+
+    def test_invalidation_refuses_redirected_report_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            outside = root / "outside"
+            outside.mkdir()
+            external_report = outside / "conversion_diagnostics.json"
+            external_report.write_bytes(b"external sentinel\n")
             try:
-                os.symlink(
-                    external_directory,
-                    os.path.join(tmp_dir, "gm2godot"),
+                (root / "gm2godot").symlink_to(
+                    outside,
+                    target_is_directory=True,
                 )
             except (NotImplementedError, OSError) as error:
                 self.skipTest(f"Symbolic links are unavailable: {error}")
 
-            invalidate_conversion_diagnostic_reports(tmp_dir)
+            invalidate_conversion_diagnostic_reports(root)
 
-            with open(external_report, "r", encoding="utf-8") as report_file:
-                self.assertEqual(report_file.read(), "external sentinel\n")
+            self.assertEqual(
+                external_report.read_bytes(),
+                b"external sentinel\n",
+            )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.28 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.29 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -205,15 +205,19 @@ Important trust rules:
 
 The exact schemas and transaction rules are defined by [`conversion_manifest.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_manifest.py), [`conversion_outcome.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_outcome.py), and their [manifest tests](https://github.com/Infiland/GM2Godot/blob/main/tests/test_conversion_manifest.py).
 
-### Architecture-policy publication confinement
+### Anchored report publication confinement
 
-`architecture_policy.json` is staged, backed up, published, rolled back, recovered and cleaned through one destination-directory binding retained for the complete operation. On POSIX hosts with the required APIs, every child lookup and namespace mutation is relative to a no-follow directory descriptor and durability barriers call `fsync()` on that retained descriptor. Replacing the visible `gm2godot/` path therefore makes publication fail, but cannot redirect cleanup or rollback into the replacement directory.
+`architecture_policy.json` and the `conversion_diagnostics.json` / `.md` pair are staged, backed up, published, rolled back, recovered and cleaned through one destination-directory binding retained for each complete operation. Diagnostic snapshots and publication receipts bind both the report root and its exact `gm2godot/` child. An explicit external report root that does not exist is created one component at a time through its verified parent; each new directory entry crosses the parent durability barrier before creation descends further.
 
-On Windows, GM2Godot opens both the destination project and the exact captured `gm2godot/` directory with reparse-point inspection and without delete sharing before it creates a stage. Child paths remain safe to resolve while those handles prevent either directory from being relocated; replacement requests use write-through completion. Publishing absence first moves the exact target behind a private write-through tombstone, then removes that tombstone on a best-effort basis. Windows has no documented general equivalent to POSIX directory `fsync`, so directory barriers revalidate the retained handle. This is a confinement and strongest-available write-through guarantee, not a claim of identical power-loss durability; a crash can leave hidden tombstone debris, but cannot restore its old public name.
+On POSIX hosts with the required APIs, every child lookup and namespace mutation is relative to a no-follow directory descriptor and durability barriers call `fsync()` on that retained descriptor. Replacing the visible `gm2godot/` path therefore makes publication fail, but cannot redirect capture, restore, invalidation, cleanup or rollback into the replacement directory.
+
+On Windows, GM2Godot opens both the report root and the exact captured `gm2godot/` directory with reparse-point inspection and without delete sharing before it creates a stage. Child paths remain safe to resolve while those handles prevent either directory from being relocated; replacement requests use write-through completion. Publishing absence first moves the exact target behind a private write-through tombstone, then removes that tombstone on a best-effort basis. Windows has no documented general equivalent to POSIX directory `fsync`, so directory barriers revalidate the retained handle. This is a confinement and strongest-available write-through guarantee, not a claim of identical power-loss durability; a crash can leave hidden tombstone debris, but cannot restore its old public name.
 
 If a non-Windows host lacks descriptor-relative open, stat, mkdir, rename or unlink, `O_NOFOLLOW`, `O_DIRECTORY`, or descriptor chmod, the transaction selects a `verified_path` fallback before staging. That fallback verifies the root and destination identities before and after each full-path operation. It rejects links and changed directories but narrows rather than eliminates the final non-cooperating path-resolution race. The backend is fixed for the transaction and never downgrades after a stage exists.
 
 The retained directory binding does not lock individual artifact names against a non-cooperating writer. Exact inode, mode, byte and digest checks run after staging, before every ordered mutation, and again at the native replace/unlink boundary. A process that races the final system call can still win the remaining leaf-entry interval on platforms without a suitable handle-relative primitive. Close editors, games and other writers while conversion or recovery is running; unexpected exact-state changes fail the transaction and preserve verified recovery material instead of authorizing an overwrite.
+
+The two diagnostic files retain stable public paths and ordinary-exception rollback, but they are still separate ordered replacements. A hard process or machine crash between their durability barriers can therefore expose one old file and one new file. Treat the pair as belonging to one successful invocation only when their outcome and surrounding attempt evidence agree; a future generation protocol is required for old-or-new crash atomicity across the pair.
 
 ## Extension mappings and platform bridges
 

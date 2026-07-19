@@ -2764,7 +2764,9 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ASSET_REGISTRY_RELATIVE_PATH,
         )
         previous_content = b"previous read-only registry\n"
-        _write_file(registry_path, previous_content.decode("utf-8"))
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "wb") as registry_file:
+            registry_file.write(previous_content)
         os.chmod(registry_path, stat.S_IREAD)
         previous_stat = os.lstat(registry_path)
         previous_identity = previous_stat.st_dev, previous_stat.st_ino

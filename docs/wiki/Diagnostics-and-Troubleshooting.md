@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.29 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.30 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -77,7 +77,7 @@ Read `canonical_manifest` in the attempt ledger:
 | `preserved` | `false` | `unverified` | A regular canonical file already existed and was left untouched. Its recorded digest identifies those bytes, but preservation does not prove that its schema or contents describe the current destination or latest attempt. |
 | `absent` | `false` | `unavailable` | No canonical manifest exists; `sha256` is `null`. |
 
-The digest string is `sha256:` followed by the lowercase hash of the raw `conversion_manifest.json` bytes. The attempt and canonical files are each atomically replaced, but they are not one multi-file atomic unit: publication is attempt-first and canonical-last. A missing canonical file or digest mismatch can therefore identify an interrupted pair publication. Do not trust the canonical manifest until the digest matches.
+The digest string is `sha256:` followed by the lowercase hash of the raw `conversion_manifest.json` bytes. Staging, backup reads, attempt-first replacement, canonical-last replacement, rollback, recovery and cleanup stay on one verified `gm2godot/` directory binding through final receipt validation; POSIX uses descriptor-relative no-follow operations and Windows retains a reparse-checked handle that denies directory deletion. The two files are still not one multi-file crash-atomic unit. A missing canonical file or digest mismatch can therefore identify an interrupted pair publication. Do not trust the canonical manifest until the digest matches.
 
 Even when the digest matches, inspect both records:
 

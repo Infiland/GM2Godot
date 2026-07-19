@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.29 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.30 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -198,7 +198,7 @@ Important trust rules:
 
 - Unsafe destinations rejected during preflight are not modified and do not receive an attempt ledger.
 - A partial canonical manifest is written only when every requested converter step completed; its partiality comes from skipped or failed resources.
-- `conversion_attempt.json` is committed before `conversion_manifest.json`. Each file replacement is atomic, but the pair is not one multi-file atomic transaction.
+- `conversion_attempt.json` is committed before `conversion_manifest.json` through one verified `gm2godot/` directory binding. Each file replacement is atomic, but the pair is not one multi-file crash-atomic transaction.
 - Consumers must compare `conversion_attempt.json` → `canonical_manifest.sha256` with the actual canonical manifest. A mismatch means publication was interrupted.
 - `canonical_manifest.status = preserved` is transaction-relative. It does not prove that an older manifest describes the destination after a failed or cancelled attempt.
 - `generated_files` describes files changed from the conversion’s initial output snapshot; it intentionally does not claim ownership of every unchanged pre-existing file.

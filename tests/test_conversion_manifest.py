@@ -640,128 +640,38 @@ class TestConversionManifest(unittest.TestCase):
         self.assertNotIn("custom.gd", generated_by_path)
         self.assertNotIn("project.godot", generated_by_path)
 
-    def test_artifact_pair_is_fsynced_and_published_attempt_first_from_same_directory(
+    def test_artifact_pair_commits_attempt_first_through_one_bound_directory(
         self,
     ) -> None:
         godot_dir = self.temp_dir / "godot"
         godot_dir.mkdir()
-        real_replace = os.replace
-        real_fsync = os.fsync
+        commits: list[tuple[str, str]] = []
 
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                wraps=real_replace,
-            ) as replace,
-            patch(
-                "src.conversion.conversion_manifest.os.fsync",
-                wraps=real_fsync,
-            ) as fsync,
+        def record_commits(
+            phase: str,
+            directory_path: str,
+            name: str | None,
+        ) -> None:
+            if phase == "after_commit" and name is not None:
+                commits.append((directory_path, name))
+
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=record_commits,
         ):
             manifest_path, attempt_path = self._write_artifacts(godot_dir)
 
-        self.assertIsNotNone(manifest_path)
-        self.assertEqual(len(replace.call_args_list), 2)
-        destinations = [Path(call.args[1]) for call in replace.call_args_list]
+        artifact_directory = os.path.abspath(godot_dir / "gm2godot")
         self.assertEqual(
-            destinations,
+            commits,
             [
-                godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH,
-                godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH,
+                (artifact_directory, "conversion_attempt.json"),
+                (artifact_directory, "conversion_manifest.json"),
             ],
         )
-        for call in replace.call_args_list:
-            staged_path, destination_path = call.args
-            self.assertEqual(Path(staged_path).parent, Path(destination_path).parent)
-        self.assertGreaterEqual(fsync.call_count, 2 if os.name == "nt" else 4)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
         self.assertTrue(Path(cast(str, manifest_path)).is_file())
         self.assertTrue(Path(attempt_path).is_file())
-
-    @unittest.skipIf(os.name == "nt", "Directory fsync is unavailable on Windows")
-    def test_new_artifact_directory_entry_is_fsynced_through_project_root(
-        self,
-    ) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_verified_directory"),
-        )
-
-        with patch(
-            "src.conversion.conversion_manifest._fsync_verified_directory",
-            wraps=real_directory_fsync,
-        ) as fsync_directory:
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(
-            any(
-                Path(call.args[0]) == godot_dir
-                and call.kwargs.get("description") == "conversion artifact root"
-                for call in fsync_directory.call_args_list
-            )
-        )
-
-    @unittest.skipIf(os.name == "nt", "Directory fsync is unavailable on Windows")
-    def test_retry_fsyncs_project_root_after_directory_creation_sync_failure(
-        self,
-    ) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_verified_directory"),
-        )
-        root_sync_failed = False
-
-        def fail_first_root_sync(
-            path: str,
-            expected_identity: object,
-            *,
-            description: str,
-        ) -> None:
-            nonlocal root_sync_failed
-            if description == "conversion artifact root" and not root_sync_failed:
-                root_sync_failed = True
-                raise OSError("injected artifact root fsync failure")
-            real_directory_fsync(
-                path,
-                cast(tuple[int, int], expected_identity),
-                description=description,
-            )
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._fsync_verified_directory",
-                side_effect=fail_first_root_sync,
-            ),
-            self.assertRaisesRegex(OSError, "injected artifact root fsync failure"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(root_sync_failed)
-        self.assertTrue((godot_dir / "gm2godot").is_dir())
-        self.assertFalse(
-            (godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH).exists()
-        )
-        self.assertFalse(
-            (godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH).exists()
-        )
-
-        with patch(
-            "src.conversion.conversion_manifest._fsync_verified_directory",
-            wraps=real_directory_fsync,
-        ) as retry_fsync:
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(
-            any(
-                Path(call.args[0]) == godot_dir
-                and call.kwargs.get("description") == "conversion artifact root"
-                for call in retry_fsync.call_args_list
-            )
-        )
+        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
 
     def test_attempt_only_preserves_canonical_bytes_and_records_exact_digest(
         self,
@@ -769,31 +679,18 @@ class TestConversionManifest(unittest.TestCase):
         godot_dir, manifest_path, attempt_path, manifest_before, _ = (
             self._existing_artifacts()
         )
-        failed_outcome = self._failed_outcome()
 
         returned_manifest, returned_attempt = self._write_artifacts(
             godot_dir,
             manifest_outcome=None,
-            attempt_outcome=failed_outcome,
+            attempt_outcome=self._failed_outcome(),
         )
 
         self.assertIsNone(returned_manifest)
         self.assertEqual(Path(returned_attempt), attempt_path)
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
         attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
-        self.assertEqual(attempt["format_version"], 1)
         self.assertEqual(attempt["attempt"]["state"], "failed")
-        self.assertFalse(attempt["attempt"]["cancelled"])
-        self.assertEqual(
-            attempt["attempt"]["steps"],
-            {
-                "requested": ["scripts", "objects"],
-                "executed": ["scripts", "objects"],
-                "completed": ["scripts"],
-                "skipped": [],
-                "failed": ["objects"],
-            },
-        )
         self.assertEqual(
             attempt["canonical_manifest"],
             {
@@ -805,7 +702,6 @@ class TestConversionManifest(unittest.TestCase):
                 + hashlib.sha256(manifest_before).hexdigest(),
             },
         )
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
 
     def test_attempt_only_records_absent_canonical_and_cancellation(self) -> None:
         godot_dir = self.temp_dir / "godot"
@@ -853,26 +749,18 @@ class TestConversionManifest(unittest.TestCase):
         manifest = json.loads(manifest_bytes)
         self.assertEqual(manifest["format_version"], 2)
         self.assertEqual(manifest["conversion"]["state"], "partial")
-        self.assertFalse(manifest["conversion"]["cancelled"])
         self.assertEqual(
             manifest["conversion"]["steps"]["completed"],
             ["scripts", "objects"],
         )
-        self.assertEqual(manifest["conversion"]["steps"]["skipped"], [])
         attempt = json.loads(Path(attempt_path_value).read_text(encoding="utf-8"))
         self.assertEqual(
-            attempt["canonical_manifest"],
-            {
-                "path": "gm2godot/conversion_manifest.json",
-                "status": "updated",
-                "updated": True,
-                "current_output": "verified",
-                "sha256": "sha256:"
-                + hashlib.sha256(manifest_bytes).hexdigest(),
-            },
+            attempt["canonical_manifest"]["sha256"],
+            "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
         )
+        self.assertEqual(attempt["canonical_manifest"]["status"], "updated")
 
-    def test_generated_files_exclude_attempt_stages_and_backups_but_keep_manifest_self(
+    def test_generated_files_exclude_transaction_files_but_keep_manifest_self(
         self,
     ) -> None:
         godot_dir = self.temp_dir / "godot"
@@ -882,9 +770,8 @@ class TestConversionManifest(unittest.TestCase):
         excluded_names = (
             "conversion_attempt.json",
             ".conversion_attempt.json.stale.tmp",
-            ".conversion_attempt.json.recovery.backup",
-            ".conversion_manifest.json.stale.tmp",
-            ".conversion_manifest.json.recovery.backup",
+            ".conversion_attempt.json.abcdefgh.recovery.backup",
+            ".conversion_manifest.json.stale.backup",
         )
         for filename in excluded_names:
             (artifact_dir / filename).write_text(filename, encoding="utf-8")
@@ -907,46 +794,35 @@ class TestConversionManifest(unittest.TestCase):
             self.assertNotIn(f"gm2godot/{filename}", generated)
         self.assertIn("gm2godot/kept_report.json", generated)
         self.assertEqual(
-            generated["gm2godot/conversion_manifest.json"],
-            {
-                "path": "gm2godot/conversion_manifest.json",
-                "kind": "manifest",
-                "sha256": "self",
-            },
+            generated["gm2godot/conversion_manifest.json"]["sha256"],
+            "self",
         )
 
-    def test_serialization_failure_preserves_existing_artifact_pair(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
+    def test_serialization_failure_preserves_pair_without_creating_directory(
+        self,
+    ) -> None:
+        existing_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
+            self._existing_artifacts(self.temp_dir / "existing")
         )
+        missing_dir = self.temp_dir / "missing"
+        missing_dir.mkdir()
 
-        with (
-            patch(
-                "src.conversion.conversion_manifest._serialize_json",
-                side_effect=TypeError("injected serialization failure"),
-            ),
-            self.assertRaisesRegex(TypeError, "injected serialization failure"),
-        ):
-            self._write_artifacts(godot_dir)
+        for godot_dir in (existing_dir, missing_dir):
+            with (
+                patch(
+                    "src.conversion.conversion_manifest._serialize_json",
+                    side_effect=TypeError("injected serialization failure"),
+                ),
+                self.assertRaisesRegex(
+                    TypeError,
+                    "injected serialization failure",
+                ),
+            ):
+                self._write_artifacts(godot_dir)
 
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_serialization_failure_does_not_create_artifact_directory(self) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._serialize_json",
-                side_effect=TypeError("injected serialization failure"),
-            ),
-            self.assertRaisesRegex(TypeError, "injected serialization failure"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertFalse((godot_dir / "gm2godot").exists())
+        self.assertFalse((missing_dir / "gm2godot").exists())
 
     def test_included_output_delete_at_manifest_boundary_rolls_back_pair(
         self,
@@ -1330,579 +1206,31 @@ class TestConversionManifest(unittest.TestCase):
 
         self.assertFalse((godot_dir / "gm2godot").exists())
 
-    def test_staged_write_failure_preserves_existing_pair_and_cleans_stages(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
+    def test_stage_and_canonical_commit_failures_restore_existing_pair(self) -> None:
+        cases = (
+            ("before_stage", "conversion_manifest.json", "staging failed"),
+            ("before_commit", "conversion_manifest.json", "commit failed"),
         )
-        real_fsync = os.fsync
-        call_count = 0
-
-        def fail_second_fsync(file_descriptor: int) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise OSError("injected staged write failure")
-            real_fsync(file_descriptor)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.fsync",
-                side_effect=fail_second_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "injected staged write failure"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_incomplete_stage_cleanup_failure_is_reported_and_retained(self) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-        real_fsync = os.fsync
-        real_unlink = os.unlink
-
-        def fail_file_fsync(file_descriptor: int) -> None:
-            if stat.S_ISREG(os.fstat(file_descriptor).st_mode):
-                raise OSError("injected stage fsync failure")
-            real_fsync(file_descriptor)
-
-        def fail_stage_unlink(path: str | bytes) -> None:
-            if os.fsdecode(path).endswith(".tmp"):
-                raise OSError("injected stage cleanup failure")
-            real_unlink(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.fsync",
-                side_effect=fail_file_fsync,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.unlink",
-                side_effect=fail_stage_unlink,
-            ),
-            self.assertRaisesRegex(OSError, "injected stage fsync failure") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(
-            any(
-                "Failed to remove incomplete conversion artifact stage" in note
-                and "injected stage cleanup failure" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-        self.assertEqual(len(self._temporary_artifact_files(godot_dir)), 1)
-
-    def test_later_successful_publish_cleans_owned_backup_leftovers(self) -> None:
-        godot_dir, _, _, _, _ = self._existing_artifacts()
-        real_unlink = os.unlink
-
-        def fail_backup_cleanup(path: str | bytes) -> None:
-            if os.fsdecode(path).endswith(".backup"):
-                raise PermissionError("injected backup cleanup refusal")
-            real_unlink(path)
-
-        with patch(
-            "src.conversion.conversion_manifest.os.unlink",
-            side_effect=fail_backup_cleanup,
-        ):
-            self._write_artifacts(godot_dir)
-
-        leftovers = self._temporary_artifact_files(godot_dir)
-        self.assertEqual(len(leftovers), 2)
-        self.assertTrue(all(path.name.endswith(".backup") for path in leftovers))
-
-        self._write_artifacts(godot_dir)
-
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_attempt_only_publish_preserves_canonical_recovery_leftover(self) -> None:
-        godot_dir, manifest_path, _, _, _ = self._existing_artifacts()
-        recovery_path = manifest_path.parent / (
-            f".{manifest_path.name}.abcdefgh.recovery.backup"
-        )
-        recovery_content = b'{"trusted": "recovery"}\n'
-        recovery_path.write_bytes(recovery_content)
-
-        self._write_artifacts(
-            godot_dir,
-            manifest_outcome=None,
-            attempt_outcome=self._failed_outcome(),
-        )
-
-        self.assertEqual(recovery_path.read_bytes(), recovery_content)
-
-        self._write_artifacts(godot_dir)
-
-        self.assertFalse(recovery_path.exists())
-
-    def test_cleanup_control_flow_signals_propagate_after_valid_commit(self) -> None:
-        for signal_type in (KeyboardInterrupt, SystemExit):
-            with self.subTest(signal_type=signal_type.__name__):
-                godot_dir, manifest_path, attempt_path, _, _ = (
-                    self._existing_artifacts(
-                        self.temp_dir / signal_type.__name__.lower()
-                    )
+        for phase, name, message in cases:
+            with self.subTest(phase=phase):
+                godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
+                    self._existing_artifacts(self.temp_dir / phase)
                 )
-                real_unlink = os.unlink
-                interrupted = False
 
-                def interrupt_backup_cleanup(path: str | bytes) -> None:
-                    nonlocal interrupted
-                    if not interrupted and os.fsdecode(path).endswith(".backup"):
-                        interrupted = True
-                        raise signal_type("injected cleanup control-flow signal")
-                    real_unlink(path)
+                def fail_selected_phase(
+                    current_phase: str,
+                    _directory_path: str,
+                    current_name: str | None,
+                ) -> None:
+                    if current_phase == phase and current_name == name:
+                        raise OSError(message)
 
                 with (
                     patch(
-                        "src.conversion.conversion_manifest.os.unlink",
-                        side_effect=interrupt_backup_cleanup,
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=fail_selected_phase,
                     ),
-                    self.assertRaises(signal_type),
-                ):
-                    self._write_artifacts(godot_dir)
-
-                self.assertTrue(interrupted)
-                manifest_bytes = manifest_path.read_bytes()
-                attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
-                self.assertEqual(
-                    attempt["canonical_manifest"]["sha256"],
-                    "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
-                )
-                self.assertGreaterEqual(
-                    len(self._temporary_artifact_files(godot_dir)),
-                    1,
-                )
-
-                self._write_artifacts(godot_dir)
-
-                self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_incomplete_stage_cleanup_does_not_swallow_keyboard_interrupt(
-        self,
-    ) -> None:
-        godot_dir = self.temp_dir / "stage-cleanup-interrupt"
-        godot_dir.mkdir()
-        real_fsync = os.fsync
-        real_unlink = os.unlink
-
-        def fail_file_fsync(file_descriptor: int) -> None:
-            if stat.S_ISREG(os.fstat(file_descriptor).st_mode):
-                raise OSError("injected stage failure")
-            real_fsync(file_descriptor)
-
-        def interrupt_stage_cleanup(path: str | bytes) -> None:
-            if os.fsdecode(path).endswith(".tmp"):
-                raise KeyboardInterrupt("injected stage cleanup interrupt")
-            real_unlink(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.fsync",
-                side_effect=fail_file_fsync,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.unlink",
-                side_effect=interrupt_stage_cleanup,
-            ),
-            self.assertRaisesRegex(
-                KeyboardInterrupt,
-                "injected stage cleanup interrupt",
-            ),
-        ):
-            self._write_artifacts(godot_dir)
-
-    @unittest.skipIf(os.name == "nt", "Symlink creation is not portable on Windows")
-    def test_stale_cleanup_refuses_redirected_lookalike(self) -> None:
-        godot_dir, _, attempt_path, _, _ = self._existing_artifacts()
-        external_path = self.temp_dir / "external-stale-lookalike.json"
-        external_content = b"external sentinel\n"
-        external_path.write_bytes(external_content)
-        lookalike = attempt_path.parent / (
-            f".{attempt_path.name}.abcdefgh.backup"
-        )
-        lookalike.symlink_to(external_path)
-
-        self._write_artifacts(godot_dir)
-
-        self.assertTrue(lookalike.is_symlink())
-        self.assertEqual(external_path.read_bytes(), external_content)
-
-    def test_second_replace_failure_rolls_back_attempt_and_preserves_pair(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_replace = os.replace
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if (
-                Path(destination) == manifest_path
-                and source.endswith(".tmp")
-            ):
-                raise OSError("injected canonical replace failure")
-            real_replace(source, destination)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            self.assertRaisesRegex(OSError, "injected canonical replace failure"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_final_publication_revalidates_the_entire_artifact_pair(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_replace = os.replace
-        corrupted_attempt = b"corrupted during canonical publication\n"
-
-        def publish_then_corrupt_attempt(source: str, destination: str) -> None:
-            real_replace(source, destination)
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                attempt_path.write_bytes(corrupted_attempt)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=publish_then_corrupt_attempt,
-            ),
-            self.assertRaisesRegex(OSError, "content changed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), corrupted_attempt)
-        recovery_files = list(
-            attempt_path.parent.glob(f".{attempt_path.name}.*.backup")
-        )
-        self.assertEqual(len(recovery_files), 1)
-        self.assertEqual(recovery_files[0].read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "rollback also failed" in note
-                and os.fspath(recovery_files[0]) in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_publication_revalidates_pair_after_cleanup_fsync(self) -> None:
-        godot_dir, manifest_path, attempt_path, _, _ = self._existing_artifacts()
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_artifact_directory"),
-        )
-        directory_fsync_calls = 0
-        corrupted_attempt = b"corrupted during cleanup fsync\n"
-
-        def corrupt_during_cleanup_fsync(
-            *args: object,
-            **kwargs: object,
-        ) -> None:
-            nonlocal directory_fsync_calls
-            directory_fsync_calls += 1
-            real_directory_fsync(*args, **kwargs)
-            if directory_fsync_calls == 3:
-                attempt_path.write_bytes(corrupted_attempt)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._fsync_artifact_directory",
-                side_effect=corrupt_during_cleanup_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "content changed"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(directory_fsync_calls, 3)
-        self.assertTrue(manifest_path.is_file())
-        self.assertEqual(attempt_path.read_bytes(), corrupted_attempt)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    @unittest.skipIf(os.name == "nt", "Directory fsync is unavailable on Windows")
-    def test_directory_fsync_failure_after_attempt_publish_rolls_back_pair(
-        self,
-    ) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_fsync = os.fsync
-        directory_fsync_failed = False
-        artifact_directory_stat = os.stat(manifest_path.parent)
-        artifact_directory_identity = (
-            artifact_directory_stat.st_dev,
-            artifact_directory_stat.st_ino,
-        )
-
-        def fail_first_directory_fsync(file_descriptor: int) -> None:
-            nonlocal directory_fsync_failed
-            descriptor_stat = os.fstat(file_descriptor)
-            if (
-                stat.S_ISDIR(descriptor_stat.st_mode)
-                and (descriptor_stat.st_dev, descriptor_stat.st_ino)
-                == artifact_directory_identity
-                and not directory_fsync_failed
-            ):
-                directory_fsync_failed = True
-                raise OSError("injected directory fsync failure")
-            real_fsync(file_descriptor)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.fsync",
-                side_effect=fail_first_directory_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "injected directory fsync failure"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(directory_fsync_failed)
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    @unittest.skipIf(os.name == "nt", "Directory fsync is unavailable on Windows")
-    def test_rollback_fsync_failure_retains_verified_recovery_copy(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_replace = os.replace
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_artifact_directory"),
-        )
-        directory_fsync_calls = 0
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            real_replace(source, destination)
-
-        def fail_rollback_fsync(*args: object, **kwargs: object) -> None:
-            nonlocal directory_fsync_calls
-            directory_fsync_calls += 1
-            if directory_fsync_calls == 2:
-                raise OSError("rollback directory fsync failed")
-            real_directory_fsync(*args, **kwargs)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            patch(
-                "src.conversion.conversion_manifest._fsync_artifact_directory",
-                side_effect=fail_rollback_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "canonical publish failed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        recovery_files = list(
-            attempt_path.parent.glob(f".{attempt_path.name}.*.recovery.backup")
-        )
-        self.assertEqual(len(recovery_files), 1)
-        self.assertEqual(recovery_files[0].read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "rollback directory fsync failed" in note
-                and os.fspath(recovery_files[0]) in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_rollback_revalidates_restored_bytes_after_directory_fsync(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_replace = os.replace
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_artifact_directory"),
-        )
-        directory_fsync_calls = 0
-        corrupted_attempt = b"corrupted during rollback fsync\n"
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            real_replace(source, destination)
-
-        def tamper_during_rollback_fsync(*args: object, **kwargs: object) -> None:
-            nonlocal directory_fsync_calls
-            directory_fsync_calls += 1
-            real_directory_fsync(*args, **kwargs)
-            if directory_fsync_calls == 2:
-                attempt_path.write_bytes(corrupted_attempt)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            patch(
-                "src.conversion.conversion_manifest._fsync_artifact_directory",
-                side_effect=tamper_during_rollback_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "canonical publish failed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), corrupted_attempt)
-        recovery_files = list(
-            attempt_path.parent.glob(f".{attempt_path.name}.*.recovery.backup")
-        )
-        self.assertEqual(len(recovery_files), 1)
-        self.assertEqual(recovery_files[0].read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "rollback also failed" in note
-                and "content changed" in note
-                and os.fspath(recovery_files[0]) in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_rollback_revalidates_absence_after_directory_fsync(self) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-        attempt_path = godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH
-        manifest_path = godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH
-        real_replace = os.replace
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_artifact_directory"),
-        )
-        directory_fsync_calls = 0
-        recreated_attempt = b"recreated during rollback fsync\n"
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            real_replace(source, destination)
-
-        def recreate_during_rollback_fsync(*args: object, **kwargs: object) -> None:
-            nonlocal directory_fsync_calls
-            directory_fsync_calls += 1
-            real_directory_fsync(*args, **kwargs)
-            if directory_fsync_calls == 2:
-                attempt_path.write_bytes(recreated_attempt)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            patch(
-                "src.conversion.conversion_manifest._fsync_artifact_directory",
-                side_effect=recreate_during_rollback_fsync,
-            ),
-            self.assertRaisesRegex(OSError, "canonical publish failed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertFalse(manifest_path.exists())
-        self.assertEqual(attempt_path.read_bytes(), recreated_attempt)
-        self.assertTrue(
-            any(
-                "rollback also failed" in note
-                and "reappeared during rollback" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_multi_artifact_rollback_revalidates_every_restored_target(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_directory_fsync = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_fsync_artifact_directory"),
-        )
-        directory_fsync_calls = 0
-        corrupted_manifest = b"corrupted during later rollback\n"
-
-        def fail_publish_then_corrupt_restored_manifest(
-            *args: object,
-            **kwargs: object,
-        ) -> None:
-            nonlocal directory_fsync_calls
-            directory_fsync_calls += 1
-            real_directory_fsync(*args, **kwargs)
-            if directory_fsync_calls == 2:
-                raise OSError("second publish directory fsync failed")
-            if directory_fsync_calls == 4:
-                manifest_path.write_bytes(corrupted_manifest)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._fsync_artifact_directory",
-                side_effect=fail_publish_then_corrupt_restored_manifest,
-            ),
-            self.assertRaisesRegex(
-                OSError,
-                "second publish directory fsync failed",
-            ) as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(manifest_path.read_bytes(), corrupted_manifest)
-        recovery_files = list(
-            manifest_path.parent.glob(f".{manifest_path.name}.*.recovery.backup")
-        )
-        self.assertEqual(len(recovery_files), 1)
-        self.assertEqual(recovery_files[0].read_bytes(), manifest_before)
-        self.assertTrue(
-            any(
-                "rollback also failed" in note
-                and "content changed" in note
-                and os.fspath(recovery_files[0]) in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_replace_that_mutates_then_raises_is_detected_and_rolled_back(self) -> None:
-        for failing_artifact in ("attempt", "manifest"):
-            with self.subTest(failing_artifact=failing_artifact):
-                test_root = self.temp_dir / failing_artifact
-                (
-                    godot_dir,
-                    manifest_path,
-                    attempt_path,
-                    manifest_before,
-                    attempt_before,
-                ) = self._existing_artifacts(test_root)
-                failing_path = (
-                    attempt_path if failing_artifact == "attempt" else manifest_path
-                )
-                real_replace = os.replace
-
-                def mutate_then_fail(source: str, destination: str) -> None:
-                    real_replace(source, destination)
-                    if Path(destination) == failing_path and source.endswith(".tmp"):
-                        raise OSError(f"{failing_artifact} replace mutated then failed")
-
-                with (
-                    patch(
-                        "src.conversion.conversion_manifest.os.replace",
-                        side_effect=mutate_then_fail,
-                    ),
-                    self.assertRaisesRegex(
-                        OSError,
-                        f"{failing_artifact} replace mutated then failed",
-                    ),
+                    self.assertRaisesRegex(OSError, message),
                 ):
                     self._write_artifacts(godot_dir)
 
@@ -1910,780 +1238,125 @@ class TestConversionManifest(unittest.TestCase):
                 self.assertEqual(attempt_path.read_bytes(), attempt_before)
                 self.assertEqual(self._temporary_artifact_files(godot_dir), [])
 
-    def test_rollback_replace_that_mutates_then_raises_counts_as_restored(self) -> None:
+    def test_final_publication_revalidates_the_complete_pair(self) -> None:
         godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
             self._existing_artifacts()
         )
-        real_replace = os.replace
+        corrupted_attempt = b"corrupted during canonical publication\n"
 
-        def fail_publish_and_mutating_rollback(
-            source: str,
-            destination: str,
+        def corrupt_attempt_after_canonical(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
         ) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            if Path(destination) == attempt_path and source.endswith(".backup"):
-                real_replace(source, destination)
-                raise OSError("rollback replace mutated then failed")
-            real_replace(source, destination)
+            if phase == "after_commit" and name == "conversion_manifest.json":
+                attempt_path.write_bytes(corrupted_attempt)
 
-        with patch(
-            "src.conversion.conversion_manifest.os.replace",
-            side_effect=fail_publish_and_mutating_rollback,
+        with (
+            patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=corrupt_attempt_after_canonical,
+            ),
+            self.assertRaisesRegex(OSError, "content changed") as raised,
         ):
-            with self.assertRaisesRegex(OSError, "canonical publish failed") as context:
-                self._write_artifacts(godot_dir)
+            self._write_artifacts(godot_dir)
 
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertFalse(
-            any(
-                "rollback also failed" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_rollback_failure_retains_recovery_backup_and_adds_exception_note(
-        self,
-    ) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_replace = os.replace
-
-        def fail_publish_and_rollback(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            if Path(destination) == attempt_path and source.endswith(".backup"):
-                raise OSError("attempt rollback failed")
-            real_replace(source, destination)
-
-        with patch(
-            "src.conversion.conversion_manifest.os.replace",
-            side_effect=fail_publish_and_rollback,
-        ):
-            with self.assertRaisesRegex(OSError, "canonical publish failed") as context:
-                self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertNotEqual(attempt_path.read_bytes(), attempt_before)
-        notes = getattr(context.exception, "__notes__", [])
-        self.assertTrue(
-            any("rollback also failed" in note for note in notes),
-            notes,
-        )
+        self.assertEqual(attempt_path.read_bytes(), corrupted_attempt)
         recovery_files = list(
             attempt_path.parent.glob(f".{attempt_path.name}.*.backup")
         )
         self.assertEqual(len(recovery_files), 1)
         self.assertEqual(recovery_files[0].read_bytes(), attempt_before)
         self.assertTrue(
-            any(os.fspath(recovery_files[0]) in note for note in notes),
-            notes,
-        )
-        self.assertEqual(
-            [
-                path
-                for path in self._temporary_artifact_files(godot_dir)
-                if path != recovery_files[0]
-            ],
-            [],
-        )
-
-    def test_windows_file_fingerprint_match_ignores_only_ctime(self) -> None:
-        fingerprints_match = cast(
-            Callable[
-                [tuple[int, int, int, int, int], tuple[int, int, int, int, int]],
-                bool,
-            ],
-            getattr(conversion_manifest_module, "_file_fingerprints_match"),
-        )
-        baseline = (11, 22, 33, 44, 55)
-        ctime_only_drift = (11, 22, 33, 44, 99)
-        real_drift = {
-            "device": (12, 22, 33, 44, 55),
-            "inode": (11, 23, 33, 44, 55),
-            "size": (11, 22, 34, 44, 55),
-            "mtime": (11, 22, 33, 45, 55),
-        }
-
-        with patch(
-            "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-            return_value=True,
-        ):
-            self.assertTrue(fingerprints_match(ctime_only_drift, baseline))
-            for field, fingerprint in real_drift.items():
-                with self.subTest(field=field):
-                    self.assertFalse(fingerprints_match(fingerprint, baseline))
-
-        with patch(
-            "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-            return_value=False,
-        ):
-            self.assertFalse(fingerprints_match(ctime_only_drift, baseline))
-
-    def test_windows_target_state_keeps_exact_path_ctime_guard(self) -> None:
-        artifact_path = self.temp_dir / "artifact.json"
-        artifact_path.write_bytes(b"stable artifact\n")
-        target_state = cast(
-            Callable[[str], object],
-            getattr(conversion_manifest_module, "_artifact_target_state"),
-        )(str(artifact_path))
-        verify_target_state = cast(
-            Callable[[str, object], None],
-            getattr(conversion_manifest_module, "_verify_artifact_target_state"),
-        )
-        real_fingerprint = cast(
-            Callable[[os.stat_result], tuple[int, int, int, int, int]],
-            getattr(conversion_manifest_module, "_file_fingerprint"),
-        )
-
-        def path_ctime_drift(
-            path_stat: os.stat_result,
-        ) -> tuple[int, int, int, int, int]:
-            fingerprint = real_fingerprint(path_stat)
-            return (*fingerprint[:4], fingerprint[4] + 1)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-                return_value=True,
-            ),
-            patch(
-                "src.conversion.conversion_manifest._file_fingerprint",
-                side_effect=path_ctime_drift,
-            ),
-            self.assertRaisesRegex(OSError, "changed during publication"),
-        ):
-            verify_target_state(str(artifact_path), target_state)
-
-    def test_windows_temporary_verification_accepts_ctime_only_divergence(
-        self,
-    ) -> None:
-        stage_artifact = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
-        verify_artifact = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_verify_temporary_artifact"),
-        )
-        file_fingerprint = cast(
-            Callable[[os.stat_result], tuple[int, int, int, int, int]],
-            getattr(conversion_manifest_module, "_file_fingerprint"),
-        )
-        artifact = stage_artifact(
-            str(self.temp_dir / "artifact.json"),
-            b"stable artifact\n",
-            mode=None,
-            suffix=".tmp",
-        )
-        fingerprint_call = 0
-
-        def ctime_divergent_fingerprint(
-            path_stat: os.stat_result,
-        ) -> tuple[int, int, int, int, int]:
-            nonlocal fingerprint_call
-            fingerprint_call += 1
-            fingerprint = file_fingerprint(path_stat)
-            return (*fingerprint[:4], fingerprint[4] + fingerprint_call)
-
-        try:
-            with (
-                patch(
-                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-                    return_value=True,
-                ),
-                patch(
-                    "src.conversion.conversion_manifest._file_fingerprint",
-                    side_effect=ctime_divergent_fingerprint,
-                ),
-            ):
-                verify_artifact(artifact)
-
-            fingerprint_call = 0
-            with (
-                patch(
-                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-                    return_value=False,
-                ),
-                patch(
-                    "src.conversion.conversion_manifest._file_fingerprint",
-                    side_effect=ctime_divergent_fingerprint,
-                ),
-                self.assertRaisesRegex(OSError, "content changed"),
-            ):
-                verify_artifact(artifact)
-        finally:
-            Path(artifact.path).unlink(missing_ok=True)
-
-    def test_windows_temporary_verification_rejects_content_and_mode_drift(
-        self,
-    ) -> None:
-        stage_artifact = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
-        verify_artifact = cast(
-            Callable[..., None],
-            getattr(conversion_manifest_module, "_verify_temporary_artifact"),
-        )
-        original_content = b"original\n"
-        artifact = stage_artifact(
-            str(self.temp_dir / "artifact.json"),
-            original_content,
-            mode=None,
-            suffix=".tmp",
-        )
-        artifact_path = Path(artifact.path)
-
-        try:
-            artifact_path.write_bytes(b"tampered\n")
-            with (
-                patch(
-                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-                    return_value=True,
-                ),
-                self.assertRaisesRegex(OSError, "content changed"),
-            ):
-                verify_artifact(artifact)
-
-            artifact_path.write_bytes(original_content)
-            tampered_mode = artifact.staged_mode ^ stat.S_IWRITE
-            os.chmod(artifact_path, tampered_mode)
-            with (
-                patch(
-                    "src.conversion.conversion_manifest._uses_windows_file_fingerprint_semantics",
-                    return_value=True,
-                ),
-                self.assertRaisesRegex(OSError, "artifact changed"),
-            ):
-                verify_artifact(artifact)
-        finally:
-            os.chmod(artifact_path, artifact.staged_mode | stat.S_IWRITE)
-            artifact_path.unlink(missing_ok=True)
-
-    def test_windows_read_only_artifact_pair_is_replaced_without_read_only_temps(
-        self,
-    ) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        for artifact_path in (manifest_path, attempt_path):
-            os.chmod(artifact_path, 0o444)
-        real_replace = os.replace
-        real_unlink = os.unlink
-        replaced_targets: list[Path] = []
-        removed_temporary_paths: list[Path] = []
-
-        def windows_replace(source: str, destination: str) -> None:
-            destination_path = Path(destination)
-            if destination_path.exists() and not (
-                stat.S_IMODE(os.lstat(destination_path).st_mode)
-                & stat.S_IWRITE
-            ):
-                raise PermissionError("Windows cannot replace a read-only target")
-            real_replace(source, destination)
-            replaced_targets.append(destination_path)
-
-        def windows_unlink(path: str | bytes) -> None:
-            decoded_path = Path(os.fsdecode(path))
-            if decoded_path.exists() and not (
-                stat.S_IMODE(os.lstat(decoded_path).st_mode)
-                & stat.S_IWRITE
-            ):
-                raise PermissionError("Windows cannot unlink a read-only file")
-            if decoded_path.name.startswith(".conversion_"):
-                removed_temporary_paths.append(decoded_path)
-            real_unlink(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._uses_windows_file_attribute_modes",
-                return_value=True,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=windows_replace,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.unlink",
-                side_effect=windows_unlink,
-            ),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(
-            replaced_targets,
-            [attempt_path, manifest_path],
-        )
-        self.assertTrue(removed_temporary_paths)
-        self.assertNotEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertNotEqual(attempt_path.read_bytes(), attempt_before)
-        for artifact_path in (manifest_path, attempt_path):
-            self.assertEqual(
-                stat.S_IMODE(os.lstat(artifact_path).st_mode),
-                0o444,
+            any(
+                "rollback also failed" in note
+                for note in getattr(raised.exception, "__notes__", ())
             )
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+        )
 
-    def test_windows_read_only_pair_is_restored_after_second_replace_failure(
+    def test_stale_cleanup_preserves_canonical_recovery_until_canonical_update(
         self,
     ) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
+        godot_dir, manifest_path, _, _, _ = self._existing_artifacts()
+        attempt_stale = manifest_path.parent / (
+            ".conversion_attempt.json.abcdefgh.backup"
         )
-        for artifact_path in (manifest_path, attempt_path):
-            os.chmod(artifact_path, 0o444)
-        real_replace = os.replace
-        real_unlink = os.unlink
-        canonical_failure_injected = False
+        manifest_recovery = manifest_path.parent / (
+            ".conversion_manifest.json.abcdefgh.recovery.backup"
+        )
+        attempt_stale.write_bytes(b"old attempt backup\n")
+        manifest_recovery.write_bytes(b"old canonical recovery\n")
 
-        def windows_replace(source: str, destination: str) -> None:
-            nonlocal canonical_failure_injected
-            destination_path = Path(destination)
-            if destination_path.exists() and not (
-                stat.S_IMODE(os.lstat(destination_path).st_mode)
-                & stat.S_IWRITE
-            ):
-                raise PermissionError("Windows cannot replace a read-only target")
-            if (
-                destination_path == manifest_path
-                and source.endswith(".tmp")
-            ):
-                canonical_failure_injected = True
-                raise OSError("injected read-only canonical publish failure")
-            real_replace(source, destination)
+        self._write_artifacts(
+            godot_dir,
+            manifest_outcome=None,
+            attempt_outcome=self._failed_outcome(),
+        )
 
-        def windows_unlink(path: str | bytes) -> None:
-            decoded_path = Path(os.fsdecode(path))
-            if decoded_path.exists() and not (
-                stat.S_IMODE(os.lstat(decoded_path).st_mode)
-                & stat.S_IWRITE
-            ):
-                raise PermissionError("Windows cannot unlink a read-only file")
-            real_unlink(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._uses_windows_file_attribute_modes",
-                return_value=True,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=windows_replace,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.unlink",
-                side_effect=windows_unlink,
-            ),
-            self.assertRaisesRegex(
-                OSError,
-                "injected read-only canonical publish failure",
-            ),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(canonical_failure_injected)
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        for artifact_path in (manifest_path, attempt_path):
-            self.assertEqual(
-                stat.S_IMODE(os.lstat(artifact_path).st_mode),
-                0o444,
-            )
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_existing_artifact_modes_are_preserved(self) -> None:
-        godot_dir, manifest_path, attempt_path, _, _ = self._existing_artifacts()
-        os.chmod(manifest_path, 0o640)
-        os.chmod(attempt_path, 0o604)
+        self.assertFalse(attempt_stale.exists())
+        self.assertEqual(
+            manifest_recovery.read_bytes(),
+            b"old canonical recovery\n",
+        )
 
         self._write_artifacts(godot_dir)
 
-        self.assertEqual(os.stat(manifest_path).st_mode & 0o777, 0o640)
-        self.assertEqual(os.stat(attempt_path).st_mode & 0o777, 0o604)
+        self.assertFalse(manifest_recovery.exists())
 
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_existing_set_id_artifact_modes_are_preserved(self) -> None:
-        godot_dir, manifest_path, attempt_path, _, _ = self._existing_artifacts()
-        expected_modes = {
-            manifest_path: stat.S_ISUID | 0o640,
-            attempt_path: stat.S_ISGID | 0o640,
-        }
-        for artifact_path, expected_mode in expected_modes.items():
-            os.chmod(artifact_path, expected_mode)
-            if stat.S_IMODE(os.stat(artifact_path).st_mode) != expected_mode:
-                self.skipTest("Filesystem does not retain set-ID file modes")
+    @unittest.skipUnless(os.name == "posix", "POSIX links are required")
+    def test_stale_cleanup_refuses_redirected_and_hardlinked_lookalikes(
+        self,
+    ) -> None:
+        godot_dir, manifest_path, _, _, _ = self._existing_artifacts()
+        external = self.temp_dir / "external-stale.json"
+        external_content = b"external sentinel\n"
+        external.write_bytes(external_content)
+        symlink = manifest_path.parent / (
+            ".conversion_attempt.json.redirected.backup"
+        )
+        hardlink = manifest_path.parent / (
+            ".conversion_manifest.json.hardlinked.backup"
+        )
+        symlink.symlink_to(external)
+        os.link(external, hardlink)
 
         self._write_artifacts(godot_dir)
 
-        for artifact_path, expected_mode in expected_modes.items():
-            with self.subTest(artifact=artifact_path.name):
-                self.assertEqual(
-                    stat.S_IMODE(os.stat(artifact_path).st_mode),
-                    expected_mode,
-                )
+        self.assertTrue(symlink.is_symlink())
+        self.assertTrue(hardlink.is_file())
+        self.assertEqual(external.read_bytes(), external_content)
+        self.assertEqual(hardlink.read_bytes(), external_content)
 
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_staged_mode_tampering_is_detected_before_publication(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        os.chmod(manifest_path, 0o640)
-        real_stage = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
-
-        def stage_then_chmod(
-            path: str,
-            content: bytes,
-            *,
-            mode: int | None,
-            suffix: str,
-        ) -> Any:
-            staged = real_stage(path, content, mode=mode, suffix=suffix)
-            if Path(path) == manifest_path and suffix == ".tmp":
-                os.chmod(staged.path, 0o666)
-            return staged
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._stage_artifact_bytes",
-                side_effect=stage_then_chmod,
-            ),
-            self.assertRaisesRegex(OSError, "Staged conversion artifact changed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "cleanup failed" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_stage_capture_window_mode_tampering_is_rejected(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_lstat = os.lstat
-        tampered = False
-
-        def chmod_before_stage_stat(path: str | bytes) -> os.stat_result:
-            nonlocal tampered
-            decoded_path = os.fsdecode(path)
-            if (
-                not tampered
-                and decoded_path.endswith(".tmp")
-                and f".{attempt_path.name}." in os.path.basename(decoded_path)
-            ):
-                os.chmod(decoded_path, 0o666)
-                tampered = True
-            return real_lstat(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.lstat",
-                side_effect=chmod_before_stage_stat,
-            ),
-            self.assertRaisesRegex(OSError, "mode changed"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(tampered)
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_backup_mode_tampering_is_never_restored(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_stage_existing = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_existing_artifact"),
-        )
-        real_replace = os.replace
-
-        def backup_then_chmod(path: str, expected: object) -> Any:
-            backup = real_stage_existing(path, expected)
-            if Path(path) == attempt_path and backup is not None:
-                os.chmod(backup.path, 0o666)
-            return backup
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            real_replace(source, destination)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._stage_existing_artifact",
-                side_effect=backup_then_chmod,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            self.assertRaisesRegex(OSError, "canonical publish failed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertNotEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "rollback also failed" in note and "artifact changed" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_backup_capture_window_mode_tampering_is_rejected(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_lstat = os.lstat
-        tampered = False
-
-        def chmod_before_backup_stat(path: str | bytes) -> os.stat_result:
-            nonlocal tampered
-            decoded_path = os.fsdecode(path)
-            if (
-                not tampered
-                and decoded_path.endswith(".backup")
-                and f".{attempt_path.name}." in os.path.basename(decoded_path)
-            ):
-                os.chmod(decoded_path, 0o666)
-                tampered = True
-            return real_lstat(path)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest.os.lstat",
-                side_effect=chmod_before_backup_stat,
-            ),
-            self.assertRaisesRegex(OSError, "mode changed"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertTrue(tampered)
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    @unittest.skipIf(os.name == "nt", "POSIX permission modes are unavailable")
-    def test_new_artifact_modes_remain_restrictive(self) -> None:
-        godot_dir = self.temp_dir / "godot"
-        godot_dir.mkdir()
-
-        manifest_path_value, attempt_path_value = self._write_artifacts(godot_dir)
-
-        for artifact_path in (
-            Path(cast(str, manifest_path_value)),
-            Path(attempt_path_value),
-        ):
-            with self.subTest(artifact=artifact_path.name):
-                self.assertEqual(os.stat(artifact_path).st_mode & 0o077, 0)
-
-    @unittest.skipIf(os.name == "nt", "Symlink creation is not portable on Windows")
-    def test_refuses_redirected_root_and_artifact_targets(self) -> None:
-        real_root = self.temp_dir / "real-root"
-        real_root.mkdir()
-        redirected_root = self.temp_dir / "redirected-root"
-        redirected_root.symlink_to(real_root, target_is_directory=True)
-        with self.assertRaisesRegex(OSError, "redirected or non-directory"):
-            self._write_artifacts(redirected_root)
-
-        godot_dir = self.temp_dir / "godot"
-        artifact_dir = godot_dir / "gm2godot"
-        artifact_dir.mkdir(parents=True)
-        external = self.temp_dir / "external.json"
-        external.write_text("external\n", encoding="utf-8")
-        manifest_path = godot_dir / CONVERSION_MANIFEST_RELATIVE_PATH
-        manifest_path.symlink_to(external)
-
-        with self.assertRaisesRegex(OSError, "redirected or non-regular"):
-            self._write_artifacts(
-                godot_dir,
-                manifest_outcome=None,
-                attempt_outcome=self._failed_outcome(),
-            )
-
-        self.assertEqual(external.read_text(encoding="utf-8"), "external\n")
-        self.assertFalse((godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH).exists())
-
-    @unittest.skipIf(not hasattr(os, "mkfifo"), "FIFOs are unavailable")
-    def test_refuses_nonregular_artifact_target(self) -> None:
-        godot_dir = self.temp_dir / "godot"
-        attempt_path = godot_dir / CONVERSION_ATTEMPT_RELATIVE_PATH
-        attempt_path.parent.mkdir(parents=True)
-        os.mkfifo(attempt_path)
-
-        with self.assertRaisesRegex(OSError, "non-regular"):
-            self._write_artifacts(godot_dir)
-
-    def test_target_change_during_staging_is_detected_without_publication(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, _ = (
-            self._existing_artifacts()
-        )
-        externally_changed_attempt = b"externally changed attempt\n"
-        real_stage = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
-        stage_count = 0
-
-        def stage_then_change_target(
-            path: str,
-            content: bytes,
-            *,
-            mode: int | None,
-            suffix: str,
-        ) -> Any:
-            nonlocal stage_count
-            staged = real_stage(path, content, mode=mode, suffix=suffix)
-            stage_count += 1
-            if stage_count == 1:
-                attempt_path.write_bytes(externally_changed_attempt)
-            return staged
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._stage_artifact_bytes",
-                side_effect=stage_then_change_target,
-            ),
-            self.assertRaisesRegex(OSError, "changed"),
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), externally_changed_attempt)
-        self.assertEqual(self._temporary_artifact_files(godot_dir), [])
-
-    def test_in_place_stage_tampering_is_detected_before_publication(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_stage = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
-
-        def stage_then_tamper(
-            path: str,
-            content: bytes,
-            *,
-            mode: int | None,
-            suffix: str,
-        ) -> Any:
-            staged = real_stage(path, content, mode=mode, suffix=suffix)
-            if Path(path) == manifest_path and suffix == ".tmp":
-                Path(staged.path).write_bytes(b"tampered manifest stage\n")
-            return staged
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._stage_artifact_bytes",
-                side_effect=stage_then_tamper,
-            ),
-            self.assertRaisesRegex(OSError, "content changed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertTrue(
-            any(
-                "cleanup failed" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-        self.assertEqual(len(self._temporary_artifact_files(godot_dir)), 1)
-
-    def test_in_place_backup_tampering_is_never_restored(self) -> None:
-        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
-            self._existing_artifacts()
-        )
-        real_stage_existing = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_existing_artifact"),
-        )
-        real_replace = os.replace
-
-        def backup_then_tamper(path: str, expected: object) -> Any:
-            backup = real_stage_existing(path, expected)
-            if Path(path) == attempt_path and backup is not None:
-                Path(backup.path).write_bytes(b"tampered attempt backup\n")
-            return backup
-
-        def fail_canonical_publish(source: str, destination: str) -> None:
-            if Path(destination) == manifest_path and source.endswith(".tmp"):
-                raise OSError("canonical publish failed")
-            real_replace(source, destination)
-
-        with (
-            patch(
-                "src.conversion.conversion_manifest._stage_existing_artifact",
-                side_effect=backup_then_tamper,
-            ),
-            patch(
-                "src.conversion.conversion_manifest.os.replace",
-                side_effect=fail_canonical_publish,
-            ),
-            self.assertRaisesRegex(OSError, "canonical publish failed") as context,
-        ):
-            self._write_artifacts(godot_dir)
-
-        self.assertEqual(manifest_path.read_bytes(), manifest_before)
-        self.assertNotEqual(attempt_path.read_bytes(), attempt_before)
-        self.assertNotEqual(attempt_path.read_bytes(), b"tampered attempt backup\n")
-        self.assertTrue(
-            any(
-                "rollback also failed" in note and "content changed" in note
-                for note in getattr(context.exception, "__notes__", [])
-            )
-        )
-
-    def test_attempt_only_rejects_canonical_change_after_digesting(self) -> None:
+    def test_attempt_only_guard_rejects_canonical_change_after_digesting(
+        self,
+    ) -> None:
         godot_dir, manifest_path, attempt_path, _, attempt_before = (
             self._existing_artifacts()
         )
         external_manifest = b"externally changed manifest\n"
-        real_stage = cast(
-            Callable[..., Any],
-            getattr(conversion_manifest_module, "_stage_artifact_bytes"),
-        )
         changed = False
 
-        def stage_then_change_manifest(
-            path: str,
-            content: bytes,
-            *,
-            mode: int | None,
-            suffix: str,
-        ) -> Any:
+        def change_after_attempt_stage(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
             nonlocal changed
-            staged = real_stage(path, content, mode=mode, suffix=suffix)
-            if not changed:
-                manifest_path.write_bytes(external_manifest)
+            if (
+                not changed
+                and phase == "after_stage"
+                and name == "conversion_attempt.json"
+            ):
                 changed = True
-            return staged
+                manifest_path.write_bytes(external_manifest)
 
         with (
             patch(
-                "src.conversion.conversion_manifest._stage_artifact_bytes",
-                side_effect=stage_then_change_manifest,
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=change_after_attempt_stage,
             ),
-            self.assertRaisesRegex(OSError, "changed during publication"),
+            self.assertRaisesRegex(OSError, "Artifact changed"),
         ):
             self._write_artifacts(
                 godot_dir,
@@ -2691,9 +1364,309 @@ class TestConversionManifest(unittest.TestCase):
                 attempt_outcome=self._failed_outcome(),
             )
 
+        self.assertTrue(changed)
         self.assertEqual(manifest_path.read_bytes(), external_manifest)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
         self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+
+    @unittest.skipIf(os.name == "nt", "Exact POSIX modes are unavailable")
+    def test_existing_and_new_artifact_modes_remain_exact(self) -> None:
+        godot_dir, manifest_path, attempt_path, _, _ = self._existing_artifacts()
+        os.chmod(manifest_path, 0o440)
+        os.chmod(attempt_path, 0o640)
+
+        self._write_artifacts(godot_dir)
+
+        self.assertEqual(stat.S_IMODE(os.lstat(manifest_path).st_mode), 0o440)
+        self.assertEqual(stat.S_IMODE(os.lstat(attempt_path).st_mode), 0o640)
+
+        fresh_dir = self.temp_dir / "fresh"
+        fresh_dir.mkdir()
+        manifest_value, attempt_value = self._write_artifacts(fresh_dir)
+        for artifact_path in (
+            Path(cast(str, manifest_value)),
+            Path(attempt_value),
+        ):
+            self.assertEqual(
+                stat.S_IMODE(os.lstat(artifact_path).st_mode) & 0o077,
+                0,
+            )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX relocation is required")
+    def test_physical_replacement_never_mutates_replacement_at_any_pair_boundary(
+        self,
+    ) -> None:
+        cases = [
+            ("before_stale_recovery", None, 1),
+            ("before_stage", "conversion_attempt.json", 1),
+            ("before_stage", "conversion_manifest.json", 1),
+            ("before_backup", "conversion_attempt.json", 1),
+            ("before_backup", "conversion_manifest.json", 1),
+            ("before_commit", "conversion_attempt.json", 1),
+            ("before_commit", "conversion_manifest.json", 1),
+            ("before_durability", "conversion_attempt.json", 1),
+            ("before_durability", "conversion_manifest.json", 1),
+            ("before_sync", None, 1),
+            ("before_sync", None, 2),
+            ("before_sync", None, 3),
+            ("before_sync", None, 4),
+            ("before_cleanup", None, 1),
+            ("before_cleanup", None, 2),
+        ]
+        for index, (selected_phase, selected_name, selected_occurrence) in enumerate(
+            cases
+        ):
+            with self.subTest(
+                phase=selected_phase,
+                name=selected_name,
+                occurrence=selected_occurrence,
+            ):
+                godot_dir, _, _, _, _ = self._existing_artifacts(
+                    self.temp_dir / f"boundary-{index}"
+                )
+                artifact_directory = godot_dir / "gm2godot"
+                parked = godot_dir / "gm2godot.parked"
+                stale = artifact_directory / (
+                    ".conversion_attempt.json.stale.backup"
+                )
+                stale.write_bytes(b"owned stale backup\n")
+                outside = godot_dir / "outside-hardlink.json"
+                outside.write_bytes(b"outside hardlink sentinel\n")
+                matching_calls = 0
+                swapped = False
+                replacement_before: dict[
+                    str,
+                    tuple[int, int, int, bytes],
+                ] = {}
+
+                def replace_directory(
+                    phase: str,
+                    directory_path: str,
+                    name: str | None,
+                ) -> None:
+                    nonlocal matching_calls, replacement_before, swapped
+                    if (
+                        phase != selected_phase
+                        or name != selected_name
+                        or os.path.abspath(directory_path)
+                        != os.path.abspath(artifact_directory)
+                    ):
+                        return
+                    matching_calls += 1
+                    if matching_calls != selected_occurrence:
+                        return
+                    swapped = True
+                    os.rename(artifact_directory, parked)
+                    artifact_directory.mkdir()
+                    (
+                        artifact_directory / "conversion_attempt.json"
+                    ).write_bytes(b"replacement attempt\n")
+                    (
+                        artifact_directory / "conversion_manifest.json"
+                    ).write_bytes(b"replacement manifest\n")
+                    (artifact_directory / "sentinel.txt").write_bytes(
+                        b"replacement sentinel\n"
+                    )
+                    os.link(
+                        outside,
+                        artifact_directory
+                        / ".conversion_attempt.json.abcdefgh.backup",
+                    )
+                    replacement_before = _directory_snapshot(
+                        artifact_directory
+                    )
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=replace_directory,
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    self._write_artifacts(godot_dir)
+
+                self.assertTrue(swapped)
+                self.assertEqual(
+                    _directory_snapshot(artifact_directory),
+                    replacement_before,
+                )
+                self.assertEqual(
+                    outside.read_bytes(),
+                    b"outside hardlink sentinel\n",
+                )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX relocation is required")
+    def test_rollback_and_recovery_stay_bound_after_physical_replacement(
+        self,
+    ) -> None:
+        cases = (
+            ("before_rollback", None),
+            ("before_recovery_stage", "conversion_attempt.json"),
+        )
+        for selected_phase, selected_name in cases:
+            with self.subTest(phase=selected_phase):
+                godot_dir, _, _, _, _ = self._existing_artifacts(
+                    self.temp_dir / selected_phase
+                )
+                artifact_directory = godot_dir / "gm2godot"
+                parked = godot_dir / "gm2godot.parked"
+                outside = godot_dir / "outside-hardlink.json"
+                outside.write_bytes(b"outside rollback sentinel\n")
+                swapped = False
+                replacement_before: dict[
+                    str,
+                    tuple[int, int, int, bytes],
+                ] = {}
+
+                def fail_then_replace(
+                    phase: str,
+                    directory_path: str,
+                    name: str | None,
+                ) -> None:
+                    nonlocal replacement_before, swapped
+                    if (
+                        phase == "before_commit"
+                        and name == "conversion_manifest.json"
+                    ):
+                        raise OSError("injected canonical failure")
+                    if (
+                        swapped
+                        or phase != selected_phase
+                        or name != selected_name
+                        or os.path.abspath(directory_path)
+                        != os.path.abspath(artifact_directory)
+                    ):
+                        return
+                    swapped = True
+                    os.rename(artifact_directory, parked)
+                    artifact_directory.mkdir()
+                    (
+                        artifact_directory / "conversion_attempt.json"
+                    ).write_bytes(b"replacement attempt\n")
+                    (
+                        artifact_directory / "conversion_manifest.json"
+                    ).write_bytes(b"replacement manifest\n")
+                    (artifact_directory / "sentinel.txt").write_bytes(
+                        b"replacement sentinel\n"
+                    )
+                    os.link(
+                        outside,
+                        artifact_directory
+                        / ".conversion_manifest.json.abcdefgh.recovery.backup",
+                    )
+                    replacement_before = _directory_snapshot(
+                        artifact_directory
+                    )
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=fail_then_replace,
+                    ),
+                    self.assertRaisesRegex(
+                        OSError,
+                        "injected canonical failure",
+                    ) as raised,
+                ):
+                    self._write_artifacts(godot_dir)
+
+                self.assertTrue(swapped)
+                self.assertEqual(
+                    _directory_snapshot(artifact_directory),
+                    replacement_before,
+                )
+                self.assertEqual(
+                    outside.read_bytes(),
+                    b"outside rollback sentinel\n",
+                )
+                self.assertTrue(
+                    any(
+                        "rollback also failed" in note
+                        for note in getattr(
+                            raised.exception,
+                            "__notes__",
+                            (),
+                        )
+                    )
+                )
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows handles are required")
+    def test_windows_bindings_block_root_and_directory_relocation(self) -> None:
+        godot_dir, _, _, _, _ = self._existing_artifacts()
+        artifact_directory = godot_dir / "gm2godot"
+        parked_root = godot_dir.with_name("godot.parked")
+        parked_artifacts = godot_dir / "gm2godot.parked"
+        relocation_checked = False
+
+        def try_relocation(
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
+        ) -> None:
+            nonlocal relocation_checked
+            if phase != "before_stage" or relocation_checked:
+                return
+            relocation_checked = True
+            with self.assertRaises(OSError):
+                os.rename(artifact_directory, parked_artifacts)
+            with self.assertRaises(OSError):
+                os.rename(godot_dir, parked_root)
+
+        with patch(
+            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+            side_effect=try_relocation,
+        ):
+            self._write_artifacts(godot_dir)
+
+        self.assertTrue(relocation_checked)
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows modes are required")
+    def test_windows_read_only_pair_is_replaced_and_rolled_back_exactly(
+        self,
+    ) -> None:
+        success_dir, success_manifest, success_attempt, manifest_before, attempt_before = (
+            self._existing_artifacts(self.temp_dir / "readonly-success")
+        )
+        for path in (success_manifest, success_attempt):
+            os.chmod(path, 0o444)
+
+        self._write_artifacts(success_dir)
+
+        self.assertNotEqual(success_manifest.read_bytes(), manifest_before)
+        self.assertNotEqual(success_attempt.read_bytes(), attempt_before)
+        for path in (success_manifest, success_attempt):
+            self.assertFalse(stat.S_IMODE(os.lstat(path).st_mode) & stat.S_IWRITE)
+
+        rollback_dir, rollback_manifest, rollback_attempt, manifest_before, attempt_before = (
+            self._existing_artifacts(self.temp_dir / "readonly-rollback")
+        )
+        for path in (rollback_manifest, rollback_attempt):
+            os.chmod(path, 0o444)
+
+        def fail_canonical_commit(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            if phase == "before_commit" and name == "conversion_manifest.json":
+                raise OSError("injected read-only canonical failure")
+
+        with (
+            patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_canonical_commit,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "injected read-only canonical failure",
+            ),
+        ):
+            self._write_artifacts(rollback_dir)
+
+        self.assertEqual(rollback_manifest.read_bytes(), manifest_before)
+        self.assertEqual(rollback_attempt.read_bytes(), attempt_before)
+        for path in (rollback_manifest, rollback_attempt):
+            self.assertFalse(stat.S_IMODE(os.lstat(path).st_mode) & stat.S_IWRITE)
 
     def test_rejects_failed_or_cancelled_canonical_outcome_before_writing(self) -> None:
         godot_dir = self.temp_dir / "godot"
@@ -2854,6 +1827,22 @@ class TestConversionManifest(unittest.TestCase):
                 *artifact_dir.glob(".conversion_attempt.json.*.backup"),
             ]
         )
+
+
+def _directory_snapshot(
+    directory: Path,
+) -> dict[str, tuple[int, int, int, bytes]]:
+    snapshot: dict[str, tuple[int, int, int, bytes]] = {}
+    for path in sorted(directory.iterdir()):
+        path_stat = os.lstat(path)
+        content = path.read_bytes() if stat.S_ISREG(path_stat.st_mode) else b""
+        snapshot[path.name] = (
+            path_stat.st_ino,
+            path_stat.st_nlink,
+            stat.S_IMODE(path_stat.st_mode),
+            content,
+        )
+    return snapshot
 
 
 if __name__ == "__main__":

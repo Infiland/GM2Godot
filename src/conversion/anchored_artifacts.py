@@ -693,6 +693,14 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
             return False
         return True
 
+    def list_names(self) -> tuple[str, ...]:
+        if self.strategy == "posix_dir_fd":
+            return tuple(sorted(os.listdir(self.descriptor)))
+        self.verify_path()
+        names = tuple(sorted(os.listdir(self.path)))
+        self.verify_path()
+        return names
+
     def open_file(self, name: str, flags: int, mode: int = 0o600) -> int:
         leaf = _safe_leaf(name)
         flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -1821,12 +1829,37 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             sha256=_sha256_bytes(content),
         )
 
+    def capture_staged(self, name: str) -> StagedArtifact | None:
+        """Capture an existing private artifact for identity-bound cleanup."""
+        leaf = _safe_leaf(name)
+        state = self.target_state(leaf)
+        if state.fingerprint is None:
+            return None
+        if state.mode is None:
+            raise AssertionError("A present artifact target must have a mode.")
+        content = self.read_target_bytes(leaf, state)
+        staged = StagedArtifact(
+            directory_path=self.path,
+            name=leaf,
+            identity=(state.fingerprint[0], state.fingerprint[1]),
+            content=content,
+            mode=state.mode,
+            target_mode=state.mode,
+            sha256=_sha256_bytes(content),
+        )
+        self.verify_staged(staged)
+        return staged
+
     def capture_snapshots(
         self,
         names: tuple[str, ...],
     ) -> tuple[ArtifactSnapshot, ...]:
         self._validate_unique_names(names)
         return tuple(self.capture_snapshot(name) for name in names)
+
+    def verify_snapshot(self, snapshot: ArtifactSnapshot) -> None:
+        self._validate_snapshot(snapshot)
+        self._verify_snapshot_current(snapshot)
 
     def _verify_snapshot_current(self, snapshot: ArtifactSnapshot) -> None:
         state = self._snapshot_state(snapshot)
@@ -1845,9 +1878,18 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
     def publish_specs(
         self,
         specs: tuple[ArtifactSpec, ...],
+        *,
+        guards: tuple[ArtifactSnapshot, ...] = (),
+        before_commit: Callable[[str], None] | None = None,
+        after_commit: Callable[[str], None] | None = None,
     ) -> tuple[ArtifactReceipt | None, ...]:
-        """Publish an ordered present/absent set with reverse rollback."""
-        self._validate_unique_names(tuple(spec.name for spec in specs))
+        """Publish an ordered present/absent set with guards and reverse rollback."""
+        self._validate_unique_names(
+            tuple(spec.name for spec in specs)
+            + tuple(guard.name for guard in guards)
+        )
+        for guard in guards:
+            self._validate_snapshot(guard)
         normalized_specs = tuple(
             ArtifactSpec(
                 name=_safe_leaf(spec.name),
@@ -1864,8 +1906,16 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         temporary_files: dict[str, StagedArtifact] = {}
         active_error: BaseException | None = None
         mutations: list[_PublishedMutation] = []
+
+        def verify_guards() -> None:
+            self.verify_directory()
+            for guard in guards:
+                self._verify_snapshot_current(guard)
+
         try:
+            verify_guards()
             for spec, snapshot in zip(normalized_specs, snapshots, strict=True):
+                verify_guards()
                 desired = None
                 if spec.content is not None:
                     desired = self.stage_bytes(
@@ -1877,6 +1927,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     temporary_files[desired.name] = desired
                 desired_stages[spec.name] = desired
             for spec, snapshot in zip(normalized_specs, snapshots, strict=True):
+                verify_guards()
                 backup = self.stage_existing(
                     spec.name,
                     self._snapshot_state(snapshot),
@@ -1894,8 +1945,9 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         f"{self.directory.child_path(snapshot.name)}"
                     )
                 self._verify_snapshot_current(snapshot)
+                verify_guards()
 
-            self.verify_directory()
+            verify_guards()
             for snapshot in snapshots:
                 self._verify_snapshot_current(snapshot)
 
@@ -1906,8 +1958,13 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 # give another writer time to change a later target. Never
                 # overwrite that external state from the stale preflight.
                 self._verify_snapshot_current(snapshot)
+                verify_guards()
                 mutation_started = False
                 completion_error: BaseException | None = None
+                if before_commit is not None:
+                    before_commit(spec.name)
+                    self._verify_snapshot_current(snapshot)
+                    verify_guards()
                 if desired is not None:
                     completion_error = self.replace_staged(desired, spec.name)
                     mutation_started = True
@@ -1932,6 +1989,10 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     self.phase("before_durability", spec.name)
                     self.sync(f"commit_{spec.name}_durability")
                     self.phase("after_durability", spec.name)
+                    verify_guards()
+                    if after_commit is not None:
+                        after_commit(spec.name)
+                        verify_guards()
 
             receipts = tuple(
                 None
@@ -1957,7 +2018,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     + "; ".join(str(error) for error in cleanup_errors)
                 )
 
-        self.verify_directory()
+        verify_guards()
         for spec, receipt in zip(normalized_specs, receipts, strict=True):
             if receipt is None:
                 if self.directory.lexists(spec.name):
@@ -2158,6 +2219,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         backup.content,
                         mode=backup.target_mode,
                         suffix=".recovery.backup",
+                        phase_name="recovery_stage",
                     )
                     temporary_files[recovery.name] = recovery
                     completion_error = self.replace_staged(backup, name)

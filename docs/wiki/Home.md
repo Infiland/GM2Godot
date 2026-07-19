@@ -1,6 +1,6 @@
 # GM2Godot Documentation
 
-> **Applies to:** GM2Godot 0.7.17 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.18 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -21,7 +21,7 @@ Maintainers should also read [Release and Wiki Maintenance](Maintainer-Release-a
 
 This documentation set describes:
 
-- GM2Godot 0.7.17;
+- GM2Godot 0.7.18;
 - GameMaker LTS 2026 source projects in the GMS2 runtime family; and
 - Godot 4.7.1 output and validation, pinned in CI as `4.7.1.stable.official.a13da4feb`.
 

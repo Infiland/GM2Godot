@@ -1100,6 +1100,7 @@ jobs:
           RELEASE_TARGET_SHA: ${{ github.sha }}
           RELEASE_RECEIPT_PATH: release-receipt/release-publisher.json
           RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS: '1'
+          RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS: '1'
         run: python3 scripts/release_publisher.py
 
       - name: Preserve release ownership receipt

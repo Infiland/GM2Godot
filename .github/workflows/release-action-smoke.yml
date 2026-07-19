@@ -132,6 +132,7 @@ jobs:
                   "GITHUB_TOKEN": "gm2godot-release-smoke-invalid-token",
                   "RELEASE_ASSET_ROOT": os.environ["SMOKE_ASSET_ROOT"],
                   "RELEASE_NAME": "GM2Godot v0.0.0",
+                  "RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS": "0",
                   "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
                   "RELEASE_RECEIPT_PATH": "release-receipt/release-publisher.json",
                   "RELEASE_TAG": "v0.0.0",

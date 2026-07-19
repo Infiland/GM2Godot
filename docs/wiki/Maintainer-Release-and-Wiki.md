@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.17 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.18 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -16,7 +16,7 @@ When the exact remote tag is absent, the workflow uses an authenticated, paginat
 
 After the platform payloads and canonical manifest are ready, the create-only publisher requires the event ref to be exactly `refs/heads/main`, binds `RELEASE_TARGET_SHA` to that event's 40-hex commit, seals the five fixed regular files by identity, size, SHA-256 digest, and content type, and verifies the checksum manifest bytes. It then verifies the current `main` ref and takes three fresh draft-aware tag/release-absence snapshots immediately before mutation. The publisher creates the exact tag ref first and accepts only its validated `201 Created` receipt. It next creates a draft for that claimed exact tag while sending the exact target SHA, and accepts only the validated draft-creation `201`; the returned positive release ID is the only release ID the run may ever mutate.
 
-Before each of the five uploads and immediately before finalization, the publisher verifies the exact tag target, the run-owned draft by ID, the exact already-uploaded asset prefix, the absence of a published exact-tag release, and one sole exact-tag release ID in the authenticated draft-aware listing. Uploads use fixed names, MIME types, content lengths, and streamed bytes, and each must return a unique validated `201` size/digest receipt. The one publication `PATCH` targets only the run-owned numeric ID. Final verification independently checks release by ID, published release by tag, direct tag target, the exact five assets, and the sole exact-tag listing.
+Before each of the five uploads and immediately before finalization, the publisher verifies the exact tag target, the run-owned draft by ID, the exact already-uploaded asset prefix, the absence of a published exact-tag release, and one sole exact-tag release ID in the authenticated draft-aware listing. A temporarily empty exact-tag match set in an otherwise well-formed authenticated listing is the only retryable state: the publisher repeats the entire five-read gate up to seven times with 1, 2, 4, 8, 16, and 32-second delays, persisting every decision before it waits. Any foreign or duplicate ID, malformed response, or other drift stops immediately. Uploads use fixed names, MIME types, content lengths, and streamed bytes, and each must return a unique validated `201` size/digest receipt. The one publication `PATCH` targets only the run-owned numeric ID. Final verification independently checks release by ID, published release by tag, direct tag target, the exact five assets, and the sole exact-tag listing.
 
 Mutation requests are never retried: a timeout, malformed accepted-status body, collision, authorization failure, `502` starter possibility, or other ambiguous response may have changed remote state. The publisher never adopts a lookup ID, updates a ref, skips or replaces an asset, deletes partial state, or automatically rolls back. An atomic Actions artifact records every mutation intent, accepted ownership receipt, uploaded prefix, request ID, observation, and failure phase. Follow its ID-first manual-recovery links and prove ownership before changing anything or rerunning.
 

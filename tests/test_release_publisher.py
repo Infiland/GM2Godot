@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 import copy
 from dataclasses import dataclass
 import hashlib
@@ -9,16 +9,19 @@ from pathlib import Path
 import tempfile
 from typing import Literal, cast
 import unittest
+from unittest.mock import patch
 
 from scripts import release_publisher as publisher_module
 
 
 REPOSITORY = "Infiland/GM2Godot"
-TAG = "v0.7.17"
+TAG = "v0.7.18"
 RELEASE_NAME = f"GM2Godot {TAG}"
 TARGET_SHA = "a" * 40
 OWNED_RELEASE_ID = 7001
 FOREIGN_RELEASE_ID = 9009
+HISTORICAL_RELEASE_ID = 6001
+HISTORICAL_TAG = "v0.7.17"
 DRAFT_TAG_SEGMENT = "untagged-4f85c190bafb4cdda230"
 API_ORIGIN = "https://api.github.com"
 UPLOAD_ORIGIN = "https://uploads.github.com"
@@ -75,6 +78,7 @@ FaultKind = Literal[
     "publish-server-error",
     "publish-id-drift",
     "asset-digest-drift",
+    "unexpected-draft-asset",
 ]
 
 
@@ -588,6 +592,12 @@ class ScriptedTransport:
                 raise AssertionError("Asset digest drift requires uploaded assets")
             assets[0]["digest"] = f"sha256:{'0' * 64}"
             return self._json_result(ordinal, 200, assets)
+        if fault == "unexpected-draft-asset":
+            return self._json_result(
+                ordinal,
+                200,
+                [{"id": 9999, "name": "foreign.zip"}],
+            )
         raise AssertionError(f"Unknown fault kind: {fault}")
 
     def _record_external_upload(
@@ -715,6 +725,102 @@ class ScriptedTransport:
         )
 
 
+class VisibilityScriptedTransport(ScriptedTransport):
+    """Repeat one complete ownership gate with scripted exact-tag visibility."""
+
+    def __init__(
+        self,
+        gate_index: int,
+        list_states: Sequence[str],
+        faults: Mapping[int, FaultKind] | None = None,
+    ) -> None:
+        if not list_states:
+            raise ValueError("Visibility transport requires at least one list state")
+        super().__init__(faults)
+        list_positions = [index for index, call in enumerate(HAPPY_LEDGER) if call.role == "draft-release-list"]
+        if not 0 <= gate_index < len(list_positions):
+            raise ValueError(f"Invalid ownership gate index: {gate_index}")
+        list_position = list_positions[gate_index]
+        gate_start = list_position - 4
+        gate = HAPPY_LEDGER[gate_start : list_position + 1]
+        repeated: list[ExpectedCall] = []
+        for state in list_states:
+            repeated.extend(gate[:-1])
+            repeated.append(
+                ExpectedCall(
+                    gate[-1].method,
+                    gate[-1].url,
+                    f"visibility-list-{state}",
+                )
+            )
+        self.expected = (
+            *HAPPY_LEDGER[:gate_start],
+            *repeated,
+            *HAPPY_LEDGER[list_position + 1 :],
+        )
+
+    def _normal_result(
+        self,
+        ordinal: int,
+        expected: ExpectedCall,
+        file_body: publisher_module.FileSeal | None,
+    ) -> publisher_module.TransportResult:
+        state_prefix = "visibility-list-"
+        if not expected.role.startswith(state_prefix):
+            return super()._normal_result(ordinal, expected, file_body)
+        state = expected.role.removeprefix(state_prefix)
+        historical = self._historical_release_object()
+        if state == "missing-owned":
+            value: object = [historical]
+        elif state == "owned":
+            value = [historical, self._release_object(draft=True)]
+        elif state == "foreign":
+            value = [historical, {"id": FOREIGN_RELEASE_ID, "tag_name": TAG}]
+        elif state == "duplicate":
+            value = [
+                historical,
+                self._release_object(draft=True),
+                {"id": FOREIGN_RELEASE_ID, "tag_name": TAG},
+            ]
+        elif state == "duplicate-owned":
+            value = [
+                historical,
+                self._release_object(draft=True),
+                self._release_object(draft=True),
+            ]
+        elif state == "malformed":
+            value = [historical, {"id": FOREIGN_RELEASE_ID}]
+        elif state == "owned-invalid":
+            invalid = self._release_object(draft=True)
+            invalid["name"] = "Foreign title"
+            value = [historical, invalid]
+        elif state == "api-error":
+            return self._json_result(
+                ordinal,
+                500,
+                {"message": "simulated release-list failure"},
+            )
+        else:
+            raise AssertionError(f"Unknown visibility list state: {state}")
+        return self._json_result(ordinal, 200, value)
+
+    def _historical_release_object(self) -> dict[str, object]:
+        historical = self._release_object(
+            draft=False,
+            release_id=HISTORICAL_RELEASE_ID,
+        )
+        historical.update(
+            {
+                "tag_name": HISTORICAL_TAG,
+                "target_commitish": "b" * 40,
+                "name": f"GM2Godot {HISTORICAL_TAG}",
+                "html_url": (f"https://github.com/{REPOSITORY}/releases/tag/{HISTORICAL_TAG}"),
+                "assets": [],
+            }
+        )
+        return historical
+
+
 def _write_release_assets(root: Path) -> dict[str, bytes]:
     payloads = {
         "GM2Godot-windows.zip": b"PK\x03\x04GM2Godot Windows unit artifact\n",
@@ -742,6 +848,9 @@ class TestReleasePublisher(unittest.TestCase):
     def _execute(
         self,
         faults: Mapping[int, FaultKind] | None = None,
+        *,
+        transport: ScriptedTransport | None = None,
+        ownership_retry_delay_seconds: float = 0,
     ) -> tuple[
         publisher_module.ReleasePublisher,
         ScriptedTransport,
@@ -767,10 +876,13 @@ class TestReleasePublisher(unittest.TestCase):
                 receipt_path=root / "release-receipt/release-publisher.json",
                 asset_root=asset_root,
                 preflight_delay_seconds=0,
+                ownership_retry_delay_seconds=ownership_retry_delay_seconds,
             )
-            transport = ScriptedTransport(faults)
+            if transport is not None and faults is not None:
+                raise ValueError("Provide faults or a scripted transport, not both")
+            selected_transport = transport if transport is not None else ScriptedTransport(faults)
             api = publisher_module.GitHubApi(
-                transport,
+                selected_transport,
                 repository=config.repository,
                 token=config.token,
                 api_origin=config.api_origin,
@@ -783,7 +895,7 @@ class TestReleasePublisher(unittest.TestCase):
                 publisher.run()
             except publisher_module.PublishError as caught:
                 error = caught
-            return publisher, transport, receipt, error, payloads
+            return publisher, selected_transport, receipt, error, payloads
 
     def test_happy_path_uses_exact_50_call_ownership_ledger(self) -> None:
         publisher, transport, receipt, error, payloads = self._execute()
@@ -859,6 +971,19 @@ class TestReleasePublisher(unittest.TestCase):
                 "final-verification",
             ],
         )
+        ownership_observations = [
+            observation
+            for observation in receipt.observations
+            if str(observation["phase"]).startswith("ownership-gate-")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in ownership_observations],
+            ["accept-owned"] * 6,
+        )
+        self.assertEqual(
+            [observation["snapshot_attempt"] for observation in ownership_observations],
+            [1] * 6,
+        )
         self.assertIsNotNone(receipt.release_receipt)
         assert receipt.release_receipt is not None
         self.assertEqual(receipt.release_receipt["id"], OWNED_RELEASE_ID)
@@ -874,6 +999,315 @@ class TestReleasePublisher(unittest.TestCase):
             receipt.release_receipt["published_html_url"],
             f"https://github.com/{REPOSITORY}/releases/tag/{TAG}",
         )
+
+    def test_missing_owned_match_repeats_the_whole_gate_until_visible(self) -> None:
+        scripted = VisibilityScriptedTransport(
+            0,
+            ("missing-owned", "owned"),
+        )
+        with patch.object(publisher_module.time, "sleep") as sleeper:
+            publisher, transport, receipt, error, _ = self._execute(
+                transport=scripted,
+                ownership_retry_delay_seconds=1,
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(len(transport.calls), 55)
+        self.assertEqual(
+            [call.ordinal for call in transport.calls if call.method != "GET"],
+            [8, 9, 20, 26, 32, 38, 44, 50],
+        )
+        self.assertEqual([call.args[0] for call in sleeper.call_args_list], [1.0])
+        gate_observations = [
+            observation
+            for observation in receipt.observations
+            if str(observation["phase"]).startswith("ownership-gate-0")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in gate_observations],
+            ["retry-empty", "accept-owned"],
+        )
+        self.assertEqual(
+            [observation["snapshot_attempt"] for observation in gate_observations],
+            [1, 2],
+        )
+        self.assertEqual(
+            [observation["listed_release_count"] for observation in gate_observations],
+            [1, 2],
+        )
+        retry_snapshots = [
+            snapshot
+            for snapshot in receipt.snapshots
+            if snapshot["observations"]
+            and cast(list[dict[str, object]], snapshot["observations"])[-1].get("decision") == "retry-empty"
+        ]
+        self.assertEqual(len(retry_snapshots), 1)
+        for snapshot in retry_snapshots:
+            self.assertEqual(len(cast(list[object], snapshot["mutation_intents"])), 2)
+            self.assertEqual(snapshot["asset_receipts"], [])
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_persistent_missing_owned_match_fails_before_upload(self) -> None:
+        scripted = VisibilityScriptedTransport(
+            0,
+            ("missing-owned",) * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+        )
+        with patch.object(publisher_module.time, "sleep") as sleeper:
+            publisher, transport, receipt, error, _ = self._execute(
+                transport=scripted,
+                ownership_retry_delay_seconds=1,
+            )
+
+        self.assertIsNotNone(error)
+        assert error is not None
+        self.assertEqual(error.phase, "ownership-gate-0")
+        self.assertIn("visibility did not converge", str(error))
+        self.assertEqual(len(transport.calls), 44)
+        self.assertEqual(
+            [call.ordinal for call in transport.calls if call.method != "GET"],
+            [8, 9],
+        )
+        self.assertEqual(
+            [call.args[0] for call in sleeper.call_args_list],
+            [1.0, 2.0, 4.0, 8.0, 16.0, 32.0],
+        )
+        self.assertEqual(transport.uploaded, [])
+        self.assertFalse(transport.published)
+        self.assertEqual(len(receipt.mutation_intents), 2)
+        self.assertEqual(receipt.asset_receipts, [])
+        self.assertEqual(receipt.observations[-1]["decision"], "fail-empty-exhausted")
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_visibility_retry_persists_release_list_api_failure(self) -> None:
+        scripted = VisibilityScriptedTransport(
+            0,
+            ("missing-owned", "api-error"),
+        )
+        publisher, transport, receipt, error, _ = self._execute(transport=scripted)
+
+        self.assertIsNotNone(error)
+        assert error is not None
+        self.assertEqual(error.phase, "ownership-gate-0")
+        self.assertEqual(error.status, 500)
+        self.assertEqual(error.request_id, "request-019")
+        self.assertIn("simulated release-list failure", str(error))
+        self.assertEqual(len(transport.calls), 19)
+        self.assertEqual(
+            [call.ordinal for call in transport.calls if call.method != "GET"],
+            [8, 9],
+        )
+        self.assertEqual(transport.uploaded, [])
+        self.assertFalse(transport.published)
+        self.assertEqual(len(receipt.mutation_intents), 2)
+        gate_observations = [
+            observation
+            for observation in receipt.observations
+            if str(observation["phase"]).startswith("ownership-gate-0")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in gate_observations],
+            ["retry-empty", "fail-list-read"],
+        )
+        self.assertEqual(gate_observations[0]["listed_release_count"], 1)
+        self.assertIsNone(gate_observations[1]["listed_release_count"])
+        self.assertIsNone(gate_observations[1]["exact_release_ids"])
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_visibility_retry_never_waits_out_nonempty_or_malformed_drift(self) -> None:
+        for final_state, expected_message, final_decision, final_ids in (
+            ("foreign", "observed ids=[9009]", "fail-identity-drift", [9009]),
+            (
+                "duplicate",
+                "observed ids=[7001, 9009]",
+                "fail-identity-drift",
+                [7001, 9009],
+            ),
+            (
+                "duplicate-owned",
+                "observed ids=[7001, 7001]",
+                "fail-identity-drift",
+                [7001, 7001],
+            ),
+            (
+                "malformed",
+                "lacked a non-empty tag_name",
+                "fail-list-read",
+                None,
+            ),
+            (
+                "owned-invalid",
+                "Owned release verification failed",
+                "fail-owned-schema",
+                [7001],
+            ),
+        ):
+            with self.subTest(final_state=final_state):
+                scripted = VisibilityScriptedTransport(
+                    0,
+                    ("missing-owned", final_state),
+                )
+                publisher, transport, receipt, error, _ = self._execute(
+                    transport=scripted,
+                )
+
+                self.assertIsNotNone(error)
+                assert error is not None
+                self.assertEqual(error.phase, "ownership-gate-0")
+                self.assertIn(expected_message, str(error))
+                self.assertEqual(len(transport.calls), 19)
+                self.assertEqual(transport.uploaded, [])
+                self.assertFalse(transport.published)
+                self.assertEqual(len(receipt.mutation_intents), 2)
+                self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+                gate_observations = [
+                    observation
+                    for observation in receipt.observations
+                    if str(observation["phase"]).startswith("ownership-gate-0")
+                ]
+                self.assertEqual(
+                    [observation["decision"] for observation in gate_observations],
+                    ["retry-empty", final_decision],
+                )
+                self.assertEqual(gate_observations[0]["exact_release_ids"], [])
+                self.assertEqual(
+                    gate_observations[1]["exact_release_ids"],
+                    final_ids,
+                )
+
+    def test_visibility_retry_revalidates_non_list_gate_state(self) -> None:
+        for ordinal, fault, expected_message in (
+            (15, "tag-drift", "wrong commit SHA"),
+            (16, "owned-id-drift", "Release identity drifted"),
+            (17, "unexpected-draft-asset", "asset count drifted"),
+            (18, "foreign-published-release", "published exact-tag release appeared"),
+        ):
+            with self.subTest(fault=fault):
+                scripted = VisibilityScriptedTransport(
+                    0,
+                    ("missing-owned", "owned"),
+                    {ordinal: cast(FaultKind, fault)},
+                )
+                _, transport, receipt, error, _ = self._execute(transport=scripted)
+
+                self.assertIsNotNone(error)
+                assert error is not None
+                self.assertIn(expected_message, str(error))
+                self.assertEqual(len(transport.calls), ordinal)
+                self.assertEqual(transport.uploaded, [])
+                self.assertEqual(len(receipt.mutation_intents), 2)
+
+    def test_later_missing_owned_match_converges_without_replaying_uploaded_prefix(
+        self,
+    ) -> None:
+        scripted = VisibilityScriptedTransport(3, ("missing-owned", "owned"))
+        publisher, transport, receipt, error, _ = self._execute(transport=scripted)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(transport.calls), 55)
+        self.assertEqual(
+            [call.ordinal for call in transport.calls if call.method != "GET"],
+            [8, 9, 15, 21, 27, 38, 44, 50],
+        )
+        self.assertEqual([seal.name for seal, _ in transport.uploaded], list(ASSET_ORDER))
+        self.assertEqual(len(receipt.mutation_intents), 8)
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_later_persistent_missing_owned_match_preserves_uploaded_prefix(self) -> None:
+        scripted = VisibilityScriptedTransport(
+            3,
+            ("missing-owned",) * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+        )
+        publisher, transport, receipt, error, _ = self._execute(transport=scripted)
+
+        self.assertIsNotNone(error)
+        assert error is not None
+        self.assertEqual(error.phase, "ownership-gate-3")
+        self.assertIn("visibility did not converge", str(error))
+        self.assertEqual(len(transport.calls), 62)
+        self.assertEqual([seal.name for seal, _ in transport.uploaded], list(ASSET_ORDER[:3]))
+        self.assertFalse(transport.published)
+        self.assertEqual(
+            [intent["phase"] for intent in receipt.mutation_intents],
+            [
+                "create-tag-ref",
+                "create-draft-release",
+                *(f"upload-{name}" for name in ASSET_ORDER[:3]),
+            ],
+        )
+        self.assertEqual(
+            [item["name"] for item in receipt.asset_receipts],
+            list(ASSET_ORDER[:3]),
+        )
+        gate_observations = [
+            observation
+            for observation in receipt.observations
+            if str(observation["phase"]).startswith("ownership-gate-3")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in gate_observations],
+            ["retry-empty"] * 6 + ["fail-empty-exhausted"],
+        )
+        for observation in gate_observations:
+            self.assertEqual(
+                observation["uploaded_asset_names"],
+                list(ASSET_ORDER[:3]),
+            )
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_prepublish_persistent_missing_owned_match_never_patches(self) -> None:
+        scripted = VisibilityScriptedTransport(
+            5,
+            ("missing-owned",) * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+        )
+        publisher, transport, receipt, error, _ = self._execute(transport=scripted)
+
+        self.assertIsNotNone(error)
+        assert error is not None
+        self.assertEqual(error.phase, "ownership-gate-5")
+        self.assertIn("visibility did not converge", str(error))
+        self.assertEqual(len(transport.calls), 74)
+        self.assertEqual(
+            [call.ordinal for call in transport.calls if call.method != "GET"],
+            [8, 9, 15, 21, 27, 33, 39],
+        )
+        self.assertEqual(
+            [seal.name for seal, _ in transport.uploaded],
+            list(ASSET_ORDER),
+        )
+        self.assertFalse(transport.published)
+        self.assertEqual(
+            [intent["phase"] for intent in receipt.mutation_intents],
+            [
+                "create-tag-ref",
+                "create-draft-release",
+                *(f"upload-{name}" for name in ASSET_ORDER),
+            ],
+        )
+        self.assertEqual(
+            [intent["state"] for intent in receipt.mutation_intents],
+            ["accepted"] * 7,
+        )
+        self.assertEqual(
+            [item["name"] for item in receipt.asset_receipts],
+            list(ASSET_ORDER),
+        )
+        gate_observations = [
+            observation
+            for observation in receipt.observations
+            if str(observation["phase"]).startswith("ownership-gate-5")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in gate_observations],
+            ["retry-empty"] * 6 + ["fail-empty-exhausted"],
+        )
+        for observation in gate_observations:
+            self.assertEqual(observation["next_mutation"], "publish-owned-release")
+            self.assertEqual(observation["listed_release_count"], 1)
+            self.assertEqual(
+                observation["uploaded_asset_names"],
+                list(ASSET_ORDER),
+            )
+        self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
 
     def test_publisher_source_has_no_adoption_or_destructive_mutation_path(
         self,

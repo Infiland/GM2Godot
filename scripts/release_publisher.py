@@ -30,6 +30,8 @@ API_VERSION = "2026-03-10"
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 STREAM_CHUNK_BYTES = 1024 * 1024
 MAX_PAGES = 100
+OWNED_DRAFT_VISIBILITY_SNAPSHOTS = 7
+MAX_OWNERSHIP_RETRY_DELAY_SECONDS = 32.0
 DEFAULT_RECEIPT_PATH = Path("release-receipt/release-publisher.json")
 DEFAULT_ASSET_ROOT = Path("artifacts")
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
@@ -877,6 +879,7 @@ class PublisherConfig:
     receipt_path: Path
     asset_root: Path
     preflight_delay_seconds: float
+    ownership_retry_delay_seconds: float
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> PublisherConfig:
@@ -933,6 +936,16 @@ class PublisherConfig:
             raise ValueError("Invalid release preflight retry delay.") from error
         if not 0 <= delay <= 10:
             raise ValueError("Release preflight retry delay must be between 0 and 10 seconds.")
+        ownership_delay_text = environment.get(
+            "RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS",
+            "1",
+        )
+        try:
+            ownership_delay = float(ownership_delay_text)
+        except ValueError as error:
+            raise ValueError("Invalid release ownership retry delay.") from error
+        if not 0 <= ownership_delay <= 1:
+            raise ValueError("Release ownership retry delay must be between 0 and 1 second.")
 
         return cls(
             repository=repository,
@@ -948,6 +961,7 @@ class PublisherConfig:
             receipt_path=receipt_path,
             asset_root=asset_root,
             preflight_delay_seconds=delay,
+            ownership_retry_delay_seconds=ownership_delay,
         )
 
 
@@ -1276,81 +1290,187 @@ class ReleasePublisher:
         )
 
     def _ownership_gate(self, uploaded_count: int) -> None:
+        """Allow bounded convergence only while the exact-tag match set is empty."""
+
         identity = self._require_owned_release()
         phase = f"ownership-gate-{uploaded_count}"
-        ref_payload = self.api.get_ref(
-            phase,
-            f"tags/{self.config.tag}",
-            allow_missing=False,
+        next_mutation = (
+            f"upload-{self.assets[uploaded_count].name}"
+            if uploaded_count < len(self.assets)
+            else "publish-owned-release"
         )
-        self._validate_read_ref(
-            ref_payload,
-            f"tags/{self.config.tag}",
-            self.config.target_sha,
-            phase,
-        )
+        uploaded_asset_names = [receipt.name for receipt in self.uploaded]
 
-        release_payload = self.api.get_release(phase, identity.release_id)
-        self._validate_read_release(
-            release_payload,
-            identity.release_id,
-            draft=True,
-            phase=phase,
-        )
-        listed_assets = self.api.list_assets(phase, identity.release_id)
-        self._validate_asset_inventory(
-            listed_assets,
-            self.uploaded,
-            phase,
-            draft=True,
-        )
+        for snapshot_attempt in range(1, OWNED_DRAFT_VISIBILITY_SNAPSHOTS + 1):
+            ref_payload = self.api.get_ref(
+                phase,
+                f"tags/{self.config.tag}",
+                allow_missing=False,
+            )
+            self._validate_read_ref(
+                ref_payload,
+                f"tags/{self.config.tag}",
+                self.config.target_sha,
+                phase,
+            )
 
-        published = self.api.get_release_by_tag(
-            phase,
-            self.config.tag,
-            allow_missing=True,
-        )
-        if published.status != 404:
-            foreign_id = "unknown"
-            try:
-                foreign_id = str(
-                    _required_int(
-                        _expect_object(published.value, "published collision"),
-                        "id",
-                        "published collision",
+            release_payload = self.api.get_release(phase, identity.release_id)
+            self._validate_read_release(
+                release_payload,
+                identity.release_id,
+                draft=True,
+                phase=phase,
+            )
+            listed_assets = self.api.list_assets(phase, identity.release_id)
+            self._validate_asset_inventory(
+                listed_assets,
+                self.uploaded,
+                phase,
+                draft=True,
+            )
+
+            published = self.api.get_release_by_tag(
+                phase,
+                self.config.tag,
+                allow_missing=True,
+            )
+            if published.status != 404:
+                foreign_id = "unknown"
+                try:
+                    foreign_id = str(
+                        _required_int(
+                            _expect_object(published.value, "published collision"),
+                            "id",
+                            "published collision",
+                        )
                     )
+                except SchemaError:
+                    pass
+                raise PublishError(
+                    phase,
+                    f"A published exact-tag release appeared while owned draft "
+                    f"id={identity.release_id} was gated; published id={foreign_id}.",
+                    status=published.status,
+                    request_id=published.request_id,
                 )
-            except SchemaError:
-                pass
-            raise PublishError(
-                phase,
-                f"A published exact-tag release appeared while owned draft "
-                f"id={identity.release_id} was gated; published id={foreign_id}.",
-                status=published.status,
-                request_id=published.request_id,
-            )
 
-        matches = self._exact_release_matches(self.api.list_releases(phase), phase)
-        match_ids = [self._release_id_for_diagnostic(match) for match in matches]
-        if match_ids != [identity.release_id]:
-            raise PublishError(
-                phase,
-                f"Exact-tag release identity drift before the next mutation: "
-                f"owned id={identity.release_id}, observed ids={match_ids}.",
+            listed_releases: list[dict[str, object]] | None = None
+            try:
+                listed_releases = self.api.list_releases(phase)
+                matches = self._exact_release_matches(listed_releases, phase)
+            except PublishError as error:
+                self.receipt.observe(
+                    f"{phase}-snapshot-{snapshot_attempt}",
+                    snapshot_attempt=snapshot_attempt,
+                    snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                    decision="fail-list-read",
+                    next_mutation=next_mutation,
+                    tag_sha=self.config.target_sha,
+                    owned_release_id=identity.release_id,
+                    exact_release_ids=None,
+                    listed_release_count=(len(listed_releases) if listed_releases is not None else None),
+                    uploaded_asset_names=uploaded_asset_names,
+                    error=str(error),
+                )
+                raise
+            match_ids = [self._release_id_for_diagnostic(match) for match in matches]
+            observation_phase = phase if match_ids == [identity.release_id] else f"{phase}-snapshot-{snapshot_attempt}"
+            if match_ids == [identity.release_id]:
+                try:
+                    self._validate_read_release_object(
+                        matches[0],
+                        identity.release_id,
+                        draft=True,
+                        phase=phase,
+                    )
+                except PublishError as error:
+                    self.receipt.observe(
+                        f"{phase}-snapshot-{snapshot_attempt}",
+                        snapshot_attempt=snapshot_attempt,
+                        snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                        decision="fail-owned-schema",
+                        next_mutation=next_mutation,
+                        tag_sha=self.config.target_sha,
+                        owned_release_id=identity.release_id,
+                        exact_release_ids=match_ids,
+                        listed_release_count=len(listed_releases),
+                        uploaded_asset_names=uploaded_asset_names,
+                        error=str(error),
+                    )
+                    raise
+                self.receipt.observe(
+                    observation_phase,
+                    snapshot_attempt=snapshot_attempt,
+                    snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                    decision="accept-owned",
+                    next_mutation=next_mutation,
+                    tag_sha=self.config.target_sha,
+                    owned_release_id=identity.release_id,
+                    exact_release_ids=match_ids,
+                    listed_release_count=len(listed_releases),
+                    uploaded_asset_names=uploaded_asset_names,
+                )
+                return
+
+            if match_ids:
+                self.receipt.observe(
+                    observation_phase,
+                    snapshot_attempt=snapshot_attempt,
+                    snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                    decision="fail-identity-drift",
+                    next_mutation=next_mutation,
+                    tag_sha=self.config.target_sha,
+                    owned_release_id=identity.release_id,
+                    exact_release_ids=match_ids,
+                    listed_release_count=len(listed_releases),
+                    uploaded_asset_names=uploaded_asset_names,
+                )
+                raise PublishError(
+                    phase,
+                    f"Exact-tag release identity drift before the next mutation: "
+                    f"owned id={identity.release_id}, observed ids={match_ids}.",
+                )
+
+            if snapshot_attempt == OWNED_DRAFT_VISIBILITY_SNAPSHOTS:
+                self.receipt.observe(
+                    observation_phase,
+                    snapshot_attempt=snapshot_attempt,
+                    snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                    decision="fail-empty-exhausted",
+                    next_mutation=next_mutation,
+                    tag_sha=self.config.target_sha,
+                    owned_release_id=identity.release_id,
+                    exact_release_ids=[],
+                    listed_release_count=len(listed_releases),
+                    uploaded_asset_names=uploaded_asset_names,
+                )
+                raise PublishError(
+                    phase,
+                    f"Owned draft exact-tag visibility did not converge before "
+                    f"the next mutation: owned id={identity.release_id}, "
+                    f"observed ids=[] after "
+                    f"{OWNED_DRAFT_VISIBILITY_SNAPSHOTS} snapshots.",
+                )
+
+            retry_delay = min(
+                self.config.ownership_retry_delay_seconds * (2 ** (snapshot_attempt - 1)),
+                MAX_OWNERSHIP_RETRY_DELAY_SECONDS,
             )
-        self._validate_read_release_object(
-            matches[0],
-            identity.release_id,
-            draft=True,
-            phase=phase,
-        )
-        self.receipt.observe(
-            phase,
-            tag_sha=self.config.target_sha,
-            owned_release_id=identity.release_id,
-            exact_release_ids=match_ids,
-            uploaded_asset_names=[receipt.name for receipt in self.uploaded],
-        )
+            self.receipt.observe(
+                observation_phase,
+                snapshot_attempt=snapshot_attempt,
+                snapshot_limit=OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+                decision="retry-empty",
+                retry_delay_seconds=retry_delay,
+                next_mutation=next_mutation,
+                tag_sha=self.config.target_sha,
+                owned_release_id=identity.release_id,
+                exact_release_ids=[],
+                listed_release_count=len(listed_releases),
+                uploaded_asset_names=uploaded_asset_names,
+            )
+            if retry_delay:
+                time.sleep(retry_delay)
 
     def _upload(self, asset: FileSeal) -> None:
         identity = self._require_owned_release()

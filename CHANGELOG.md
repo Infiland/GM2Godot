@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.18 - 2026-07-19
+
+- Made each pre-mutation ownership gate tolerate only well-formed authenticated release listings whose exact-tag match set is temporarily empty, using seven bounded full-gate snapshots with exponential backoff; every retry revalidates the exact tag, run-owned draft by ID, uploaded asset prefix, published-tag absence, and complete draft-aware listing before any mutation.
+- Persisted every empty-match retry, terminal visibility exhaustion, and nonempty identity drift decision in the ownership receipt while keeping foreign IDs, malformed responses, mutation failures, and ambiguous outcomes immediately terminal and never retrying uploads or publication.
+
 ## 0.7.17 - 2026-07-19
 
 - Replaced the update-capable release action with a create-only publisher that seals the exact `main` event SHA and five local asset receipts, claims the tag through one validated `201 Created` response, and derives the only writable release ID from this run's validated draft-creation response.

@@ -25,6 +25,7 @@ from tests.test_release_publisher import (
     TAG,
     TARGET_SHA,
     UPLOAD_ORIGIN,
+    VisibilityScriptedTransport,
 )
 
 
@@ -50,6 +51,7 @@ def _publisher_environment(
         "RELEASE_RECEIPT_PATH": receipt_path,
         "RELEASE_ASSET_ROOT": asset_root,
         "RELEASE_PREFLIGHT_RETRY_DELAY_SECONDS": "0",
+        "RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS": "0",
     }
 
 
@@ -120,13 +122,14 @@ class TestPublisherConfiguration(unittest.TestCase):
                 config = publisher_module.PublisherConfig.from_environment(environment)
                 self.assertEqual(config.target_sha, TARGET_SHA)
                 self.assertEqual(config.release_name, RELEASE_NAME)
+                self.assertEqual(config.ownership_retry_delay_seconds, 0)
                 self.assertEqual(
                     config.run_url,
                     f"https://github.com/{REPOSITORY}/actions/runs/12345/attempts/2",
                 )
 
         rejected = (
-            ("GITHUB_REF", "refs/tags/v0.7.17", "refs/heads/main"),
+            ("GITHUB_REF", "refs/tags/v0.7.18", "refs/heads/main"),
             ("GITHUB_REF_TYPE", "tag", "branch event ref"),
             ("GITHUB_EVENT_NAME", "pull_request", "not allowed"),
             ("RELEASE_TARGET_SHA", "b" * 40, "must equal"),
@@ -160,6 +163,16 @@ class TestPublisherConfiguration(unittest.TestCase):
             ("RELEASE_ASSET_ROOT", "/tmp/artifacts", "stay relative"),
             ("RELEASE_ASSET_ROOT", "artifacts/../elsewhere", "stay relative"),
             ("RELEASE_NAME", f"Release {TAG}", "fixed GM2Godot tag title"),
+            (
+                "RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS",
+                "1.1",
+                "between 0 and 1 second",
+            ),
+            (
+                "RELEASE_OWNERSHIP_RETRY_DELAY_SECONDS",
+                "not-a-number",
+                "Invalid release ownership retry delay",
+            ),
         )
         for variable, value, message in rejected:
             with self.subTest(rejected_variable=variable, value=value):
@@ -257,6 +270,45 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
                 endpoint = cast(str, pending["endpoint"])
                 expected_url = endpoint if endpoint.startswith("https://") else API_ORIGIN + endpoint
                 self.assertEqual(expected_url, call.url)
+
+    def _run_main_with_persistent_missing_owned_match(
+        self,
+        gate_index: int,
+    ) -> tuple[dict[str, object], str, VisibilityScriptedTransport]:
+        workspace = Path.cwd()
+        with tempfile.TemporaryDirectory(
+            prefix=".release-publisher-visibility-",
+            dir=workspace,
+        ) as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            relative_root = temporary_root.relative_to(workspace)
+            relative_asset_root = relative_root / "artifacts"
+            relative_receipt_path = relative_root / "receipt/publisher.json"
+            _write_release_assets(workspace / relative_asset_root)
+            transport = VisibilityScriptedTransport(
+                gate_index,
+                ("missing-owned",) * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+            )
+            environment = _publisher_environment(
+                receipt_path=str(relative_receipt_path),
+                asset_root=str(relative_asset_root),
+            )
+            stderr = StringIO()
+            with (
+                patch.object(
+                    publisher_module,
+                    "HttpsTransport",
+                    return_value=transport,
+                ),
+                redirect_stderr(stderr),
+            ):
+                result = publisher_module.main(environment)
+            self.assertEqual(result, 1)
+            receipt = cast(
+                dict[str, object],
+                json.loads((workspace / relative_receipt_path).read_text(encoding="utf-8")),
+            )
+            return receipt, stderr.getvalue(), transport
 
     def test_post_mutation_failure_persists_id_first_recovery_receipt(self) -> None:
         receipt, stderr, transport = self._run_main_with_fault(
@@ -434,6 +486,97 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
         self.assertIn(f"published id={FOREIGN_RELEASE_ID}", failure_message)
         self.assertIn(f"owned draft id={OWNED_RELEASE_ID}", stderr)
         self.assertIn(f"published id={FOREIGN_RELEASE_ID}", stderr)
+        self.assertIn(f"releases/{OWNED_RELEASE_ID}", stderr)
+        self.assertNotIn(f"releases/{FOREIGN_RELEASE_ID}", stderr)
+
+    def test_persistent_missing_owned_match_persists_owned_id_without_upload_intent(
+        self,
+    ) -> None:
+        receipt, stderr, _ = self._run_main_with_persistent_missing_owned_match(0)
+
+        self.assertEqual(receipt["stage"], "failed")
+        failure = cast(dict[str, object], receipt["failure"])
+        self.assertEqual(failure["phase"], "ownership-gate-0")
+        self.assertIs(failure["ambiguous"], False)
+        self.assertEqual(failure["owned_release_id"], OWNED_RELEASE_ID)
+        self.assertEqual(failure["completed_asset_names"], [])
+        intents = cast(list[dict[str, object]], receipt["mutation_intents"])
+        self.assertEqual(
+            [(intent["phase"], intent["state"]) for intent in intents],
+            [
+                ("create-tag-ref", "accepted"),
+                ("create-draft-release", "accepted"),
+            ],
+        )
+        self.assertEqual(receipt["asset_receipts"], [])
+        observations = cast(list[dict[str, object]], receipt["observations"])
+        visibility = [
+            observation
+            for observation in observations
+            if str(observation["phase"]).startswith("ownership-gate-0-snapshot-")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in visibility],
+            ["retry-empty"] * 6 + ["fail-empty-exhausted"],
+        )
+        self.assertEqual(
+            [observation["listed_release_count"] for observation in visibility],
+            [1] * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
+        )
+        self.assertIn("visibility did not converge", str(failure["message"]))
+        self.assertIn(f"releases/{OWNED_RELEASE_ID}", stderr)
+        self.assertNotIn(f"releases/{FOREIGN_RELEASE_ID}", stderr)
+
+    def test_later_persistent_missing_owned_match_persists_completed_prefix(
+        self,
+    ) -> None:
+        receipt, stderr, _ = self._run_main_with_persistent_missing_owned_match(3)
+
+        self.assertEqual(receipt["stage"], "failed")
+        failure = cast(dict[str, object], receipt["failure"])
+        self.assertEqual(failure["phase"], "ownership-gate-3")
+        self.assertIs(failure["ambiguous"], False)
+        self.assertEqual(failure["owned_release_id"], OWNED_RELEASE_ID)
+        self.assertEqual(
+            failure["completed_asset_names"],
+            list(ASSET_ORDER[:3]),
+        )
+
+        asset_receipts = cast(list[dict[str, object]], receipt["asset_receipts"])
+        self.assertEqual(
+            [asset["name"] for asset in asset_receipts],
+            list(ASSET_ORDER[:3]),
+        )
+        intents = cast(list[dict[str, object]], receipt["mutation_intents"])
+        self.assertEqual(
+            [intent["phase"] for intent in intents],
+            [
+                "create-tag-ref",
+                "create-draft-release",
+                *(f"upload-{asset_name}" for asset_name in ASSET_ORDER[:3]),
+            ],
+        )
+        self.assertEqual(
+            [intent["state"] for intent in intents],
+            ["accepted"] * 5,
+        )
+
+        observations = cast(list[dict[str, object]], receipt["observations"])
+        visibility = [
+            observation
+            for observation in observations
+            if str(observation["phase"]).startswith("ownership-gate-3-snapshot-")
+        ]
+        self.assertEqual(
+            [observation["decision"] for observation in visibility],
+            ["retry-empty"] * 6 + ["fail-empty-exhausted"],
+        )
+        for observation in visibility:
+            self.assertEqual(observation["listed_release_count"], 1)
+            self.assertEqual(
+                observation["uploaded_asset_names"],
+                list(ASSET_ORDER[:3]),
+            )
         self.assertIn(f"releases/{OWNED_RELEASE_ID}", stderr)
         self.assertNotIn(f"releases/{FOREIGN_RELEASE_ID}", stderr)
 

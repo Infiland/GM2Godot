@@ -10,6 +10,7 @@ import shutil
 import tempfile
 import threading
 import unittest
+from collections.abc import Collection, Iterable
 from types import SimpleNamespace
 from typing import BinaryIO, Callable
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,7 @@ from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.included_file_registry import (
     INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
 )
+from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
@@ -346,6 +348,564 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self.assertEqual(project_debris, [])
         self.assertEqual(registry_debris, [])
 
+    def test_unchanged_generation_preserves_public_identity_without_writes(
+        self,
+    ) -> None:
+        self._write("nested/payload.txt", "stable payload")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "nested",
+            "payload.txt",
+        )
+        previous_output_identity = os.lstat(output_path).st_ino
+
+        with (
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("unchanged conversion staged output"),
+            ) as create_stage,
+            patch.object(included_files_module.os, "fsync") as fsync,
+            patch.object(included_files_module.os, "replace") as replace,
+        ):
+            converter.convert_all()
+
+        create_stage.assert_not_called()
+        fsync.assert_not_called()
+        replace.assert_not_called()
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(os.lstat(output_path).st_ino, previous_output_identity)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                completed=1,
+            ),
+        )
+        self._assert_no_transaction_debris()
+
+    def test_64_mib_generation_has_bounded_initial_and_unchanged_reads(
+        self,
+    ) -> None:
+        payload_size = 64 * 1024 * 1024
+        source_path = os.path.join(self.datafiles_dir, "large.bin")
+        with open(source_path, "wb") as source_file:
+            source_file.truncate(payload_size)
+        converter = self._converter(max_workers=1)
+        original_payload_read = (
+            included_files_module._read_included_payload_chunk
+        )
+        original_validation_read = (
+            included_files_module._read_included_validation_chunk
+        )
+        read_bytes = 0
+
+        def count_payload_read(source_file: BinaryIO) -> bytes:
+            nonlocal read_bytes
+            chunk = original_payload_read(source_file)
+            read_bytes += len(chunk)
+            return chunk
+
+        def count_validation_read(source_file: BinaryIO) -> bytes:
+            nonlocal read_bytes
+            chunk = original_validation_read(source_file)
+            read_bytes += len(chunk)
+            return chunk
+
+        with (
+            patch.object(
+                included_files_module,
+                "_read_included_payload_chunk",
+                side_effect=count_payload_read,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_validation_chunk",
+                side_effect=count_validation_read,
+            ),
+        ):
+            converter.convert_all()
+        self.assertEqual(read_bytes, 5 * payload_size)
+
+        read_bytes = 0
+        with (
+            patch.object(
+                included_files_module,
+                "_read_included_payload_chunk",
+                side_effect=count_payload_read,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_validation_chunk",
+                side_effect=count_validation_read,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("unchanged conversion staged output"),
+            ),
+        ):
+            converter.convert_all()
+        self.assertEqual(read_bytes, 4 * payload_size)
+        self._assert_no_transaction_debris()
+
+    def test_changed_payload_uses_the_normal_output_transaction(self) -> None:
+        self._write("payload.txt", "BEFORE")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        self._write("payload.txt", "AFTER!")
+        original_create_stage = (
+            included_files_module._create_included_output_stage
+        )
+
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            wraps=original_create_stage,
+        ) as create_stage:
+            converter.convert_all()
+
+        create_stage.assert_called_once()
+        current_pair = self._pair_snapshot()
+        self.assertNotEqual(current_pair[0], previous_pair[0])
+        self.assertEqual(current_pair[1], {"payload.txt": b"AFTER!"})
+        self._assert_no_transaction_debris()
+
+    def test_changed_path_uses_the_normal_output_transaction(
+        self,
+    ) -> None:
+        self._write("old.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        os.rename(
+            os.path.join(self.datafiles_dir, "old.txt"),
+            os.path.join(self.datafiles_dir, "new.txt"),
+        )
+        original_create_stage = (
+            included_files_module._create_included_output_stage
+        )
+
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            wraps=original_create_stage,
+        ) as create_stage:
+            converter.convert_all()
+
+        create_stage.assert_called_once()
+        self.assertEqual(self._pair_snapshot()[1], {"new.txt": b"stable"})
+        self._assert_no_transaction_debris()
+
+    def test_changed_registry_rendering_uses_the_normal_output_transaction(
+        self,
+    ) -> None:
+        self._write("payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        original_render = included_files_module.render_included_file_registry
+        original_create_stage = (
+            included_files_module._create_included_output_stage
+        )
+
+        def changed_render(
+            assignments: Iterable[IncludedFilePathAssignment],
+            emitted_logical_paths: Collection[str],
+        ) -> str:
+            return (
+                original_render(assignments, emitted_logical_paths)
+                + "# changed rendering\n"
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "render_included_file_registry",
+                side_effect=changed_render,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                wraps=original_create_stage,
+            ) as create_stage,
+        ):
+            converter.convert_all()
+
+        create_stage.assert_called_once()
+        with open(registry_path, "rb") as registry_file:
+            self.assertTrue(registry_file.read().endswith(b"# changed rendering\n"))
+        self._assert_no_transaction_debris()
+
+    def test_hardlinked_public_payload_is_republished_normally(self) -> None:
+        self._write("payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.txt",
+        )
+        external_path = os.path.join(self.godot_dir, "external-hardlink.txt")
+        with open(external_path, "w", encoding="utf-8") as external_file:
+            external_file.write("stable")
+        os.unlink(output_path)
+        try:
+            os.link(external_path, output_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Hard links are unavailable: {error}")
+        self.assertEqual(os.lstat(output_path).st_nlink, 2)
+        original_create_stage = (
+            included_files_module._create_included_output_stage
+        )
+
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            wraps=original_create_stage,
+        ) as create_stage:
+            converter.convert_all()
+
+        create_stage.assert_called_once()
+        self.assertEqual(os.lstat(output_path).st_nlink, 1)
+        with open(external_path, "r", encoding="utf-8") as external_file:
+            self.assertEqual(external_file.read(), "stable")
+        self._assert_no_transaction_debris()
+
+    def test_collision_and_availability_changes_use_normal_transactions(
+        self,
+    ) -> None:
+        self._write("Alpha Beta.txt", "first")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        self._write("alpha_beta.txt", "second")
+        original_create_stage = (
+            included_files_module._create_included_output_stage
+        )
+
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            wraps=original_create_stage,
+        ) as collision_stage:
+            converter.convert_all()
+        collision_stage.assert_called_once()
+        self.assertEqual(len(self._pair_snapshot()[1]), 2)
+
+        os.unlink(os.path.join(self.datafiles_dir, "Alpha Beta.txt"))
+        os.unlink(os.path.join(self.datafiles_dir, "alpha_beta.txt"))
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            wraps=original_create_stage,
+        ) as availability_stage:
+            converter.convert_all()
+        availability_stage.assert_called_once()
+        self.assertEqual(self._pair_snapshot()[1], {})
+        self._assert_no_transaction_debris()
+
+    def test_source_mutation_between_noop_receipts_fails_closed(self) -> None:
+        self._write("payload.txt", "ORIGINAL")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        source_path = os.path.join(self.datafiles_dir, "payload.txt")
+        source_stat = os.stat(source_path)
+
+        def mutate_source() -> None:
+            with open(source_path, "r+b", buffering=0) as source_file:
+                source_file.write(b"MUTATED!")
+                os.fsync(source_file.fileno())
+            os.utime(
+                source_path,
+                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_unchanged_source_revalidation",
+                side_effect=mutate_source,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("mutated no-op candidate staged output"),
+            ),
+            self.assertRaisesRegex(OSError, "sources changed"),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
+        self._assert_no_transaction_debris()
+
+    def test_source_directory_swap_with_same_inode_fails_closed(self) -> None:
+        self._write("nested/payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        source_directory = os.path.join(self.datafiles_dir, "nested")
+        moved_directory = os.path.join(self.datafiles_dir, "nested-original")
+
+        def swap_source_directory() -> None:
+            os.rename(source_directory, moved_directory)
+            os.mkdir(source_directory)
+            os.link(
+                os.path.join(moved_directory, "payload.txt"),
+                os.path.join(source_directory, "payload.txt"),
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_unchanged_source_revalidation",
+                side_effect=swap_source_directory,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("swapped no-op candidate staged output"),
+            ),
+            self.assertRaisesRegex(OSError, "sources changed"),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(
+            os.stat(
+                os.path.join(source_directory, "payload.txt")
+            ).st_ino,
+            os.stat(
+                os.path.join(moved_directory, "payload.txt")
+            ).st_ino,
+        )
+        self._assert_no_transaction_debris()
+
+    def test_public_root_symlink_swap_during_noop_is_preserved_and_rejected(
+        self,
+    ) -> None:
+        self._write("payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        root_path = os.path.join(self.godot_dir, "included_files")
+        moved_root = os.path.join(self.godot_dir, "preserved-root")
+        replacement_root = tempfile.mkdtemp()
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        registry_identity = os.lstat(registry_path).st_ino
+        with open(
+            os.path.join(replacement_root, "payload.txt"),
+            "wb",
+        ) as replacement_file:
+            replacement_file.write(b"replacement")
+
+        def swap_public_root() -> None:
+            os.rename(root_path, moved_root)
+            try:
+                os.symlink(replacement_root, root_path)
+            except (NotImplementedError, OSError) as error:
+                os.rename(moved_root, root_path)
+                self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_before_included_unchanged_public_revalidation",
+                    side_effect=swap_public_root,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_create_included_output_stage",
+                    side_effect=AssertionError(
+                        "swapped no-op candidate staged output"
+                    ),
+                ),
+                self.assertRaisesRegex(OSError, "redirected|changed"),
+            ):
+                converter.convert_all()
+
+            self.assertTrue(os.path.islink(root_path))
+            with open(
+                os.path.join(moved_root, "payload.txt"),
+                "rb",
+            ) as preserved_file:
+                self.assertEqual(preserved_file.read(), b"stable")
+            with open(
+                os.path.join(root_path, "payload.txt"),
+                "rb",
+            ) as replacement_file:
+                self.assertEqual(replacement_file.read(), b"replacement")
+            self.assertEqual(os.lstat(registry_path).st_ino, registry_identity)
+            self._assert_no_transaction_debris()
+        finally:
+            shutil.rmtree(replacement_root)
+
+    def test_registry_mutation_during_noop_is_rejected_without_staging(
+        self,
+    ) -> None:
+        self._write("payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        root_identity, root_files, registry_identity, registry_content = (
+            self._pair_snapshot()
+        )
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+
+        def mutate_registry() -> None:
+            with open(registry_path, "ab") as registry_file:
+                registry_file.write(b"# concurrent mutation\n")
+                registry_file.flush()
+                os.fsync(registry_file.fileno())
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_unchanged_public_revalidation",
+                side_effect=mutate_registry,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("mutated no-op candidate staged output"),
+            ),
+            self.assertRaisesRegex(OSError, "registry changed"),
+        ):
+            converter.convert_all()
+
+        current_pair = self._pair_snapshot()
+        self.assertEqual(current_pair[0], root_identity)
+        self.assertEqual(current_pair[1], root_files)
+        self.assertEqual(current_pair[2], registry_identity)
+        self.assertEqual(
+            current_pair[3],
+            registry_content + b"# concurrent mutation\n",
+        )
+        self._assert_no_transaction_debris()
+
+    def test_late_same_size_public_mutation_is_rejected_without_staging(
+        self,
+    ) -> None:
+        if os.name == "nt":
+            self.skipTest("Windows ctime does not portably expose content changes")
+        self._write("payload.txt", "ORIGINAL")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.txt",
+        )
+        output_stat = os.stat(output_path)
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        registry_identity = os.lstat(registry_path).st_ino
+
+        def mutate_public_payload() -> None:
+            with open(output_path, "r+b", buffering=0) as output_file:
+                output_file.write(b"MUTATED!")
+                os.fsync(output_file.fileno())
+            os.utime(
+                output_path,
+                ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_unchanged_final_revalidation",
+                side_effect=mutate_public_payload,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("mutated no-op candidate staged output"),
+            ),
+            self.assertRaisesRegex(OSError, "tree metadata changed"),
+        ):
+            converter.convert_all()
+
+        with open(output_path, "rb") as output_file:
+            self.assertEqual(output_file.read(), b"MUTATED!")
+        self.assertEqual(os.lstat(registry_path).st_ino, registry_identity)
+        self._assert_no_transaction_debris()
+
+    def test_unchanged_generation_uses_the_pinned_fallback_verifier(self) -> None:
+        self._write("nested/payload.txt", "stable")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("fallback no-op staged output"),
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    def test_unchanged_contained_source_symlink_keeps_copy_semantics(self) -> None:
+        target_path = os.path.join(self.datafiles_dir, "target.txt")
+        with open(target_path, "w", encoding="utf-8") as source_file:
+            source_file.write("contained target")
+        alias_path = os.path.join(self.datafiles_dir, "alias.txt")
+        try:
+            os.symlink(target_path, alias_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+        converter = self._converter(max_workers=2)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        with patch.object(
+            included_files_module,
+            "_create_included_output_stage",
+            side_effect=AssertionError("symlink no-op candidate staged output"),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(
+            previous_pair[1],
+            {
+                "alias.txt": b"contained target",
+                "target.txt": b"contained target",
+            },
+        )
+        self._assert_no_transaction_debris()
+
     @staticmethod
     def _modeled_handle_stat(
         path_stat: os.stat_result,
@@ -411,6 +971,122 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 staged_path,
                 path_stat,
             )
+
+    def test_windows_validation_stream_denies_writes_and_reparse_following(
+        self,
+    ) -> None:
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        msvcrt = MagicMock()
+        msvcrt.open_osfhandle.return_value = 5678
+        binary_stream = MagicMock()
+        path = os.path.join(self.godot_dir, "payload.bin")
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_read_api",
+                return_value=kernel32,
+            ),
+            patch.dict(sys.modules, {"msvcrt": msvcrt}),
+            patch.object(
+                included_files_module.os,
+                "fdopen",
+                return_value=binary_stream,
+            ) as fdopen,
+        ):
+            opened_stream = (
+                included_files_module._open_included_file_validation_stream(
+                    path,
+                    deny_writes=True,
+                    no_follow=True,
+                )
+            )
+
+        self.assertIs(opened_stream, binary_stream)
+        kernel32.CreateFileW.assert_called_once_with(
+            os.path.abspath(path),
+            included_files_module._WINDOWS_GENERIC_READ,
+            included_files_module._WINDOWS_FILE_SHARE_READ,
+            None,
+            included_files_module._WINDOWS_OPEN_EXISTING,
+            included_files_module._WINDOWS_FILE_ATTRIBUTE_NORMAL
+            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+            | included_files_module._WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+            None,
+        )
+        msvcrt.open_osfhandle.assert_called_once_with(
+            1234,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0),
+        )
+        fdopen.assert_called_once_with(5678, "rb")
+        kernel32.CloseHandle.assert_not_called()
+
+    def test_windows_validation_stream_closes_fd_when_wrapping_fails(
+        self,
+    ) -> None:
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        msvcrt = MagicMock()
+        msvcrt.open_osfhandle.return_value = 5678
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_file_read_api",
+                return_value=kernel32,
+            ),
+            patch.dict(sys.modules, {"msvcrt": msvcrt}),
+            patch.object(
+                included_files_module.os,
+                "fdopen",
+                side_effect=MemoryError("injected wrapper failure"),
+            ),
+            patch.object(included_files_module.os, "close") as close,
+            self.assertRaisesRegex(MemoryError, "injected wrapper failure"),
+        ):
+            included_files_module._open_included_file_validation_stream(
+                os.path.join(self.godot_dir, "payload.bin"),
+                deny_writes=True,
+                no_follow=True,
+            )
+
+        close.assert_called_once_with(5678)
+        kernel32.CloseHandle.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_noop_hashes_deny_concurrent_writes(self) -> None:
+        self._write("payload.txt", "stable payload")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        source_path = os.path.join(self.datafiles_dir, "payload.txt")
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.txt",
+        )
+        original_read = included_files_module._read_included_validation_chunk
+        blocked_paths: set[str] = set()
+
+        def observe_write_sharing(opened_file: BinaryIO) -> bytes:
+            for path in (source_path, output_path):
+                try:
+                    with open(path, "r+b"):
+                        pass
+                except PermissionError:
+                    blocked_paths.add(path)
+            return original_read(opened_file)
+
+        with patch.object(
+            included_files_module,
+            "_read_included_validation_chunk",
+            side_effect=observe_write_sharing,
+        ):
+            converter.convert_all()
+
+        self.assertEqual(blocked_paths, {source_path, output_path})
 
     def test_descriptor_digest_rechecks_the_open_handle(self) -> None:
         if not included_files_module._included_descriptor_paths_supported():

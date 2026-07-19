@@ -153,6 +153,7 @@
 "Console_Convertor_IncludedFiles_Complete" : "Included files conversion completed.",
 "Console_Convertor_IncludedFiles_Stopped" : "Included files conversion stopped.",
 "Console_Convertor_IncludedFiles_Copied" : "Copied: {path}",
+"Console_Convertor_IncludedFiles_Unchanged" : "Unchanged: {path}",
 "Console_Convertor_IncludedFiles_Error_NotFound" : "No included files (datafiles) folder found in GameMaker project.",
 
 "Icon_Error_PhotoImage" : "Failed to set icon using PhotoImage: {error}",

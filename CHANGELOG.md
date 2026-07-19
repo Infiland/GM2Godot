@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.25 - 2026-07-19
+
+- Skipped unchanged Included Files publication only after the complete planned output topology, rendered registry bytes, and two stable source-content receipts match the descriptor-captured public generation.
+- Kept the initial transaction at five full payload reads and bounded a deterministic 64 MiB unchanged generation to four, while pinned no-follow tree, registry, source-path, directory-identity, and final metadata checks make changed or concurrently mutated candidates use the normal transaction or fail closed without staging.
+
 ## 0.7.24 - 2026-07-19
 
 - Reused attempt-local Included File receipts across asset-registry and manifest publication, reducing successful matching Included File validation from 12x payload reads to at most 6x while binding reuse to the exact source, generated output, assigned path, and output generation.

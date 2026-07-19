@@ -5,6 +5,7 @@ import json
 import os
 import posixpath
 import stat
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -280,8 +281,29 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self.running.set()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.gm_dir)
-        shutil.rmtree(self.godot_dir)
+        shutil.rmtree(
+            self.gm_dir,
+            onexc=self._retry_windows_read_only_cleanup,
+        )
+        shutil.rmtree(
+            self.godot_dir,
+            onexc=self._retry_windows_read_only_cleanup,
+        )
+
+    @staticmethod
+    def _retry_windows_read_only_cleanup(
+        function: Callable[..., object],
+        path: str,
+        error: BaseException,
+    ) -> None:
+        if not isinstance(error, PermissionError):
+            raise error
+        path_stat = os.lstat(path)
+        path_mode = stat.S_IMODE(path_stat.st_mode)
+        if not stat.S_ISREG(path_stat.st_mode) or path_mode & stat.S_IWRITE:
+            raise error
+        os.chmod(path, path_mode | stat.S_IWRITE)
+        function(path)
 
     def _converter(self, *, max_workers: int = 2) -> IncludedFilesConverter:
         return IncludedFilesConverter(
@@ -301,6 +323,58 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(content)
+
+    def _make_native_windows_junction(
+        self,
+        junction_path: str,
+        target_path: str,
+    ) -> None:
+        os.makedirs(target_path, exist_ok=True)
+        result = subprocess.run(
+            (
+                "cmd.exe",
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                junction_path,
+                target_path,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            result.stdout + result.stderr,
+        )
+        self.assertTrue(os.path.isjunction(junction_path))
+
+    def _make_native_windows_junction_target(self, label: str) -> str:
+        target_path = os.path.join(self.gm_dir, "junction-targets", label)
+        os.makedirs(target_path)
+        with open(
+            os.path.join(target_path, "external-sentinel.txt"),
+            "wb",
+        ) as sentinel_file:
+            sentinel_file.write(b"external junction sentinel\n")
+        return target_path
+
+    def _assert_native_windows_junction_sentinel(self, target_path: str) -> None:
+        with open(
+            os.path.join(target_path, "external-sentinel.txt"),
+            "rb",
+        ) as sentinel_file:
+            self.assertEqual(
+                sentinel_file.read(),
+                b"external junction sentinel\n",
+            )
+
+    @staticmethod
+    def _remove_native_windows_junction(path: str) -> None:
+        if os.path.isjunction(path):
+            os.rmdir(path)
 
     def _pair_snapshot(self) -> tuple[int, dict[str, bytes], int, bytes]:
         root_path = os.path.join(self.godot_dir, "included_files")
@@ -2357,6 +2431,174 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         os.chmod(owned_path, 0o600)
 
+    def test_windows_fallback_cleanup_removes_readonly_owned_file(self) -> None:
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "windows-readonly-cleanup",
+        )
+        os.mkdir(cleanup_directory)
+        owned_path = os.path.join(cleanup_directory, "owned.txt")
+        with open(owned_path, "w", encoding="utf-8") as owned_file:
+            owned_file.write("owned cleanup target")
+        os.chmod(owned_path, 0o400)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+        supports_without_chmod = set(os.supports_fd)
+        supports_without_chmod.discard(os.chmod)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module.os,
+                "supports_fd",
+                supports_without_chmod,
+            ),
+        ):
+            included_files_module._remove_owned_included_file(
+                owned_path,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                expected_parent_identity=(
+                    parent_stat.st_dev,
+                    parent_stat.st_ino,
+                ),
+            )
+
+        self.assertFalse(os.path.lexists(owned_path))
+        self.assertEqual(os.listdir(cleanup_directory), [])
+
+    def test_windows_fallback_cleanup_restores_readonly_after_unlink_failure(
+        self,
+    ) -> None:
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "windows-readonly-cleanup-failure",
+        )
+        os.mkdir(cleanup_directory)
+        owned_path = os.path.join(cleanup_directory, "owned.txt")
+        with open(owned_path, "w", encoding="utf-8") as owned_file:
+            owned_file.write("owned cleanup target")
+        os.chmod(owned_path, 0o400)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+        supports_without_chmod = set(os.supports_fd)
+        supports_without_chmod.discard(os.chmod)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module.os,
+                "supports_fd",
+                supports_without_chmod,
+            ),
+            patch.object(
+                included_files_module.os,
+                "unlink",
+                side_effect=PermissionError("injected Windows sharing failure"),
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "recoverable quarantine retained",
+            ),
+        ):
+            included_files_module._remove_owned_included_file(
+                owned_path,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                expected_parent_identity=(
+                    parent_stat.st_dev,
+                    parent_stat.st_ino,
+                ),
+            )
+
+        quarantined_names = os.listdir(cleanup_directory)
+        self.assertEqual(len(quarantined_names), 1)
+        quarantined_path = os.path.join(
+            cleanup_directory,
+            quarantined_names[0],
+        )
+        quarantined_stat = os.lstat(quarantined_path)
+        self.assertEqual(
+            (quarantined_stat.st_dev, quarantined_stat.st_ino),
+            (owned_stat.st_dev, owned_stat.st_ino),
+        )
+        self.assertFalse(quarantined_stat.st_mode & stat.S_IWRITE)
+        with open(quarantined_path, encoding="utf-8") as quarantined_file:
+            self.assertEqual(quarantined_file.read(), "owned cleanup target")
+        os.chmod(quarantined_path, 0o600)
+        os.unlink(quarantined_path)
+
+    def test_windows_fallback_cleanup_preserves_readonly_hardlink_alias(
+        self,
+    ) -> None:
+        cleanup_directory = os.path.join(
+            self.godot_dir,
+            "windows-readonly-hardlink-cleanup",
+        )
+        os.mkdir(cleanup_directory)
+        external_path = os.path.join(cleanup_directory, "external.txt")
+        owned_path = os.path.join(cleanup_directory, "owned.txt")
+        with open(external_path, "w", encoding="utf-8") as external_file:
+            external_file.write("external hardlink sentinel")
+        try:
+            os.link(external_path, owned_path)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Hard links are unavailable: {error}")
+        os.chmod(external_path, 0o400)
+        owned_stat = os.lstat(owned_path)
+        parent_stat = os.lstat(cleanup_directory)
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            self.assertRaisesRegex(
+                OSError,
+                "multiple hard links.*recoverable quarantine retained",
+            ),
+        ):
+            included_files_module._remove_owned_included_file(
+                owned_path,
+                (owned_stat.st_dev, owned_stat.st_ino),
+                expected_parent_identity=(
+                    parent_stat.st_dev,
+                    parent_stat.st_ino,
+                ),
+            )
+
+        with open(external_path, encoding="utf-8") as external_file:
+            self.assertEqual(
+                external_file.read(),
+                "external hardlink sentinel",
+            )
+        external_stat = os.lstat(external_path)
+        self.assertFalse(external_stat.st_mode & stat.S_IWRITE)
+        self.assertEqual(external_stat.st_nlink, 2)
+        quarantined_paths = [
+            os.path.join(cleanup_directory, name)
+            for name in os.listdir(cleanup_directory)
+            if name != os.path.basename(external_path)
+        ]
+        self.assertEqual(len(quarantined_paths), 1)
+        quarantined_stat = os.lstat(quarantined_paths[0])
+        self.assertEqual(
+            (quarantined_stat.st_dev, quarantined_stat.st_ino),
+            (external_stat.st_dev, external_stat.st_ino),
+        )
+        os.chmod(external_path, 0o600)
+        os.unlink(quarantined_paths[0])
+
     def test_moved_and_symlinked_stage_container_is_rejected(self) -> None:
         converter = self._converter(max_workers=1)
         self._write("old.txt", "old")
@@ -2845,6 +3087,385 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ).resources,
             ConversionCounts(requested=1, executed=1, failed=1),
         )
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_readonly_backup_cleanup_leaves_no_debris(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old/nested.txt", "old payload")
+        converter.convert_all()
+        public_root = os.path.join(self.godot_dir, "included_files")
+        public_directory = os.path.join(public_root, "old")
+        public_file = os.path.join(public_directory, "nested.txt")
+        registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        for path in (public_file, registry_path, public_directory, public_root):
+            os.chmod(path, stat.S_IREAD)
+
+        os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
+        os.rmdir(os.path.join(self.datafiles_dir, "old"))
+        self._write("new/nested.txt", "new payload")
+        new_source = os.path.join(self.datafiles_dir, "new", "nested.txt")
+        os.chmod(new_source, stat.S_IREAD)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            self._pair_snapshot()[1],
+            {"new/nested.txt": b"new payload"},
+        )
+        self.assertFalse(os.lstat(registry_path).st_mode & stat.S_IWRITE)
+        self.assertFalse(
+            os.lstat(
+                os.path.join(
+                    self.godot_dir,
+                    "included_files",
+                    "new",
+                    "nested.txt",
+                )
+            ).st_mode
+            & stat.S_IWRITE
+        )
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_readonly_commit_failure_rolls_back_cleanly(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old/nested.txt", "old payload")
+        converter.convert_all()
+        public_root = os.path.join(self.godot_dir, "included_files")
+        public_directory = os.path.join(public_root, "old")
+        public_file = os.path.join(public_directory, "nested.txt")
+        final_registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        for path in (
+            public_file,
+            final_registry_path,
+            public_directory,
+            public_root,
+        ):
+            os.chmod(path, stat.S_IREAD)
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
+        os.rmdir(os.path.join(self.datafiles_dir, "old"))
+        self._write("new/nested.txt", "new payload")
+        os.chmod(
+            os.path.join(self.datafiles_dir, "new", "nested.txt"),
+            stat.S_IREAD,
+        )
+        original_move = included_files_module._move_exact_included_file
+        publication_failed = False
+
+        def publish_registry_then_fail(
+            source: str,
+            destination: str,
+            expected_identity: tuple[int, int],
+            *,
+            source_parent_identity: tuple[int, int] | None = None,
+            destination_parent_identity: tuple[int, int] | None = None,
+        ) -> None:
+            nonlocal publication_failed
+            original_move(
+                source,
+                destination,
+                expected_identity,
+                source_parent_identity=source_parent_identity,
+                destination_parent_identity=destination_parent_identity,
+            )
+            if destination == final_registry_path and not publication_failed:
+                publication_failed = True
+                raise OSError("injected native Windows commit failure")
+
+        with (
+            patch.object(
+                included_files_module,
+                "_move_exact_included_file",
+                side_effect=publish_registry_then_fail,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "injected native Windows commit failure",
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(publication_failed)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_readonly_cancellation_rolls_back_cleanly(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old/nested.txt", "old payload")
+        converter.convert_all()
+        public_root = os.path.join(self.godot_dir, "included_files")
+        public_directory = os.path.join(public_root, "old")
+        public_file = os.path.join(public_directory, "nested.txt")
+        final_registry_path = os.path.join(
+            self.godot_dir,
+            INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+        )
+        for path in (
+            public_file,
+            final_registry_path,
+            public_directory,
+            public_root,
+        ):
+            os.chmod(path, stat.S_IREAD)
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old", "nested.txt"))
+        os.rmdir(os.path.join(self.datafiles_dir, "old"))
+        self._write("new/nested.txt", "new payload")
+        os.chmod(
+            os.path.join(self.datafiles_dir, "new", "nested.txt"),
+            stat.S_IREAD,
+        )
+        original_move = included_files_module._move_exact_included_file
+        cancellation_injected = False
+
+        def publish_registry_then_cancel(
+            source: str,
+            destination: str,
+            expected_identity: tuple[int, int],
+            *,
+            source_parent_identity: tuple[int, int] | None = None,
+            destination_parent_identity: tuple[int, int] | None = None,
+        ) -> None:
+            nonlocal cancellation_injected
+            original_move(
+                source,
+                destination,
+                expected_identity,
+                source_parent_identity=source_parent_identity,
+                destination_parent_identity=destination_parent_identity,
+            )
+            if destination == final_registry_path and not cancellation_injected:
+                cancellation_injected = True
+                self.running.clear()
+
+        with patch.object(
+            included_files_module,
+            "_move_exact_included_file",
+            side_effect=publish_registry_then_cancel,
+        ):
+            converter.convert_all()
+
+        self.assertTrue(cancellation_injected)
+        self.assertTrue(converter.conversion_step_result().cancelled)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_managed_root_junction_is_rejected(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("payload.txt", "stable payload")
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        root_path = os.path.join(self.godot_dir, "included_files")
+        parked_root = os.path.join(self.godot_dir, ".native-parked-root")
+        target_path = self._make_native_windows_junction_target(
+            "managed-root"
+        )
+        os.rename(root_path, parked_root)
+        try:
+            self._make_native_windows_junction(root_path, target_path)
+            with self.assertRaisesRegex(OSError, "redirected"):
+                converter.convert_all()
+            self.assertTrue(os.path.isjunction(root_path))
+            self._assert_native_windows_junction_sentinel(target_path)
+        finally:
+            self._remove_native_windows_junction(root_path)
+            if os.path.isdir(parked_root):
+                os.rename(parked_root, root_path)
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_nested_tree_junction_is_rejected(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("nested/payload.txt", "stable payload")
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        nested_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "nested",
+        )
+        parked_nested = os.path.join(self.godot_dir, ".native-parked-nested")
+        target_path = self._make_native_windows_junction_target("nested-tree")
+        os.rename(nested_path, parked_nested)
+        try:
+            self._make_native_windows_junction(nested_path, target_path)
+            with self.assertRaisesRegex(OSError, "redirected"):
+                converter.convert_all()
+            self.assertTrue(os.path.isjunction(nested_path))
+            self._assert_native_windows_junction_sentinel(target_path)
+        finally:
+            self._remove_native_windows_junction(nested_path)
+            if os.path.isdir(parked_nested):
+                os.rename(parked_nested, nested_path)
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_registry_directory_junction_is_rejected(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("payload.txt", "stable payload")
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        registry_directory = os.path.join(self.godot_dir, "gm2godot")
+        parked_registry = os.path.join(
+            self.godot_dir,
+            ".native-parked-registry",
+        )
+        target_path = self._make_native_windows_junction_target(
+            "registry-directory"
+        )
+        os.rename(registry_directory, parked_registry)
+        try:
+            self._make_native_windows_junction(
+                registry_directory,
+                target_path,
+            )
+            with self.assertRaisesRegex(OSError, "redirected"):
+                converter.convert_all()
+            self.assertTrue(os.path.isjunction(registry_directory))
+            self._assert_native_windows_junction_sentinel(target_path)
+        finally:
+            self._remove_native_windows_junction(registry_directory)
+            if os.path.isdir(parked_registry):
+                os.rename(parked_registry, registry_directory)
+
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_stage_container_junction_is_rejected(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old.txt", "old payload")
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new payload")
+        original_commit = included_files_module._commit_included_output_set
+        parked_stage = os.path.join(self.gm_dir, "native-parked-stage")
+        target_path = self._make_native_windows_junction_target(
+            "stage-container"
+        )
+        stage_junction: str | None = None
+
+        def replace_stage_with_junction(
+            project_path: str,
+            transaction: included_files_module._IncludedOutputSetTransaction,
+            conversion_running: Callable[[], bool],
+        ) -> tuple[str, ...]:
+            nonlocal stage_junction
+            os.rename(transaction.stage_container_path, parked_stage)
+            self._make_native_windows_junction(
+                transaction.stage_container_path,
+                target_path,
+            )
+            stage_junction = transaction.stage_container_path
+            return original_commit(
+                project_path,
+                transaction,
+                conversion_running,
+            )
+
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_commit_included_output_set",
+                    side_effect=replace_stage_with_junction,
+                ),
+                self.assertRaisesRegex(OSError, "redirected"),
+            ):
+                converter.convert_all()
+            self.assertIsNotNone(stage_junction)
+            self.assertTrue(os.path.isjunction(stage_junction or ""))
+            self._assert_native_windows_junction_sentinel(target_path)
+            self.assertEqual(self._pair_snapshot(), previous_pair)
+        finally:
+            if stage_junction is not None:
+                self._remove_native_windows_junction(stage_junction)
+            if os.path.isdir(parked_stage):
+                shutil.rmtree(
+                    parked_stage,
+                    onexc=self._retry_windows_read_only_cleanup,
+                )
+
+        self._assert_no_transaction_debris()
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_backup_destination_junction_is_preserved(
+        self,
+    ) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("old.txt", "old payload")
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new payload")
+        final_root_path = os.path.join(self.godot_dir, "included_files")
+        target_path = self._make_native_windows_junction_target(
+            "backup-destination"
+        )
+        backup_junction: str | None = None
+
+        def inject_backup_junction(source: str, destination: str) -> None:
+            nonlocal backup_junction
+            if (
+                backup_junction is None
+                and source == final_root_path
+                and os.path.basename(destination).startswith(
+                    ".included_files."
+                )
+                and destination.endswith(".backup")
+            ):
+                self._make_native_windows_junction(destination, target_path)
+                backup_junction = destination
+
+        try:
+            with (
+                patch.object(
+                    included_files_module,
+                    "_before_included_transaction_rename_fallback",
+                    side_effect=inject_backup_junction,
+                ),
+                self.assertRaises(OSError),
+            ):
+                converter.convert_all()
+            self.assertIsNotNone(backup_junction)
+            self.assertTrue(os.path.isjunction(backup_junction or ""))
+            self._assert_native_windows_junction_sentinel(target_path)
+            self.assertEqual(self._pair_snapshot(), previous_pair)
+        finally:
+            if backup_junction is not None:
+                self._remove_native_windows_junction(backup_junction)
+
         self._assert_no_transaction_debris()
 
 

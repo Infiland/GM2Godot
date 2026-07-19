@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.25 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.26 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -55,6 +55,8 @@ For relative file and buffer reads, the generated runtime checks the exact `user
 When source paths collapse to the same packaged name, or when one normalized file path would block another file's directory, GM2Godot reserves natural names and deterministically assigns `_2`, `_3`, and later suffixes before the extension. The emitted files, asset registry, and conversion manifest use the same assignments. `GM2GD-INCLUDED-FILE-PATH-COLLISION` reports the mapping; rename these conflicts in GameMaker because normalized lookup cannot distinguish every original alias. Publication also rejects redirected or non-regular paths in the managed `included_files/` output tree instead of writing through them.
 
 `res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` form one converter-owned output set. Ordinary conversion failures and cancellation preserve the previous pair, but the root and registry are published in separate steps and are not process-crash-atomic. Until [#727](https://github.com/Infiland/GM2Godot/issues/727) is implemented, do not run conversion while a live game or another converter is accessing the same output project.
+
+On Windows, the path-based transaction fallback rejects real NTFS junctions at the managed root, inside the tree, at the registry directory, and at staging or backup boundaries without traversing their targets. Cleanup renames an identity-verified converter-owned file into a private quarantine before temporarily clearing its Windows read-only attribute; if deletion then fails, GM2Godot restores the attribute and retains the quarantine with an actionable warning. A read-only file with multiple hard links is retained rather than changing the shared attribute visible through an external alias. The read-only directory attribute does not control directory deletion on Windows. Native `windows-2025` tests cover those junctions with external sentinels and cover read-only cleanup after success, commit failure, cancellation, and rollback. These checks do not make concurrent namespace mutation safe: do not run another converter or non-cooperating writer against the same generated project.
 
 This emission and runtime-read contract is covered by an end-to-end smoke test using the exact supported Godot 4.7.1 build.
 

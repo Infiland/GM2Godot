@@ -2009,7 +2009,70 @@ def _unlink_exact_quarantined_entry_fallback(
             "Refusing to remove changed Included Files quarantine; recoverable "
             f"entry retained at {path!r}"
         )
-    os.unlink(path)
+    original_mode = stat.S_IMODE(current_stat.st_mode)
+    windows_read_only = (
+        os.name == "nt"
+        and not bool(current_stat.st_mode & stat.S_IWRITE)
+    )
+    if windows_read_only:
+        if current_stat.st_nlink != 1:
+            raise OSError(
+                "Refusing to clear the Windows read-only attribute on an "
+                "Included Files cleanup file with multiple hard links; "
+                f"recoverable quarantine retained at {path!r}"
+            )
+        parent_path = os.path.dirname(os.path.abspath(path))
+        parent_identities = _capture_fallback_directory_ancestors(parent_path)
+        parent_identity = parent_identities[-1][1]
+        try:
+            _chmod_exact_included_file(
+                path,
+                expected_identity,
+                original_mode | stat.S_IWRITE,
+                parent_identity,
+            )
+        except OSError as error:
+            raise OSError(
+                "Could not clear the Windows read-only attribute from an "
+                "identity-verified Included Files cleanup file; recoverable "
+                f"quarantine retained at {path!r}"
+            ) from error
+        writable_stat = os.lstat(path)
+        if (
+            _included_output_path_is_redirected(path, writable_stat)
+            or not stat.S_ISREG(writable_stat.st_mode)
+            or (writable_stat.st_dev, writable_stat.st_ino)
+            != expected_identity
+            or not bool(writable_stat.st_mode & stat.S_IWRITE)
+        ):
+            raise OSError(
+                "Included Files cleanup file changed while clearing its "
+                f"Windows read-only attribute: {path!r}"
+            )
+    try:
+        os.unlink(path)
+    except OSError as error:
+        if windows_read_only:
+            try:
+                parent_identity = _capture_fallback_directory_ancestors(
+                    os.path.dirname(os.path.abspath(path))
+                )[-1][1]
+                _chmod_exact_included_file(
+                    path,
+                    expected_identity,
+                    original_mode,
+                    parent_identity,
+                )
+            except OSError as restore_error:
+                error.add_note(
+                    "Restoring the Windows read-only attribute on the "
+                    "recoverable Included Files quarantine also failed: "
+                    + str(restore_error)
+                )
+        raise OSError(
+            "Could not remove an identity-verified Included Files cleanup "
+            f"file; recoverable quarantine retained at {path!r}"
+        ) from error
 
 
 def _rmdir_exact_quarantined_entry_fallback(

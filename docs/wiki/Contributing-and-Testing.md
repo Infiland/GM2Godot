@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.18 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.19 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -8,15 +8,47 @@ This page is the short contributor route map. The repository's [CONTRIBUTING.md]
 
 ## Set up a development checkout
 
+Use the matching procedure on [Installation](Installation). The reviewed dependency baselines are Linux x64 with CPython 3.12.13, macOS arm64 with CPython 3.12.10, and Windows x64 with CPython 3.12.10. Each has a complete native constraint under `constraints/`.
+
+For example, the Linux x64 baseline is:
+
 ```bash
 git clone https://github.com/YOUR_USERNAME/GM2Godot.git
 cd GM2Godot
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+python3.12 -m venv venv
+source venv/bin/activate
+python --version  # Python 3.12.13
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt -r requirements.txt
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt -r requirements-tooling.txt
 ```
 
-GM2Godot requires Python 3.12 or later. Install Godot 4.7.1 and set `GODOT_BIN` when a change needs generated-resource or runtime validation.
+On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.txt`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.txt`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.1 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
+
+### Refresh dependency constraints
+
+`requirements.txt` and `requirements-tooling.txt` contain the reviewed direct dependencies, while `requirements-lock.in` is the combined compile input. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, macOS, and Windows baselines with the committed generator pin, currently `pip-tools==7.6.0`.
+
+Pull requests and pushes use `refresh=locked`, which preference-seeds generation with the committed constraint and requests no upgrades. A manual `workflow_dispatch` run accepts:
+
+| Selection | Behavior |
+| --- | --- |
+| `refresh=locked` | Recreate the preference-seeded graph without requesting an upgrade. |
+| `refresh=all` | Request upgrades for the complete graph. |
+| `refresh=package` | Upgrade only the normalized distribution supplied as `refresh_package`. |
+
+`refresh_package` must be empty for `refresh=locked` and `refresh=all`; for `refresh=package`, it is required and must already be normalized, such as `pip-tools` or `pyside6`.
+
+Each native job installs the candidate's own pip and pip-tools pins, regenerates a self-hosted constraint, and compares it with the candidate. It also performs two clean complete-graph installs and compares their normalized receipts. The candidate, self-hosted output, receipts, and evidence manifest are uploaded before the final equality gates.
+
+An intentional refresh that changes pins is expected to fail the committed-equality gate. Review the artifacts for all three platforms, commit the approved native constraints, and rerun until `refresh=locked` is clean. If a pip or pip-tools upgrade makes the candidate differ from its self-hosted output, review and commit the self-hosted result first, then rerun with the new generator pins. Do not generate a constraint for a different platform locally; native environment markers and platform-specific transitive dependencies must be resolved on the platform they describe.
 
 ## Choose the right extension point
 

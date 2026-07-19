@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.19 - 2026-07-19
+
+- Pinned the complete CPython 3.12 runtime and tooling dependency graphs for the exact Linux x64, macOS arm64, and Windows x64 release tuples, with native pip-tools generation, self-hosted regeneration, strict installed-distribution receipts, `pip check`, and two fresh empty-cache installs per platform.
+- Constrained every CI, release, Godot 4.7.1, GameMaker LTS 2026 fixture, and supported local-build install site to reviewed wheel-only pins; added fail-closed inventory and adversarial transitive-drift tests plus reproducible installation and refresh guidance.
+
 ## 0.7.18 - 2026-07-19
 
 - Made each pre-mutation ownership gate tolerate only well-formed authenticated release listings whose exact-tag match set is temporarily empty, using seven bounded full-gate snapshots with exponential backoff; every retry revalidates the exact tag, run-owned draft by ID, uploaded asset prefix, published-tag absence, and complete draft-aware listing before any mutation.

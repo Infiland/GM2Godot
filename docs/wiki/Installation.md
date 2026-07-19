@@ -1,10 +1,10 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.18 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.19 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
-Use a packaged release for the desktop interface, or run from source when you also need the headless CLI. The current packaging and dependency details live in the repository's [release workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml) and [`requirements.txt`](https://github.com/Infiland/GM2Godot/blob/main/requirements.txt).
+Use a packaged release for the desktop interface, or run from source when you also need the headless CLI. The current packaging and dependency details live in the repository's [release workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml), [`requirements.txt`](https://github.com/Infiland/GM2Godot/blob/main/requirements.txt), and [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml).
 
 Godot is not required merely to launch GM2Godot. Install the exact [Godot 4.7.1 release](https://github.com/godotengine/godot/releases/tag/4.7.1-stable) separately to open or headlessly validate converted output.
 
@@ -34,11 +34,19 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.18`.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.19`.
 
 ## Run from source
 
-GM2Godot requires Python 3.12 or later. The automated builds and tests use Python 3.12, so that is the most predictable choice. Git is required for the clone commands below.
+Use the native, reproducible baseline for your host. Git is also required for the clone commands below.
+
+| Host | Python | Constraint |
+| --- | --- | --- |
+| Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.txt` |
+| macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.txt` |
+| Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.txt` |
+
+Other Python patch versions and architectures are not the reviewed dependency baseline. In each procedure below, `python --version` must report the listed exact patch version before installation.
 
 ### Windows (PowerShell)
 
@@ -47,20 +55,34 @@ git clone https://github.com/Infiland/GM2Godot.git
 Set-Location GM2Godot
 py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python --version  # Python 3.12.10
+$env:PIP_CONFIG_FILE = "nul"
+python -m pip --isolated --disable-pip-version-check --no-input install `
+  --no-cache-dir --only-binary=:all: `
+  --constraint constraints/requirements-windows-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install `
+  --no-cache-dir --only-binary=:all: `
+  --constraint constraints/requirements-windows-py312.txt -r requirements.txt
 python main.py
 ```
 
-If the `py` launcher is unavailable, use a Python 3.12-or-later executable in its place. Activate the same environment again before running GM2Godot in a new terminal.
+If the `py` launcher is unavailable, use an x64 CPython 3.12.10 executable directly. Activate the same environment again before running GM2Godot in a new terminal.
 
 ### macOS
 
 ```bash
 git clone https://github.com/Infiland/GM2Godot.git
 cd GM2Godot
-python3 -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
-python -m pip install -r requirements.txt
+python --version  # Python 3.12.10
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-macos-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-macos-py312.txt -r requirements.txt
 python main.py
 ```
 
@@ -69,11 +91,20 @@ python main.py
 ```bash
 git clone https://github.com/Infiland/GM2Godot.git
 cd GM2Godot
-python3 -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
-python -m pip install -r requirements.txt
+python --version  # Python 3.12.13
+export PIP_CONFIG_FILE=/dev/null
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: \
+  --constraint constraints/requirements-linux-py312.txt -r requirements.txt
 python main.py
 ```
+
+The null config file and `--isolated` prevent machine-local pip settings from changing the reviewed install behavior. The constraints include reviewed transitive dependencies for these exact native environments. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) compiles `requirements-lock.in` with the committed generator pin, currently `pip-tools==7.6.0`, and uses preference-seeded `refresh=locked` generation on pull requests and pushes. Manual runs also offer `refresh=all` or `refresh=package`; package refreshes require a normalized `refresh_package` name. Each native candidate must reproduce itself and produce identical receipts from two clean installs. Evidence is uploaded before a changed candidate intentionally fails the committed-equality gate; review and commit the native constraints, then rerun. Generator upgrades may require committing the uploaded self-hosted result first. Do not generate one platform's constraint from another platform.
 
 ## Verify the source installation
 
@@ -84,6 +115,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.18`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.7.19`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

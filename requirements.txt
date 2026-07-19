@@ -1,4 +1,4 @@
-Pillow
-markdown2
-requests
-PySide6
+Pillow==12.3.0
+markdown2==2.5.5
+requests==2.34.2
+PySide6==6.11.1

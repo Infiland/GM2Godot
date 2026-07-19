@@ -13,17 +13,57 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
      ```
 
 2. **Set Up Development Environment**
-   - Install Python 3.12 or later
-   - Install required packages:
+   - Use the reviewed native baseline for your host. Other Python patch versions and architectures are not the reproducible CI/release baseline.
+
+     | Host | Python | Constraint |
+     | --- | --- | --- |
+     | Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.txt` |
+     | macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.txt` |
+     | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.txt` |
+
+   - Create and activate a virtual environment with that exact interpreter. Confirm `python --version` reports the required patch version.
+   - Bootstrap the pinned pip and install the runtime graph under the matching constraint. For Linux x64:
      ```bash
-     python3 -m venv venv
+     python3.12 -m venv venv
      source venv/bin/activate
-     pip install -r requirements.txt
+     python --version  # Python 3.12.13
+     export PIP_CONFIG_FILE=/dev/null
+     python -m pip --isolated --disable-pip-version-check --no-input install \
+       --no-cache-dir --only-binary=:all: \
+       --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+     python -m pip --isolated --disable-pip-version-check --no-input install \
+       --no-cache-dir --only-binary=:all: \
+       --constraint constraints/requirements-linux-py312.txt -r requirements.txt
      ```
-   - Install optional local tooling when changing Python code:
+   - On macOS arm64, use CPython 3.12.10 and substitute `constraints/requirements-macos-py312.txt` in both install commands. Keep `PIP_CONFIG_FILE=/dev/null`.
+   - On Windows x64, use CPython 3.12.10, substitute `constraints/requirements-windows-py312.txt`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell before the same isolated install commands.
+   - The platform null device disables config-file discovery, while `--isolated` ignores user configuration and environment settings that could change resolution.
+   - Install the pinned development tools from `requirements-tooling.txt` under the same constraint when changing Python code. For Linux x64:
      ```bash
-     pip install pyright ruff
+     python -m pip --isolated --disable-pip-version-check --no-input install \
+       --no-cache-dir --only-binary=:all: \
+       --constraint constraints/requirements-linux-py312.txt -r requirements-tooling.txt
      ```
+
+### Refreshing dependency constraints
+
+`requirements.txt` and `requirements-tooling.txt` declare the reviewed direct dependencies; `requirements-lock.in` is the single compile input for their combined graph. Constraint changes must be intentional and reviewed with the input change that caused them.
+
+Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml), which runs the committed `pip-tools` pin—currently `pip-tools==7.6.0`—on the exact Linux x64, macOS arm64, and Windows x64 baselines. Pull-request and push runs always use `refresh=locked`: each committed constraint preference-seeds a candidate without requesting upgrades. Manual `workflow_dispatch` runs expose these policies:
+
+| Selection | Behavior |
+| --- | --- |
+| `refresh=locked` | Recreate the preference-seeded graph without requesting an upgrade. |
+| `refresh=all` | Request upgrades for the complete graph. |
+| `refresh=package` | Request an upgrade only for the normalized distribution named by `refresh_package`. |
+
+Leave `refresh_package` empty for `refresh=locked` and `refresh=all`. It is required for `refresh=package` and must already be normalized, such as `pip-tools` or `pyside6`.
+
+Every native job uses the candidate's own pip and pip-tools pins to regenerate a self-hosted constraint, then performs two clean complete-graph installs and compares their normalized receipts. Candidate, self-hosted output, receipts, and a manifest are uploaded before the final gates run. When an intentional refresh changes pins, the committed-equality gate is expected to fail: review all three native artifacts, commit the approved constraints, and rerun until `locked` generation is clean.
+
+If pip or pip-tools is upgraded, the current generator's candidate can differ from the candidate generator's self-hosted result. Review and commit the uploaded self-hosted constraint, then rerun so the new committed generator proves its own stable output. Do not compile a Linux or Windows constraint on macOS, or any other cross-platform combination: environment markers and native transitive dependencies are part of the graph.
+
+Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.1 validation.
 
 ## Development Guidelines
 

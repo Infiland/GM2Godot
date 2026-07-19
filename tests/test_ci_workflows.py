@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 import copy
 import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -100,6 +102,308 @@ EXISTING_RELEASE_BASE_PAYLOADS = {
     "GM2Godot-macos.zip": b"existing macOS ZIP payload\n",
     "GM2Godot-windows.zip": b"existing Windows payload\n",
 }
+LINUX_CONSTRAINT = "constraints/requirements-linux-py312.txt"
+MACOS_CONSTRAINT = "constraints/requirements-macos-py312.txt"
+WINDOWS_CONSTRAINT = "constraints/requirements-windows-py312.txt"
+PIP_VERSION = "26.1.2"
+PIP_TOOLS_VERSION = "7.6.0"
+PYINSTALLER_VERSION = "6.21.0"
+PYRIGHT_VERSION = "1.1.411"
+RUFF_VERSION = "0.15.22"
+PILLOW_VERSION = "12.3.0"
+PIP_HARDENED_INSTALL_FRAGMENT = (
+    "-m pip --isolated --disable-pip-version-check --no-input install"
+)
+PIP_HARDENED_GLOBAL_OPTIONS = (
+    "--isolated",
+    "--disable-pip-version-check",
+    "--no-input",
+)
+PIP_HARDENED_INSTALL_ARGUMENT_PREFIX = (
+    "--no-cache-dir",
+    "--only-binary=:all:",
+)
+
+
+def _logical_commands(path: Path) -> tuple[tuple[int, str], ...]:
+    """Join shell and batch continuations while preserving the starting line."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    commands: list[tuple[int, str]] = []
+    index = 0
+    while index < len(lines):
+        line_number = index + 1
+        command_parts: list[str] = []
+        while True:
+            part = lines[index].strip()
+            continued = part.endswith(("\\", "^"))
+            if continued:
+                part = part[:-1].rstrip()
+            command_parts.append(part)
+            index += 1
+            if not continued or index >= len(lines):
+                break
+        command = " ".join(part for part in command_parts if part)
+        if command:
+            commands.append((line_number, command))
+    return tuple(commands)
+
+
+_PIP_MODULE_PATTERN = re.compile(r"pip\Z", re.IGNORECASE)
+_PIP_EXECUTABLE_PATTERN = re.compile(
+    r"pip(?:3(?:\.\d+)*)?(?:\.exe)?\Z",
+    re.IGNORECASE,
+)
+_SHELL_OPERATORS = {"&&", "||", ";", "|"}
+_PIP_GLOBAL_FLAGS = {
+    "--debug",
+    "--disable-pip-version-check",
+    "--help",
+    "--isolated",
+    "--no-cache-dir",
+    "--no-color",
+    "--no-input",
+    "--no-python-version-warning",
+    "--quiet",
+    "--require-virtualenv",
+    "--verbose",
+    "--version",
+    "-h",
+    "-q",
+    "-v",
+}
+_PIP_GLOBAL_OPTIONS_WITH_VALUE = {
+    "--cache-dir",
+    "--cert",
+    "--client-cert",
+    "--exists-action",
+    "--keyring-provider",
+    "--log",
+    "--proxy",
+    "--python",
+    "--resume-retries",
+    "--retries",
+    "--timeout",
+    "--trusted-host",
+    "--use-deprecated",
+    "--use-feature",
+}
+
+
+def _pip_subcommand(
+    tokens: Sequence[str], start: int, location: str
+) -> tuple[str, int]:
+    index = start
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _SHELL_OPERATORS:
+            break
+        option, separator, _ = token.partition("=")
+        option_folded = option.casefold()
+        if option_folded in _PIP_GLOBAL_FLAGS or re.fullmatch(r"-[qv]+", token):
+            if separator:
+                raise AssertionError(
+                    f"{location}: pip flag unexpectedly has a value: {token!r}"
+                )
+            index += 1
+            continue
+        if option_folded in _PIP_GLOBAL_OPTIONS_WITH_VALUE:
+            if separator:
+                index += 1
+                continue
+            if index + 1 >= len(tokens) or tokens[index + 1] in _SHELL_OPERATORS:
+                raise AssertionError(
+                    f"{location}: pip global option lacks a value: {token!r}"
+                )
+            index += 2
+            continue
+        if token == "--":
+            index += 1
+            continue
+        if token.startswith("-"):
+            raise AssertionError(
+                f"{location}: unclassified pip global option: {token!r}"
+            )
+        return token.casefold(), index
+    raise AssertionError(f"{location}: pip invocation has no classifiable subcommand")
+
+
+def _is_pip_executable_token(token: str) -> bool:
+    basename = token.replace("\\", "/").rsplit("/", 1)[-1]
+    return _PIP_EXECUTABLE_PATTERN.fullmatch(basename) is not None
+
+
+def _pip_install_commands(
+    path: Path,
+) -> tuple[tuple[int, str, bool, tuple[str, ...], tuple[str, ...]], ...]:
+    """Return every pip install site and reject unclassified pip invocations."""
+
+    commands: list[tuple[int, str, bool, tuple[str, ...], tuple[str, ...]]] = []
+    for line_number, command in _logical_commands(path):
+        stripped = command.lstrip()
+        if stripped.startswith(("#", "REM ", "rem ", "::")):
+            continue
+        location = f"{path}:{line_number}"
+        try:
+            tokens = shlex.split(command, comments=True, posix=True)
+        except ValueError as error:
+            if re.search(r"(?i)(?:^|\s)-m\s+pip(?:3(?:\.\d+)*)?(?=\s|$)", command):
+                raise AssertionError(
+                    f"{location}: cannot tokenize pip invocation: {error}"
+                ) from error
+            continue
+
+        invocations: list[tuple[int, bool]] = []
+        module_pip_indexes: set[int] = set()
+        for index in range(len(tokens) - 1):
+            if tokens[index] == "-m" and _PIP_MODULE_PATTERN.fullmatch(
+                tokens[index + 1]
+            ):
+                module_pip_indexes.add(index + 1)
+                invocations.append((index + 2, True))
+        for index, token in enumerate(tokens):
+            if index in module_pip_indexes or not _is_pip_executable_token(token):
+                continue
+            if index > 0 and tokens[index - 1] == "--require":
+                continue
+            invocations.append((index + 1, False))
+
+        if not invocations:
+            continue
+        if len(invocations) != 1:
+            raise AssertionError(
+                f"{location}: keep exactly one auditable pip invocation per logical command"
+            )
+        subcommand_start, uses_module_entrypoint = invocations[0]
+        subcommand, subcommand_index = _pip_subcommand(
+            tokens, subcommand_start, location
+        )
+        if subcommand != "install":
+            raise AssertionError(
+                f"{location}: unclassified pip subcommand {subcommand!r}; "
+                "route environment checks through the dependency verifier"
+            )
+        argument_end = next(
+            (
+                index
+                for index in range(subcommand_index + 1, len(tokens))
+                if tokens[index] in _SHELL_OPERATORS
+            ),
+            len(tokens),
+        )
+        commands.append(
+            (
+                line_number,
+                command,
+                uses_module_entrypoint,
+                tuple(tokens[subcommand_start:subcommand_index]),
+                tuple(tokens[subcommand_index + 1 : argument_end]),
+            )
+        )
+    return tuple(commands)
+
+
+def _normalized_constraint_in_install(
+    argument_tokens: Sequence[str],
+) -> str | None:
+    constraints: list[str] = []
+    index = 0
+    while index < len(argument_tokens):
+        token = argument_tokens[index]
+        if token == "--constraint":
+            if index + 1 >= len(argument_tokens):
+                raise AssertionError("pip --constraint option lacks a value")
+            constraints.append(argument_tokens[index + 1])
+            index += 2
+            continue
+        option, separator, value = token.partition("=")
+        if option == "--constraint" and separator:
+            if not value:
+                raise AssertionError("pip --constraint option lacks a value")
+            constraints.append(value)
+        index += 1
+
+    if len(constraints) > 1:
+        raise AssertionError("pip install must use exactly one native constraint")
+    if not constraints:
+        return None
+    return constraints[0].replace("\\", "/")
+
+
+def _require_hardened_pip_install_policy(
+    global_option_tokens: Sequence[str],
+    argument_tokens: Sequence[str],
+    location: str,
+) -> None:
+    if tuple(global_option_tokens) != PIP_HARDENED_GLOBAL_OPTIONS:
+        raise AssertionError(
+            f"{location}: pip must ignore inherited configuration and prompts"
+        )
+    if tuple(argument_tokens[:2]) != PIP_HARDENED_INSTALL_ARGUMENT_PREFIX:
+        raise AssertionError(
+            f"{location}: pip must reject caches and source distributions first"
+        )
+    cache_binary_options = tuple(
+        token
+        for token in argument_tokens
+        if token.partition("=")[0].casefold()
+        in {"--cache-dir", "--no-binary", "--no-cache-dir", "--only-binary"}
+    )
+    if cache_binary_options != PIP_HARDENED_INSTALL_ARGUMENT_PREFIX:
+        raise AssertionError(
+            f"{location}: pip cache or binary policy has a conflicting override"
+        )
+
+
+def _pip_constraint_and_payload(
+    argument_tokens: Sequence[str],
+    location: str,
+) -> tuple[str, tuple[str, ...]]:
+    if len(argument_tokens) < 5 or argument_tokens[2] != "--constraint":
+        raise AssertionError(
+            f"{location}: native constraint must immediately precede the exact payload"
+        )
+    constraint = _normalized_constraint_in_install(argument_tokens)
+    if constraint is None:
+        raise AssertionError(f"{location}: pip install escaped the native constraint")
+    return constraint, tuple(argument_tokens[4:])
+
+
+def _require_exact_pip_payload(
+    argument_tokens: Sequence[str],
+    expected_payload: Sequence[str],
+    location: str,
+) -> None:
+    _, payload = _pip_constraint_and_payload(argument_tokens, location)
+    if payload != tuple(expected_payload):
+        raise AssertionError(f"{location}: pip install escaped its exact payload")
+
+
+def _exact_requirement_pins(path: Path) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    requirement_pattern = re.compile(
+        r"^(?P<name>[A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[^\]]+\])?"
+        r"==(?P<version>[^\s#]+)$"
+    )
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        line = raw_line.partition("#")[0].strip()
+        if not line:
+            continue
+        match = requirement_pattern.fullmatch(line)
+        if match is None:
+            raise AssertionError(
+                f"{path.name}:{line_number}: requirement is not an exact pin: {line!r}"
+            )
+        normalized_name = re.sub(r"[-_.]+", "-", match.group("name")).casefold()
+        if normalized_name in pins:
+            raise AssertionError(
+                f"{path.name}:{line_number}: duplicate requirement: {normalized_name}"
+            )
+        pins[normalized_name] = match.group("version")
+    return pins
 
 
 def _godot_env_lines(content: str) -> tuple[str, ...]:
@@ -126,6 +430,17 @@ def _workflow_run_script(content: str, step_name: str) -> str:
             break
         script_lines.append(line[10:] if line else "")
     return "\n".join(script_lines).strip() + "\n"
+
+
+def _workflow_job_section(content: str, job_name: str) -> str:
+    marker = f"  {job_name}:\n"
+    start = content.find(marker)
+    if start < 0:
+        raise AssertionError(f"Workflow job not found: {job_name}")
+    remainder = content[start + len(marker):]
+    next_job = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", remainder)
+    end = len(content) if next_job is None else start + len(marker) + next_job.start()
+    return content[start:end]
 
 
 def _run_git(
@@ -957,7 +1272,12 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 5, locations)
+        self.assertEqual(len(locations), 6, locations)
+        self.assertEqual(
+            sum(location.startswith("dependency-locks.yml:") for location in locations),
+            1,
+            locations,
+        )
 
     def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
@@ -3075,8 +3395,12 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertNotIn("gh api", get_version_job)
         self.assertIn("permissions:\n      contents: write", integrity_job)
         self.assertNotIn("actions/checkout", integrity_job)
-        self.assertNotIn("      - uses:", integrity_job)
-        self.assertNotIn("pip install", integrity_job)
+        self.assertNotRegex(integrity_job, r"(?m)^\s*(?:-\s+)?uses\s*:")
+        self.assertNotIn("actions/", integrity_job)
+        self.assertNotRegex(
+            integrity_job,
+            r"(?i)\bpip(?:3(?:\.\d+)*)?\s+install\b",
+        )
         self.assertNotIn("continue-on-error:", integrity_job)
         self.assertEqual(
             integrity_job_conditions,
@@ -3127,8 +3451,12 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn("permissions:\n      contents: write", preflight_job)
         self.assertNotIn("actions/checkout", preflight_job)
-        self.assertNotIn("      - uses:", preflight_job)
-        self.assertNotIn("pip install", preflight_job)
+        self.assertNotRegex(preflight_job, r"(?m)^\s*(?:-\s+)?uses\s*:")
+        self.assertNotIn("actions/", preflight_job)
+        self.assertNotRegex(
+            preflight_job,
+            r"(?i)\bpip(?:3(?:\.\d+)*)?\s+install\b",
+        )
         self.assertEqual(content.count("contents: write"), 3)
         self.assertEqual(
             preflight_job_conditions,
@@ -3214,20 +3542,972 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertEqual(config["pythonVersion"], "3.12")
 
+    def test_native_python_dependency_tuples_are_exact(self) -> None:
+        linux_workflow_job_counts = {
+            "code-health.yml": 1,
+            "godot-smoke.yml": 1,
+            "pyright.yml": 1,
+            "tcc-conversion-test.yml": 2,
+        }
+        workflow_dir = PROJECT_ROOT / ".github" / "workflows"
+        for workflow_name, job_count in linux_workflow_job_counts.items():
+            with self.subTest(workflow=workflow_name):
+                content = (workflow_dir / workflow_name).read_text(encoding="utf-8")
+                self.assertEqual(content.count("runs-on: ubuntu-24.04"), job_count)
+                self.assertEqual(content.count("python-version: '3.12.13'"), job_count)
+                self.assertEqual(content.count("architecture: x64"), job_count)
+                self.assertNotIn("ubuntu-latest", content)
+
+        release = (workflow_dir / "release.yml").read_text(encoding="utf-8")
+        release_build = release[release.index("  build:"):release.index("  release:")]
+        for native_tuple in (
+            "          - os: windows-2025\n"
+            "            name: windows\n"
+            "            ext: .exe\n"
+            "            pyinstaller_mode: --onefile\n"
+            "            python_version: '3.12.10'\n"
+            "            python_architecture: x64\n"
+            f"            constraint: {WINDOWS_CONSTRAINT}\n"
+            "            pip_config_file: nul\n"
+            "            expected_platform: win32\n"
+            "            expected_machine: AMD64\n",
+            "          - os: macos-26\n"
+            "            name: macos\n"
+            "            ext: \"\"\n"
+            "            pyinstaller_mode: --onedir\n"
+            "            python_version: '3.12.10'\n"
+            "            python_architecture: arm64\n"
+            f"            constraint: {MACOS_CONSTRAINT}\n"
+            "            pip_config_file: /dev/null\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: arm64\n",
+            "          - os: ubuntu-24.04\n"
+            "            name: linux\n"
+            "            ext: \"\"\n"
+            "            pyinstaller_mode: --onefile\n"
+            "            python_version: '3.12.13'\n"
+            "            python_architecture: x64\n"
+            f"            constraint: {LINUX_CONSTRAINT}\n"
+            "            pip_config_file: /dev/null\n"
+            "            expected_platform: linux\n"
+            "            expected_machine: x86_64\n",
+        ):
+            with self.subTest(workflow="release.yml", native_tuple=native_tuple):
+                self.assertIn(native_tuple, release_build)
+        self.assertNotIn("-latest", release_build)
+
+        dependency_locks = (workflow_dir / "dependency-locks.yml").read_text(
+            encoding="utf-8"
+        )
+        for native_tuple in (
+            "          - platform: linux-x64\n"
+            "            runner: ubuntu-24.04\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.13'\n"
+            "            constraint: requirements-linux-py312.txt\n"
+            "            expected_platform: linux\n"
+            "            expected_machine: x86_64\n"
+            "            venv_python: bin/python\n",
+            "          - platform: macos-arm64\n"
+            "            runner: macos-26\n"
+            "            architecture: arm64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-macos-py312.txt\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: arm64\n"
+            "            venv_python: bin/python\n",
+            "          - platform: windows-x64\n"
+            "            runner: windows-2025\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-windows-py312.txt\n"
+            "            expected_platform: win32\n"
+            "            expected_machine: AMD64\n"
+            "            venv_python: Scripts/python.exe\n",
+        ):
+            with self.subTest(workflow="dependency-locks.yml", native_tuple=native_tuple):
+                self.assertIn(native_tuple, dependency_locks)
+        self.assertEqual(dependency_locks.count("          - platform:"), 3)
+        self.assertNotIn("-latest", dependency_locks)
+
+    def test_native_workflow_installs_use_fresh_selected_venvs(self) -> None:
+        install_jobs = (
+            (
+                "code-health.yml",
+                "ruff",
+                "Install and verify Ruff",
+                "posix",
+                "gm2godot-ruff-venv",
+                "/dev/null",
+            ),
+            (
+                "pyright.yml",
+                "pyright",
+                "Install and verify dependencies",
+                "posix",
+                "gm2godot-pyright-venv",
+                "/dev/null",
+            ),
+            (
+                "godot-smoke.yml",
+                "godot-smoke",
+                "Install and verify test dependencies",
+                "posix",
+                "gm2godot-godot-smoke-venv",
+                "/dev/null",
+            ),
+            (
+                "tcc-conversion-test.yml",
+                "tcc-conversion",
+                "Install and verify test dependencies",
+                "posix",
+                "gm2godot-tcc-conversion-venv",
+                "/dev/null",
+            ),
+            (
+                "tcc-conversion-test.yml",
+                "lts-2026-conversion",
+                "Install and verify test dependencies",
+                "posix",
+                "gm2godot-lts-2026-conversion-venv",
+                "/dev/null",
+            ),
+            (
+                "tests.yml",
+                "test",
+                "Install and verify test dependencies",
+                "posix",
+                "gm2godot-tests-linux-venv",
+                "/dev/null",
+            ),
+            (
+                "tests.yml",
+                "windows-artifact-transactions",
+                "Install and verify test dependencies",
+                "windows",
+                "gm2godot-tests-windows-venv",
+                "nul",
+            ),
+            (
+                "release.yml",
+                "build",
+                "Install and verify dependencies",
+                "matrix",
+                "gm2godot-release-${{ matrix.name }}-venv",
+                "${{ matrix.pip_config_file }}",
+            ),
+        )
+        workflow_dir = PROJECT_ROOT / ".github" / "workflows"
+        prefix_probe = (
+            "python -c 'import os, pathlib, sys; raise SystemExit(0 if "
+            "pathlib.Path(sys.prefix).resolve() == "
+            "pathlib.Path(os.environ[\"VIRTUAL_ENV\"]).resolve() else 1)'"
+        )
+
+        self.assertEqual(len(install_jobs), 8)
+        for (
+            workflow_name,
+            job_name,
+            step_name,
+            platform_kind,
+            venv_name,
+            pip_config_file,
+        ) in install_jobs:
+            label = f"{workflow_name}:{job_name}"
+            with self.subTest(job=label):
+                content = (workflow_dir / workflow_name).read_text(encoding="utf-8")
+                job = _workflow_job_section(content, job_name)
+                script = _workflow_run_script(job, step_name)
+                step_marker = f"      - name: {step_name}\n"
+                step_start = job.index(step_marker)
+                next_step = job.find("\n      - ", step_start + len(step_marker))
+                self.assertGreaterEqual(next_step, 0, f"{label}: install step must not be terminal")
+                later_steps = job[next_step:]
+                job_metadata, steps_separator, _ = job.partition("    steps:\n")
+                self.assertTrue(steps_separator, f"{label}: steps section is missing")
+
+                pip_config_line = f"      PIP_CONFIG_FILE: {pip_config_file}\n"
+                self.assertEqual(
+                    job.count("PIP_CONFIG_FILE:"),
+                    1,
+                    f"{label}: pip config must be overridden exactly once",
+                )
+                self.assertIn(
+                    pip_config_line,
+                    job_metadata,
+                    f"{label}: pip config must use the controlled null device",
+                )
+
+                guard = 'if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then'
+                create = 'python -m venv "$venv_dir"'
+                export_path = 'export PATH="$venv_bin:$PATH"'
+                verifier = "python scripts/verify_dependency_environment.py"
+                install_command = f"python {PIP_HARDENED_INSTALL_FRAGMENT}"
+                for required in (
+                    guard,
+                    "Refusing to reuse dependency environment: $venv_dir",
+                    create,
+                    export_path,
+                    "hash -r",
+                    prefix_probe,
+                    verifier,
+                ):
+                    self.assertIn(required, script, f"{label}: missing {required!r}")
+                self.assertEqual(script.count(install_command), 2)
+                self.assertLess(script.index(guard), script.index(create))
+                self.assertLess(script.index(create), script.index(export_path))
+                self.assertLess(script.index(export_path), script.index(prefix_probe))
+                self.assertLess(
+                    script.index(prefix_probe),
+                    script.index(install_command),
+                )
+                self.assertLess(script.index(install_command), script.index(verifier))
+                self.assertRegex(
+                    later_steps,
+                    r"(?m)^\s+(?:run:\s+)?python(?:\s|$)",
+                    f"{label}: later Python commands must resolve through GITHUB_PATH",
+                )
+
+                if platform_kind in {"posix", "matrix"}:
+                    self.assertIn(f'venv_dir="$RUNNER_TEMP/{venv_name}"', script)
+                if platform_kind == "posix":
+                    self.assertIn(
+                        "printf 'VIRTUAL_ENV=%s\\n' \"$venv_dir\" >> \"$GITHUB_ENV\"",
+                        script,
+                    )
+                    self.assertIn(
+                        "printf '%s\\n' \"$venv_bin\" >> \"$GITHUB_PATH\"",
+                        script,
+                    )
+                if platform_kind in {"windows", "matrix"}:
+                    self.assertIn(
+                        f'venv_dir="$(cygpath -u "$RUNNER_TEMP")/{venv_name}"',
+                        script,
+                    )
+                    self.assertIn('venv_native="$(cygpath -w "$venv_dir")"', script)
+                    self.assertIn(
+                        'venv_path_native="$(cygpath -w "$venv_bin")"',
+                        script,
+                    )
+                    self.assertIn(
+                        "printf 'VIRTUAL_ENV=%s\\n' \"$venv_native\" >> \"$github_env_file\"",
+                        script,
+                    )
+                    self.assertIn(
+                        "printf '%s\\n' \"$venv_path_native\" >> \"$github_path_file\"",
+                        script,
+                    )
+
+    def test_pip_install_inventory_is_constrained_and_uses_module_entrypoints(
+        self,
+    ) -> None:
+        workflow_dir = PROJECT_ROOT / ".github" / "workflows"
+        install_paths = sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")))
+        install_paths.extend((PROJECT_ROOT / "build_macos.sh", PROJECT_ROOT / "build.bat"))
+
+        expected_install_files = {
+            ".github/workflows/code-health.yml",
+            ".github/workflows/dependency-locks.yml",
+            ".github/workflows/godot-smoke.yml",
+            ".github/workflows/pyright.yml",
+            ".github/workflows/release.yml",
+            ".github/workflows/tcc-conversion-test.yml",
+            ".github/workflows/tests.yml",
+            "build.bat",
+            "build_macos.sh",
+        }
+        expected_profiles: dict[
+            str,
+            Counter[tuple[str, tuple[str, ...]]],
+        ] = {
+            ".github/workflows/code-health.yml": Counter(
+                {
+                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, (f"ruff=={RUFF_VERSION}",)): 1,
+                }
+            ),
+            ".github/workflows/dependency-locks.yml": Counter(
+                {
+                    ("$CONSTRAINT", ("pip==$CURRENT_PIP",)): 1,
+                    ("$CONSTRAINT", ("pip-tools==$CURRENT_PIP_TOOLS",)): 1,
+                    ("$CONSTRAINT", ("pip==$CANDIDATE_PIP",)): 2,
+                    (
+                        "$CONSTRAINT",
+                        ("pip-tools==$CANDIDATE_PIP_TOOLS",),
+                    ): 1,
+                    ("$CONSTRAINT", ("-r", "requirements-lock.in")): 1,
+                }
+            ),
+            ".github/workflows/godot-smoke.yml": Counter(
+                {
+                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, (f"Pillow=={PILLOW_VERSION}",)): 1,
+                }
+            ),
+            ".github/workflows/pyright.yml": Counter(
+                {
+                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (
+                        LINUX_CONSTRAINT,
+                        (
+                            "-r",
+                            "requirements.txt",
+                            f"pyright[nodejs]=={PYRIGHT_VERSION}",
+                        ),
+                    ): 1,
+                }
+            ),
+            ".github/workflows/release.yml": Counter(
+                {
+                    (
+                        "${{ matrix.constraint }}",
+                        (f"pip=={PIP_VERSION}",),
+                    ): 1,
+                    (
+                        "${{ matrix.constraint }}",
+                        (
+                            "-r",
+                            "requirements.txt",
+                            f"PyInstaller=={PYINSTALLER_VERSION}",
+                        ),
+                    ): 1,
+                }
+            ),
+            ".github/workflows/tcc-conversion-test.yml": Counter(
+                {
+                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 2,
+                    (LINUX_CONSTRAINT, (f"Pillow=={PILLOW_VERSION}",)): 2,
+                }
+            ),
+            ".github/workflows/tests.yml": Counter(
+                {
+                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                }
+            ),
+            "build_macos.sh": Counter(
+                {
+                    (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (
+                        MACOS_CONSTRAINT,
+                        (
+                            "-r",
+                            "requirements.txt",
+                            f"PyInstaller=={PYINSTALLER_VERSION}",
+                        ),
+                    ): 1,
+                }
+            ),
+            "build.bat": Counter(
+                {
+                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (
+                        WINDOWS_CONSTRAINT,
+                        (
+                            "-r",
+                            "requirements.txt",
+                            f"PyInstaller=={PYINSTALLER_VERSION}",
+                        ),
+                    ): 1,
+                }
+            ),
+        }
+        exact_direct_pins = {
+            "pip": PIP_VERSION,
+            "pip-tools": PIP_TOOLS_VERSION,
+            "Pillow": PILLOW_VERSION,
+            "PyInstaller": PYINSTALLER_VERSION,
+            "pyright": PYRIGHT_VERSION,
+            "ruff": RUFF_VERSION,
+        }
+
+        actual_install_files: set[str] = set()
+        actual_profiles: dict[str, Counter[tuple[str, tuple[str, ...]]]] = {}
+        dependency_lock_command_count = 0
+        non_dependency_lock_command_count = 0
+        for path in install_paths:
+            relative = path.relative_to(PROJECT_ROOT).as_posix()
+            commands = _pip_install_commands(path)
+            if commands:
+                actual_install_files.add(relative)
+            profiles: Counter[tuple[str, tuple[str, ...]]] = Counter()
+            for (
+                line_number,
+                _command,
+                module_entrypoint,
+                global_option_tokens,
+                argument_tokens,
+            ) in commands:
+                location = f"{relative}:{line_number}"
+                with self.subTest(location=location):
+                    self.assertTrue(
+                        module_entrypoint,
+                        f"{location}: use the selected Python interpreter with -m pip",
+                    )
+                    _require_hardened_pip_install_policy(
+                        global_option_tokens,
+                        argument_tokens,
+                        location,
+                    )
+                    constraint, payload = _pip_constraint_and_payload(
+                        argument_tokens,
+                        location,
+                    )
+                    install_arguments = " ".join(payload)
+                    for package_name, version in exact_direct_pins.items():
+                        package_pattern = (
+                            rf"(?i)(?<![-\w]){re.escape(package_name)}"
+                            r"(?:\[[^\]]+\])?(?![-\w])"
+                        )
+                        if re.search(package_pattern, install_arguments) is None:
+                            continue
+                        direct_pin_pattern = package_pattern + r"==[^\s\\^]+"
+                        self.assertRegex(
+                            install_arguments,
+                            direct_pin_pattern,
+                            f"{location}: {package_name} must be an exact direct pin",
+                        )
+                        if relative != ".github/workflows/dependency-locks.yml":
+                            self.assertRegex(
+                                install_arguments,
+                                package_pattern
+                                + rf"=={re.escape(version)}(?:['\"\s]|$)",
+                            )
+
+                constraint = {
+                    ("build_macos.sh", "$DEPENDENCY_CONSTRAINT"): MACOS_CONSTRAINT,
+                    ("build.bat", "%DEPENDENCY_CONSTRAINT%"): WINDOWS_CONSTRAINT,
+                }.get((relative, constraint), constraint)
+                if relative == ".github/workflows/dependency-locks.yml":
+                    dependency_lock_command_count += 1
+                else:
+                    non_dependency_lock_command_count += 1
+                profiles[(constraint, payload)] += 1
+            if relative in expected_profiles:
+                actual_profiles[relative] = profiles
+
+        self.assertEqual(actual_install_files, expected_install_files)
+        self.assertEqual(actual_profiles, expected_profiles)
+        self.assertEqual(non_dependency_lock_command_count, 20)
+        self.assertEqual(dependency_lock_command_count, 6)
+
+    def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory)
+            split_install = directory / "split-install.sh"
+            split_install.write_text(
+                "python -m pip \\\n"
+                "  --isolated \\\n"
+                "  --disable-pip-version-check \\\n"
+                "  --no-input \\\n"
+                "  install \\\n"
+                "  --no-cache-dir --only-binary=:all: \\\n"
+                "  --constraint constraints/requirements-linux-py312.txt \\\n"
+                "  Pillow==12.3.0\n",
+                encoding="utf-8",
+            )
+
+            commands = _pip_install_commands(split_install)
+            self.assertEqual(len(commands), 1)
+            (
+                line_number,
+                command,
+                module_entrypoint,
+                global_option_tokens,
+                argument_tokens,
+            ) = commands[0]
+            self.assertEqual(line_number, 1)
+            self.assertTrue(module_entrypoint)
+            self.assertIn(PIP_HARDENED_INSTALL_FRAGMENT, command)
+            self.assertEqual(
+                global_option_tokens,
+                PIP_HARDENED_GLOBAL_OPTIONS,
+            )
+            _require_hardened_pip_install_policy(
+                global_option_tokens,
+                argument_tokens,
+                "split-install",
+            )
+            self.assertEqual(
+                argument_tokens,
+                (
+                    "--no-cache-dir",
+                    "--only-binary=:all:",
+                    "--constraint",
+                    LINUX_CONSTRAINT,
+                    "Pillow==12.3.0",
+                ),
+            )
+            self.assertEqual(
+                _normalized_constraint_in_install(argument_tokens),
+                LINUX_CONSTRAINT,
+            )
+
+            prefixed_constraint = directory / "prefixed-constraint.sh"
+            prefixed_constraint.write_text(
+                "echo --constraint constraints/fake.txt && "
+                f"python {PIP_HARDENED_INSTALL_FRAGMENT} "
+                "--no-cache-dir --only-binary=:all: Pillow==12.3.0\n",
+                encoding="utf-8",
+            )
+            prefixed_commands = _pip_install_commands(prefixed_constraint)
+            self.assertEqual(len(prefixed_commands), 1)
+            self.assertIsNone(
+                _normalized_constraint_in_install(prefixed_commands[0][4]),
+                "tokens before pip must not fake native constraint coverage",
+            )
+
+            spoofed_hardening = directory / "spoofed-hardening.sh"
+            spoofed_hardening.write_text(
+                f"echo '{PIP_HARDENED_INSTALL_FRAGMENT} "
+                "--no-cache-dir --only-binary=:all:' && "
+                "python -m pip install "
+                f"--constraint {LINUX_CONSTRAINT} Pillow==12.3.0\n",
+                encoding="utf-8",
+            )
+            spoofed_commands = _pip_install_commands(spoofed_hardening)
+            self.assertEqual(len(spoofed_commands), 1)
+            self.assertEqual(
+                spoofed_commands[0][3],
+                (),
+                "tokens before pip must not fake hardened global options",
+            )
+            self.assertNotIn("--no-cache-dir", spoofed_commands[0][4])
+            self.assertNotIn("--only-binary=:all:", spoofed_commands[0][4])
+            with self.assertRaisesRegex(
+                AssertionError,
+                "ignore inherited configuration and prompts",
+            ):
+                _require_hardened_pip_install_policy(
+                    spoofed_commands[0][3],
+                    spoofed_commands[0][4],
+                    "spoofed-hardening",
+                )
+
+            conflicting_policy = directory / "conflicting-policy.sh"
+            conflicting_policy.write_text(
+                f"python {PIP_HARDENED_INSTALL_FRAGMENT} "
+                "--no-cache-dir --only-binary=:all: "
+                "--cache-dir=/tmp/pip-cache --no-binary=:all: "
+                f"--constraint {LINUX_CONSTRAINT} Pillow==12.3.0\n",
+                encoding="utf-8",
+            )
+            conflicting_commands = _pip_install_commands(conflicting_policy)
+            self.assertEqual(len(conflicting_commands), 1)
+            self.assertEqual(
+                conflicting_commands[0][4][:2],
+                PIP_HARDENED_INSTALL_ARGUMENT_PREFIX,
+            )
+            with self.assertRaisesRegex(AssertionError, "conflicting override"):
+                _require_hardened_pip_install_policy(
+                    conflicting_commands[0][3],
+                    conflicting_commands[0][4],
+                    "conflicting-policy",
+                )
+
+            payload_escapes = (
+                (
+                    "no-deps",
+                    "--no-deps Pillow==12.3.0",
+                    ("Pillow==12.3.0",),
+                ),
+                (
+                    "second-requirement",
+                    "-r requirements.txt -r hostile.txt",
+                    ("-r", "requirements.txt"),
+                ),
+            )
+            for name, payload, expected_payload in payload_escapes:
+                path = directory / f"{name}.sh"
+                path.write_text(
+                    f"python {PIP_HARDENED_INSTALL_FRAGMENT} "
+                    "--no-cache-dir --only-binary=:all: "
+                    f"--constraint {LINUX_CONSTRAINT} {payload}\n",
+                    encoding="utf-8",
+                )
+                escape_commands = _pip_install_commands(path)
+                self.assertEqual(len(escape_commands), 1)
+                with self.subTest(payload_escape=name):
+                    with self.assertRaisesRegex(AssertionError, "exact payload"):
+                        _require_exact_pip_payload(
+                            escape_commands[0][4],
+                            expected_payload,
+                            name,
+                        )
+
+            bare_commands = (
+                "pip --isolated install --constraint constraints.txt root==1.0",
+                "sudo -H pip install --constraint constraints.txt root==1.0",
+                "/usr/local/bin/pip3.12 install --constraint constraints.txt root==1.0",
+                '"C:\\Python312\\Scripts\\pip.exe" install '
+                "--constraint constraints.txt root==1.0",
+                "python -m pip3 install --constraint constraints.txt root==1.0",
+            )
+            for index, payload in enumerate(bare_commands, start=1):
+                bare_install = directory / f"bare-install-{index}.sh"
+                bare_install.write_text(payload + "\n", encoding="utf-8")
+                with self.subTest(bare=payload):
+                    commands = _pip_install_commands(bare_install)
+                    self.assertEqual(len(commands), 1)
+                    self.assertEqual(commands[0][0], 1)
+                    self.assertEqual(commands[0][1], payload)
+                    self.assertFalse(
+                        commands[0][2],
+                        "path-qualified pip executables must be rejected by module policy",
+                    )
+                    self.assertEqual(
+                        commands[0][3],
+                        ("--isolated",) if "--isolated" in payload else (),
+                    )
+                    self.assertEqual(
+                        commands[0][4],
+                        (
+                            "--constraint",
+                            "constraints.txt",
+                            "root==1.0",
+                        ),
+                    )
+
+            unclassified_commands = (
+                "python -m pip check\n",
+                "python -m pip --isolated config set global.index-url install\n",
+                "python -m pip --unknown-global-option install root==1.0\n",
+            )
+            for index, payload in enumerate(unclassified_commands, start=1):
+                path = directory / f"unclassified-{index}.sh"
+                path.write_text(payload, encoding="utf-8")
+                with self.subTest(command=payload.strip()):
+                    with self.assertRaisesRegex(
+                        AssertionError,
+                        r"unclassified pip (?:subcommand|global option)",
+                    ):
+                        _pip_install_commands(path)
+
+    def test_dependency_lock_inputs_and_workflow_pins_stay_synchronized(self) -> None:
+        runtime_pins = _exact_requirement_pins(PROJECT_ROOT / "requirements.txt")
+        tooling_pins = _exact_requirement_pins(PROJECT_ROOT / "requirements-tooling.txt")
+        self.assertEqual(
+            runtime_pins,
+            {
+                "pillow": PILLOW_VERSION,
+                "markdown2": "2.5.5",
+                "requests": "2.34.2",
+                "pyside6": "6.11.1",
+            },
+        )
+        self.assertEqual(
+            tooling_pins,
+            {
+                "pip": PIP_VERSION,
+                "pip-tools": PIP_TOOLS_VERSION,
+                "pyinstaller": PYINSTALLER_VERSION,
+                "pyright": PYRIGHT_VERSION,
+                "ruff": RUFF_VERSION,
+            },
+        )
+        lock_input_lines = tuple(
+            line.strip()
+            for line in (PROJECT_ROOT / "requirements-lock.in")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        self.assertEqual(
+            lock_input_lines,
+            ("-r requirements.txt", "-r requirements-tooling.txt"),
+        )
+
+        for constraint_name in (
+            "requirements-linux-py312.txt",
+            "requirements-macos-py312.txt",
+            "requirements-windows-py312.txt",
+        ):
+            with self.subTest(constraint=constraint_name):
+                constraint_pins = _exact_requirement_pins(
+                    PROJECT_ROOT / "constraints" / constraint_name
+                )
+                self.assertEqual(constraint_pins.get("pip"), tooling_pins["pip"])
+                self.assertEqual(
+                    constraint_pins.get("pip-tools"),
+                    tooling_pins["pip-tools"],
+                )
+
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("scripts.verify_dependency_environment", workflow)
+        self.assertIn("load_constraint", workflow)
+        self.assertNotRegex(workflow, r"(?<![-\w])pip==[0-9]")
+        self.assertNotRegex(workflow, r"(?<![-\w])pip-tools==[0-9]")
+
+    def test_dependency_lock_workflow_is_broad_and_reviewable(self) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        content = workflow.read_text(encoding="utf-8")
+        trigger_section = content[:content.index("permissions:")]
+        self.assertIn("  pull_request:\n    branches: [main]", trigger_section)
+        self.assertIn("  push:\n    branches: [main]", trigger_section)
+        self.assertIn("  workflow_dispatch:", trigger_section)
+        self.assertNotIn("paths:", trigger_section)
+        self.assertIn("permissions:\n  contents: read", content)
+
+        self.assertGreaterEqual(content.count("--no-config"), 2)
+        self.assertGreaterEqual(content.count("--no-emit-options"), 2)
+        self.assertIn("CUSTOM_COMPILE_COMMAND:", content)
+        self.assertIn("WORK_ROOT: dependency-locks", content)
+        self.assertIn("ARTIFACT_DIR: dependency-locks/artifact", content)
+        self.assertIn(
+            "CANDIDATE_CONSTRAINT: dependency-locks/artifact/candidate/"
+            "${{ matrix.constraint }}",
+            content,
+        )
+        self.assertIn(
+            "SELFHOST_CONSTRAINT: dependency-locks/artifact/selfhost/"
+            "${{ matrix.constraint }}",
+            content,
+        )
+        self.assertIn("RECEIPT_DIR: dependency-locks/artifact/receipts", content)
+        self.assertIn(
+            "path: ${{ env.ARTIFACT_DIR }}",
+            content,
+        )
+        self.assertIn("if: ${{ always() }}", content)
+        self.assertIn("if-no-files-found: warn", content)
+        self.assertIn("archive: true", content)
+        work_root_guard = 'if [[ -e "$WORK_ROOT" || -L "$WORK_ROOT" ]]; then'
+        self.assertIn(work_root_guard, content)
+        self.assertIn(
+            "Refusing to reuse dependency lock work root: $WORK_ROOT",
+            content,
+        )
+        self.assertLess(
+            content.index(work_root_guard),
+            content.index('mkdir -p "$WORK_DIR"'),
+        )
+        self.assertIn(
+            "if observed_receipt_names != expected_receipt_names:",
+            content,
+        )
+        for receipt_name in (
+            "candidate-generator.json",
+            "current-generator.json",
+            "fresh-1.json",
+            "fresh-2.json",
+        ):
+            with self.subTest(receipt=receipt_name):
+                self.assertEqual(content.count(f'              "{receipt_name}",'), 1)
+        self.assertLess(
+            content.index("- name: Upload dependency lock evidence"),
+            content.index("- name: Enforce self-hosting and committed repeatability"),
+        )
+
+    def test_dependency_lock_refresh_package_requires_native_graph_membership(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        content = workflow.read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Validate refresh request")
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "REFRESH_MODE": "package",
+                "REFRESH_PACKAGE": "",
+                "PATH": os.pathsep.join(
+                    (str(Path(sys.executable).parent), environment.get("PATH", ""))
+                ),
+            }
+        )
+
+        for package_name in ("pillow", "macholib", "pefile"):
+            with self.subTest(package=package_name):
+                environment["REFRESH_PACKAGE"] = package_name
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    cwd=PROJECT_ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+        environment["REFRESH_PACKAGE"] = "normalized-package-typo"
+        unknown = subprocess.run(
+            ["bash", "-c", script],
+            cwd=PROJECT_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertNotEqual(unknown.returncode, 0)
+        self.assertIn(
+            "refresh_package 'normalized-package-typo' is absent from every supported "
+            "committed native dependency graph",
+            unknown.stderr,
+        )
+        self.assertNotIn("Traceback", unknown.stderr)
+
+    def test_build_scripts_pin_native_hosts_and_use_python_modules(self) -> None:
+        macos = (PROJECT_ROOT / "build_macos.sh").read_text(encoding="utf-8")
+        windows = (PROJECT_ROOT / "build.bat").read_text(encoding="utf-8")
+
+        for required in (
+            'SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"',
+            'expected = ("CPython", "3.12.10", "darwin", "Darwin", "arm64")',
+            f"readonly DEPENDENCY_CONSTRAINT={MACOS_CONSTRAINT}",
+            "export PIP_CONFIG_FILE=/dev/null",
+            'BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-XXXXXX")"',
+            'readonly VENV_PYTHON="${BUILD_VENV}/bin/python"',
+            '"$PYTHON_BIN" -m venv "$BUILD_VENV"',
+            '--constraint "$DEPENDENCY_CONSTRAINT"',
+            f"pip=={PIP_VERSION}",
+            f"PyInstaller=={PYINSTALLER_VERSION}",
+            '"$VENV_PYTHON" -m PyInstaller --onedir',
+        ):
+            with self.subTest(script="build_macos.sh", required=required):
+                self.assertIn(required, macos)
+        self.assertNotIn('"$PYTHON_BIN" -m pip install', macos)
+        self.assertEqual(
+            re.findall(r"(?m)^export PIP_CONFIG_FILE=(\S+)$", macos),
+            ["/dev/null"],
+        )
+        self.assertEqual(
+            macos.count(f'"$VENV_PYTHON" {PIP_HARDENED_INSTALL_FRAGMENT}'),
+            2,
+        )
+        self.assertNotRegex(macos, r"(?m)^\s*pyinstaller\b")
+        self.assertLess(
+            macos.index('"$VENV_PYTHON" "$DEPENDENCY_VERIFIER"'),
+            macos.index('echo "Cleaning old build artifacts..."'),
+        )
+
+        for required in (
+            'pushd "%~dp0" >nul 2>&1',
+            "expected = ('CPython', '3.12.10', 'win32', 'Windows', 'AMD64')",
+            "set \"DEPENDENCY_CONSTRAINT="
+            f"{WINDOWS_CONSTRAINT.replace('/', chr(92))}\"",
+            'set "PIP_CONFIG_FILE=nul"',
+            'set "BUILD_VENV=%BUILD_TEMP_ROOT%\\venv"',
+            'set "VENV_PYTHON=%BUILD_VENV%\\Scripts\\python.exe"',
+            '"%PYTHON_BIN%" -m venv "%BUILD_VENV%"',
+            '--constraint "%DEPENDENCY_CONSTRAINT%"',
+            f"pip=={PIP_VERSION}",
+            f"PyInstaller=={PYINSTALLER_VERSION}",
+            '"%VENV_PYTHON%" -m PyInstaller --onefile',
+            "if errorlevel 1 goto :fail",
+            "call :cleanup_temp",
+            "original = pathlib.Path(sys.argv[1])",
+            "original.parent.resolve() == parent",
+            "original.name.startswith(prefix)",
+            "len(original.name) > len(prefix)",
+            "not original.is_symlink()",
+            "not original.is_junction()",
+            "shutil.rmtree(original)",
+        ):
+            with self.subTest(script="build.bat", required=required):
+                self.assertIn(required, windows)
+        self.assertNotIn('"%PYTHON_BIN%" -m pip install', windows)
+        self.assertEqual(
+            re.findall(r'(?im)^set "PIP_CONFIG_FILE=([^"\r\n]+)"$', windows),
+            ["nul"],
+        )
+        self.assertEqual(
+            windows.count(f'"%VENV_PYTHON%" {PIP_HARDENED_INSTALL_FRAGMENT}'),
+            2,
+        )
+        self.assertNotIn("shutil.rmtree(original.resolve())", windows)
+        self.assertNotRegex(windows, r"(?im)^\s*pyinstaller\b")
+        self.assertLess(
+            windows.index('"%VENV_PYTHON%" "%DEPENDENCY_VERIFIER%"'),
+            windows.index("echo Cleaning up old build files..."),
+        )
+
+    def test_windows_build_cleanup_guard_deletes_only_original_owned_directory(
+        self,
+    ) -> None:
+        windows = (PROJECT_ROOT / "build.bat").read_text(encoding="utf-8")
+        cleanup_line = next(
+            line for line in windows.splitlines() if "shutil.rmtree(original)" in line
+        )
+        marker = '-c "'
+        _, separator, remainder = cleanup_line.partition(marker)
+        self.assertTrue(separator)
+        cleanup_code, separator, _ = remainder.partition('" "%BUILD_TEMP_ROOT%"')
+        self.assertTrue(separator)
+
+        def invoke(path: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, "-c", cleanup_code, str(path), "gm2godot-build-"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        safe_path = Path(tempfile.mkdtemp(prefix="gm2godot-build-"))
+        (safe_path / "owned.txt").write_text("owned\n", encoding="utf-8")
+        safe_result = invoke(safe_path)
+        self.assertEqual(safe_result.returncode, 0, safe_result.stderr)
+        self.assertFalse(safe_path.exists())
+
+        wrong_prefix = Path(tempfile.mkdtemp(prefix="unrelated-build-"))
+        try:
+            wrong_result = invoke(wrong_prefix)
+            self.assertNotEqual(wrong_result.returncode, 0)
+            self.assertTrue(wrong_prefix.is_dir())
+        finally:
+            shutil.rmtree(wrong_prefix, ignore_errors=True)
+
+        with tempfile.TemporaryDirectory(prefix="gm2godot-cleanup-parent-") as raw_parent:
+            nested = Path(raw_parent) / "gm2godot-build-nested"
+            nested.mkdir()
+            nested_result = invoke(nested)
+            self.assertNotEqual(nested_result.returncode, 0)
+            self.assertTrue(nested.is_dir())
+
+        symlink_target = Path(tempfile.mkdtemp(prefix="gm2godot-build-target-"))
+        symlink_path = Path(tempfile.mkdtemp(prefix="gm2godot-build-link-"))
+        symlink_path.rmdir()
+        try:
+            (symlink_target / "preserve.txt").write_text("preserve\n", encoding="utf-8")
+            symlink_path.symlink_to(symlink_target, target_is_directory=True)
+            symlink_result = invoke(symlink_path)
+            self.assertNotEqual(symlink_result.returncode, 0)
+            self.assertTrue((symlink_target / "preserve.txt").is_file())
+            self.assertTrue(symlink_path.is_symlink())
+        finally:
+            symlink_path.unlink(missing_ok=True)
+            shutil.rmtree(symlink_target, ignore_errors=True)
+
     def test_unit_workflow_runs_discovery_for_golden_and_threshold_gates(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
         content = workflow.read_text(encoding="utf-8")
 
-        self.assertIn("pip install -r requirements.txt", content)
-        self.assertNotIn("pip install Pillow", content)
+        linux_job = content[content.index("  test:"):content.index(
+            "  windows-artifact-transactions:"
+        )]
+        self.assertIn("runs-on: ubuntu-24.04", linux_job)
+        self.assertIn("python-version: '3.12.13'", linux_job)
+        self.assertIn("architecture: x64", linux_job)
+        self.assertIn(
+            f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
+            f"            --constraint {LINUX_CONSTRAINT} \\\n"
+            "            -r requirements.txt",
+            linux_job,
+        )
+        self.assertIn("python -m unittest discover tests/ -v", linux_job)
         self.assertIn(
             "sudo apt-get install --yes --no-install-recommends libegl1",
-            content,
+            linux_job,
         )
-        self.assertIn("python -m unittest discover tests/ -v", content)
         self.assertLess(
-            content.index("sudo apt-get install --yes --no-install-recommends libegl1"),
-            content.index("python -m unittest discover tests/ -v"),
+            linux_job.index(
+                "sudo apt-get install --yes --no-install-recommends libegl1"
+            ),
+            linux_job.index("python -m unittest discover tests/ -v"),
         )
         self.assertTrue((PROJECT_ROOT / "tests" / "test_golden_conversion.py").is_file())
         self.assertTrue((PROJECT_ROOT / "tests" / "test_cli.py").is_file())
@@ -3237,9 +4517,16 @@ class TestCIWorkflows(unittest.TestCase):
         content = workflow.read_text(encoding="utf-8")
         windows_job = content[content.index("  windows-artifact-transactions:"):]
 
-        self.assertIn("runs-on: windows-latest", windows_job)
-        self.assertIn("python-version: '3.12'", windows_job)
-        self.assertIn("pip install -r requirements.txt", windows_job)
+        self.assertIn("runs-on: windows-2025", windows_job)
+        self.assertIn("python-version: '3.12.10'", windows_job)
+        self.assertIn("architecture: x64", windows_job)
+        self.assertIn("shell: bash", windows_job)
+        self.assertIn(
+            f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
+            f"            --constraint {WINDOWS_CONSTRAINT} \\\n"
+            "            -r requirements.txt",
+            windows_job,
+        )
         for module in (
             "tests.test_conversion_outcome",
             "tests.test_conversion_manifest",

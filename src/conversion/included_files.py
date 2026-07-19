@@ -1880,6 +1880,11 @@ def _included_stage_container_snapshot(
         raise OSError("Included Files staging container inventory changed")
     entries: list[_IncludedTreeEntry] = []
     for entry in metadata.entries:
+        if entry.kind == "file" and entry.fingerprint[5] != 1:
+            raise OSError(
+                "Included Files staging file has multiple hard links: "
+                + entry.relative_path
+            )
         if (
             entry.relative_path == _INCLUDED_FILES_ROOT_NAME
             and entry.fingerprint[:2] != staged_root_snapshot.identity
@@ -1942,6 +1947,11 @@ def _verify_staged_included_inventory(
     }
     for assigned_path, receipt in assigned_receipts.items():
         staged_entry = entries_by_path[assigned_path]
+        if staged_entry.fingerprint[5] != 1:
+            raise OSError(
+                "Included Files staging payload has multiple hard links: "
+                + assigned_path
+            )
         if (
             staged_entry.fingerprint[3] != receipt.byte_count
             or staged_entry.content_sha256 != receipt.sha256
@@ -9090,6 +9100,7 @@ class IncludedFilesConverter(BaseConverter):
         stage_container_identity: _PathIdentity | None = None
         active_error: BaseException | None = None
         transaction_committed = False
+        transaction_cleanup_managed = False
         try:
             previous_content_receipts = _included_registry_receipts_from_tree(
                 previous_root_snapshot,
@@ -9318,6 +9329,9 @@ class IncludedFilesConverter(BaseConverter):
                 previous_root_snapshot=previous_root_snapshot,
                 previous_registry_snapshot=previous_registry_snapshot,
             )
+            # From this handoff onward, only manifest-bound transaction
+            # cleanup may remove the stage, including after rollback.
+            transaction_cleanup_managed = True
             cleanup_warnings = _commit_included_output_set(
                 self.godot_project_path,
                 transaction,
@@ -9367,7 +9381,8 @@ class IncludedFilesConverter(BaseConverter):
                     )
                 )
                 if (
-                    not recovery_pending
+                    not transaction_cleanup_managed
+                    and not recovery_pending
                     and stage_container_path is not None
                     and stage_container_identity is not None
                 ):

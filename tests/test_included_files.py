@@ -4388,6 +4388,128 @@ os._exit(88)
             self.assertEqual(external_file.read(), "stable")
         self._assert_no_transaction_debris()
 
+    def test_staged_payload_hardlink_is_rejected_before_publication(self) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        external_path = os.path.join(
+            self.gm_dir,
+            "external-staged-payload.txt",
+        )
+        original_capture = included_files_module._capture_included_tree
+        hardlink_created = False
+
+        def capture_with_hardlink(
+            root_path: str,
+            *,
+            expected_parent_identity: (
+                included_files_module._PathIdentity | None
+            ) = None,
+            include_content: bool = True,
+        ) -> included_files_module._IncludedTreeSnapshot:
+            nonlocal hardlink_created
+            stage_name = os.path.basename(os.path.dirname(root_path))
+            if (
+                not hardlink_created
+                and os.path.basename(root_path)
+                == included_files_module._INCLUDED_FILES_ROOT_NAME
+                and stage_name.startswith(
+                    included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                )
+            ):
+                staged_path = os.path.join(root_path, "new.txt")
+                try:
+                    os.link(staged_path, external_path)
+                except (NotImplementedError, OSError) as error:
+                    self.skipTest(f"Hard links are unavailable: {error}")
+                hardlink_created = True
+            return original_capture(
+                root_path,
+                expected_parent_identity=expected_parent_identity,
+                include_content=include_content,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_capture_included_tree",
+                side_effect=capture_with_hardlink,
+            ),
+            self.assertRaisesRegex(OSError, "multiple hard links"),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(hardlink_created)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        with open(external_path, "rb") as external_file:
+            self.assertEqual(external_file.read(), b"new generation")
+        self._assert_no_transaction_debris()
+
+    def test_staged_registry_hardlink_is_rejected_before_publication(self) -> None:
+        self._write("old.txt", "old generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+
+        os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
+        self._write("new.txt", "new generation")
+        external_path = os.path.join(
+            self.gm_dir,
+            "external-staged-registry.gd",
+        )
+        external_content: bytes | None = None
+        original_snapshot = (
+            included_files_module._included_stage_container_snapshot
+        )
+
+        def snapshot_with_hardlink(
+            project_identity: included_files_module._PathIdentity,
+            stage_path: str,
+            stage_identity: included_files_module._PathIdentity,
+            staged_root_snapshot: included_files_module._IncludedTreeSnapshot,
+            staged_registry_identity: included_files_module._PathIdentity,
+            staged_registry_content: bytes,
+        ) -> included_files_module._IncludedTreeSnapshot:
+            nonlocal external_content
+            staged_registry_path = os.path.join(
+                stage_path,
+                "gml_included_file_registry.gd",
+            )
+            try:
+                os.link(staged_registry_path, external_path)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Hard links are unavailable: {error}")
+            with open(external_path, "rb") as external_file:
+                external_content = external_file.read()
+            return original_snapshot(
+                project_identity,
+                stage_path,
+                stage_identity,
+                staged_root_snapshot,
+                staged_registry_identity,
+                staged_registry_content,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_stage_container_snapshot",
+                side_effect=snapshot_with_hardlink,
+            ),
+            self.assertRaisesRegex(OSError, "multiple hard links"),
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(external_content)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        with open(external_path, "rb") as external_file:
+            self.assertEqual(external_file.read(), external_content)
+        self._assert_no_transaction_debris()
+
     def test_collision_and_availability_changes_use_normal_transactions(
         self,
     ) -> None:
@@ -5189,17 +5311,19 @@ os._exit(88)
         self._write("new.txt", "GOOD")
         original_commit = included_files_module._commit_included_output_set
         mutated = False
+        preserved_staged_file: str | None = None
 
         def mutate_then_commit(
             project_path: str,
             transaction: included_files_module._IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
-            nonlocal mutated
+            nonlocal mutated, preserved_staged_file
             staged_file = os.path.join(
                 transaction.staged_root_path,
                 "new.txt",
             )
+            preserved_staged_file = staged_file
             staged_stat = os.stat(staged_file)
             with open(staged_file, "r+b", buffering=0) as output_file:
                 output_file.write(b"EVIL")
@@ -5232,7 +5356,18 @@ os._exit(88)
             ).resources,
             ConversionCounts(requested=1, executed=1, failed=1),
         )
-        self._assert_no_transaction_debris()
+        self.assertIsNotNone(preserved_staged_file)
+        if preserved_staged_file is not None:
+            with open(preserved_staged_file, "rb") as staged_file:
+                self.assertEqual(staged_file.read(), b"EVIL")
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (
+                    os.path.basename(
+                        os.path.dirname(os.path.dirname(preserved_staged_file))
+                    ),
+                ),
+            )
 
     def test_first_registry_publication_failure_restores_absent_pair(
         self,
@@ -5376,10 +5511,31 @@ os._exit(88)
             ).resources,
             ConversionCounts(requested=1, executed=1, failed=1),
         )
-        self.assertEqual(
-            _included_files_transaction_debris(self.godot_dir),
-            (),
+        debris = _included_files_transaction_debris(self.godot_dir)
+        self.assertEqual(len(debris), 2)
+        stage_relative_path = debris[0]
+        self.assertTrue(
+            stage_relative_path.startswith(
+                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            ),
+            debris,
         )
+        self.assertEqual(
+            debris[1],
+            stage_relative_path
+            + "/"
+            + included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                stage_relative_path,
+                "included_files",
+                "new.txt",
+            ),
+            "rb",
+        ) as staged_file:
+            self.assertEqual(staged_file.read(), b"new")
 
     def test_unknown_registry_backup_destination_is_not_overwritten(
         self,
@@ -5576,6 +5732,200 @@ os._exit(88)
                 finalize_unfinished_as=None,
             ).resources,
             ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_committed_cleanup_preserves_unknown_stage_content(self) -> None:
+        logs: list[str] = []
+        converter = IncludedFilesConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=self.running.is_set,
+            max_workers=1,
+        )
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown committed stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
+
+        with patch.object(
+            included_files_module,
+            "_cleanup_recorded_included_tree",
+            side_effect=inject_unknown_stage_content,
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown committed stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertEqual(self._pair_snapshot()[1], {"new.txt": b"new"})
+        self.assertTrue(
+            any("transaction cleanup failed" in message for message in logs),
+            logs,
+        )
+
+    def test_cancelled_rollback_preserves_unknown_stage_content(self) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+        cancellation_injected = False
+
+        def cancel_after_journal(phase: str) -> None:
+            nonlocal cancellation_injected
+            if phase == "journal-prepared":
+                cancellation_injected = True
+                self.running.clear()
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "rollback-stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown cancelled stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=cancel_after_journal,
+            ),
+            patch.object(
+                included_files_module,
+                "_cleanup_recorded_included_tree",
+                side_effect=inject_unknown_stage_content,
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(cancellation_injected)
+        self.assertTrue(converter.conversion_step_result().cancelled)
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown cancelled stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.godot_dir, "included_files"))
+        )
+
+    def test_failed_rollback_preserves_unknown_stage_content(self) -> None:
+        converter = self._converter(max_workers=1)
+        self._write("new.txt", "new")
+        cleanup_recorded_tree = (
+            included_files_module._cleanup_recorded_included_tree
+        )
+        sentinel_path: str | None = None
+
+        def fail_after_journal(phase: str) -> None:
+            if phase == "journal-prepared":
+                raise OSError("injected commit failure")
+
+        def inject_unknown_stage_content(
+            path: str,
+            snapshot: included_files_module._IncludedTreeSnapshot,
+            expected_parent_identity: tuple[int, int],
+            transaction_id: str,
+            role: str,
+        ) -> tuple[str, ...]:
+            nonlocal sentinel_path
+            if sentinel_path is None and role == "rollback-stage":
+                sentinel_path = os.path.join(path, "unknown-sentinel.txt")
+                with open(sentinel_path, "xb") as sentinel_file:
+                    sentinel_file.write(b"unknown failed stage content")
+                    sentinel_file.flush()
+                    os.fsync(sentinel_file.fileno())
+            return cleanup_recorded_tree(
+                path,
+                snapshot,
+                expected_parent_identity,
+                transaction_id,
+                role,
+            )
+
+        with (
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=fail_after_journal,
+            ),
+            patch.object(
+                included_files_module,
+                "_cleanup_recorded_included_tree",
+                side_effect=inject_unknown_stage_content,
+            ),
+            self.assertRaisesRegex(OSError, "injected commit failure"),
+        ):
+            converter.convert_all()
+
+        self.assertIsNotNone(sentinel_path)
+        if sentinel_path is not None:
+            with open(sentinel_path, "rb") as sentinel_file:
+                self.assertEqual(
+                    sentinel_file.read(),
+                    b"unknown failed stage content",
+                )
+            self.assertEqual(
+                _included_files_transaction_debris(self.godot_dir),
+                (os.path.basename(os.path.dirname(sentinel_path)),),
+            )
+        self.assertFalse(
+            os.path.lexists(os.path.join(self.godot_dir, "included_files"))
         )
 
     def test_transaction_source_swap_restores_unknown_replacement_without_loss(

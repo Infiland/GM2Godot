@@ -610,10 +610,14 @@ def _run_pip(
     *,
     maximum_stdout_bytes: int,
 ) -> CommandResult:
-    # Python isolated mode protects module resolution; pip isolated mode and
-    # the filtered environment independently protect command configuration.
+    # Python isolated mode protects module resolution; because it ignores
+    # PYTHON* settings, the interpreter flag must keep pip's redirected JSON
+    # output lossless on Windows regardless of the ANSI code page. Pip isolated
+    # mode and the filtered environment independently protect configuration.
     command = [
         sys.executable,
+        "-X",
+        "utf8",
         "-I",
         "-m",
         "pip",

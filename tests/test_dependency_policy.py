@@ -326,6 +326,8 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
             )
         command_prefix = [
             sys.executable,
+            "-X",
+            "utf8",
             "-I",
             "-m",
             "pip",
@@ -347,6 +349,8 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         baseline = subprocess.run(
             [
                 sys.executable,
+                "-X",
+                "utf8",
                 "-I",
                 "-m",
                 "pip",
@@ -786,7 +790,9 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
             "SystemRoot": "C:\\Windows",
             "PIP_PATH": "forged-site-packages",
             "PIP_CONFIG_FILE": "forged-pip.ini",
+            "PYTHONIOENCODING": "cp1252",
             "PYTHONPATH": "forged-pythonpath",
+            "PYTHONUTF8": "0",
             "pythonwarnings": "error",
         }
         with mock.patch.dict(verifier.os.environ, poisoned_environment, clear=True):
@@ -805,6 +811,42 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         self.assertIsNot(keyword_arguments["stdout"], subprocess.PIPE)
         self.assertIsNot(keyword_arguments["stderr"], subprocess.PIPE)
         self.assertIsNot(keyword_arguments["stdout"], keyword_arguments["stderr"])
+
+    def test_pip_subprocess_forces_utf8_for_unicode_output_under_legacy_locale(self) -> None:
+        payload = '{"description":"Hello from pip \U0001f44b"}\n'
+        factory = _PopenFactory([_PopenScenario(stdout=payload.encode("utf-8"))])
+        run_pip = cast(Callable[..., verifier.CommandResult], getattr(verifier, "_run_pip"))
+        poisoned_environment = {
+            "LC_ALL": "C",
+            "PATH": "safe-path",
+            "PYTHONIOENCODING": "cp1252",
+            "PYTHONUTF8": "0",
+        }
+
+        with (
+            mock.patch.dict(verifier.os.environ, poisoned_environment, clear=True),
+            mock.patch.object(verifier.subprocess, "Popen", side_effect=factory) as popen_mock,
+        ):
+            result = run_pip(
+                ("inspect",),
+                "pip-inspect",
+                maximum_stdout_bytes=verifier.MAX_INSPECT_BYTES,
+            )
+
+        call = popen_mock.call_args
+        self.assertIsNotNone(call)
+        self.assertEqual(
+            cast(list[str], call.args[0])[:5],
+            [sys.executable, "-X", "utf8", "-I", "-m"],
+        )
+        environment = cast(dict[str, str], call.kwargs["env"])
+        self.assertEqual(
+            environment,
+            {"LC_ALL": "C", "PATH": "safe-path", "PIP_CONFIG_FILE": os.devnull},
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, payload)
+        self.assertEqual(result.stderr, "")
 
     def test_constraint_output_aliases_are_rejected_before_pip_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:

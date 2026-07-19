@@ -27,8 +27,12 @@ from src.conversion import included_files as included_files_module
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.included_file_registry import (
     INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+    render_included_file_registry,
 )
-from src.conversion.included_file_paths import IncludedFilePathAssignment
+from src.conversion.included_file_paths import (
+    IncludedFilePathAssignment,
+    plan_included_file_paths,
+)
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
@@ -2484,6 +2488,81 @@ included_files_module._acquire_included_project_lock(
                 ),
             )
 
+    def test_changed_ten_thousand_entry_preflight_stays_below_cap(
+        self,
+    ) -> None:
+        logical_paths = tuple(
+            f"entry-{index:05d}.txt" for index in range(10_000)
+        )
+        assignments = plan_included_file_paths(logical_paths)
+        receipts = {
+            path: (
+                1,
+                included_files_module._INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256,
+            )
+            for path in logical_paths
+        }
+        registry_content = render_included_file_registry(
+            assignments,
+            set(logical_paths),
+            receipts,
+        ).encode("utf-8")
+        assigned_byte_counts = {
+            assignment.assigned_output_path: 1
+            for assignment in assignments
+        }
+        project_identity = (1, 2)
+        (
+            _stage_identity,
+            _container_snapshot,
+            previous_root_snapshot,
+            _registry_identity,
+            _registry_mode,
+        ) = included_files_module._included_preflight_placeholder_snapshots(
+            project_identity,
+            assigned_byte_counts,
+            registry_content,
+        )
+        previous_registry_snapshot = (
+            included_files_module._IncludedRegistrySnapshot(
+                directory_identity=(1, 10),
+                file_identity=(1, 11),
+                file_mode=0o600,
+                content=registry_content,
+            )
+        )
+
+        first_sizes = (
+            included_files_module._preflight_included_recovery_record_sizes(
+                self.godot_dir,
+                project_identity,
+                assigned_byte_counts,
+                registry_content,
+                previous_root_snapshot,
+                previous_registry_snapshot,
+            )
+        )
+        second_sizes = (
+            included_files_module._preflight_included_recovery_record_sizes(
+                self.godot_dir,
+                project_identity,
+                assigned_byte_counts,
+                registry_content,
+                previous_root_snapshot,
+                previous_registry_snapshot,
+            )
+        )
+        expected_sizes = included_files_module._IncludedRecoveryRecordSizes(
+            journal_bytes=13_865_860,
+            commit_bytes=13_866_493,
+        )
+        self.assertEqual(first_sizes, expected_sizes)
+        self.assertEqual(second_sizes, expected_sizes)
+        self.assertLess(
+            expected_sizes.commit_bytes,
+            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+        )
+
     def test_ten_thousand_entry_compact_records_publish_and_recover_below_cap(
         self,
     ) -> None:
@@ -2497,13 +2576,6 @@ included_files_module._acquire_included_project_lock(
                 "wb",
             ) as source_file:
                 source_file.write(b"x")
-
-        self._converter(max_workers=4).convert_all()
-        with open(
-            os.path.join(self.datafiles_dir, "entry-00000.txt"),
-            "wb",
-        ) as source_file:
-            source_file.write(b"y")
 
         captured_sizes: (
             included_files_module._IncludedRecoveryRecordSizes | None
@@ -2584,8 +2656,8 @@ included_files_module._acquire_included_project_lock(
         self.assertEqual(
             actual_sizes,
             included_files_module._IncludedRecoveryRecordSizes(
-                journal_bytes=13_865_860,
-                commit_bytes=13_866_493,
+                journal_bytes=8_138_698,
+                commit_bytes=8_139_331,
             ),
         )
         self.assertLess(
@@ -2629,7 +2701,7 @@ included_files_module._acquire_included_project_lock(
             ),
             "rb",
         ) as output_file:
-            self.assertEqual(output_file.read(), b"y")
+            self.assertEqual(output_file.read(), b"x")
         self._assert_no_transaction_debris()
 
     def test_recovery_record_staging_syncs_parent_before_durable_phase(

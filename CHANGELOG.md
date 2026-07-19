@@ -4,7 +4,7 @@
 
 - Added deterministic format-v2 Included Files recovery records with compact fixed-width tree rows while retaining strict canonical parsing and recovery for existing format-v1 journals and commit markers.
 - Preflighted the byte-exact journal and commit serialization before creating a payload stage, publishing recovery state, or changing the public generation, without increasing the 16 MiB canonical-record limit.
-- Added malformed and bounded-parser coverage, old/new-format interruption recovery at every publication boundary, and a changed 10,000-file generation whose 13,866,493-byte commit record publishes and recovers under exact Godot 4.7.1 and GameMaker LTS 2026 validation.
+- Added malformed and bounded-parser coverage, old/new-format interruption recovery at every publication boundary, a deterministic 13,866,493-byte changed-generation preflight, and 10,000-file publication/recovery under exact Godot 4.7.1 and GameMaker LTS 2026 validation.
 
 ## 0.7.34 - 2026-07-20
 

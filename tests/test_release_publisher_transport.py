@@ -171,7 +171,7 @@ class TestReleasePaginationTransport(unittest.TestCase):
                 transport = _PageTransport(
                     [
                         _page_response(
-                            [{"id": RELEASE_ID, "tag_name": "v0.7.17"}],
+                            [{"id": RELEASE_ID, "tag_name": "v0.7.18"}],
                             headers={"link": _next_link(next_path)},
                         ),
                         _page_response([page_two_release]),
@@ -241,7 +241,7 @@ class TestReleasePaginationTransport(unittest.TestCase):
 
     def test_exactly_one_hundred_releases_without_link_fetches_page_two(self) -> None:
         first_page = [{"id": index + 1} for index in range(100)]
-        page_two_release = {"id": 9009, "tag_name": "v0.7.17", "foreign": True}
+        page_two_release = {"id": 9009, "tag_name": "v0.7.18", "foreign": True}
         transport = _PageTransport([_page_response(first_page), _page_response([page_two_release])])
 
         releases = _api(transport).list_releases("release-fallback-pagination")
@@ -274,7 +274,7 @@ class TestReleasePaginationTransport(unittest.TestCase):
         page_two_release = {"id": 9009, "tag_name": "v9.9.9", "foreign": True}
         first = _FakeHttpsConnection(
             response=_FakeHttpResponse(
-                [{"id": RELEASE_ID, "tag_name": "v0.7.17"}],
+                [{"id": RELEASE_ID, "tag_name": "v0.7.18"}],
                 [
                     ("Link", f'<{next_url}>; rel="next"'),
                     ("Link", f'<{last_url}>; rel="last"'),

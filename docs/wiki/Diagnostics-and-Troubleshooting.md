@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.20 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.21 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-19
 
@@ -35,6 +35,8 @@ Every valid `convert` command prints exactly one terminal line beginning `GM2God
 | `partial` | Every requested converter step completed, but at least one tracked resource was skipped or failed. The output can be useful, but the missing work must be understood. |
 | `failed` | The latest invocation terminated as a failure, so its filesystem output must not be assumed usable. `failed_step` and `failure_phase` identify preflight, runtime, report, or finalizer context when available. A separately digest-verified canonical candidate can still exist from an earlier phase or attempt. |
 | `cancelled` | A user stop request or `SIGINT` was observed before the CLI's terminal-summary commit point. Generated output may be incomplete, although a late cancellation can coexist with a separately digest-verified canonical candidate. |
+
+The GUI uses the same terminal outcome instead of inferring success from the worker thread returning. Full success is green, partial output is amber, failure is red, and cancellation is blue. Every state prints the exact resource counts. A usable partial result also prints the absolute path to `gm2godot/conversion_diagnostics.md`; it never receives the green full-success message.
 
 For converters and resources, `requested = completed + skipped + failed`. Completed and failed work was executed. A resource or converter interrupted after it started can be recorded as both executed and skipped, so `executed` and `skipped` are intentionally not disjoint. The named `steps` ledger follows conversion-plan order and is usually the clearest place to find where work stopped.
 

@@ -5,22 +5,23 @@ import time
 import webbrowser
 import multiprocessing
 
-from PySide6.QtCore import QThread, QTimer, Signal, QObject
+from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox
 
 from src.gui.icons import AppIcons
 from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker
+from src.gui.workers import ConversionWorker, ConversionWorkerResult
 from src.gui.panels.path_panel import PathPanel
 from src.gui.panels.action_panel import ActionPanel
-from src.gui.panels.console_panel import ConsolePanel
+from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
 from src.gui.panels.progress_panel import ProgressPanel
 from src.gui.panels.info_bar import InfoBar
 from src.gui.dialogs.settings_dialog import SettingsDialog
 from src.gui.dialogs.about_dialog import AboutDialog
 from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
 from src.gui.dialogs.language_dialog import LanguageDialog
+from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.conversion.project_godot import (
     GODOT_PROJECT_FILENAME,
@@ -301,7 +302,7 @@ class MainWindow(QMainWindow):
         self._worker.log_message.connect(self._console.append_log)
         self._worker.update_log_message.connect(self._console.update_last_line)
         self._worker.progress_updated.connect(self._progress.progress_bar.set_progress)
-        self._worker.status_updated.connect(self._progress.status_label.setText)
+        self._worker.status_updated.connect(self._progress.set_running_status)
         self._worker.conversion_finished.connect(self._conversion_complete)
 
         self._conversion_thread.started.connect(self._worker.run)
@@ -346,6 +347,7 @@ class MainWindow(QMainWindow):
         self._conversion_running.set()
         self._console.clear()
         self._progress.progress_bar.set_progress(0)
+        self._progress.set_running_status("")
         self._console.append_log(get_localized("Console_ConversionStart"))
 
     def _stop_conversion(self) -> None:
@@ -354,33 +356,93 @@ class MainWindow(QMainWindow):
             self._console.append_log(get_localized("Console_ConversionStopping"))
             self._action_panel.stop_button.setEnabled(False)
 
-    def _conversion_complete(self, succeeded: bool, error_message: str) -> None:
-        if not succeeded:
-            failure_message = get_localized("Console_ConversionFailed").format(
-                error=error_message
-            )
-            self._progress.status_label.setText(failure_message)
-            self._console.append_log(failure_message)
-        elif self._conversion_running.is_set():
-            self._progress.progress_bar.set_progress(100)
-            self._progress.status_label.setText(get_localized("Console_ConversionComplete"))
-            self._console.append_log(get_localized("Console_ConversionComplete_B"), success=True)
-        else:
-            stopped_message = get_localized("Console_ConversionStopped")
-            self._progress.status_label.setText(stopped_message)
-            self._console.append_log(stopped_message)
+    @Slot(object)
+    def _conversion_complete(self, result: ConversionWorkerResult) -> None:
+        try:
+            self._present_conversion_result(result)
+        finally:
+            self._finish_conversion_lifecycle()
 
+    def _present_conversion_result(self, result: ConversionWorkerResult) -> None:
+        outcome = result.outcome
+        if result.error_message is not None:
+            failure_message = get_localized("Console_ConversionFailed").format(
+                error=result.error_message
+            )
+            self._progress.set_terminal_status(failure_message, "failed")
+            self._console.append_log(failure_message, "error")
+            if outcome is not None:
+                self._append_resource_counts(outcome, "error")
+        elif outcome is None:
+            failure_message = get_localized("Console_ConversionFailed").format(
+                error="missing terminal outcome"
+            )
+            self._progress.set_terminal_status(failure_message, "failed")
+            self._console.append_log(failure_message, "error")
+        elif outcome.state == "success":
+            self._progress.progress_bar.set_progress(100)
+            self._progress.set_terminal_status(
+                get_localized("Console_ConversionComplete"), "success"
+            )
+            self._console.append_log(
+                get_localized("Console_ConversionComplete_B"), "success"
+            )
+            self._append_resource_counts(outcome, "success")
+        elif outcome.state == "partial":
+            self._progress.progress_bar.set_progress(100)
+            partial_message = get_localized("Console_ConversionPartial")
+            self._progress.set_terminal_status(partial_message, "partial")
+            self._console.append_log(partial_message, "warning")
+            self._append_resource_counts(outcome, "warning")
+            if result.diagnostic_report_path is not None:
+                self._console.append_log(
+                    get_localized("Console_ConversionDiagnostics").format(
+                        report_path=result.diagnostic_report_path
+                    ),
+                    "warning",
+                )
+        elif outcome.state == "failed":
+            failure_message = get_localized("Console_ConversionFailedState")
+            self._progress.set_terminal_status(failure_message, "failed")
+            self._console.append_log(failure_message, "error")
+            self._append_resource_counts(outcome, "error")
+        elif outcome.state == "cancelled":
+            stopped_message = get_localized("Console_ConversionStopped")
+            self._progress.set_terminal_status(stopped_message, "cancelled")
+            self._console.append_log(stopped_message, "cancelled")
+            self._append_resource_counts(outcome, "cancelled")
+
+    def _finish_conversion_lifecycle(self) -> None:
         self._conversion_running.clear()
         self._action_panel.convert_button.setEnabled(True)
         self._action_panel.stop_button.setEnabled(False)
         self._action_panel.settings_button.setEnabled(True)
         self._stop_timer()
 
-        if self._conversion_thread:
-            self._conversion_thread.quit()
-            self._conversion_thread.wait()
+        try:
+            if self._conversion_thread:
+                self._conversion_thread.quit()
+                self._conversion_thread.wait()
+        finally:
             self._conversion_thread = None
             self._worker = None
+
+    def _append_resource_counts(
+        self,
+        outcome: ConversionOutcome,
+        style: ConsoleLogStyle,
+    ) -> None:
+        counts = outcome.resources
+        self._console.append_log(
+            get_localized("Console_ConversionResourceCounts").format(
+                requested=counts.requested,
+                executed=counts.executed,
+                completed=counts.completed,
+                skipped=counts.skipped,
+                failed=counts.failed,
+            ),
+            style,
+        )
 
     # --- Timer ---
 

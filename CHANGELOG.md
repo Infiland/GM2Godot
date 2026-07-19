@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.21 - 2026-07-19
+
+- Forwarded exact terminal conversion outcomes through the GUI worker so partial, failed, and cancelled runs no longer collapse into the green success state.
+- Added localized resource-count and diagnostic-report guidance with distinct success, partial, failed, and cancelled presentation.
+
 ## 0.7.20 - 2026-07-19
 
 - Stamped the macOS app bundle with the stable `land.infi.gm2godot` identifier and exact three-component release version from `src/version.py` for both its short and build versions.

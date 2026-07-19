@@ -27,6 +27,7 @@ THEME = {
     "log_success": "#98c379",
     "log_warning": "#e5c07b",
     "log_error": "#e06c75",
+    "log_cancelled": "#61afef",
 
     # Disabled / borders
     "disabled_bg": "#333333",

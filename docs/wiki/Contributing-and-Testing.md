@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.33 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.34 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-20
 
@@ -117,6 +117,19 @@ Worker-scheduling changes must also retain the deterministic 10,000-source submi
   tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_cancellation_stops_worker_admission_within_window \
   tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_worker_counts_produce_identical_output_and_diagnostics
 ```
+
+Included Files tree-traversal changes must retain the deterministic depth probe on both the descriptor and path-fallback implementations, byte-equivalent snapshots, and deep directory/ancestor swap rejection:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_deep_tree_capture_binding_work_scales_linearly \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_deep_directory_swap_is_not_followed_during_tree_capture \
+  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_fallback_deep_directory_swap_during_scan_is_detected_before_hashing
+```
+
+The depth probe exercises 25, 50, 100, and 200 nested directories, requires at most `16 * depth + 64` binding checks, and limits each doubling to 2.25x work. Run the native Windows Included Files workflow for path-fallback and junction coverage; POSIX-only descriptor results do not substitute for the Windows path.
 
 Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
 

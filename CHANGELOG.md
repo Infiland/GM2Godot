@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.34 - 2026-07-20
+
+- Replaced recursively nested ancestor checks during descriptor-pinned Included Files capture with direct parent/child verification over the retained descriptor chain, reducing binding work from quadratic to linear in tree depth.
+- Applied equivalent current-directory identity verification to the path fallback used on native Windows while retaining no-follow opens, mount rejection, deterministic ordering, pre/post binding checks, and fail-closed handling of directory replacement and concurrent mutation.
+- Added deterministic depth-scaling bounds, descriptor/fallback snapshot equivalence, deep ancestor-swap coverage, and exact GameMaker LTS 2026 and Godot 4.7.1 compatibility validation.
+
 ## 0.7.33 - 2026-07-20
 
 - Bounded unchanged-generation receipt validation and changed-generation Included Files staging to at most twice the configured worker count, so future and submission bookkeeping no longer scales with the complete source set.

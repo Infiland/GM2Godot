@@ -28,6 +28,10 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 
 `res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` are published as one recoverable converter-owned generation. A durable journal and commit marker make the next conversion select and verify either the complete previous generation or the complete committed generation after an interruption, while a cooperative per-project lock rejects another GM2Godot converter. While the stable journal exists, relative GML reads fail closed to `user://` instead of observing either public path. During generated `GMRuntime` autoload startup, format-v2 registry entries are verified as one complete generation against their byte counts and SHA-256 hashes in deterministic 1 MiB chunks. Missing, malformed, incomplete, or mismatched generations expose no packaged entries; normal first file access uses the established receipts without hashing the payload again. This adds one bounded-memory startup pass over all emitted Included File bytes. Format-v2 recovery records use compact, fixed-width tree rows whose exact journal and commit sizes are preflighted before payload staging; the 16 MiB cap remains unchanged and format-v1 interruptions remain recoverable. Descriptor-pinned and native Windows path traversal keep binding verification linear in managed-tree depth while retaining no-follow, mount, replacement, and concurrent-mutation rejection. The public `res://` paths remain stable. Do not convert while a live game or a non-cooperating writer is accessing the generated project; they do not participate in the converter lock and may retain already-open or cached state.
 
+Version 0.7.38 also provides the internal destination-wide workspace foundation for the next transaction stages. A `ManagedOutputWorkspace` holds a non-blocking operating-system lock at `.gm2godot-managed-output.lock`, proves that its private transaction directory under `.gm2godot-managed-output/` shares the destination filesystem, and snapshots or copies only an explicit allowlist of regular files. Strict ownership markers bind cleanup to the exact transaction; redirected, mounted, multiply-linked, replaced, or unknown reserved state is preserved with an error instead of traversed or guessed at.
+
+This foundation does **not** route `Converter`, the CLI, or individual converters to staging yet, and it does not inventory, publish, roll back, or recover the complete managed generation. Those remain separate transaction steps. Current conversion semantics and generated GameMaker/Godot runtime behavior are unchanged in 0.7.38.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -48,7 +52,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.37`.
+Current source version: `0.7.38`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

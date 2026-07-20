@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.38 - 2026-07-20
+
+- Added a reusable destination-wide managed-output workspace session with a non-blocking operating-system lock, destination-local private stages, explicit same-filesystem proof, and retained no-follow destination, staging-parent, and stage bindings.
+- Added exact allowlist snapshot and streaming-copy primitives plus bounded identity-bound ownership markers and fail-closed cleanup that preserves redirected, mounted, hard-linked, replaced, or unknown lookalike state without changing public destination bytes or modes.
+- Added focused cancellation, staging-failure, lock-contention, cleanup-retry, POSIX path-swap/symlink/hard-link/mount, and native Windows junction/read-only coverage while preserving GameMaker LTS 2026 and exact Godot 4.7.1 behavior; production converters are intentionally not routed through this foundation yet.
+
 ## 0.7.37 - 2026-07-20
 
 - Moved format-v2 Included File integrity establishment into the generated `GMRuntime` autoload startup, before script initialization or the main scene, so normal exact-path, canonical-path, `file_exists`, text-read, and buffer-load calls perform no full-payload checksum.

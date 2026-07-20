@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.35 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.36 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-20
 
@@ -55,6 +55,8 @@ For relative file and buffer reads, the generated runtime checks the exact `user
 When source paths collapse to the same packaged name, or when one normalized file path would block another file's directory, GM2Godot reserves natural names and deterministically assigns `_2`, `_3`, and later suffixes before the extension. The emitted files, asset registry, and conversion manifest use the same assignments. `GM2GD-INCLUDED-FILE-PATH-COLLISION` reports the mapping; rename these conflicts in GameMaker because normalized lookup cannot distinguish every original alias. Publication also rejects redirected or non-regular paths in the managed `included_files/` output tree instead of writing through them.
 
 Unchanged-generation receipt validation and changed-generation staging keep at most twice the configured worker count unfinished. The source plan and completed receipt map still scale with the Included File count, but queued futures and submission bookkeeping do not. Once cancellation or the first terminal worker failure is observed, GM2Godot admits no further source work, cancels pending tasks where possible, drains only the bounded running remainder, and leaves the previous public generation unchanged.
+
+When a changed generation retains the same planned paths, immutable source-content receipts flow into copying and staged-tree capture instead of rereading bytes already proven for that attempt. Reuse remains bound to the exact source path and handle, assigned path, staged and public output identities, transaction, and generation. GM2Godot still hashes both the source and published tree at the final pre-commit boundary; any same-size mutation, replacement, redirection, hard-link, mount, or directory swap fails closed and restores the previous complete root/registry pair. The deterministic single-file payload bounds are 5x reads for an initial generation, 4x for an unchanged generation, and at most 8x for a changed generation.
 
 `res://included_files/` and `res://gm2godot/gml_included_file_registry.gd` form one recoverable converter-owned generation. Before replacing either public path, GM2Godot durably publishes `.gm2godot-included-files-transaction.json`, which records the exact previous and staged identities, bytes, hashes, and transaction paths. Format v2 stores tree entries as strict compact rows with fixed-width integer fields; recovery continues to accept canonical format-v1 journals and commit markers. After both new paths have been published and verified, GM2Godot durably publishes `.gm2godot-included-files-commit.json`; the marker embeds the complete cleanup manifest so recovery remains possible if journal retirement was interrupted. At the start of the next Included Files conversion, a prepared transaction with no matching commit marker is rolled back to the complete previous pair; a transaction with the matching marker is verified as the complete new pair and its cleanup is finalized. The public `res://` paths do not change, so existing projects need no path migration.
 

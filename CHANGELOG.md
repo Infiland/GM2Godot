@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.36 - 2026-07-20
+
+- Reused immutable source and staged-output content receipts during changed Included Files publication while binding them to the exact source path and handle, assigned path, output identities, transaction, and generation.
+- Retained final source and published-tree SHA-256 validation before the commit marker, so same-size mutation, replacement, redirection, mount, hard-link, and directory-swap failures still restore the previous complete root/registry generation.
+- Bounded the deterministic 64 MiB changed-payload path to at most 8x payload reads while retaining the existing 5x initial and 4x unchanged bounds, with focused receipt-boundary, rollback, and exact Godot 4.7.1/GameMaker LTS 2026 coverage.
+
 ## 0.7.35 - 2026-07-20
 
 - Added deterministic format-v2 Included Files recovery records with compact fixed-width tree rows while retaining strict canonical parsing and recovery for existing format-v1 journals and commit markers.

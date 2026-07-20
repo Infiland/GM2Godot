@@ -183,10 +183,30 @@ def _run_bounded_included_worker_phase(
 
 
 @dataclass(frozen=True)
-class _IncludedCopyReceipt:
+class _IncludedPayloadReceipt:
     source_fingerprint: _IncludedSourceFingerprint
     byte_count: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _IncludedCopyReceipt:
+    payload: _IncludedPayloadReceipt
+    output_fingerprint: _PathFingerprint
+    output_ctime_ns: int
+    output_handle_state: _HandleState
+
+    @property
+    def source_fingerprint(self) -> _IncludedSourceFingerprint:
+        return self.payload.source_fingerprint
+
+    @property
+    def byte_count(self) -> int:
+        return self.payload.byte_count
+
+    @property
+    def sha256(self) -> str:
+        return self.payload.sha256
 
 
 @dataclass(frozen=True)
@@ -201,9 +221,28 @@ class _IncludedSourceBinding:
 
 @dataclass(frozen=True)
 class _IncludedNoOpSourceReceipt:
+    logical_path: str
+    assigned_path: str
     binding: _IncludedSourceBinding
     byte_count: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _IncludedGenerationMatch:
+    unchanged: bool
+    source_receipts: tuple[_IncludedNoOpSourceReceipt, ...]
+
+
+@dataclass(frozen=True)
+class _IncludedGenerationContentReceipt:
+    transaction_id: str
+    generation_identity: _PathIdentity
+    stage_container_identity: _PathIdentity
+    source: _IncludedNoOpSourceReceipt
+    staged_output_path: str
+    public_output_path: str
+    output: _IncludedCopyReceipt
 
 
 @dataclass(frozen=True)
@@ -271,6 +310,16 @@ class _IncludedOutputSetTransaction:
     previous_registry_snapshot: _IncludedRegistrySnapshot
     recovery_record_sizes: _IncludedRecoveryRecordSizes | None = field(
         default=None,
+        compare=False,
+        repr=False,
+    )
+    publication_transaction_id: str | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
+    content_receipts: tuple[_IncludedGenerationContentReceipt, ...] = field(
+        default=(),
         compare=False,
         repr=False,
     )
@@ -1930,6 +1979,242 @@ def _included_tree_matches_source_receipts(
         and entries_by_path[assigned_path].content_sha256 == receipt.sha256
         for assigned_path, receipt in assigned_receipts.items()
     )
+
+
+def _included_generation_receipts_by_path(
+    *,
+    transaction_id: str,
+    generation_identity: _PathIdentity,
+    stage_container_identity: _PathIdentity,
+    staged_root_path: str,
+    public_root_path: str,
+    receipts: tuple[_IncludedGenerationContentReceipt, ...],
+) -> dict[str, _IncludedGenerationContentReceipt]:
+    if not receipts:
+        raise OSError("Included Files generation receipt set is empty")
+    receipts_by_path: dict[str, _IncludedGenerationContentReceipt] = {}
+    normalized_staged_root = os.path.normcase(os.path.abspath(staged_root_path))
+    normalized_public_root = os.path.normcase(os.path.abspath(public_root_path))
+    for receipt in receipts:
+        assigned_path = receipt.source.assigned_path
+        assigned_components = tuple(assigned_path.split("/"))
+        if (
+            not assigned_path
+            or "\\" in assigned_path
+            or any(
+                component in {"", ".", ".."}
+                for component in assigned_components
+            )
+            or assigned_path in receipts_by_path
+        ):
+            raise OSError("Invalid Included Files generation receipt path")
+        expected_staged_path = os.path.normcase(
+            os.path.abspath(
+                os.path.join(
+                    normalized_staged_root,
+                    *assigned_components,
+                )
+            )
+        )
+        expected_public_path = os.path.normcase(
+            os.path.abspath(
+                os.path.join(
+                    normalized_public_root,
+                    *assigned_components,
+                )
+            )
+        )
+        output = receipt.output
+        output_binding = (
+            output.output_handle_state[0],
+            output.output_handle_state[1],
+            stat.S_IFMT(output.output_handle_state[2]),
+            output.output_handle_state[3],
+            output.output_handle_state[4],
+            output.output_handle_state[6],
+        )
+        path_binding = (
+            output.output_fingerprint[0],
+            output.output_fingerprint[1],
+            stat.S_IFMT(output.output_fingerprint[2]),
+            output.output_fingerprint[3],
+            output.output_fingerprint[4],
+            output.output_fingerprint[5],
+        )
+        if (
+            receipt.transaction_id != transaction_id
+            or receipt.generation_identity != generation_identity
+            or receipt.stage_container_identity
+            != stage_container_identity
+            or receipt.source.logical_path == ""
+            or receipt.staged_output_path != expected_staged_path
+            or receipt.public_output_path != expected_public_path
+            or output.source_fingerprint
+            != receipt.source.binding.handle_state[:6]
+            or output.byte_count != receipt.source.byte_count
+            or output.sha256 != receipt.source.sha256
+            or output_binding != path_binding
+            or output.output_fingerprint[5] != 1
+        ):
+            raise OSError(
+                "Included Files generation content receipt binding changed"
+            )
+        receipts_by_path[assigned_path] = receipt
+    return receipts_by_path
+
+
+def _capture_included_tree_from_generation_receipts(
+    staged_root_path: str,
+    *,
+    expected_parent_identity: _PathIdentity,
+    transaction_id: str,
+    generation_identity: _PathIdentity,
+    stage_container_identity: _PathIdentity,
+    receipts: tuple[_IncludedGenerationContentReceipt, ...],
+    published: bool = False,
+) -> _IncludedTreeSnapshot:
+    if not receipts:
+        raise OSError("Included Files generation receipt set is empty")
+    project_path = os.path.dirname(os.path.dirname(staged_root_path))
+    public_root_path = os.path.join(
+        project_path,
+        _INCLUDED_FILES_ROOT_NAME,
+    )
+    receipts_by_path = _included_generation_receipts_by_path(
+        transaction_id=transaction_id,
+        generation_identity=generation_identity,
+        stage_container_identity=stage_container_identity,
+        staged_root_path=staged_root_path,
+        public_root_path=public_root_path,
+        receipts=receipts,
+    )
+    root_path = public_root_path if published else staged_root_path
+    metadata = _capture_included_tree(
+        root_path,
+        expected_parent_identity=expected_parent_identity,
+        include_content=False,
+    )
+    if metadata.identity != generation_identity:
+        raise OSError("Included Files generation receipt root changed")
+    file_entries = {
+        entry.relative_path: entry
+        for entry in metadata.entries
+        if entry.kind == "file"
+    }
+    if file_entries.keys() != receipts_by_path.keys():
+        raise OSError("Included Files generation receipt inventory changed")
+
+    entries: list[_IncludedTreeEntry] = []
+    for entry in metadata.entries:
+        if entry.kind != "file":
+            entries.append(entry)
+            continue
+        receipt = receipts_by_path[entry.relative_path]
+        expected_output_path = (
+            receipt.public_output_path
+            if published
+            else receipt.staged_output_path
+        )
+        actual_output_path = os.path.normcase(
+            os.path.abspath(
+                os.path.join(
+                    root_path,
+                    *entry.relative_path.split("/"),
+                )
+            )
+        )
+        if (
+            actual_output_path != expected_output_path
+            or entry.fingerprint != receipt.output.output_fingerprint
+            or entry.ctime_ns != receipt.output.output_ctime_ns
+        ):
+            raise OSError(
+                "Included Files generation receipt output identity changed: "
+                + entry.relative_path
+            )
+        entries.append(
+            replace(
+                entry,
+                content_sha256=receipt.output.sha256,
+            )
+        )
+    return _IncludedTreeSnapshot(
+        root_fingerprint=metadata.root_fingerprint,
+        entries=tuple(entries),
+    )
+
+
+def _verify_included_generation_source_receipt(
+    receipt: _IncludedNoOpSourceReceipt,
+    *,
+    validate_content: bool,
+) -> None:
+    binding = receipt.binding
+    source_path = binding.filesystem_path
+    project_root = binding.directory_identities[0][0]
+    with _open_included_file_validation_stream(
+        source_path,
+        deny_writes=validate_content,
+    ) as source_file:
+        expected_stat = os.fstat(source_file.fileno())
+
+        def capture_binding() -> _IncludedSourceBinding:
+            lexical_stat = os.lstat(source_path)
+            path_stat = os.stat(source_path)
+            handle_stat = os.fstat(source_file.fileno())
+            if (
+                not stat.S_ISREG(path_stat.st_mode)
+                or not stat.S_ISREG(handle_stat.st_mode)
+                or not os.path.samestat(path_stat, handle_stat)
+                or _included_path_handle_binding(path_stat)
+                != _included_path_handle_binding(handle_stat)
+                or _included_handle_state(handle_stat)
+                != _included_handle_state(expected_stat)
+            ):
+                raise OSError(
+                    "GameMaker Included File source receipt handle changed: "
+                    + receipt.logical_path
+                )
+            canonical_path, directory_identities = (
+                _capture_included_source_directory_identities(
+                    project_root,
+                    source_path,
+                )
+            )
+            _verify_fallback_directory_ancestors(directory_identities)
+            return _IncludedSourceBinding(
+                filesystem_path=os.path.normcase(
+                    os.path.abspath(source_path)
+                ),
+                canonical_path=canonical_path,
+                directory_identities=directory_identities,
+                lexical_state=_included_handle_state(lexical_stat),
+                path_state=_included_handle_state(path_stat),
+                handle_state=_included_handle_state(handle_stat),
+            )
+
+        before_binding = capture_binding()
+        if before_binding != binding:
+            raise OSError(
+                "GameMaker Included File source receipt binding changed: "
+                + receipt.logical_path
+            )
+        if validate_content:
+            byte_count, sha256 = _digest_open_included_file(source_file)
+            if (
+                byte_count != receipt.byte_count
+                or sha256 != receipt.sha256
+            ):
+                raise OSError(
+                    "GameMaker Included File source receipt content changed: "
+                    + receipt.logical_path
+                )
+        after_binding = capture_binding()
+        if after_binding != binding:
+            raise OSError(
+                "GameMaker Included File source receipt binding changed: "
+                + receipt.logical_path
+            )
 
 
 def _included_registry_receipts_from_tree(
@@ -8127,11 +8412,50 @@ def _commit_included_output_set(
             transaction.previous_registry_snapshot,
             expected_project_identity=transaction.project_identity,
         )
-        _verify_included_tree_snapshot(
-            transaction.staged_root_path,
-            transaction.staged_root_snapshot,
-            expected_parent_identity=transaction.stage_container_identity,
-        )
+        if transaction.content_receipts:
+            publication_transaction_id = (
+                transaction.publication_transaction_id
+            )
+            staged_generation_identity = (
+                transaction.staged_root_snapshot.identity
+            )
+            if (
+                publication_transaction_id is None
+                or staged_generation_identity is None
+            ):
+                raise OSError(
+                    "Included Files generation receipts lost their "
+                    "transaction binding"
+                )
+            current_staged_snapshot = (
+                _capture_included_tree_from_generation_receipts(
+                    transaction.staged_root_path,
+                    expected_parent_identity=(
+                        transaction.stage_container_identity
+                    ),
+                    transaction_id=publication_transaction_id,
+                    generation_identity=staged_generation_identity,
+                    stage_container_identity=(
+                        transaction.stage_container_identity
+                    ),
+                    receipts=transaction.content_receipts,
+                )
+            )
+            if current_staged_snapshot != transaction.staged_root_snapshot:
+                raise OSError(
+                    "Included Files generation receipt snapshot changed"
+                )
+            for content_receipt in transaction.content_receipts:
+                _verify_included_generation_source_receipt(
+                    content_receipt.source,
+                    validate_content=False,
+                )
+        else:
+            _verify_included_tree_snapshot(
+                transaction.staged_root_path,
+                transaction.staged_root_snapshot,
+                expected_parent_identity=transaction.stage_container_identity,
+            )
         staged_registry_state = _included_regular_file_state(
             transaction.staged_registry_path,
             expected_parent_identity=transaction.stage_container_identity,
@@ -8198,7 +8522,10 @@ def _commit_included_output_set(
         )
         recovery_journal = _IncludedRecoveryJournal(
             format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
-            transaction_id=secrets.token_hex(16),
+            transaction_id=(
+                transaction.publication_transaction_id
+                or secrets.token_hex(16)
+            ),
             transaction=transaction,
             root_backup_path=root_backup_path,
             registry_backup_path=registry_backup_path,
@@ -8321,6 +8648,46 @@ def _commit_included_output_set(
             recovery_journal,
             journal_identity,
         )
+        if transaction.content_receipts:
+            publication_transaction_id = (
+                transaction.publication_transaction_id
+            )
+            staged_generation_identity = (
+                transaction.staged_root_snapshot.identity
+            )
+            if (
+                publication_transaction_id is None
+                or staged_generation_identity is None
+                or recovery_journal.transaction_id
+                != publication_transaction_id
+            ):
+                raise OSError(
+                    "Included Files generation receipts crossed transaction "
+                    "or generation boundaries"
+                )
+            final_receipt_snapshot = (
+                _capture_included_tree_from_generation_receipts(
+                    transaction.staged_root_path,
+                    expected_parent_identity=transaction.project_identity,
+                    transaction_id=publication_transaction_id,
+                    generation_identity=staged_generation_identity,
+                    stage_container_identity=(
+                        transaction.stage_container_identity
+                    ),
+                    receipts=transaction.content_receipts,
+                    published=True,
+                )
+            )
+            if final_receipt_snapshot != transaction.staged_root_snapshot:
+                raise OSError(
+                    "Published Included Files generation receipt changed"
+                )
+            _before_included_changed_generation_final_validation()
+            for content_receipt in transaction.content_receipts:
+                _verify_included_generation_source_receipt(
+                    content_receipt.source,
+                    validate_content=True,
+                )
         _verify_included_commit_marker_generation(
             project_path,
             _included_commit_marker_from_journal(recovery_journal),
@@ -8651,7 +9018,8 @@ def _copy_included_payload(
     source_file: BinaryIO,
     target_file: BinaryIO,
     source_stat: os.stat_result,
-) -> _IncludedCopyReceipt:
+    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
+) -> _IncludedPayloadReceipt:
     expected_fingerprint = _included_source_fingerprint(source_stat)
     if source_file.tell() != 0:
         raise OSError("GameMaker Included File source did not start at offset zero")
@@ -8682,21 +9050,31 @@ def _copy_included_payload(
     ):
         raise OSError("GameMaker Included File source changed while copying")
     streamed_sha256 = digest.hexdigest()
-    source_file.seek(0)
-    verified_byte_count, verified_sha256 = _digest_open_included_file(
-        source_file
-    )
-    after_verification = os.fstat(source_file.fileno())
-    if (
-        _included_source_fingerprint(after_verification)
-        != expected_fingerprint
-        or verified_byte_count != byte_count
-        or verified_sha256 != streamed_sha256
-    ):
-        raise OSError(
-            "GameMaker Included File source payload changed while copying"
+    if expected_receipt is not None:
+        if (
+            expected_receipt.byte_count != byte_count
+            or expected_receipt.sha256 != streamed_sha256
+        ):
+            raise OSError(
+                "GameMaker Included File source payload changed after its "
+                "planning receipt"
+            )
+    else:
+        source_file.seek(0)
+        verified_byte_count, verified_sha256 = _digest_open_included_file(
+            source_file
         )
-    return _IncludedCopyReceipt(
+        after_verification = os.fstat(source_file.fileno())
+        if (
+            _included_source_fingerprint(after_verification)
+            != expected_fingerprint
+            or verified_byte_count != byte_count
+            or verified_sha256 != streamed_sha256
+        ):
+            raise OSError(
+                "GameMaker Included File source payload changed while copying"
+            )
+    return _IncludedPayloadReceipt(
         source_fingerprint=expected_fingerprint,
         byte_count=byte_count,
         sha256=streamed_sha256,
@@ -8709,6 +9087,7 @@ def _stage_included_output_at(
     source_file: BinaryIO,
     source_stat: os.stat_result,
     verify_directory: Callable[[], None],
+    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
 ) -> _IncludedCopyReceipt:
     verify_directory()
     output_identity = _included_output_state_at(directory_fd, filename)
@@ -8739,10 +9118,11 @@ def _stage_included_output_at(
     try:
         with os.fdopen(file_descriptor, "wb") as target_file:
             file_descriptor = -1
-            copy_receipt = _copy_included_payload(
+            payload_receipt = _copy_included_payload(
                 source_file,
                 target_file,
                 source_stat,
+                expected_receipt,
             )
             target_file.flush()
             _apply_included_output_metadata(
@@ -8786,6 +9166,40 @@ def _stage_included_output_at(
             != temporary_identity
         ):
             raise OSError(f"Included File output changed after publication: {filename}")
+        verify_directory()
+        published_fd = os.open(
+            filename,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        try:
+            opened_stat = os.fstat(published_fd)
+            current_stat = os.stat(
+                filename,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or not os.path.samestat(opened_stat, current_stat)
+                or _included_path_handle_binding(current_stat)
+                != _included_path_handle_binding(opened_stat)
+                or (current_stat.st_dev, current_stat.st_ino)
+                != temporary_identity
+                or current_stat.st_nlink != 1
+                or current_stat.st_size != payload_receipt.byte_count
+            ):
+                raise OSError(
+                    f"Included File output changed after publication: {filename}"
+                )
+            copy_receipt = _IncludedCopyReceipt(
+                payload=payload_receipt,
+                output_fingerprint=_included_path_fingerprint(current_stat),
+                output_ctime_ns=current_stat.st_ctime_ns,
+                output_handle_state=_included_handle_state(opened_stat),
+            )
+        finally:
+            os.close(published_fd)
         verify_directory()
         published_pending = False
         return copy_receipt
@@ -8831,6 +9245,7 @@ def _publish_included_output_at(
     components: tuple[str, ...],
     source_file: BinaryIO,
     source_stat: os.stat_result,
+    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
 ) -> _IncludedCopyReceipt:
     directory_flags = os.O_RDONLY
     directory_flags |= getattr(os, "O_DIRECTORY", 0)
@@ -8868,6 +9283,7 @@ def _publish_included_output_at(
             source_file,
             source_stat,
             verify_output_directory,
+            expected_receipt,
         )
         verify_output_directory()
         return receipt
@@ -9039,6 +9455,7 @@ def _publish_included_output_fallback(
     components: tuple[str, ...],
     source_file: BinaryIO,
     source_stat: os.stat_result,
+    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
 ) -> _IncludedCopyReceipt:
     directory_identities = _prepare_included_output_directories_fallback(
         project_path,
@@ -9071,10 +9488,11 @@ def _publish_included_output_fallback(
         )
         with os.fdopen(file_descriptor, "wb") as target_file:
             file_descriptor = -1
-            copy_receipt = _copy_included_payload(
+            payload_receipt = _copy_included_payload(
                 source_file,
                 target_file,
                 source_stat,
+                expected_receipt,
             )
             target_file.flush()
             _apply_included_output_metadata(
@@ -9101,6 +9519,32 @@ def _publish_included_output_fallback(
             raise OSError(
                 f"Included File output changed after publication: {output_path}"
             )
+        with _open_included_file_validation_stream(
+            output_path,
+            deny_writes=False,
+            no_follow=True,
+        ) as published_file:
+            opened_stat = os.fstat(published_file.fileno())
+            current_stat = os.lstat(output_path)
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or not os.path.samestat(opened_stat, current_stat)
+                or _included_path_handle_binding(current_stat)
+                != _included_path_handle_binding(opened_stat)
+                or (current_stat.st_dev, current_stat.st_ino)
+                != temporary_identity
+                or current_stat.st_nlink != 1
+                or current_stat.st_size != payload_receipt.byte_count
+            ):
+                raise OSError(
+                    f"Included File output changed after publication: {output_path}"
+                )
+            copy_receipt = _IncludedCopyReceipt(
+                payload=payload_receipt,
+                output_fingerprint=_included_path_fingerprint(current_stat),
+                output_ctime_ns=current_stat.st_ctime_ns,
+                output_handle_state=_included_handle_state(opened_stat),
+            )
         return copy_receipt
     finally:
         if file_descriptor >= 0:
@@ -9120,6 +9564,7 @@ def _publish_confined_included_output(
     output_path: str,
     source_file: BinaryIO,
     source_stat: os.stat_result,
+    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
 ) -> _IncludedCopyReceipt:
     components = _included_output_components(project_path, output_path)
     _ensure_included_output_project_root(project_path)
@@ -9129,12 +9574,14 @@ def _publish_confined_included_output(
             components,
             source_file,
             source_stat,
+            expected_receipt,
         )
     return _publish_included_output_fallback(
         project_path,
         components,
         source_file,
         source_stat,
+        expected_receipt,
     )
 
 
@@ -9148,6 +9595,10 @@ def _before_included_unchanged_public_revalidation() -> None:
 
 def _before_included_unchanged_final_revalidation() -> None:
     """Narrow test seam before final source and public identity checks."""
+
+
+def _before_included_changed_generation_final_validation() -> None:
+    """Narrow test seam before final receipt-bound content validation."""
 
 
 class IncludedFilesConverter(BaseConverter):
@@ -9167,6 +9618,7 @@ class IncludedFilesConverter(BaseConverter):
         godot_file_path: str,
         rel_path: str,
         owner_source_path: str = "datafiles",
+        planned_receipt: _IncludedNoOpSourceReceipt | None = None,
     ) -> tuple[str, bool, _IncludedCopyReceipt | None] | None:
         if not self.conversion_running():
             return None
@@ -9186,13 +9638,70 @@ class IncludedFilesConverter(BaseConverter):
             source_file, source_stat = opened_source
             with source_file:
                 try:
-                    copy_receipt = _publish_confined_included_output(
-                        self._active_output_project_path
-                        or self.godot_project_path,
-                        godot_file_path,
-                        source_file,
-                        source_stat,
-                    )
+                    if planned_receipt is not None:
+                        active_project_path = (
+                            self._active_output_project_path
+                            or self.godot_project_path
+                        )
+                        output_components = _included_output_components(
+                            active_project_path,
+                            godot_file_path,
+                        )
+                        assigned_path = posixpath.join(
+                            *output_components[1:]
+                        )
+                        if (
+                            planned_receipt.logical_path != rel_path
+                            or planned_receipt.assigned_path != assigned_path
+                            or self._capture_pinned_included_source_binding(
+                                _IncludedFileSource(
+                                    filesystem_path=gm_file_path,
+                                    relative_path=rel_path,
+                                    owner_source_path=owner_source_path,
+                                ),
+                                source_file,
+                                source_stat,
+                            )
+                            != planned_receipt.binding
+                        ):
+                            raise OSError(
+                                "GameMaker Included File planning receipt "
+                                f"changed before staging: {rel_path}"
+                            )
+                    if planned_receipt is None:
+                        copy_receipt = _publish_confined_included_output(
+                            self._active_output_project_path
+                            or self.godot_project_path,
+                            godot_file_path,
+                            source_file,
+                            source_stat,
+                        )
+                    else:
+                        copy_receipt = _publish_confined_included_output(
+                            self._active_output_project_path
+                            or self.godot_project_path,
+                            godot_file_path,
+                            source_file,
+                            source_stat,
+                            planned_receipt,
+                        )
+                    if (
+                        planned_receipt is not None
+                        and self._capture_pinned_included_source_binding(
+                            _IncludedFileSource(
+                                filesystem_path=gm_file_path,
+                                relative_path=rel_path,
+                                owner_source_path=owner_source_path,
+                            ),
+                            source_file,
+                            source_stat,
+                        )
+                        != planned_receipt.binding
+                    ):
+                        raise OSError(
+                            "GameMaker Included File planning receipt changed "
+                            f"while staging: {rel_path}"
+                        )
                 except (OSError, ValueError) as error:
                     self._resource_failed(rel_path)
                     self._report_included_file_output_rejection(
@@ -9426,6 +9935,8 @@ class IncludedFilesConverter(BaseConverter):
         if not self.conversion_running():
             raise _IncludedOutputSetCancelled()
         return _IncludedNoOpSourceReceipt(
+            logical_path=source.relative_path,
+            assigned_path="",
             binding=before_binding,
             byte_count=byte_count,
             sha256=sha256,
@@ -9434,6 +9945,7 @@ class IncludedFilesConverter(BaseConverter):
     def _collect_unchanged_source_receipts(
         self,
         sources: tuple[_IncludedFileSource, ...],
+        assignments_by_source: dict[str, IncludedFilePathAssignment],
         *,
         deny_writes: bool,
     ) -> dict[str, _IncludedNoOpSourceReceipt]:
@@ -9453,7 +9965,12 @@ class IncludedFilesConverter(BaseConverter):
             source: _IncludedFileSource,
             future: Future[_IncludedNoOpSourceReceipt],
         ) -> bool:
-            receipts[source.relative_path] = future.result()
+            receipts[source.relative_path] = replace(
+                future.result(),
+                assigned_path=assignments_by_source[
+                    source.relative_path
+                ].assigned_output_path,
+            )
             return True
 
         phase_completed = _run_bounded_included_worker_phase(
@@ -9506,7 +10023,7 @@ class IncludedFilesConverter(BaseConverter):
         previous_registry_snapshot: _IncludedRegistrySnapshot,
         project_identity: _PathIdentity,
         public_root_path: str,
-    ) -> bool:
+    ) -> _IncludedGenerationMatch:
         assigned_paths = {
             assignments_by_source[source.relative_path].assigned_output_path
             for source in sources
@@ -9520,10 +10037,14 @@ class IncludedFilesConverter(BaseConverter):
                 assigned_paths,
             )
         ):
-            return False
+            return _IncludedGenerationMatch(
+                unchanged=False,
+                source_receipts=(),
+            )
 
         first_receipts = self._collect_unchanged_source_receipts(
             sources,
+            assignments_by_source,
             deny_writes=False,
         )
         assigned_receipts = {
@@ -9535,11 +10056,18 @@ class IncludedFilesConverter(BaseConverter):
             previous_root_snapshot,
             assigned_receipts,
         ):
-            return False
+            return _IncludedGenerationMatch(
+                unchanged=False,
+                source_receipts=tuple(
+                    first_receipts[source.relative_path]
+                    for source in sources
+                ),
+            )
 
         _before_included_unchanged_source_revalidation()
         second_receipts = self._collect_unchanged_source_receipts(
             sources,
+            assignments_by_source,
             deny_writes=True,
         )
         if second_receipts != first_receipts:
@@ -9581,7 +10109,13 @@ class IncludedFilesConverter(BaseConverter):
         )
         if not self.conversion_running():
             raise _IncludedOutputSetCancelled()
-        return True
+        return _IncludedGenerationMatch(
+            unchanged=True,
+            source_receipts=tuple(
+                first_receipts[source.relative_path]
+                for source in sources
+            ),
+        )
 
     def _list_confined_directory(
         self,
@@ -10193,7 +10727,7 @@ class IncludedFilesConverter(BaseConverter):
                     previous_content_receipts,
                 ).encode("utf-8")
             )
-            if self._unchanged_included_generation_matches(
+            generation_match = self._unchanged_included_generation_matches(
                 tuple(all_files),
                 assignments_by_source,
                 expected_registry_content,
@@ -10201,7 +10735,8 @@ class IncludedFilesConverter(BaseConverter):
                 previous_registry_snapshot,
                 project_identity,
                 public_root_path,
-            ):
+            )
+            if generation_match.unchanged:
                 for completed_count, source in enumerate(all_files, start=1):
                     self._resource_started(source.relative_path)
                     self._resource_completed(source.relative_path)
@@ -10219,6 +10754,10 @@ class IncludedFilesConverter(BaseConverter):
                         )
                 self._safe_progress(100)
                 return
+            planned_source_receipts = {
+                receipt.logical_path: receipt
+                for receipt in generation_match.source_receipts
+            }
 
             source_byte_counts = self._preflight_included_source_byte_counts(
                 tuple(all_files)
@@ -10251,6 +10790,15 @@ class IncludedFilesConverter(BaseConverter):
                     previous_root_snapshot,
                     previous_registry_snapshot,
                 )
+            )
+            publication_transaction_id = (
+                secrets.token_hex(16)
+                if len(planned_source_receipts) == len(all_files)
+                and all(
+                    source.relative_path in planned_source_receipts
+                    for source in all_files
+                )
+                else None
             )
 
             (
@@ -10289,12 +10837,24 @@ class IncludedFilesConverter(BaseConverter):
                         staged_root_path,
                         *assignment.assigned_output_path.split("/"),
                     )
+                    planned_receipt = planned_source_receipts.get(
+                        source.relative_path
+                    )
+                    if planned_receipt is None:
+                        return executor.submit(
+                            self._process_file,
+                            source.filesystem_path,
+                            staged_output_path,
+                            source.relative_path,
+                            source.owner_source_path,
+                        )
                     return executor.submit(
                         self._process_file,
                         source.filesystem_path,
                         staged_output_path,
                         source.relative_path,
                         source.owner_source_path,
+                        planned_receipt,
                     )
 
                 def consume_copy(
@@ -10368,10 +10928,62 @@ class IncludedFilesConverter(BaseConverter):
                 )
                 return
 
-            staged_root_snapshot = _capture_included_tree(
-                staged_root_path,
-                expected_parent_identity=stage_container_identity,
+            generation_content_receipts = (
+                tuple(
+                    _IncludedGenerationContentReceipt(
+                        transaction_id=publication_transaction_id,
+                        generation_identity=staged_root_identity,
+                        stage_container_identity=stage_container_identity,
+                        source=planned_source_receipts[
+                            source.relative_path
+                        ],
+                        staged_output_path=os.path.normcase(
+                            os.path.abspath(
+                                os.path.join(
+                                    staged_root_path,
+                                    *assignments_by_source[
+                                        source.relative_path
+                                    ].assigned_output_path.split("/"),
+                                )
+                            )
+                        ),
+                        public_output_path=os.path.normcase(
+                            os.path.abspath(
+                                os.path.join(
+                                    public_root_path,
+                                    *assignments_by_source[
+                                        source.relative_path
+                                    ].assigned_output_path.split("/"),
+                                )
+                            )
+                        ),
+                        output=copy_receipts[source.relative_path],
+                    )
+                    for source in all_files
+                )
+                if publication_transaction_id is not None
+                else ()
             )
+            if generation_content_receipts:
+                if publication_transaction_id is None:
+                    raise AssertionError(
+                        "Generation receipts require a transaction id"
+                    )
+                staged_root_snapshot = (
+                    _capture_included_tree_from_generation_receipts(
+                        staged_root_path,
+                        expected_parent_identity=stage_container_identity,
+                        transaction_id=publication_transaction_id,
+                        generation_identity=staged_root_identity,
+                        stage_container_identity=stage_container_identity,
+                        receipts=generation_content_receipts,
+                    )
+                )
+            else:
+                staged_root_snapshot = _capture_included_tree(
+                    staged_root_path,
+                    expected_parent_identity=stage_container_identity,
+                )
             assigned_receipts = {
                 assignments_by_source[source.relative_path].assigned_output_path:
                     copy_receipts[source.relative_path]
@@ -10450,6 +11062,8 @@ class IncludedFilesConverter(BaseConverter):
                 previous_root_snapshot=previous_root_snapshot,
                 previous_registry_snapshot=previous_registry_snapshot,
                 recovery_record_sizes=recovery_record_sizes,
+                publication_transaction_id=publication_transaction_id,
+                content_receipts=generation_content_receipts,
             )
             # From this handoff onward, only manifest-bound transaction
             # cleanup may remove the stage, including after rollback.

@@ -195,6 +195,7 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
         "\tinitialize_runtime_manager()",
     ])
     if definition.name == "GMRuntime":
+        lines.append("\tGMRuntimeFacade.gml_included_file_integrity_prewarm()")
         lines.append("\tGMRuntimeFacade.gml_script_registry_entries()")
     lines.extend([
         "",

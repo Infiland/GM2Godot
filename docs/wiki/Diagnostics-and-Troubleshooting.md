@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.36 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.37 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-20
 
@@ -133,7 +133,7 @@ With a binary available, validation asks Godot to import supported asset types a
 | Conversion artifact recovery rejects its journal, generation pointer, lock, public pair, or reserved temporary state | Preserve the complete `gm2godot/` directory and error. Do not edit the digest, pointer, or recovery records to force acceptance. Back up the destination, identify any non-cooperating writer or pre-0.7.32 mismatch, and attach the preserved state to a bug report if ownership is unclear. |
 | An Included Files recovery record exceeds the 16 MiB canonical size limit | Preserve the generated project and error. A newly generated format-v2 record is byte-preflighted before payload staging, so the previous public generation remains unchanged; an oversized reserved-path record found during recovery is intentionally not parsed or deleted. Report the Included File count and path shape rather than raising the parser-memory ceiling. |
 | A hidden `.gm2godot-included-cleanup.*` entry remains after a Windows machine power loss | Do not move it onto either public Included Files path or delete it by guesswork. Windows can replay a completed hidden deletion without replaying the write-through public generation moves; preserve the project and attach the entry plus recovery diagnostics to a bug report so ownership can be verified safely. |
-| A packaged Included File exists on disk but generated file APIs treat it as missing | Format-v2 registries require the exact recorded byte count and SHA-256. Hand edits, an incomplete external copy, or concurrent publication make the packaged candidate unavailable. Close the live game, restore the source input, and rerun conversion so the root and registry are regenerated together. |
+| A packaged Included File exists on disk but generated file APIs treat it as missing | Format-v2 startup prevalidation requires every emitted payload to match its exact recorded byte count and SHA-256 before any packaged entry is exposed. One hand edit, missing file, malformed receipt, incomplete external copy, or concurrent publication rejects the complete generation. Close the live game, restore the source input, and rerun conversion so the root and registry are regenerated together. `GMRuntime.gml_included_file_integrity_status()` can distinguish an unavailable registry from a failed or incomplete prewarm. |
 | An old manifest is still present after failure or cancellation | This can be deliberate preservation. Trust the latest attempt ledger's status and digest rules, not the manifest filename alone. |
 | Report or artifact publication fails | Preserve stderr and exception detail, do not treat old reports as current, and retry in a writable local destination after checking permissions and filesystem redirection. Attach both ledgers if they exist. |
 

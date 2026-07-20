@@ -85,7 +85,15 @@ class TestRuntimeManagers(unittest.TestCase):
         )
         self.assertIn("func _exit_tree():", script)
         self.assertIn("GMRuntimeFacade.gm2godot_runtime_shutdown()", script)
+        self.assertIn(
+            "GMRuntimeFacade.gml_included_file_integrity_prewarm()",
+            script,
+        )
         self.assertIn("GMRuntimeFacade.gml_script_registry_entries()", script)
+        self.assertLess(
+            script.index("GMRuntimeFacade.gml_included_file_integrity_prewarm()"),
+            script.index("GMRuntimeFacade.gml_script_registry_entries()"),
+        )
 
     def test_events_manager_pumps_central_scheduler(self) -> None:
         definition = next(

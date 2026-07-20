@@ -1872,6 +1872,28 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "_gml_asset_registry_ensure_loaded()\n\tif _gml_included_file_exact_paths",
             GML_RUNTIME_SCRIPT,
         )
+        self.assertIn(
+            "static func gml_included_file_integrity_prewarm():",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func gml_included_file_integrity_status():",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "const GML_INCLUDED_FILE_HASH_CHUNK_SIZE = 1048576",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "var context = HashingContext.new()",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if not _gml_included_file_integrity_established:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("if format_version != 2:", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("FileAccess.get_sha256(", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_any_values_untyped(self):
         self.assertNotRegex(GML_RUNTIME_SCRIPT, r"static func \w+\([^)]*:\s")

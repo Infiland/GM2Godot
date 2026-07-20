@@ -4,6 +4,7 @@ const GML_FILE_USER_ROOT = "user://gm2godot"
 const GML_FILE_INCLUDED_FILES_ROOT = "res://included_files"
 const GML_INCLUDED_FILE_REGISTRY_PATH = "res://gm2godot/gml_included_file_registry.gd"
 const GML_INCLUDED_FILE_TRANSACTION_PATH = "res://.gm2godot-included-files-transaction.json"
+const GML_INCLUDED_FILE_HASH_CHUNK_SIZE = 1048576
 const GML_FILE_BIN_READ = 0
 const GML_FILE_BIN_WRITE = 1
 const GML_FILE_BIN_READ_WRITE = 2
@@ -17,6 +18,11 @@ static var _gml_included_file_registry_requires_content_receipts = false
 static var _gml_included_file_exact_paths = {}
 static var _gml_included_file_canonical_paths = {}
 static var _gml_included_file_ambiguous_paths = {}
+static var _gml_included_file_integrity_entries = []
+static var _gml_included_file_integrity_established = false
+static var _gml_included_file_integrity_hash_attempts = 0
+static var _gml_included_file_integrity_hash_payload_bytes = 0
+static var _gml_included_file_integrity_hash_elapsed_usec = 0
 static var _gml_included_file_verified_payloads = {}
 
 
@@ -463,9 +469,49 @@ static func _gml_file_resolve_path(path, write = false, expect_directory = false
 		if _gml_included_file_registry_requires_content_receipts:
 			return user_path
 
-	if FileAccess.file_exists(packaged_path):
+	if (
+		_gml_included_file_registry_available
+		and not _gml_included_file_registry_requires_content_receipts
+		and FileAccess.file_exists(packaged_path)
+	):
 		return packaged_path
 	return user_path
+
+
+static func gml_included_file_integrity_prewarm():
+	_gml_included_file_registry_ensure_loaded()
+	if not _gml_included_file_registry_available:
+		return false
+	if not _gml_included_file_registry_requires_content_receipts:
+		return true
+	if _gml_included_file_integrity_established:
+		return true
+	_gml_included_file_verified_payloads = {}
+	if _gml_included_file_transaction_present():
+		return false
+	for entry in _gml_included_file_integrity_entries:
+		if not _gml_included_file_registry_verify_entry(entry):
+			_gml_included_file_verified_payloads = {}
+			return false
+	if _gml_included_file_transaction_present():
+		_gml_included_file_verified_payloads = {}
+		return false
+	_gml_included_file_integrity_established = true
+	return true
+
+
+static func gml_included_file_integrity_status():
+	_gml_included_file_registry_ensure_loaded()
+	return {
+		"registry_available": _gml_included_file_registry_available,
+		"requires_content_receipts": _gml_included_file_registry_requires_content_receipts,
+		"integrity_established": _gml_included_file_integrity_established,
+		"entry_count": _gml_included_file_integrity_entries.size(),
+		"verified_count": _gml_included_file_verified_payloads.size(),
+		"hash_attempts": _gml_included_file_integrity_hash_attempts,
+		"hash_payload_bytes": _gml_included_file_integrity_hash_payload_bytes,
+		"hash_elapsed_usec": _gml_included_file_integrity_hash_elapsed_usec,
+	}
 
 
 static func _gml_included_file_registry_ensure_loaded():
@@ -477,52 +523,108 @@ static func _gml_included_file_registry_ensure_loaded():
 	_gml_included_file_exact_paths = {}
 	_gml_included_file_canonical_paths = {}
 	_gml_included_file_ambiguous_paths = {}
+	_gml_included_file_integrity_entries = []
+	_gml_included_file_integrity_established = false
 	_gml_included_file_verified_payloads = {}
 	if not ResourceLoader.exists(GML_INCLUDED_FILE_REGISTRY_PATH):
 		return
 	var registry_script = load(GML_INCLUDED_FILE_REGISTRY_PATH)
 	if registry_script == null or not registry_script.has_method("gml_included_file_registry_entries"):
 		return
+	var format_version = 1
 	if registry_script.has_method("gml_included_file_registry_format_version"):
-		_gml_included_file_registry_requires_content_receipts = (
-			int(registry_script.gml_included_file_registry_format_version()) >= 2
+		format_version = int(
+			registry_script.gml_included_file_registry_format_version()
 		)
+	if format_version != 2:
+		return
+	var requires_content_receipts = true
 	var entries = registry_script.gml_included_file_registry_entries()
 	if not (entries is Array):
 		return
-	_gml_included_file_registry_available = true
+	var exact_paths = {}
 	var canonical_candidates = {}
+	var integrity_entries = []
+	var assigned_paths = {}
 	for entry in entries:
 		if typeof(entry) != TYPE_DICTIONARY:
+			if requires_content_receipts:
+				return
 			continue
+		if (
+			requires_content_receipts
+			and (
+				typeof(entry.get("logical_path", null)) != TYPE_STRING
+				or typeof(entry.get("canonical_path", null)) != TYPE_STRING
+				or typeof(entry.get("assigned_path", null)) != TYPE_STRING
+				or typeof(entry.get("emitted", null)) != TYPE_BOOL
+			)
+		):
+			return
 		var logical_path = _gml_file_registry_logical_path(
 			str(entry.get("logical_path", ""))
 		)
 		var canonical_path = str(entry.get("canonical_path", ""))
 		var assigned_path = str(entry.get("assigned_path", ""))
+		var emitted = bool(entry.get("emitted", true))
 		if (
 			logical_path == ""
 			or canonical_path == ""
 			or assigned_path == ""
 			or canonical_path != _gml_file_packaged_relative_path(logical_path)
+			or _gml_file_registry_logical_path(assigned_path) != assigned_path
 		):
+			if requires_content_receipts:
+				return
 			continue
+		if (
+			requires_content_receipts
+			and (
+				exact_paths.has(logical_path)
+				or assigned_paths.has(assigned_path)
+			)
+		):
+			return
 		var normalized_entry = {
 			"assigned_path": assigned_path,
-			"emitted": bool(entry.get("emitted", true)),
+			"emitted": emitted,
 			"byte_count": int(entry.get("byte_count", -1)),
 			"content_sha256": str(entry.get("content_sha256", "")).to_lower()
 		}
-		_gml_included_file_exact_paths[logical_path] = normalized_entry
+		if (
+			requires_content_receipts
+			and emitted
+			and (
+				typeof(entry.get("byte_count", null)) != TYPE_INT
+				or int(entry.get("byte_count", -1)) < 0
+				or typeof(entry.get("content_sha256", null)) != TYPE_STRING
+				or not _gml_file_valid_sha256(
+					str(entry.get("content_sha256", "")).to_lower()
+				)
+			)
+		):
+			return
+		exact_paths[logical_path] = normalized_entry
+		assigned_paths[assigned_path] = true
+		if requires_content_receipts and emitted:
+			integrity_entries.append(normalized_entry)
 		if not canonical_candidates.has(canonical_path):
 			canonical_candidates[canonical_path] = []
 		canonical_candidates[canonical_path].append(normalized_entry)
+	var canonical_paths = {}
+	var ambiguous_paths = {}
 	for candidate_key in canonical_candidates:
 		var candidates = canonical_candidates[candidate_key]
 		if candidates.size() == 1:
-			_gml_included_file_canonical_paths[candidate_key] = candidates[0]
+			canonical_paths[candidate_key] = candidates[0]
 		else:
-			_gml_included_file_ambiguous_paths[candidate_key] = true
+			ambiguous_paths[candidate_key] = true
+	_gml_included_file_registry_requires_content_receipts = requires_content_receipts
+	_gml_included_file_exact_paths = exact_paths
+	_gml_included_file_canonical_paths = canonical_paths
+	_gml_included_file_ambiguous_paths = ambiguous_paths
+	_gml_included_file_integrity_entries = integrity_entries
+	_gml_included_file_registry_available = true
 
 
 static func _gml_included_file_registry_output_path(entry):
@@ -537,21 +639,104 @@ static func _gml_included_file_registry_output_path(entry):
 	var output_path = GML_FILE_INCLUDED_FILES_ROOT + "/" + assigned_path
 	if not _gml_included_file_registry_requires_content_receipts:
 		return output_path
-	var expected_size = int(entry.get("byte_count", -1))
-	var expected_sha256 = str(entry.get("content_sha256", "")).to_lower()
+	if not _gml_included_file_integrity_established:
+		return ""
+	var verification_key = _gml_included_file_registry_verification_key(
+		entry,
+		output_path
+	)
 	if (
-		expected_size < 0
-		or not _gml_file_valid_sha256(expected_sha256)
+		verification_key == ""
+		or not _gml_included_file_verified_payloads.has(verification_key)
+	):
+		return ""
+	var expected_size = int(entry.get("byte_count", -1))
+	if (
+		not FileAccess.file_exists(output_path)
 		or FileAccess.get_size(output_path) != expected_size
 	):
 		return ""
-	var verification_key = output_path + "\n" + str(expected_size) + "\n" + expected_sha256
-	if _gml_included_file_verified_payloads.has(verification_key):
-		return output_path
-	if FileAccess.get_sha256(output_path).to_lower() != expected_sha256:
-		return ""
-	_gml_included_file_verified_payloads[verification_key] = true
 	return output_path
+
+
+static func _gml_included_file_registry_verify_entry(entry):
+	var assigned_path = str(entry.get("assigned_path", ""))
+	if (
+		assigned_path == ""
+		or _gml_file_registry_logical_path(assigned_path) != assigned_path
+	):
+		return false
+	var output_path = GML_FILE_INCLUDED_FILES_ROOT + "/" + assigned_path
+	var verification_key = _gml_included_file_registry_verification_key(
+		entry,
+		output_path
+	)
+	if verification_key == "":
+		return false
+	var expected_size = int(entry.get("byte_count", -1))
+	if (
+		not FileAccess.file_exists(output_path)
+		or FileAccess.get_size(output_path) != expected_size
+	):
+		return false
+	_gml_included_file_integrity_hash_attempts += 1
+	var hash_started_usec = Time.get_ticks_usec()
+	var actual_sha256 = _gml_included_file_sha256(output_path, expected_size)
+	_gml_included_file_integrity_hash_elapsed_usec += (
+		Time.get_ticks_usec() - hash_started_usec
+	)
+	if actual_sha256 != str(entry.get("content_sha256", "")).to_lower():
+		return false
+	_gml_included_file_verified_payloads[verification_key] = true
+	return true
+
+
+static func _gml_included_file_registry_verification_key(entry, output_path):
+	var expected_size = int(entry.get("byte_count", -1))
+	var expected_sha256 = str(entry.get("content_sha256", "")).to_lower()
+	if expected_size < 0 or not _gml_file_valid_sha256(expected_sha256):
+		return ""
+	return output_path + "\n" + str(expected_size) + "\n" + expected_sha256
+
+
+static func _gml_included_file_sha256(path, expected_size):
+	var file = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return ""
+	if file.get_length() != expected_size:
+		file.close()
+		return ""
+	var context = HashingContext.new()
+	if context.start(HashingContext.HASH_SHA256) != OK:
+		file.close()
+		return ""
+	var remaining = expected_size
+	while remaining > 0:
+		var read_size = min(remaining, GML_INCLUDED_FILE_HASH_CHUNK_SIZE)
+		var chunk = file.get_buffer(read_size)
+		if chunk.size() != read_size:
+			file.close()
+			return ""
+		_gml_included_file_integrity_hash_payload_bytes += chunk.size()
+		if context.update(chunk) != OK:
+			file.close()
+			return ""
+		remaining -= chunk.size()
+	if file.get_position() != expected_size or file.get_length() != expected_size:
+		file.close()
+		return ""
+	file.close()
+	var digest = context.finish()
+	if digest.size() != 32:
+		return ""
+	return digest.hex_encode()
+
+
+static func _gml_included_file_transaction_present():
+	return (
+		FileAccess.file_exists(GML_INCLUDED_FILE_TRANSACTION_PATH)
+		or DirAccess.dir_exists_absolute(GML_INCLUDED_FILE_TRANSACTION_PATH)
+	)
 
 
 static func _gml_file_valid_sha256(value):

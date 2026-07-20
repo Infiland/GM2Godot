@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -485,6 +486,451 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                     result.stdout,
                 )
 
+    def test_large_included_file_first_access_uses_startup_prewarm(
+        self,
+    ) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        version_result = subprocess.run(
+            [godot_binary, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(version_result.returncode, 0, version_result.stdout)
+        if not version_result.stdout.strip().startswith("4.7.1."):
+            self.skipTest(
+                "Exact Godot 4.7.1 required; found "
+                + version_result.stdout.strip()
+            )
+
+        payload_size = 64 * 1024 * 1024
+        smoke_script = textwrap.dedent(
+            f"""\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const PAYLOAD_SIZE = {payload_size}
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tvar before = GMRuntime.gml_included_file_integrity_status()
+            \tif not _check(bool(before.get("registry_available", false)), "Included File registry was unavailable"):
+            \t\treturn
+            \tif not _check(bool(before.get("requires_content_receipts", false)), "format-v2 receipts were not required"):
+            \t\treturn
+            \tif not _check(bool(before.get("integrity_established", false)), "startup prewarm did not establish generation integrity"):
+            \t\treturn
+            \tif not _check(int(before.get("entry_count", -1)) == 1 and int(before.get("verified_count", -1)) == 1, "startup prewarm did not verify exactly one entry"):
+            \t\treturn
+            \tif not _check(int(before.get("hash_attempts", -1)) == 1, "startup prewarm did not perform exactly one hash"):
+            \t\treturn
+            \tif not _check(int(before.get("hash_payload_bytes", -1)) == PAYLOAD_SIZE, "startup prewarm did not hash the complete 64 MiB payload"):
+            \t\treturn
+            \tif not _check(int(before.get("hash_elapsed_usec", -1)) > 0, "startup hash duration was not recorded"):
+            \t\treturn
+
+            \tvar caller_started_usec = Time.get_ticks_usec()
+            \tif not _check(GMRuntime.gml_file_resolve_path("Large Payload.bin", false) == "res://included_files/large_payload.bin", "exact logical path did not resolve"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("LARGE PAYLOAD.BIN", false) == "res://included_files/large_payload.bin", "canonical path did not resolve"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_exists("Large Payload.bin") and GMRuntime.gml_file_exists("LARGE PAYLOAD.BIN"), "file_exists did not share exact/canonical resolution"):
+            \t\treturn
+            \tvar reader = GMRuntime.gml_file_text_open_read("Large Payload.bin")
+            \tif not _check(GMRuntime.gml_file_text_read_string(reader) == "FIRST LINE", "text read did not use the verified payload"):
+            \t\treturn
+            \tGMRuntime.gml_file_text_close(reader)
+            \tvar caller_lookup_usec = Time.get_ticks_usec() - caller_started_usec
+
+            \tvar buffer_started_usec = Time.get_ticks_usec()
+            \tvar loaded = GMRuntime.gml_buffer_load("LARGE PAYLOAD.BIN")
+            \tvar buffer_load_usec = Time.get_ticks_usec() - buffer_started_usec
+            \tif not _check(GMRuntime.gml_buffer_exists(loaded), "buffer_load did not use the verified payload"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_buffer_get_used_size(loaded) == PAYLOAD_SIZE, "buffer_load size mismatch"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_buffer_peek(loaded, 0, 1) == 70, "buffer_load payload mismatch"):
+            \t\treturn
+            \tGMRuntime.gml_buffer_delete(loaded)
+
+            \tvar after = GMRuntime.gml_included_file_integrity_status()
+            \tif not _check(int(after.get("hash_attempts", -1)) == int(before.get("hash_attempts", -2)), "normal first access started another checksum"):
+            \t\treturn
+            \tif not _check(int(after.get("hash_payload_bytes", -1)) == int(before.get("hash_payload_bytes", -2)), "normal first access read payload bytes for integrity"):
+            \t\treturn
+            \tif not _check(int(after.get("hash_elapsed_usec", -1)) == int(before.get("hash_elapsed_usec", -2)), "normal first access spent time hashing"):
+            \t\treturn
+
+            \tprint(
+            \t\t"INCLUDED_FILE_FIRST_ACCESS_OK caller_lookup_usec=",
+            \t\tcaller_lookup_usec,
+            \t\t" buffer_load_usec=",
+            \t\tbuffer_load_usec,
+            \t\t" startup_hash_usec=",
+            \t\tbefore.get("hash_elapsed_usec", -1),
+            \t)
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            gm_project_dir = workspace / "gamemaker"
+            project_dir = workspace / "godot"
+            payload_path = (
+                gm_project_dir / "datafiles" / "Large Payload.bin"
+            )
+            payload_path.parent.mkdir(parents=True, exist_ok=True)
+            with payload_path.open("wb") as payload_file:
+                payload_file.write(b"FIRST LINE\n")
+                payload_file.truncate(payload_size)
+
+            IncludedFilesConverter(
+                os.fspath(gm_project_dir),
+                os.fspath(project_dir),
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=1,
+            ).convert_all()
+            _write_text(
+                project_dir / "project.godot",
+                "[application]\nconfig/name=\"Included File First Access\"\n",
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            result = subprocess.run(
+                [
+                    godot_binary,
+                    "--headless",
+                    "--path",
+                    str(project_dir),
+                    "smoke.tscn",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=60,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("INCLUDED_FILE_FIRST_ACCESS_OK", result.stdout)
+        measurement = re.search(
+            r"caller_lookup_usec=(\d+).*buffer_load_usec=(\d+).*"
+            r"startup_hash_usec=(\d+)",
+            result.stdout,
+        )
+        self.assertIsNotNone(measurement, result.stdout)
+        if measurement is not None:
+            caller_lookup_usec = int(measurement.group(1))
+            buffer_load_usec = int(measurement.group(2))
+            startup_hash_usec = int(measurement.group(3))
+            self.assertLess(
+                caller_lookup_usec,
+                startup_hash_usec,
+                (
+                    caller_lookup_usec,
+                    startup_hash_usec,
+                    result.stdout,
+                ),
+            )
+            if os.environ.get("GM2GODOT_REPORT_PERF") == "1":
+                print(
+                    "64 MiB Included File: "
+                    f"startup hash {startup_hash_usec} us; "
+                    f"first path/file/text access {caller_lookup_usec} us; "
+                    f"buffer load {buffer_load_usec} us"
+                )
+
+    def test_same_size_pretrust_mutation_rejects_complete_generation(
+        self,
+    ) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        version_result = subprocess.run(
+            [godot_binary, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(version_result.returncode, 0, version_result.stdout)
+        if not version_result.stdout.strip().startswith("4.7.1."):
+            self.skipTest(
+                "Exact Godot 4.7.1 required; found "
+                + version_result.stdout.strip()
+            )
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tvar status = GMRuntime.gml_included_file_integrity_status()
+            \tif not _check(bool(status.get("registry_available", false)), "format-v2 registry was not parsed"):
+            \t\treturn
+            \tif not _check(bool(status.get("requires_content_receipts", false)), "content receipts were not required"):
+            \t\treturn
+            \tif not _check(not bool(status.get("integrity_established", true)), "same-size mutation established trust"):
+            \t\treturn
+            \tif not _check(int(status.get("entry_count", -1)) == 2, "unexpected integrity inventory"):
+            \t\treturn
+            \tif not _check(int(status.get("verified_count", -1)) == 0, "partial generation remained verified"):
+            \t\treturn
+            \tif not _check(FileAccess.file_exists("res://included_files/changed.txt") and FileAccess.file_exists("res://included_files/trusted.txt"), "loose payload fixture is incomplete"):
+            \t\treturn
+
+            \tfor logical_path in ["Changed.txt", "CHANGED.TXT", "Trusted.txt", "TRUSTED.TXT"]:
+            \t\tif not _check(GMRuntime.gml_file_resolve_path(logical_path, false).begins_with("user://gm2godot/"), "untrusted exact/canonical path escaped the fail-closed user path: " + logical_path):
+            \t\t\treturn
+            \t\tif not _check(not GMRuntime.gml_file_exists(logical_path), "untrusted generation remained visible to file_exists: " + logical_path):
+            \t\t\treturn
+
+            \tvar reader = GMRuntime.gml_file_text_open_read("Trusted.txt")
+            \tif not _check(GMRuntime.gml_file_text_read_string(reader) == "", "text read exposed another entry from the rejected generation"):
+            \t\treturn
+            \tvar loaded = GMRuntime.gml_buffer_load("TRUSTED.TXT")
+            \tif not _check(not GMRuntime.gml_buffer_exists(loaded), "buffer_load exposed another entry from the rejected generation"):
+            \t\treturn
+
+            \tprint("INCLUDED_FILE_PRETRUST_MUTATION_REJECTED_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            gm_project_dir = workspace / "gamemaker"
+            project_dir = workspace / "godot"
+            _write_text(
+                gm_project_dir / "datafiles" / "Changed.txt",
+                "trusted payload\n",
+            )
+            _write_text(
+                gm_project_dir / "datafiles" / "Trusted.txt",
+                "other trusted\n",
+            )
+            IncludedFilesConverter(
+                os.fspath(gm_project_dir),
+                os.fspath(project_dir),
+                log_callback=lambda _message: None,
+                progress_callback=lambda _value: None,
+                conversion_running=lambda: True,
+                max_workers=1,
+            ).convert_all()
+
+            changed_payload = (
+                project_dir / "included_files" / "changed.txt"
+            )
+            original_size = changed_payload.stat().st_size
+            changed_payload.write_text(
+                "altered payload\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(changed_payload.stat().st_size, original_size)
+
+            _write_text(
+                project_dir / "project.godot",
+                "[application]\nconfig/name=\"Included File Mutation\"\n",
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            result = subprocess.run(
+                [
+                    godot_binary,
+                    "--headless",
+                    "--path",
+                    str(project_dir),
+                    "smoke.tscn",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=30,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(
+            "INCLUDED_FILE_PRETRUST_MUTATION_REJECTED_OK",
+            result.stdout,
+        )
+
+    def test_untrusted_registry_does_not_expose_loose_payload(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        version_result = subprocess.run(
+            [godot_binary, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(version_result.returncode, 0, version_result.stdout)
+        if not version_result.stdout.strip().startswith("4.7.1."):
+            self.skipTest(
+                "Exact Godot 4.7.1 required; found "
+                + version_result.stdout.strip()
+            )
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tvar status = GMRuntime.gml_included_file_integrity_status()
+            \tif not _check(not bool(status.get("registry_available", true)), "missing or receiptless registry was treated as available"):
+            \t\treturn
+            \tif not _check(FileAccess.file_exists("res://included_files/orphan.txt"), "loose payload fixture is missing"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_file_resolve_path("Orphan.txt", false) == "user://gm2godot/Orphan.txt", "untrusted registry fell through to a loose payload"):
+            \t\treturn
+            \tif not _check(not GMRuntime.gml_file_exists("Orphan.txt"), "file_exists exposed a loose payload without its registry"):
+            \t\treturn
+            \tvar reader = GMRuntime.gml_file_text_open_read("Orphan.txt")
+            \tif not _check(GMRuntime.gml_file_text_read_string(reader) == "", "text read exposed a loose payload without its registry"):
+            \t\treturn
+            \tvar loaded = GMRuntime.gml_buffer_load("ORPHAN.TXT")
+            \tif not _check(not GMRuntime.gml_buffer_exists(loaded), "buffer_load exposed a loose payload without its registry"):
+            \t\treturn
+
+            \tprint("INCLUDED_FILE_UNTRUSTED_REGISTRY_REJECTED_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        for registry_kind in ("missing", "receiptless"):
+            with self.subTest(registry_kind=registry_kind):
+                with tempfile.TemporaryDirectory() as tmp:
+                    project_dir = Path(tmp) / "godot"
+                    _write_text(
+                        project_dir / "included_files" / "orphan.txt",
+                        "untrusted loose payload\n",
+                    )
+                    _write_text(
+                        project_dir / "project.godot",
+                        "[application]\nconfig/name=\"Untrusted Included Registry\"\n",
+                    )
+                    write_gml_runtime(str(project_dir))
+                    if registry_kind == "receiptless":
+                        _write_text(
+                            project_dir
+                            / "gm2godot"
+                            / "gml_included_file_registry.gd",
+                            textwrap.dedent(
+                                """\
+                                extends RefCounted
+
+                                const FORMAT_VERSION = 1
+                                const INCLUDED_FILES = [{
+                                \t"assigned_path": "orphan.txt",
+                                \t"canonical_path": "orphan.txt",
+                                \t"emitted": true,
+                                \t"logical_path": "Orphan.txt",
+                                }]
+
+                                static func gml_included_file_registry_format_version():
+                                \treturn FORMAT_VERSION
+
+                                static func gml_included_file_registry_entries():
+                                \treturn INCLUDED_FILES
+                                """
+                            ),
+                        )
+                    _write_text(project_dir / "smoke.gd", smoke_script)
+                    _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+                    result = subprocess.run(
+                        [
+                            godot_binary,
+                            "--headless",
+                            "--path",
+                            str(project_dir),
+                            "smoke.tscn",
+                        ],
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=30,
+                    )
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(
+                    "INCLUDED_FILE_UNTRUSTED_REGISTRY_REJECTED_OK",
+                    result.stdout,
+                )
+
     def test_files_ini_json_and_path_mapping(self) -> None:
         godot_binary = _find_godot_binary()
         if godot_binary is None:
@@ -549,7 +995,6 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_file_delete("READ ME.TXT")
             \tGMRuntime.gml_file_delete("foo_bar")
             \tGMRuntime.gml_file_delete("Foo Bar/item.txt")
-            \tGMRuntime.gml_file_delete("Gone File.txt")
             \tGMRuntime.gml_file_delete("Ghost File.txt")
             \tif not _check(GMRuntime.gml_file_resolve_path("Read Me.txt", false) == "res://included_files/read_me_3.txt", "exact colliding logical path did not use reserved suffix"):
             \t\treturn
@@ -585,19 +1030,10 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             \t\treturn
             \tGMRuntime.gml_file_text_close(nested_reader)
 
-            \tif not _check(GMRuntime.gml_file_resolve_path("Gone File.txt", false) == "user://gm2godot/Gone File.txt", "known missing assigned target fell through to canonical payload"):
-            \t\treturn
-            \tif not _check(not GMRuntime.gml_file_exists("Gone File.txt"), "known missing assigned target selected canonical payload"):
-            \t\treturn
             \tif not _check(GMRuntime.gml_file_resolve_path("Ghost File.txt", false) == "user://gm2godot/Ghost File.txt", "planned but unemitted logical path fell through to canonical payload"):
             \t\treturn
             \tif not _check(not GMRuntime.gml_file_exists("Ghost File.txt"), "planned but unemitted logical path selected canonical payload"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_file_resolve_path("Tampered.txt", false) == "user://gm2godot/Tampered.txt", "content-mismatched Included File did not fail closed"):
-            \t\treturn
-            \tif not _check(not GMRuntime.gml_file_exists("Tampered.txt"), "content-mismatched Included File was exposed"):
-            \t\treturn
-
             \tGMRuntime.gml_file_delete(" Leading.txt")
             \tGMRuntime.gml_file_delete("Trailing.txt ")
             \tif not _check(GMRuntime.gml_file_resolve_path(" Leading.txt", true) == "user://gm2godot/ Leading.txt", "leading-space write path lost its literal space"):
@@ -815,10 +1251,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                 "read_me_2.txt": "natural suffix\n",
                 "foo_bar": "blocking file\n",
                 "Foo Bar/item.txt": "nested item\n",
-                "Gone File.txt": "target removed after conversion\n",
-                "gone_file.txt": "canonical payload must not leak\n",
                 "ghost_file.txt": "unavailable alias must not leak\n",
-                "Tampered.txt": "trusted payload\n",
             }
             for relative_path, payload in collision_payloads.items():
                 _write_text(
@@ -916,15 +1349,6 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                 ).read_text(encoding="utf-8"),
                 "nested item\n",
             )
-            missing_assigned_target = (
-                project_dir / "included_files" / "gone_file_2.txt"
-            )
-            self.assertTrue(missing_assigned_target.is_file())
-            missing_assigned_target.unlink()
-            (
-                project_dir / "included_files" / "tampered.txt"
-            ).write_text("altered payload\n", encoding="utf-8")
-
             _write_text(project_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(project_dir))
             _write_text(project_dir / "smoke.gd", smoke_script)

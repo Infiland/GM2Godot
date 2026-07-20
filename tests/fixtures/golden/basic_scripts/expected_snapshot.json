@@ -7,7 +7,7 @@
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:4811acc186c077ed6dfd9a9747cfa2aede23085f350ebb0a13bc6c0d51108044",
+    "gm2godot/gml_runtime.gd": "sha256:74cecfa3365b211fee734ddce7ffc80e786253856ba3d4f545cd49e07eec8102",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
     "gm2godot/managers/gm_async.gd": "sha256:d0a73997476f0e889892f85a6c343fc5b44fecdf9fa547e943902632aedf9df3",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",
@@ -17,7 +17,7 @@
     "gm2godot/managers/gm_instances.gd": "sha256:a9aa134e11c2defab7a74277614b0365f5852c725414365ff7123de88ae2fa3c",
     "gm2godot/managers/gm_platform.gd": "sha256:cde24c6189462db519eca853affd94375ec8363153b733679a27eb0d1b6183f1",
     "gm2godot/managers/gm_rooms.gd": "sha256:455aa5d05589673425845dcbbbab8a8b32cfd88b9244abb864d288af751cd3f9",
-    "gm2godot/managers/gm_runtime_manager.gd": "sha256:07c9b928bd54c90c7f0797fa36208579ed438c348a1ef0225114fe4e2c7c7408"
+    "gm2godot/managers/gm_runtime_manager.gd": "sha256:fbbc79f40807ffa7c2ecbf57d90c1f8b91affa693a0850d358296c0cfe7c63e3"
   },
   "json_files": {
     "gm2godot/architecture_policy.json": {

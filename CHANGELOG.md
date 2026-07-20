@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.37 - 2026-07-20
+
+- Moved format-v2 Included File integrity establishment into the generated `GMRuntime` autoload startup, before script initialization or the main scene, so normal exact-path, canonical-path, `file_exists`, text-read, and buffer-load calls perform no full-payload checksum.
+- Made startup verification an all-or-nothing generation gate with deterministic sequential 1 MiB SHA-256 chunks, bounded memory, strict registry receipts, and fail-closed handling for missing, malformed, incomplete, or same-size-modified loose payloads.
+- Added a deterministic 64 MiB first-access measurement, pre-trust mutation and missing-registry adversarial coverage, and exact Godot 4.7.1/GameMaker LTS 2026 validation.
+
 ## 0.7.36 - 2026-07-20
 
 - Reused immutable source and staged-output content receipts during changed Included Files publication while binding them to the exact source path and handle, assigned path, output identities, transaction, and generation.

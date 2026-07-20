@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.36 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.37 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-20
 
@@ -70,9 +70,11 @@ Within one conversion, Included File receipt and copy workers use a bounded subm
 
 Deep managed Included Files trees use linear binding verification on both descriptor-capable hosts and the native Windows path fallback. Traversal retains no-follow opens, filesystem/mount boundaries, deterministic path ordering, pre/post directory binding checks, and fail-closed rejection of replacements or concurrent mutation.
 
+At generated-game startup, the first runtime autoload verifies all format-v2 Included File receipts as one generation before the main scene. The pass is sequential and uses fixed 1 MiB SHA-256 chunks, so memory is bounded but startup time grows with the total emitted payload size. Relative `file_exists`, text-read, and buffer-load calls expose no packaged file until the pass succeeds completely, and their first access does not hash the payload again. Explicit `res://` paths remain native Godot paths and are outside GameMaker-style relative lookup.
+
 The conversion attempt/canonical-manifest pair has its own persistent `.gm2godot-conversion.lock`, durable transaction journal, and generation pointer inside `gm2godot/`. Interruption before the pointer switch restores the complete previous pair; interruption after it verifies and finalizes the complete new pair. The stable public filenames and existing consumer schemas remain unchanged. Recovery records are size-bounded, and malformed, redirected, mounted, hard-linked, replaced, or unknown reserved state is preserved and rejected without following or deleting it.
 
-These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or cached content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
+These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or startup-established content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
 
 ## Known limitation areas
 

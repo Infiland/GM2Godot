@@ -1442,12 +1442,12 @@ class ManagedOutputWorkspace(
                     expected_identity=child_identity,
                     description=description,
                 )
+                opened.append(child)
                 _verify_binding_boundary(
                     child,
                     expected_device=self._destination_device,
                     expected_mount_id=self._destination_mount_id,
                 )
-                opened.append(child)
                 current = child
             return opened, current, components[-1]
         except BaseException:

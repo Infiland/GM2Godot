@@ -64,9 +64,11 @@ class TestManagedOutputWorkspace(unittest.TestCase):
         with ManagedOutputWorkspace.open(nested_destination) as workspace:
             stage = Path(workspace.stage_path)
             self.assertTrue(stage.is_dir())
-            self.assertEqual(
-                stage.parent,
-                (nested_destination / WORKSPACE_PARENT_NAME).resolve(),
+            self.assertTrue(
+                os.path.samefile(
+                    stage.parent,
+                    nested_destination / WORKSPACE_PARENT_NAME,
+                )
             )
             self.assertEqual(workspace.destination_device, workspace.stage_device)
             self.assertEqual(len(workspace.transaction_id), 32)

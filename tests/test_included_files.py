@@ -4764,7 +4764,7 @@ os._exit(88)
         )
         self._assert_no_transaction_debris()
 
-    def test_64_mib_generation_has_bounded_initial_and_unchanged_reads(
+    def test_64_mib_generation_has_bounded_initial_unchanged_and_changed_reads(
         self,
     ) -> None:
         payload_size = 64 * 1024 * 1024
@@ -4829,6 +4829,25 @@ os._exit(88)
         ):
             converter.convert_all()
         self.assertEqual(read_bytes, 4 * payload_size)
+
+        with open(source_path, "r+b", buffering=0) as source_file:
+            source_file.write(b"\x01")
+            os.fsync(source_file.fileno())
+        read_bytes = 0
+        with (
+            patch.object(
+                included_files_module,
+                "_read_included_payload_chunk",
+                side_effect=count_payload_read,
+            ),
+            patch.object(
+                included_files_module,
+                "_read_included_validation_chunk",
+                side_effect=count_validation_read,
+            ),
+        ):
+            converter.convert_all()
+        self.assertLessEqual(read_bytes, 8 * payload_size)
         self._assert_no_transaction_debris()
 
     def test_changed_payload_uses_the_normal_output_transaction(self) -> None:
@@ -4853,6 +4872,249 @@ os._exit(88)
         self.assertNotEqual(current_pair[0], previous_pair[0])
         self.assertEqual(current_pair[1], {"payload.txt": b"AFTER!"})
         self._assert_no_transaction_debris()
+
+    def test_changed_generation_receipts_are_boundary_bound(self) -> None:
+        self._write("payload.txt", "BEFORE")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        self._write("payload.txt", "AFTER!")
+        captured_transactions: list[
+            included_files_module._IncludedOutputSetTransaction
+        ] = []
+
+        def capture_transaction(
+            _project_path: str,
+            transaction: (
+                included_files_module._IncludedOutputSetTransaction
+            ),
+            _conversion_running: Callable[[], bool],
+        ) -> tuple[str, ...]:
+            captured_transactions.append(transaction)
+            raise OSError("captured generation receipts")
+
+        with (
+            patch.object(
+                included_files_module,
+                "_commit_included_output_set",
+                side_effect=capture_transaction,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "captured generation receipts",
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertEqual(len(captured_transactions), 1)
+        transaction = captured_transactions[0]
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertEqual(len(transaction.content_receipts), 1)
+        transaction_id = transaction.publication_transaction_id
+        generation_identity = transaction.staged_root_snapshot.identity
+        self.assertIsNotNone(transaction_id)
+        self.assertIsNotNone(generation_identity)
+        if transaction_id is None or generation_identity is None:
+            self.fail("changed-generation receipts lost their boundaries")
+        receipt = transaction.content_receipts[0]
+        captured_snapshot = (
+            included_files_module
+            ._capture_included_tree_from_generation_receipts(
+                transaction.staged_root_path,
+                expected_parent_identity=(
+                    transaction.stage_container_identity
+                ),
+                transaction_id=transaction_id,
+                generation_identity=generation_identity,
+                stage_container_identity=(
+                    transaction.stage_container_identity
+                ),
+                receipts=transaction.content_receipts,
+            )
+        )
+        self.assertEqual(
+            captured_snapshot,
+            transaction.staged_root_snapshot,
+        )
+
+        source_handle_state = receipt.source.binding.handle_state
+        output_fingerprint = receipt.output.output_fingerprint
+        output_handle_state = receipt.output.output_handle_state
+        forged_receipts = {
+            "transaction": replace(
+                receipt,
+                transaction_id="0" * 32,
+            ),
+            "generation": replace(
+                receipt,
+                generation_identity=(
+                    generation_identity[0],
+                    generation_identity[1] + 1,
+                ),
+            ),
+            "assigned path": replace(
+                receipt,
+                source=replace(
+                    receipt.source,
+                    assigned_path="other.bin",
+                ),
+            ),
+            "source identity": replace(
+                receipt,
+                source=replace(
+                    receipt.source,
+                    binding=replace(
+                        receipt.source.binding,
+                        handle_state=(
+                            source_handle_state[0],
+                            source_handle_state[1] + 1,
+                            *source_handle_state[2:],
+                        ),
+                    ),
+                ),
+            ),
+            "staged output identity": replace(
+                receipt,
+                output=replace(
+                    receipt.output,
+                    output_fingerprint=(
+                        output_fingerprint[0],
+                        output_fingerprint[1] + 1,
+                        *output_fingerprint[2:],
+                    ),
+                    output_handle_state=(
+                        output_handle_state[0],
+                        output_handle_state[1] + 1,
+                        *output_handle_state[2:],
+                    ),
+                ),
+            ),
+            "public output identity": replace(
+                receipt,
+                public_output_path=receipt.public_output_path + ".other",
+            ),
+            "stage container": replace(
+                receipt,
+                stage_container_identity=(
+                    transaction.stage_container_identity[0],
+                    transaction.stage_container_identity[1] + 1,
+                ),
+            ),
+        }
+        for boundary, forged_receipt in forged_receipts.items():
+            with (
+                self.subTest(boundary=boundary),
+                self.assertRaisesRegex(
+                    OSError,
+                    "generation.*receipt|receipt.*binding",
+                ),
+            ):
+                included_files_module._capture_included_tree_from_generation_receipts(
+                    transaction.staged_root_path,
+                    expected_parent_identity=(
+                        transaction.stage_container_identity
+                    ),
+                    transaction_id=transaction_id,
+                    generation_identity=generation_identity,
+                    stage_container_identity=(
+                        transaction.stage_container_identity
+                    ),
+                    receipts=(forged_receipt,),
+                )
+        included_files_module._remove_owned_included_tree(
+            transaction.stage_container_path,
+            transaction.stage_container_identity,
+            expected_parent_identity=transaction.project_identity,
+        )
+        self._assert_no_transaction_debris()
+
+    def test_final_source_receipt_failure_restores_previous_generation(
+        self,
+    ) -> None:
+        self._write("payload.txt", "ORIGINAL")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        self._write("payload.txt", "CHANGED!")
+        source_path = os.path.join(
+            self.datafiles_dir,
+            "payload.txt",
+        )
+        source_stat = os.stat(source_path)
+        mutated = False
+
+        def mutate_source() -> None:
+            nonlocal mutated
+            with open(source_path, "r+b", buffering=0) as source_file:
+                source_file.write(b"MUTATED!")
+                os.fsync(source_file.fileno())
+            os.utime(
+                source_path,
+                ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
+            )
+            mutated = True
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_changed_generation_final_validation",
+                side_effect=mutate_source,
+            ),
+            self.assertRaisesRegex(OSError, "source receipt"),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(mutated)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+
+    def test_final_output_hardlink_substitution_restores_previous_generation(
+        self,
+    ) -> None:
+        self._write("payload.txt", "ORIGINAL")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        self._write("payload.txt", "CHANGED!")
+        output_path = os.path.join(
+            self.godot_dir,
+            "included_files",
+            "payload.txt",
+        )
+        external_path = os.path.join(
+            self.gm_dir,
+            "receipt-hardlink.bin",
+        )
+        with open(external_path, "wb") as external_file:
+            external_file.write(b"CHANGED!")
+        substituted = False
+
+        def substitute_hardlink() -> None:
+            nonlocal substituted
+            os.unlink(output_path)
+            try:
+                os.link(external_path, output_path)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Hard links are unavailable: {error}")
+            substituted = True
+
+        with (
+            patch.object(
+                included_files_module,
+                "_before_included_changed_generation_final_validation",
+                side_effect=substitute_hardlink,
+            ),
+            self.assertRaisesRegex(
+                OSError,
+                "root generation|tree changed",
+            ),
+        ):
+            converter.convert_all()
+
+        self.assertTrue(substituted)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        with open(external_path, "rb") as external_file:
+            self.assertEqual(external_file.read(), b"CHANGED!")
 
     def test_changed_path_uses_the_normal_output_transaction(
         self,

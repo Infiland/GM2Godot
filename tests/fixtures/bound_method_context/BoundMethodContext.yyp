@@ -1,0 +1,28 @@
+{
+  "$GMProject": "",
+  "%Name": "BoundMethodContext",
+  "name": "BoundMethodContext",
+  "resources": [
+    {
+      "id": {
+        "name": "scr_receiver",
+        "path": "scripts/scr_receiver/scr_receiver.yy"
+      }
+    },
+    {
+      "id": {
+        "name": "scr_constructor",
+        "path": "scripts/scr_constructor/scr_constructor.yy"
+      }
+    },
+    {
+      "id": {
+        "name": "scr_probe",
+        "path": "scripts/scr_probe/scr_probe.yy"
+      }
+    }
+  ],
+  "RoomOrderNodes": [],
+  "resourceType": "GMProject",
+  "resourceVersion": "2.0"
+}

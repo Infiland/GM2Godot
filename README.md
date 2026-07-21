@@ -44,6 +44,8 @@ Version 0.7.42 classifies every durable destination-wide forward, rollback, rest
 
 Version 0.7.43 applies that separate policy to selected object, room, sprite, shader, and asset-registry/timeline converters. Their prior owned outputs are not copied into the candidate stage: current authoritative YYP resources regenerate complete private output sets, while unavailable, blocked, skipped, or removed resources contribute no stale files to a successful or partial commit. Objects own their scene, script, and optional source map; rooms own their scene and optional script; sprites own their collision-safe resource directory; shaders own one generated shader; timelines own their collision-safe action scripts. Registry rows, timeline script references, canonical manifest resources, inventory files, and a GM2Godot-managed room startup scene are reconciled to the files that remain. Disabled converters retain their exact prior inventory by design. Failed or cancelled pre-decision runs still preserve the complete prior generation, unrelated files outside documented managed roots remain untouched, and unknown additions inside managed roots fail closed rather than being adopted or deleted.
 
+Version 0.7.44 preserves GameMaker bound-method context across generated GDScript. Receiver-aware callables now declare hidden `self`/`other` metadata explicitly instead of relying on Godot's standard/custom `Callable` classification. Every transpiled dynamic call passes its current `self`; nested methods and callbacks therefore receive invocation-time `other`, while ordinary script calls retain their caller scope. Rebinding a script reference preserves its receiver contract, and constructors inject the new struct exactly once while using the documented caller or bound-constructor scope as `other`. Unmarked custom Godot callables fail closed instead of receiving guessed arguments.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -64,7 +66,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.43`.
+Current source version: `0.7.44`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

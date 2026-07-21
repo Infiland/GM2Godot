@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.44 - 2026-07-22
+
+- Made generated bound methods receive invocation-time `other` from the calling `self` through nested dynamic calls, `method_call`, script dispatch, and array/struct callbacks instead of retaining declaration-time scope.
+- Replaced custom-versus-standard `Callable` arity inference with explicit generated receiver metadata, preserved that metadata when rebinding script references and constructors, and fail closed when an unmarked custom Godot callable cannot be safely rebound.
+- Added a focused GameMaker fixture plus exact Godot 4.7.1 coverage for nested `self`/`other`, normal and rebound script calls, callback context, constructor `other`, single receiver injection, generated output, and unsupported metadata paths.
+
 ## 0.7.43 - 2026-07-21
 
 - Added explicit logical output ownership for objects, rooms, sprites, shaders, and timeline action scripts; selected converters now rebuild those outputs from the authoritative YYP instead of carrying their prior inventory entries into a successful or partial candidate.

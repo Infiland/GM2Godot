@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.44 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-21
+> **Last reviewed:** 2026-07-22
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -95,6 +95,23 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
 ```
 
 Documentation-only changes do not require Pyright or the Python suite unless the change also touches tests/code or verification was explicitly requested. Link and page-source checks should still pass.
+
+Bound-method, script-call, callback, or constructor-context changes must retain the focused fixture and generated-output suites:
+
+```bash
+GODOT_BIN=/path/to/Godot-4.7.1 \
+  ./venv/bin/python -m unittest \
+  tests.test_bound_method_context_godot \
+  tests.test_array_foreach_godot \
+  tests.test_array_sort_godot \
+  tests.test_script_runtime_godot \
+  tests.test_named_constructor_inheritance_godot \
+  tests.test_gml_transpiler \
+  tests.test_gml_runtime \
+  tests.test_scripts
+```
+
+The bound-method fixture proves invocation-time `other` through nested and `method_call` paths, array callbacks, normal and rebound script references, unbound and rebound constructors, exact single receiver injection, and fail-closed custom callables. Keep receiver arity explicit in generated output; `Callable.is_standard()` and `is_custom()` describe Godot callable representation, not a GameMaker hidden-argument contract.
 
 Included Files transaction changes must retain the subprocess hard-exit recovery test, not only exception-path tests:
 

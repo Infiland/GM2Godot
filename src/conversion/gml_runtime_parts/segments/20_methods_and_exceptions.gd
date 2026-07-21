@@ -26,8 +26,10 @@ static func _gml_shutdown_detach_method(method, pending, seen_objects):
 	seen_objects[object_id] = true
 	pending.append(method.bound_self)
 	pending.append(method.function_value)
+	pending.append(method.callable_owner)
 	method.bound_self = null
 	method.function_value = null
+	method.callable_owner = null
 
 
 static func _gml_shutdown_detach_methods(roots):
@@ -120,19 +122,42 @@ static func gm2godot_runtime_shutdown():
 	_gml_global_scope.clear()
 
 
-static func gml_method_call(method, array_args = null, offset = 0, num_args = null):
-	if not is_method(method):
+static func gml_method_call(
+	method,
+	array_args = null,
+	offset = 0,
+	num_args = null,
+	caller_self = null,
+	caller_other = null
+):
+	var resolved_method = method
+	if not is_method(resolved_method):
+		var script_descriptor: Variant = _gml_script_resolve(resolved_method)
+		if typeof(script_descriptor) == TYPE_DICTIONARY:
+			resolved_method = script_descriptor.get(
+				"scoped_callable",
+				script_descriptor.get("callable", null)
+			)
+	if not is_method(resolved_method):
 		return gml_unsupported_type_error("GML method_call", method)
 	var call_args = _gml_method_call_args(array_args, offset, num_args)
 	if is_undefined(call_args):
 		return call_args
-	return method.gml_callv(call_args) if method is GMLMethod else method.callv(call_args)
+	return (
+		resolved_method.gml_callv(call_args, caller_self, caller_other)
+		if resolved_method is GMLMethod
+		else resolved_method.callv(call_args)
+	)
 
 
 static func gml_call_value(function_value, args = [], caller_self = null, caller_other = null, function_name = ""):
 	var call_args = args if typeof(args) == TYPE_ARRAY else [args]
 	if is_method(function_value):
-		return function_value.gml_callv(call_args) if function_value is GMLMethod else function_value.callv(call_args)
+		return (
+			function_value.gml_callv(call_args, caller_self, caller_other)
+			if function_value is GMLMethod
+			else function_value.callv(call_args)
+		)
 	if typeof(function_value) == TYPE_DICTIONARY and function_value.has("callable"):
 		return gml_script_call(function_value, call_args, caller_self, caller_other)
 	var descriptor: Variant = _gml_script_resolve(function_value)
@@ -156,6 +181,7 @@ static func gml_script_call(script_or_callable, args = [], caller_self = null, c
 	var call_args = args if typeof(args) == TYPE_ARRAY else [args]
 	var callable = script_or_callable
 	var use_legacy_arguments = false
+	var uses_scoped_callable = false
 	var has_caller_scope = caller_self != null and not is_undefined(caller_self)
 	if not is_method(script_or_callable) and not (
 		typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable")
@@ -167,6 +193,7 @@ static func gml_script_call(script_or_callable, args = [], caller_self = null, c
 	if typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("callable"):
 		if has_caller_scope and script_or_callable.has("scoped_callable"):
 			callable = script_or_callable["scoped_callable"]
+			uses_scoped_callable = true
 		else:
 			callable = script_or_callable["callable"]
 		use_legacy_arguments = bool(script_or_callable.get("legacy_arguments", false))
@@ -174,13 +201,31 @@ static func gml_script_call(script_or_callable, args = [], caller_self = null, c
 		return gml_unsupported_type_error("GML script callable", callable)
 	_gml_script_push_arguments(call_args)
 	var runtime_args = []
-	if has_caller_scope and typeof(script_or_callable) == TYPE_DICTIONARY and script_or_callable.has("scoped_callable"):
-		runtime_args.append(caller_self)
-		runtime_args.append(caller_other if caller_other != null and not is_undefined(caller_other) else caller_self)
+	# Older generated registries expose a scoped callable without receiver
+	# metadata, so retain their explicit prefix. New generated callables inject
+	# their declared receiver arguments in GMLMethod.gml_callv instead.
+	if uses_scoped_callable:
+		var needs_legacy_scope_prefix = not (callable is GMLMethod)
+		if callable is GMLMethod:
+			needs_legacy_scope_prefix = (
+				callable.receiver_argument_count
+				== GML_RECEIVER_ARGUMENTS_NONE
+			)
+		if needs_legacy_scope_prefix:
+			runtime_args.append(caller_self)
+			runtime_args.append(
+				caller_other
+				if caller_other != null and not is_undefined(caller_other)
+				else caller_self
+			)
 	if not use_legacy_arguments:
 		runtime_args.append_array(call_args)
 	var result = null
-	result = callable.gml_callv(runtime_args) if callable is GMLMethod else callable.callv(runtime_args)
+	result = (
+		callable.gml_callv(runtime_args, caller_self, caller_other)
+		if callable is GMLMethod
+		else callable.callv(runtime_args)
+	)
 	_gml_script_pop_arguments()
 	return result
 
@@ -264,7 +309,7 @@ static func gml_script_get_callable(script):
 	var descriptor: Variant = _gml_script_resolve(script)
 	if descriptor == null:
 		return gml_undefined()
-	return descriptor["callable"]
+	return descriptor.get("scoped_callable", descriptor["callable"])
 
 
 static func gml_global_function(name):
@@ -283,13 +328,72 @@ static func gml_argument_count():
 	return int(_gml_builtin_globals["argument_count"]) if _gml_builtin_globals.has("argument_count") else 0
 
 
-static func gml_method(scope, func_or_method, method_is_constructor = false):
+static func _gml_method_has_bound_self(scope):
+	return scope != null and not is_undefined(scope)
+
+
+static func gml_method(scope, func_or_method, method_is_constructor = null):
+	if not is_method(func_or_method):
+		var script_descriptor: Variant = _gml_script_resolve(func_or_method)
+		if typeof(script_descriptor) == TYPE_DICTIONARY:
+			func_or_method = script_descriptor.get(
+				"scoped_callable",
+				script_descriptor.get("callable", null)
+			)
 	if not is_method(func_or_method):
 		return gml_unsupported_type_error("GML method", func_or_method)
 	var function_value = gml_method_get_index(func_or_method)
 	if is_undefined(function_value):
 		return function_value
-	return GMLMethod.new(scope, function_value, method_is_constructor)
+	var receiver_argument_count = GML_RECEIVER_ARGUMENTS_NONE
+	var resolved_is_constructor = (
+		bool(method_is_constructor)
+		if method_is_constructor != null
+		else false
+	)
+	if func_or_method is GMLMethod:
+		receiver_argument_count = func_or_method.receiver_argument_count
+		if method_is_constructor == null:
+			resolved_is_constructor = func_or_method.is_constructor
+	elif typeof(function_value) == TYPE_CALLABLE and function_value.is_custom():
+		return gml_error(
+			"GML method cannot bind a custom Godot Callable without explicit receiver metadata"
+		)
+	if resolved_is_constructor and receiver_argument_count == GML_RECEIVER_ARGUMENTS_NONE:
+		receiver_argument_count = GML_RECEIVER_ARGUMENTS_SELF
+	return GMLMethod.new(
+		scope,
+		function_value,
+		resolved_is_constructor,
+		receiver_argument_count,
+		_gml_method_has_bound_self(scope)
+	)
+
+
+static func gml_receiver_method(scope, callable):
+	if typeof(callable) != TYPE_CALLABLE:
+		return gml_unsupported_type_error("GML receiver-aware method", callable)
+	return GMLMethod.new(
+		scope,
+		callable,
+		false,
+		GML_RECEIVER_ARGUMENTS_SELF_OTHER,
+		_gml_method_has_bound_self(scope)
+	)
+
+
+static func gml_receiver_constructor(scope, callable):
+	if typeof(callable) != TYPE_CALLABLE:
+		return gml_unsupported_type_error("GML receiver-aware constructor", callable)
+	var constructor_method = GMLMethod.new(
+		scope,
+		callable,
+		true,
+		GML_RECEIVER_ARGUMENTS_SELF_OTHER,
+		_gml_method_has_bound_self(scope)
+	)
+	gml_static_get(constructor_method)
+	return constructor_method
 
 
 static func gml_constructor(scope, func_or_method):
@@ -310,42 +414,76 @@ static func _gml_constructor_resolve(constructor):
 	return null
 
 
-static func gml_new(constructor, args = []):
-	constructor = _gml_constructor_resolve(constructor)
-	if not (constructor is GMLMethod):
-		return gml_unsupported_type_error("GML new constructor", constructor)
-	if not constructor.is_constructor:
-		return gml_unsupported_type_error("GML new constructor", constructor)
-	var instance = gml_struct({})
-	var constructor_static = gml_static_get(constructor)
-	if not is_undefined(constructor_static):
-		gml_static_set(instance, constructor_static)
-	var call_args = [instance]
+static func _gml_constructor_invoke(constructor, instance, args, constructor_other):
+	var call_args = []
+	if constructor.receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF:
+		call_args.append(instance)
+	elif constructor.receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF_OTHER:
+		call_args.append(instance)
+		call_args.append(constructor_other)
+	else:
+		return gml_error("GML constructor is missing explicit receiver metadata")
 	if typeof(args) == TYPE_ARRAY:
 		call_args.append_array(args)
 	else:
 		call_args.append(args)
-	constructor.function_value.callv(call_args)
+	return constructor.function_value.callv(call_args)
+
+
+static func gml_new(constructor, args = [], caller_self = null, caller_other = null):
+	constructor = _gml_constructor_resolve(constructor)
+	if not (constructor is GMLMethod):
+		return gml_unsupported_type_error("GML new constructor", constructor)
+	if not constructor.is_constructor:
+		return gml_unsupported_type_error("GML new constructor", constructor)
+	if typeof(constructor.function_value) != TYPE_CALLABLE:
+		return gml_unsupported_type_error("GML constructor callable", constructor.function_value)
+	if constructor.receiver_argument_count not in [
+		GML_RECEIVER_ARGUMENTS_SELF,
+		GML_RECEIVER_ARGUMENTS_SELF_OTHER,
+	]:
+		return gml_error("GML constructor is missing explicit receiver metadata")
+	var instance = gml_struct({})
+	var constructor_static = gml_static_get(constructor)
+	if not is_undefined(constructor_static):
+		gml_static_set(instance, constructor_static)
+	# GameMaker's bound-constructor exception uses the constructor's bound
+	# scope as other. An unbound script constructor uses the scope that called new.
+	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_self
+	if constructor_other == null:
+		constructor_other = caller_other
+	_gml_constructor_invoke(constructor, instance, args, constructor_other)
 	return instance
 
 
-static func gml_constructor_inherit(instance, constructor, args = []):
+static func gml_constructor_inherit(
+	instance,
+	constructor,
+	args = [],
+	caller_self = null,
+	caller_other = null
+):
 	constructor = _gml_constructor_resolve(constructor)
 	if not (constructor is GMLMethod):
 		return gml_unsupported_type_error("GML parent constructor", constructor)
 	if not constructor.is_constructor:
 		return gml_unsupported_type_error("GML parent constructor", constructor)
+	if typeof(constructor.function_value) != TYPE_CALLABLE:
+		return gml_unsupported_type_error("GML constructor callable", constructor.function_value)
+	if constructor.receiver_argument_count not in [
+		GML_RECEIVER_ARGUMENTS_SELF,
+		GML_RECEIVER_ARGUMENTS_SELF_OTHER,
+	]:
+		return gml_error("GML constructor is missing explicit receiver metadata")
 	var parent_static = gml_static_get(constructor)
 	if not is_undefined(parent_static):
 		var current_static = gml_static_get(instance)
 		if not is_undefined(current_static):
 			gml_static_set(current_static, parent_static)
-	var call_args = [instance]
-	if typeof(args) == TYPE_ARRAY:
-		call_args.append_array(args)
-	else:
-		call_args.append(args)
-	constructor.function_value.callv(call_args)
+	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_other
+	if constructor_other == null:
+		constructor_other = caller_self
+	_gml_constructor_invoke(constructor, instance, args, constructor_other)
 	return instance
 
 

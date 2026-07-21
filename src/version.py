@@ -1,4 +1,4 @@
-VERSION = "0.7.43"
+VERSION = "0.7.44"
 
 
 def get_version():

@@ -103,7 +103,7 @@ def _script_scope_context() -> _ScopeContext:
 def _constructor_scope_context() -> _ScopeContext:
     return _ScopeContext(
         self_expression="_gml_constructor_self",
-        other_expression="_gml_constructor_self",
+        other_expression="_gml_constructor_other",
         instance_target="_gml_constructor_self",
     )
 
@@ -559,7 +559,7 @@ class ScriptConverter(BaseConverter):
             )
             constructor_scope = _ScopeContext(
                 self_expression="_gml_constructor_self",
-                other_expression="_gml_constructor_self",
+                other_expression="_gml_constructor_other",
                 instance_target="_gml_constructor_self",
                 asset_names=frozenset(asset_names),
                 extension_functions=extension_functions,
@@ -664,7 +664,11 @@ class ScriptConverter(BaseConverter):
                     constructor_suffix = _sanitize_gdscript_identifier(declaration.name)
                     constructor_value = f"_gm_constructor_{constructor_suffix}"
                     constructor_params = ", ".join(
-                        ["_gml_constructor_self = null", *parameter_declarations]
+                        [
+                            "_gml_constructor_self = null",
+                            "_gml_constructor_other = null",
+                            *parameter_declarations,
+                        ]
                     )
                     function_prefix = (
                         f"func {callable_names.call_method}({constructor_params}):\n"
@@ -705,8 +709,8 @@ class ScriptConverter(BaseConverter):
                         + f"{body}\n"
                         + "\treturn GMRuntime.gml_undefined()\n\n"
                         + f"func {callable_names.callable_accessor}():\n"
-                        + f"\tvar {constructor_value} = GMRuntime.gml_constructor(\n"
-                        + "\t\tself,\n"
+                        + f"\tvar {constructor_value} = GMRuntime.gml_receiver_constructor(\n"
+                        + "\t\tGMRuntime.gml_undefined(),\n"
                         + "\t\tGMRuntime.gml_static_bind(\n"
                         + f'\t\t\tCallable(self, "{callable_names.call_method}"),\n'
                         + f"\t\t\t{json.dumps(constructor_scope_id)},\n"
@@ -725,7 +729,10 @@ class ScriptConverter(BaseConverter):
                         + f"func {callable_names.callable_accessor}():\n"
                         + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
                         + f"func {callable_names.scoped_callable_accessor}():\n"
-                        + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.scoped_call_method}"))\n\n'
+                        + "\treturn GMRuntime.gml_receiver_method(\n"
+                        + "\t\tGMRuntime.gml_undefined(),\n"
+                        + f'\t\tCallable(self, "{callable_names.scoped_call_method}")\n'
+                        + "\t)\n\n"
                     )
                 script_entry = script_entries_by_name.get(declaration.name)
                 registry_entries.append(
@@ -815,7 +822,10 @@ class ScriptConverter(BaseConverter):
             + "func gm2godot_callable():\n"
             + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
             + "func gm2godot_scoped_callable():\n"
-            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call_scoped"))\n',
+            + "\treturn GMRuntime.gml_receiver_method(\n"
+            + "\t\tGMRuntime.gml_undefined(),\n"
+            + '\t\tCallable(self, "_gm_script_call_scoped")\n'
+            + "\t)\n",
             (
                 ScriptRegistryEntry(
                     id=entry.id,

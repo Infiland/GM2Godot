@@ -1,8 +1,8 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.44 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-21
+> **Last reviewed:** 2026-07-22
 
 [Home](Home) · [Installation](Installation) · [Quick start](Quick-Start-Conversion) · [Compatibility](Compatibility-and-Limitations) · [Diagnostics](Diagnostics-and-Troubleshooting) · [Contributing](Contributing-and-Testing)
 
@@ -111,6 +111,16 @@ Version 0.7.41 makes this the production `Converter.convert()` path used by GUI,
 After converter and finalizer work reaches a trustworthy `success` or `partial` candidate, GM2Godot freezes and rehashes the stage, reads the exact staged manifest/attempt bytes through verified bindings, performs one final cooperative cancellation check, and enters recoverable publication. Runtime exceptions, finalizer failures, validation failures, or cancellation before that point discard only verified private state. The prior public inventory, canonical diagnostics, and architecture policy remain byte- and mode-exact; only `conversion_attempt.json` is advanced, with `canonical_manifest.current_output: "verified"` after transactionally checking the preserved generation. Once publication starts, cancellation is no longer accepted as a rollback claim: the publisher completes its durable old-or-new decision.
 
 Version 0.7.42 adds deterministic phase declarations for every durable publication boundary. Real project-setting, script, object, registry, diagnostic, manifest, and attempt mutations are terminated without Python cleanup after each observed forward move, reverse rollback, recovery retry, and private cleanup operation. Every restart verifies the exact prior generation before the durable pointer or the exact desired generation after it, including canonical manifest and attempt digests; another recovery must make no changes. Native tests use byte, mode, identity, device, and namespace assertions rather than timing thresholds.
+
+### Bound method receiver context
+
+Version 0.7.44 represents every generated receiver-aware function with explicit metadata. A generated method callable declares hidden `self` and `other` arguments; a constructor declares the new struct plus its constructor `other`; ordinary Godot object methods declare no hidden GML receiver arguments. The runtime therefore never uses `Callable.is_standard()` or `is_custom()` to guess generated arity. It retains the Godot callable owner separately from the semantic GameMaker binding so an unbound script reference remains alive without pretending that its generated `RefCounted` wrapper is `method_get_self()`.
+
+Each transpiled dynamic call supplies the current GML `self`. A bound callee receives that value as `other`, so nested method calls advance context one scope at a time and array/struct callback helpers preserve the scope that invoked the callback. Script registry entries keep separate ordinary and receiver-aware call paths: direct asset calls retain caller `self`/`other`, while `method(target, script_reference)` copies the receiver contract and uses `target` as the rebound `self` without consuming a user argument.
+
+`new` has a separate checked path so receiver injection cannot be omitted or applied twice. The newly allocated struct is always constructor `self`. For an unbound script constructor, `other` is the scope that called `new`; for a constructor rebound with `method`, GameMaker's bound-constructor exception makes the bound scope `other`. Parent constructor calls reuse the same new struct and propagate constructor context. Missing receiver metadata and unmarked custom Godot callables fail closed with a runtime error.
+
+These rules follow GameMaker LTS [Method Variables](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Method_Variables.htm), [Instance Keywords](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance_Keywords.htm), and [`method`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/method.htm). Godot behavior is pinned to the exact 4.7.1 [`Callable`](https://docs.godotengine.org/en/4.7/classes/class_callable.html) contract—where lambdas, bound arguments, global functions, and Variant methods can all be custom callables—and its [GDScript lambda](https://docs.godotengine.org/en/4.7/tutorials/scripting/gdscript/gdscript_basics.html#lambda-functions) rules.
 
 ### Successful stale-resource invalidation
 

@@ -102,7 +102,8 @@ class TestNamedConstructorInheritanceGodot(unittest.TestCase):
             )
             self.assertIn(
                 'GMRuntime.gml_constructor_inherit(_gml_constructor_self, '
-                'GMRuntime.gml_asset_get_index("Parent"), [value])',
+                'GMRuntime.gml_asset_get_index("Parent"), [value], '
+                "_gml_constructor_self, _gml_constructor_other)",
                 generated_script,
             )
             source_map = cast(

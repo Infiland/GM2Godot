@@ -1,8 +1,8 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.44 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-21
+> **Last reviewed:** 2026-07-22
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Compatibility and Limitations](Compatibility-and-Limitations)
 
@@ -134,6 +134,7 @@ With a binary available, validation asks Godot to import supported asset types a
 | “No `.yyp` found” or the wrong project is analyzed | Pass the GameMaker project root that directly contains the `.yyp`. The GUI rejects multiple `.yyp` files; `analyze` warns about them, while headless project readers select the sorted first valid candidate. Separating projects is safer. |
 | Outcome is `partial` | Read `outcome.resources`, the ordered `steps` ledger, and warning/error rows in `conversion_diagnostics.json`. Search the generated compatibility reports for the affected API or resource family before choosing `--allow-partial`. |
 | Unsupported GML call or extension | Use the diagnostic's `api`, `manifest_entry`, `issue_number`, and `workaround`. Native extensions and service SDKs need a reviewed Godot addon/GDExtension or explicit local mapping; a generated stub is not a working native integration. |
+| Runtime says a custom Godot `Callable` lacks explicit receiver metadata | Do not add or remove guessed arguments. Use a transpiled GML function/method or the generated script registry path so GM2Godot can preserve the receiver contract. If converter-generated output reaches this error without hand edits or an extension bridge, report the minimal GML source and generated call site. |
 | Godot validation is `skipped` | Fix `--godot-bin`/`GODOT_BIN`, check executable permissions, and confirm `--version` reports the official 4.7.1 build. |
 | Godot reports a parse, load, import, or boot error | Open `godot_validation_report.json` and fix the first retained Godot issue. Correlate generated scripts with adjacent `.gmlmap.json` source maps when present, then rerun validation. Boot warnings also fail boot validation. |
 | Converted output runs but differs from GameMaker | Check [Compatibility and Limitations](Compatibility-and-Limitations), `architecture_policy.json`, platform capabilities, and the affected resource/API report. Create the smallest fixture that preserves the mismatch. |

@@ -64,4 +64,8 @@ def _emit_constructor_inheritance_line(
         _emit_expression(arg, local_names, scope_context=scope_context)[0]
         for arg in args
     )
-    return f"GMRuntime.gml_constructor_inherit(_gml_constructor_self, {constructor}, [{emitted_args}])"
+    return (
+        "GMRuntime.gml_constructor_inherit("
+        f"_gml_constructor_self, {constructor}, [{emitted_args}], "
+        f"{scope_context.self_expression}, {scope_context.other_expression})"
+    )

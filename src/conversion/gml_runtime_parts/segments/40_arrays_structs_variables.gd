@@ -313,35 +313,81 @@ static func gml_array_foreach(
 	return gml_undefined()
 
 
-static func gml_array_filter(array_value, callback):
+static func gml_array_filter(
+	array_value,
+	callback,
+	caller_self = null,
+	caller_other = null
+):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_filter", array_value)
-	if not is_method(callback):
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY
+		and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
 		return gml_unsupported_type_error("GML array_filter callback", callback)
 	var result = []
 	for i in range(array_value.size()):
 		var element = array_value[i]
-		if gml_method_call(callback, [element, i, array_value]):
+		if gml_call_value(
+			resolved_callback,
+			[element, i, array_value],
+			caller_self,
+			caller_other
+		):
 			result.append(element)
 	return result
 
 
-static func gml_array_map(array_value, callback):
+static func gml_array_map(
+	array_value,
+	callback,
+	caller_self = null,
+	caller_other = null
+):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_map", array_value)
-	if not is_method(callback):
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY
+		and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
 		return gml_unsupported_type_error("GML array_map callback", callback)
 	var result = []
 	for i in range(array_value.size()):
 		var element = array_value[i]
-		result.append(gml_method_call(callback, [element, i, array_value]))
+		result.append(
+			gml_call_value(
+				resolved_callback,
+				[element, i, array_value],
+				caller_self,
+				caller_other
+			)
+		)
 	return result
 
 
-static func gml_array_reduce(array_value, callback, initial_value = null):
+static func gml_array_reduce(
+	array_value,
+	callback,
+	initial_value = null,
+	caller_self = null,
+	caller_other = null
+):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array_reduce", array_value)
-	if not is_method(callback):
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY
+		and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
 		return gml_unsupported_type_error("GML array_reduce callback", callback)
 	var has_initial = initial_value != null
 	if array_value.is_empty():
@@ -352,7 +398,12 @@ static func gml_array_reduce(array_value, callback, initial_value = null):
 	var start_index = 0 if has_initial else 1
 	for i in range(start_index, array_value.size()):
 		var element = array_value[i]
-		accumulator = gml_method_call(callback, [accumulator, element, i, array_value])
+		accumulator = gml_call_value(
+			resolved_callback,
+			[accumulator, element, i, array_value],
+			caller_self,
+			caller_other
+		)
 	return accumulator
 
 
@@ -360,8 +411,13 @@ static func gml_struct(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML struct literal", fields)
 	for key in fields.keys():
-		if typeof(fields[key]) == TYPE_CALLABLE:
+		if fields[key] is GMLMethod and not fields[key].has_bound_self:
 			fields[key] = gml_method(fields, fields[key])
+		elif typeof(fields[key]) == TYPE_CALLABLE:
+			return gml_error(
+				"GML struct method is missing explicit receiver metadata for "
+				+ str(key)
+			)
 	return fields
 
 
@@ -666,14 +722,30 @@ static func _gml_object_builtin_field_set(object_value, member_name, value):
 	return value
 
 
-static func gml_struct_foreach(struct_value, callback):
+static func gml_struct_foreach(
+	struct_value,
+	callback,
+	caller_self = null,
+	caller_other = null
+):
 	if not is_struct(struct_value):
 		return gml_unsupported_type_error("GML struct_foreach", struct_value)
-	if not is_method(callback):
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY
+		and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
 		return gml_unsupported_type_error("GML struct_foreach callback", callback)
 	for member_name in gml_struct_get_names(struct_value):
 		var member_value = gml_struct_get(struct_value, member_name)
-		gml_method_call(callback, [member_name, member_value])
+		gml_call_value(
+			resolved_callback,
+			[member_name, member_value],
+			caller_self,
+			caller_other
+		)
 	return null
 
 

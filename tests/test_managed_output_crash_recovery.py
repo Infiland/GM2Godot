@@ -361,6 +361,8 @@ def make_cleanup_tree_read_only(phase, path):
         current_path = Path(current)
         directories.append(current_path)
         for filename in filenames:
+            if filename == ".gm2godot-workspace-stage.json":
+                continue
             (current_path / filename).chmod(stat.S_IREAD)
         for directory in child_directories:
             directories.append(current_path / directory)

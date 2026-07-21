@@ -136,14 +136,17 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "method(player, callback) != method(enemy, callback)",
         "GMRuntime.gml_ne(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(enemy, callback))",
     ),
-    RuntimeValueParityCase("method_call(callback)", "GMRuntime.gml_method_call(callback)"),
+    RuntimeValueParityCase(
+        "method_call(callback)",
+        "GMRuntime.gml_method_call(callback, null, 0, null, self, other)",
+    ),
     RuntimeValueParityCase(
         "method_call(callback, [1, 2, 3], 1, 2)",
-        "GMRuntime.gml_method_call(callback, [1, 2, 3], 1, 2)",
+        "GMRuntime.gml_method_call(callback, [1, 2, 3], 1, 2, self, other)",
     ),
     RuntimeValueParityCase(
         "method_call(callback, [1, 2, 3], -1, -2)",
-        "GMRuntime.gml_method_call(callback, [1, 2, 3], -1, -2)",
+        "GMRuntime.gml_method_call(callback, [1, 2, 3], -1, -2, self, other)",
     ),
     RuntimeValueParityCase('handle_parse("ref ds_list 1")', 'GMRuntime.gml_handle_parse("ref ds_list 1")'),
     RuntimeValueParityCase('ref_create(self, "text")', 'GMRuntime.gml_ref_create(self, "text")'),
@@ -151,7 +154,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         'handle_parse(string(ref_create(self, "text")))',
         'GMRuntime.gml_handle_parse(GMRuntime.gml_string(GMRuntime.gml_ref_create(self, "text")))',
     ),
-    RuntimeValueParityCase("struct_foreach(mystruct, callback)", "GMRuntime.gml_struct_foreach(mystruct, callback)"),
+    RuntimeValueParityCase(
+        "struct_foreach(mystruct, callback)",
+        "GMRuntime.gml_struct_foreach(mystruct, callback, self, other)",
+    ),
     RuntimeValueParityCase("static_get(counter)", "GMRuntime.gml_static_get(counter)"),
     RuntimeValueParityCase(
         "static_set(mystruct, static_get(counter))",
@@ -2133,10 +2139,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return gml_handle_resolve(gml_handle_from_value(kind, value))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_method_call_slices_array_arguments(self):
-        self.assertIn("static func gml_method_call(method, array_args = null, offset = 0, num_args = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_method_call(", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tcaller_self = null,\n\tcaller_other = null", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_call", method)', GML_RUNTIME_SCRIPT)
         self.assertIn("var call_args = _gml_method_call_args(array_args, offset, num_args)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return method.gml_callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "resolved_method.gml_callv(call_args, caller_self, caller_other)",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("static func _gml_method_call_args(array_args, offset, num_args):", GML_RUNTIME_SCRIPT)
         self.assertIn("var source = [] if array_args == null else array_args", GML_RUNTIME_SCRIPT)
         self.assertIn("if typeof(source) != TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
@@ -2147,7 +2157,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_dynamic_call_dispatch_uses_callv_and_registered_scripts(self):
         self.assertIn("static func gml_call_value(function_value, args = [], caller_self = null, caller_other = null, function_name = \"\"):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return function_value.gml_callv(call_args) if function_value is GMLMethod else function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "function_value.gml_callv(call_args, caller_self, caller_other)",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return gml_script_call(descriptor, call_args, caller_self, caller_other)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_named(function_name, args = [], caller_self = null, caller_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("var instance_value = gml_selector_get(caller_self, name, caller_self, caller_other)", GML_RUNTIME_SCRIPT)
@@ -2157,16 +2170,35 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("class GMLMethod:", GML_RUNTIME_SCRIPT)
         self.assertIn("var bound_self = null", GML_RUNTIME_SCRIPT)
         self.assertIn("var function_value = null", GML_RUNTIME_SCRIPT)
+        self.assertIn("var callable_owner = null", GML_RUNTIME_SCRIPT)
         self.assertIn("var is_constructor = false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "var receiver_argument_count = GML_RECEIVER_ARGUMENTS_NONE",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("var has_bound_self = true", GML_RUNTIME_SCRIPT)
         self.assertIn("bound_self = method_self", GML_RUNTIME_SCRIPT)
         self.assertIn("function_value = method_function", GML_RUNTIME_SCRIPT)
         self.assertIn("is_constructor = bool(method_is_constructor)", GML_RUNTIME_SCRIPT)
-        self.assertIn("func gml_callv(args):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "func gml_callv(args, caller_self = null, caller_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if receiver_argument_count != GML_RECEIVER_ARGUMENTS_NONE:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("var method_other = caller_self if has_bound_self else caller_other", GML_RUNTIME_SCRIPT)
         self.assertIn("return function_value.callv(args)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_method(scope, func_or_method, method_is_constructor = false):", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("not function_value.is_standard()", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_method(scope, func_or_method, method_is_constructor = null):",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn('return gml_unsupported_type_error("GML method", func_or_method)', GML_RUNTIME_SCRIPT)
         self.assertIn("var function_value = gml_method_get_index(func_or_method)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLMethod.new(scope, function_value, method_is_constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_receiver_method(scope, callable):", GML_RUNTIME_SCRIPT)
+        self.assertIn("GML_RECEIVER_ARGUMENTS_SELF_OTHER", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_method_get_self(method):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML method_get_self", method)', GML_RUNTIME_SCRIPT)
         self.assertIn("if method is GMLMethod:", GML_RUNTIME_SCRIPT)
@@ -2198,18 +2230,28 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_constructor(scope, func_or_method):", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_method = gml_method(scope, func_or_method, true)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_static_get(constructor_method)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_new(constructor, args = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_receiver_constructor(scope, callable):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_new(constructor, args = [], caller_self = null, caller_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn('return gml_unsupported_type_error("GML new constructor", constructor)', GML_RUNTIME_SCRIPT)
         self.assertIn("if not constructor.is_constructor:", GML_RUNTIME_SCRIPT)
         self.assertIn("var instance = gml_struct({})", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_static_set(instance, constructor_static)", GML_RUNTIME_SCRIPT)
-        self.assertIn("var call_args = [instance]", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_constructor_invoke(", GML_RUNTIME_SCRIPT)
+        self.assertIn("call_args.append(instance)", GML_RUNTIME_SCRIPT)
+        self.assertIn("call_args.append(constructor_other)", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append_array(args)", GML_RUNTIME_SCRIPT)
         self.assertIn("constructor.function_value.callv(call_args)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_constructor_inherit(instance, constructor, args = []):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_constructor_inherit(", GML_RUNTIME_SCRIPT)
         self.assertIn("var parent_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
         self.assertIn("gml_static_set(current_static, parent_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "constructor.bound_self if constructor.has_bound_self else caller_other",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return instance", GML_RUNTIME_SCRIPT)
 
     def test_runtime_throw_preserves_arbitrary_payload_values(self):
@@ -2434,8 +2476,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
             'return gml_unsupported_type_error("GML struct literal", fields)',
             GML_RUNTIME_SCRIPT,
         )
-        self.assertIn("if typeof(fields[key]) == TYPE_CALLABLE:", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if fields[key] is GMLMethod and not fields[key].has_bound_self:",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("fields[key] = gml_method(fields, fields[key])", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "GML struct method is missing explicit receiver metadata",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return fields", GML_RUNTIME_SCRIPT)
         self.assertNotIn("fields.duplicate", GML_RUNTIME_SCRIPT)
 
@@ -2917,17 +2966,28 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return -1", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_foreach_invokes_callback_for_visible_members(self):
-        self.assertIn("static func gml_struct_foreach(struct_value, callback):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_struct_foreach(", GML_RUNTIME_SCRIPT)
         self.assertIn("if not is_struct(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML struct_foreach", struct_value)', GML_RUNTIME_SCRIPT)
-        self.assertIn("if not is_method(callback):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var resolved_callback = callback", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "resolved_callback = _gml_script_resolve(resolved_callback)",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn(
             'return gml_unsupported_type_error("GML struct_foreach callback", callback)',
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("for member_name in gml_struct_get_names(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("var member_value = gml_struct_get(struct_value, member_name)", GML_RUNTIME_SCRIPT)
-        self.assertIn("gml_method_call(callback, [member_name, member_value])", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "gml_call_value(\n"
+            "\t\t\tresolved_callback,\n"
+            "\t\t\t[member_name, member_value],\n"
+            "\t\t\tcaller_self,\n"
+            "\t\t\tcaller_other",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return null", GML_RUNTIME_SCRIPT)
 
     def test_runtime_static_helpers_track_static_chain_relationships(self):

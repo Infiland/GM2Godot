@@ -388,7 +388,7 @@ class _ExpressionParser:
         if is_constructor:
             scope_context = _ScopeContext(
                 self_expression="_gml_constructor_self",
-                other_expression=self.scope_context.other_expression,
+                other_expression="_gml_constructor_other",
                 instance_target="_gml_constructor_self",
                 global_names=self.scope_context.global_names,
                 asset_names=self.scope_context.asset_names,
@@ -407,7 +407,7 @@ class _ExpressionParser:
                 # method().  Keep that receiver dynamic instead of baking in
                 # the scope where the function literal was declared.
                 self_expression="_gml_method_self",
-                other_expression=scope_context.other_expression,
+                other_expression="_gml_method_other",
                 instance_target="_gml_method_self",
                 global_scope=scope_context.global_scope,
                 global_names=scope_context.global_names,

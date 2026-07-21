@@ -370,11 +370,13 @@ def _emit_expression(
         if bind_function_literals:
             if expr.is_constructor:
                 return (
-                    f"GMRuntime.gml_constructor({scope_context.self_expression}, {function_literal})",
+                    "GMRuntime.gml_receiver_constructor("
+                    f"{scope_context.self_expression}, {function_literal})",
                     _POSTFIX_PRECEDENCE,
                 )
             return (
-                f"GMRuntime.gml_method({scope_context.self_expression}, {function_literal})",
+                "GMRuntime.gml_receiver_method("
+                f"{scope_context.self_expression}, {function_literal})",
                 _POSTFIX_PRECEDENCE,
             )
         return function_literal, _PRIMARY_PRECEDENCE
@@ -388,7 +390,11 @@ def _emit_expression(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
             for arg in expr.args
         )
-        return f"GMRuntime.gml_new({constructor}, [{args}])", _POSTFIX_PRECEDENCE
+        return (
+            f"GMRuntime.gml_new({constructor}, [{args}], "
+            f"{scope_context.self_expression}, {scope_context.other_expression})",
+            _POSTFIX_PRECEDENCE,
+        )
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
             _emit_struct_field(
@@ -513,15 +519,19 @@ def _emit_function_literal(
         for parameter in expr.parameters
     ]
     if expr.is_constructor:
+        emitted_parameters.insert(0, "_gml_constructor_other = null")
         emitted_parameters.insert(0, "_gml_constructor_self = null")
         function_self_expression = "_gml_constructor_self"
+        function_other_expression = "_gml_constructor_other"
     else:
+        emitted_parameters.insert(0, "_gml_method_other = null")
         emitted_parameters.insert(0, "_gml_method_self = null")
         function_self_expression = "_gml_method_self"
+        function_other_expression = "_gml_method_other"
     parameters = ", ".join(emitted_parameters)
     function_scope_context = _ScopeContext(
         self_expression=function_self_expression,
-        other_expression=scope_context.other_expression,
+        other_expression=function_other_expression,
         instance_target=function_self_expression,
         global_scope=scope_context.global_scope,
         global_names=scope_context.global_names,
@@ -562,13 +572,23 @@ def _emit_struct_field(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> str:
-    bind_function_literal = not isinstance(_unwrap_grouped_expression(field_value), _FunctionLiteral)
+    unwrapped_value = _unwrap_grouped_expression(field_value)
+    bind_function_literal = not isinstance(unwrapped_value, _FunctionLiteral)
     field_text = _emit_expression(
         field_value,
         local_names,
         bind_function_literal,
         scope_context=scope_context,
     )[0]
+    if isinstance(unwrapped_value, _FunctionLiteral):
+        helper = (
+            "gml_receiver_constructor"
+            if unwrapped_value.is_constructor
+            else "gml_receiver_method"
+        )
+        field_text = (
+            f"GMRuntime.{helper}(GMRuntime.gml_undefined(), {field_text})"
+        )
     return f"{json.dumps(field_name)}: {field_text}"
 
 
@@ -677,11 +697,22 @@ def _emit_descriptor_call(
         scope = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
         if scope == _NAME_REPLACEMENTS["undefined"]:
             scope = scope_context.self_expression
-        function_value = _emit_expression(
-            args[1],
-            local_names,
-            scope_context=scope_context,
-        )[0]
+        function_reference = _unwrap_grouped_expression(args[1])
+        if (
+            isinstance(function_reference, _Name)
+            and function_reference.value not in local_names
+            and function_reference.value in scope_context.asset_names
+        ):
+            function_value = (
+                "GMRuntime.gml_script_get_callable("
+                f"GMRuntime.gml_asset_get_index({json.dumps(function_reference.value)}))"
+            )
+        else:
+            function_value = _emit_expression(
+                args[1],
+                local_names,
+                scope_context=scope_context,
+            )[0]
         return f"GMRuntime.{descriptor.lowering_target}({scope}, {function_value})"
 
     if descriptor.lowering_kind == "with_targets":
@@ -699,6 +730,31 @@ def _emit_descriptor_call(
         ]
         values = ", ".join(emitted_args[1:])
         return f"GMRuntime.{descriptor.lowering_target}({emitted_args[0]}, [{values}])"
+
+    if descriptor.lowering_kind == "runtime_method_call":
+        emitted_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        ]
+        optional_defaults = ["null", "0", "null"]
+        while len(emitted_args) < 4:
+            emitted_args.append(optional_defaults[len(emitted_args) - 1])
+        emitted_args.extend(
+            [scope_context.self_expression, scope_context.other_expression]
+        )
+        return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
+
+    if descriptor.lowering_kind == "runtime_call_scope":
+        emitted_args = [
+            _emit_expression(arg, local_names, scope_context=scope_context)[0]
+            for arg in args
+        ]
+        if descriptor.name == "array_reduce" and len(emitted_args) == 2:
+            emitted_args.append("null")
+        emitted_args.extend(
+            [scope_context.self_expression, scope_context.other_expression]
+        )
+        return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"
 
     if descriptor.lowering_kind == "runtime_array_sort":
         emitted_args = [

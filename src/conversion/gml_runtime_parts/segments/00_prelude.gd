@@ -81,22 +81,46 @@ class GMLHandle:
 		value = int(encoded_value)
 
 
+const GML_RECEIVER_ARGUMENTS_NONE = 0
+const GML_RECEIVER_ARGUMENTS_SELF = 1
+const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
+
+
 class GMLMethod:
 	var bound_self = null
 	var function_value = null
+	var callable_owner = null
 	var is_constructor = false
+	var receiver_argument_count = GML_RECEIVER_ARGUMENTS_NONE
+	var has_bound_self = true
 
-	func _init(method_self = null, method_function = null, method_is_constructor = false):
+	func _init(
+		method_self = null,
+		method_function = null,
+		method_is_constructor = false,
+		method_receiver_argument_count = GML_RECEIVER_ARGUMENTS_NONE,
+		method_has_bound_self = true
+	):
 		bound_self = method_self
 		function_value = method_function
+		if typeof(method_function) == TYPE_CALLABLE and method_function.is_standard():
+			callable_owner = method_function.get_object()
 		is_constructor = bool(method_is_constructor)
+		receiver_argument_count = int(method_receiver_argument_count)
+		has_bound_self = bool(method_has_bound_self)
 
-	func gml_callv(args):
-		# Generated function literals are custom Callables with a hidden receiver
-		# parameter.  Supplying it at call time preserves GameMaker method rebinding;
-		# standard Object methods already carry their receiver in the Callable.
-		if typeof(function_value) == TYPE_CALLABLE and not function_value.is_standard():
-			var call_args = [bound_self]
+	func gml_callv(args, caller_self = null, caller_other = null):
+		# Generated receiver-aware callables declare their hidden arity explicitly.
+		# Callable custom/standard status does not describe a GML receiver contract:
+		# lambdas, bound arguments, Variant methods, and RPC callables are all custom.
+		if receiver_argument_count != GML_RECEIVER_ARGUMENTS_NONE:
+			var method_self = bound_self if has_bound_self else caller_self
+			var method_other = caller_self if has_bound_self else caller_other
+			if method_other == null:
+				method_other = method_self
+			var call_args = [method_self]
+			if receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF_OTHER:
+				call_args.append(method_other)
 			call_args.append_array(args)
 			return function_value.callv(call_args)
 		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():

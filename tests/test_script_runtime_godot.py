@@ -172,7 +172,8 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_script_execute(legacy_id, [2, 3]) == 5, "script_execute legacy args failed"):
             \t\treturn
-            \tif not _check(GMRuntime.gml_script_call(legacy_id, [7, 8], self, self) == 15, "transpiled script-call asset id failed"):
+            \tvar scoped_legacy_result = GMRuntime.gml_script_call(legacy_id, [7, 8], self, self)
+            \tif not _check(scoped_legacy_result == 15, "transpiled script-call asset id failed: " + str(scoped_legacy_result)):
             \t\treturn
             \tif not _check(GMRuntime.gml_argument_count() == 0, "legacy argument scope did not restore"):
             \t\treturn

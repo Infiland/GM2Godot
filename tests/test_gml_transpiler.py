@@ -1075,9 +1075,38 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression(
                 "method(scope, function() { return value; })"
             ),
-            "GMRuntime.gml_method(scope, GMRuntime.gml_method(self, "
-            "func(_gml_method_self = null): return "
+            "GMRuntime.gml_method(scope, GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null): return "
             'GMRuntime.gml_variable_instance_get(_gml_method_self, "value")))',
+        )
+
+    def test_method_function_literals_receive_other_from_each_invocation(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                "function() { return [self, other]; }"
+            ),
+            "GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null): "
+            "return [_gml_method_self, _gml_method_other])",
+        )
+
+    def test_method_rebinding_resolves_script_asset_callable_metadata(self):
+        self.assertEqual(
+            transpile_gml_expression(
+                "method(target, scr_receiver)",
+                asset_names={"scr_receiver"},
+            ),
+            "GMRuntime.gml_method(target, "
+            "GMRuntime.gml_script_get_callable("
+            'GMRuntime.gml_asset_get_index("scr_receiver")))',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "method(target, scr_receiver)",
+                local_names={"scr_receiver"},
+                asset_names={"scr_receiver"},
+            ),
+            "GMRuntime.gml_method(target, scr_receiver)",
         )
 
     def test_rejects_nameof_non_name_expressions(self):
@@ -1133,14 +1162,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("method(player, callback) != method(enemy, callback)"),
             "GMRuntime.gml_ne(GMRuntime.gml_method(player, callback), GMRuntime.gml_method(enemy, callback))",
         )
-        self.assertEqual(transpile_gml_expression("method_call(callback)"), "GMRuntime.gml_method_call(callback)")
+        self.assertEqual(
+            transpile_gml_expression("method_call(callback)"),
+            "GMRuntime.gml_method_call(callback, null, 0, null, self, other)",
+        )
         self.assertEqual(
             transpile_gml_expression("method_call(callback, [1, 2, 3], 1, 2)"),
-            "GMRuntime.gml_method_call(callback, [1, 2, 3], 1, 2)",
+            "GMRuntime.gml_method_call(callback, [1, 2, 3], 1, 2, self, other)",
         )
         self.assertEqual(
             transpile_gml_expression("method_call(callback, [1, 2, 3], -1, -2)"),
-            "GMRuntime.gml_method_call(callback, [1, 2, 3], -1, -2)",
+            "GMRuntime.gml_method_call(callback, [1, 2, 3], -1, -2, self, other)",
         )
 
     def test_transpiles_bitwise_operators(self):
@@ -1524,10 +1556,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             ),
             'GMRuntime.gml_struct({"nested value": '
             'GMRuntime.gml_struct({"child-key": value}), '
-            '"compute!": func(_gml_method_self = null, input = null):\n'
+            '"compute!": GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), '
+            "func(_gml_method_self = null, _gml_method_other = null, input = null):\n"
             '\tif input == null: input = GMRuntime.gml_undefined()\n'
             '\treturn GMRuntime.gml_add(input, 1)\n'
-            '})',
+            ')})',
         )
 
     def test_quoted_struct_fields_require_nonempty_double_quoted_names_and_values(self):
@@ -1570,22 +1603,26 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_parses_function_literals_inside_structs(self):
         self.assertEqual(
             transpile_gml_expression("{apply: function(a, b) { return a + b; }}"),
-            'GMRuntime.gml_struct({"apply": func(_gml_method_self = null, a = null, b = null):\n'
+            'GMRuntime.gml_struct({"apply": GMRuntime.gml_receiver_method('
+            "GMRuntime.gml_undefined(), func(_gml_method_self = null, "
+            "_gml_method_other = null, a = null, b = null):\n"
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null: b = GMRuntime.gml_undefined()\n"
             "\treturn GMRuntime.gml_add(a, b)\n"
-            "})",
+            ")})",
         )
         self.assertEqual(
             transpile_gml_expression('string({toString: function() { return "ok"; }})'),
             'GMRuntime.gml_string(GMRuntime.gml_struct({"toString": '
-            'func(_gml_method_self = null): return "ok"}))',
+            "GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), "
+            'func(_gml_method_self = null, _gml_method_other = null): return "ok")}))',
         )
 
     def test_function_literals_preserve_optional_defaults(self):
         self.assertEqual(
             transpile_gml_expression("function(a, b = 90) { return b; }"),
-            "GMRuntime.gml_method(self, func(_gml_method_self = null, a = null, b = null):\n"
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, "
+            "_gml_method_other = null, a = null, b = null):\n"
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null or GMRuntime.is_undefined(b): b = 90\n"
             "\treturn b\n"
@@ -1593,7 +1630,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("function(a, b = a + 1) { return b; }"),
-            "GMRuntime.gml_method(self, func(_gml_method_self = null, a = null, b = null):\n"
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, "
+            "_gml_method_other = null, a = null, b = null):\n"
             "\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\tif b == null or GMRuntime.is_undefined(b): b = GMRuntime.gml_add(a, 1)\n"
             "\treturn b\n"
@@ -1601,7 +1639,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("[function() { return 1; }]"),
-            "[GMRuntime.gml_method(self, func(_gml_method_self = null): return 1)]",
+            "[GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, "
+            "_gml_method_other = null): return 1)]",
         )
 
     def test_omitted_call_arguments_emit_gml_undefined(self):
@@ -1897,11 +1936,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_expression("struct_foreach(mystruct, callback)"),
-            "GMRuntime.gml_struct_foreach(mystruct, callback)",
+            "GMRuntime.gml_struct_foreach(mystruct, callback, self, other)",
         )
         self.assertEqual(
             transpile_gml_expression("struct_foreach(mystruct, method(self, callback))"),
-            "GMRuntime.gml_struct_foreach(mystruct, GMRuntime.gml_method(self, callback))",
+            "GMRuntime.gml_struct_foreach("
+            "mystruct, GMRuntime.gml_method(self, callback), self, other)",
         )
 
     def test_transpiles_static_struct_helpers_through_runtime(self):
@@ -1935,12 +1975,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_transpiles_new_constructor_invocations(self):
         self.assertEqual(
             transpile_gml_expression("new Point(4, 5)"),
-            "GMRuntime.gml_new(Point, [4, 5])",
+            "GMRuntime.gml_new(Point, [4, 5], self, other)",
         )
         self.assertEqual(
             transpile_gml_expression("new factory.Point(name, )"),
             'GMRuntime.gml_new(GMRuntime.gml_selector_get(factory, "Point"), '
-            "[name, GMRuntime.gml_undefined()])",
+            "[name, GMRuntime.gml_undefined()], self, other)",
         )
 
     def test_transpiles_constructor_qualified_function_literals(self):
@@ -1948,8 +1988,9 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression(
                 "function Point(_x, _y) constructor { x = _x; y = _y; }",
             ),
-            "GMRuntime.gml_constructor(self, "
-            "func Point(_gml_constructor_self = null, _x = null, _y = null):\n"
+            "GMRuntime.gml_receiver_constructor(self, "
+            "func Point(_gml_constructor_self = null, "
+            "_gml_constructor_other = null, _x = null, _y = null):\n"
             "\tif _x == null: _x = GMRuntime.gml_undefined()\n"
             "\tif _y == null: _y = GMRuntime.gml_undefined()\n"
             '\tGMRuntime.gml_variable_instance_set(_gml_constructor_self, "x", _x)\n'
@@ -1962,7 +2003,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "function counter() { show_debug_message(n); static n = 0; n += 1; return n; }"
         )
 
-        self.assertIn("GMRuntime.gml_static_bind(func counter(_gml_method_self = null):", output)
+        self.assertIn(
+            "GMRuntime.gml_static_bind(func counter("
+            "_gml_method_self = null, _gml_method_other = null):",
+            output,
+        )
         self.assertIn('GMRuntime.gml_static_scope("gml_static:counter:', output)
         self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", output)
         self.assertIn('[["n", func(): return 0]]', output)
@@ -1997,7 +2042,11 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             output,
         )
         self.assertIn('[["total", func(): return 10], ["callback", func(): return', output)
-        self.assertIn("func(_gml_method_self = null, value = null):", output)
+        self.assertIn(
+            "func(_gml_method_self = null, _gml_method_other = null, "
+            "value = null):",
+            output,
+        )
         self.assertIn(
             'value = GMRuntime.gml_struct({"amount": 1})',
             output,
@@ -2024,11 +2073,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "function Point() constructor { static make = function() { return 1; }; return make; }"
         )
 
-        self.assertIn("GMRuntime.gml_constructor(self, GMRuntime.gml_static_bind(func Point", output)
+        self.assertIn(
+            "GMRuntime.gml_receiver_constructor("
+            "self, GMRuntime.gml_static_bind(func Point",
+            output,
+        )
         self.assertIn('"Point"', output)
         self.assertIn(
-            '["make", func(): return GMRuntime.gml_method(_gml_constructor_self, '
-            'func(_gml_method_self = null): return 1)]',
+            '["make", func(): return GMRuntime.gml_receiver_method('
+            "_gml_constructor_self, func(_gml_method_self = null, "
+            "_gml_method_other = null): return 1)]",
             output,
         )
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", output)
@@ -2042,11 +2096,13 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
         self.assertIn(
-            '["operate", func(): return GMRuntime.gml_method(_gml_constructor_self,',
+            '["operate", func(): return GMRuntime.gml_receiver_method('
+            "_gml_constructor_self,",
             output,
         )
         self.assertIn(
-            '["invert", func(): return GMRuntime.gml_method(_gml_constructor_self,',
+            '["invert", func(): return GMRuntime.gml_receiver_method('
+            "_gml_constructor_self,",
             output,
         )
         self.assertIn(
@@ -2088,7 +2144,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "function Child(x) : Parent(x) constructor { static c = 1; return c; }"
         )
 
-        self.assertIn("GMRuntime.gml_constructor_inherit(_gml_constructor_self, Parent, [x])", output)
+        self.assertIn(
+            "GMRuntime.gml_constructor_inherit("
+            "_gml_constructor_self, Parent, [x], "
+            "_gml_constructor_self, _gml_constructor_other)",
+            output,
+        )
         self.assertLess(
             output.index("GMRuntime.gml_constructor_inherit"),
             output.index("GMRuntime.gml_static_initialize"),
@@ -2273,11 +2334,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_function_return_statements(self):
         self.assertEqual(
             transpile_gml_expression("function() { return; }"),
-            "GMRuntime.gml_method(self, func(_gml_method_self = null): return)",
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null): return)",
         )
         self.assertEqual(
             transpile_gml_expression("function() { return score + bonus; }"),
-            "GMRuntime.gml_method(self, func(_gml_method_self = null): return "
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null): return "
             'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_method_self, "score"), '
             'GMRuntime.gml_variable_instance_get(_gml_method_self, "bonus")))',
         )
@@ -2298,7 +2361,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_function_exit_as_early_return(self):
         self.assertEqual(
             transpile_gml_expression("function() { if done begin exit; end return score; }"),
-            "GMRuntime.gml_method(self, func(_gml_method_self = null):\n"
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
             '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
             "\t\treturn\n"
             '\treturn GMRuntime.gml_variable_instance_get(_gml_method_self, "score")\n'
@@ -2988,7 +3052,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_nested_function_local_vars_do_not_hoist_to_enclosing_scope(self):
         self.assertEqual(
             transpile_gml_code("var fn = function() { var inner = 1; return inner; };", indent=""),
-            "var fn = GMRuntime.gml_method(self, func(_gml_method_self = null):\n"
+            "var fn = GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
             "\tvar inner = 1\n"
             "\treturn inner\n"
             ")",
@@ -3672,8 +3737,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "value = 1; try_to_modify_value(value); result = value;",
                 indent="",
             ),
-            "var try_to_modify_value = GMRuntime.gml_method(self, "
-            "func(_gml_method_self = null, argument0 = null):\n"
+            "var try_to_modify_value = GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null, "
+            "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\targument0 = 2\n"
             ")\n"
@@ -3689,8 +3755,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "items = [1]; try_to_modify_array(items); value = items[1];",
                 indent="",
             ),
-            "var try_to_modify_array = GMRuntime.gml_method(self, "
-            "func(_gml_method_self = null, argument0 = null):\n"
+            "var try_to_modify_array = GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null, "
+            "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\tGMRuntime.gml_array_push(argument0, [2])\n"
             ")\n"
@@ -3787,8 +3854,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "{ return current - next; });",
                 indent="",
             ),
-            "GMRuntime.gml_array_sort(arr, GMRuntime.gml_method(self, "
-            "func(_gml_method_self = null, current = null, next = null):\n"
+            "GMRuntime.gml_array_sort(arr, GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null, "
+            "current = null, next = null):\n"
             "\tif current == null: current = GMRuntime.gml_undefined()\n"
             "\tif next == null: next = GMRuntime.gml_undefined()\n"
             "\treturn GMRuntime.gml_sub(current, next)\n"
@@ -3854,7 +3922,12 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "array_foreach(arr, function(value, index) { seen[index] = value; });",
             indent="",
         )
-        self.assertTrue(inline.startswith("GMRuntime.gml_array_foreach(arr, GMRuntime.gml_method(self, "))
+        self.assertTrue(
+            inline.startswith(
+                "GMRuntime.gml_array_foreach("
+                "arr, GMRuntime.gml_receiver_method(self, "
+            )
+        )
         self.assertTrue(inline.endswith("), 0, null, self, other)"))
         with self.assertRaisesRegex(
             GMLTranspileError,
@@ -3875,7 +3948,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code(
                 "result = array_map(arr, double);", indent=""
             ),
-            "result = GMRuntime.gml_array_map(arr, double)",
+            "result = GMRuntime.gml_array_map(arr, double, self, other)",
         )
 
     def test_transpiles_array_filter(self):
@@ -3883,7 +3956,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code(
                 "result = array_filter(arr, is_odd);", indent=""
             ),
-            "result = GMRuntime.gml_array_filter(arr, is_odd)",
+            "result = GMRuntime.gml_array_filter(arr, is_odd, self, other)",
         )
 
     def test_transpiles_array_reduce(self):
@@ -3891,13 +3964,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code(
                 "result = array_reduce(arr, add, 0);", indent=""
             ),
-            "result = GMRuntime.gml_array_reduce(arr, add, 0)",
+            "result = GMRuntime.gml_array_reduce(arr, add, 0, self, other)",
         )
         self.assertEqual(
             transpile_gml_code(
                 "result = array_reduce(arr, add);", indent=""
             ),
-            "result = GMRuntime.gml_array_reduce(arr, add)",
+            "result = GMRuntime.gml_array_reduce(arr, add, null, self, other)",
         )
 
     def test_transpiles_newline_separated_statements(self):

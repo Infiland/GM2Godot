@@ -47,12 +47,14 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_array_sort",
     "runtime_audio_api",
     "runtime_append_self",
+    "runtime_call_scope",
     "runtime_collision_api",
     "runtime_draw_api",
     "runtime_instance_api",
     "runtime_instance_keyword_first_arg",
     "runtime_layer_api",
     "runtime_motion_api",
+    "runtime_method_call",
     "runtime_path_api",
     "runtime_path_asset_api",
     "runtime_platform_service_api",
@@ -1325,13 +1327,24 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in _STRUCT_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRUCT_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind: GMLFunctionLoweringKind = (
+            "runtime_call_scope" if name == "struct_foreach" else "runtime"
+        )
+        descriptors[name] = _descriptor(
+            name,
+            min_args,
+            max_args,
+            lowering_kind,
+            target,
+        )
 
     for name, target in _VARIABLE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _VARIABLE_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "script_execute":
             lowering_kind = "runtime_variadic_1"
+        elif name == "method_call":
+            lowering_kind = "runtime_method_call"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _DS_MAP_RUNTIME_FUNCTIONS.items():
@@ -1347,6 +1360,8 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_array_foreach"
         elif name == "array_sort":
             lowering_kind = "runtime_array_sort"
+        elif name in {"array_filter", "array_map", "array_reduce"}:
+            lowering_kind = "runtime_call_scope"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in _STRING_RUNTIME_FUNCTIONS.items():

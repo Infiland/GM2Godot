@@ -179,6 +179,10 @@ class TestScriptConverter(unittest.TestCase):
 
         self.assertIn("func _gm_script_call():", legacy_script)
         self.assertIn("func _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null):", legacy_script)
+        self.assertIn(
+            "return GMRuntime.gml_receiver_method(",
+            legacy_script,
+        )
         self.assertIn("# GM2Godot source:", legacy_script)
         self.assertIn("GMRuntime.gml_argument(0)", legacy_script)
         self.assertIn("GMRuntime.gml_argument(1)", legacy_script)
@@ -194,6 +198,10 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn("func _gm_script_call(a = null, b = null):", modern_script)
         self.assertIn(
             "func _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null, a = null, b = null):",
+            modern_script,
+        )
+        self.assertIn(
+            "return GMRuntime.gml_receiver_method(",
             modern_script,
         )
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)
@@ -720,7 +728,11 @@ class TestScriptConverter(unittest.TestCase):
             script,
         )
         self.assertIn("GMRuntime.gml_static_initialize(_gml_static_scope_", script)
-        self.assertIn("func(_gml_method_self = null, value = null):", script)
+        self.assertIn(
+            "func(_gml_method_self = null, _gml_method_other = null, "
+            "value = null):",
+            script,
+        )
         self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", script)
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", script)
 
@@ -969,10 +981,15 @@ class TestScriptConverter(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(
             'GMRuntime.gml_selector_set(GMRuntime.gml_global_scope(), '
-            '"testAnonymousGlobalConstructor", GMRuntime.gml_constructor(',
+            '"testAnonymousGlobalConstructor", '
+            "GMRuntime.gml_receiver_constructor(",
             script,
         )
-        self.assertIn("func _gm_script_call(_gml_constructor_self = null):", script)
+        self.assertIn(
+            "func _gm_script_call("
+            "_gml_constructor_self = null, _gml_constructor_other = null):",
+            script,
+        )
         self.assertIn(
             'GMRuntime.gml_variable_instance_set(_gml_constructor_self, "variable", 3.141)',
             script,
@@ -1009,7 +1026,7 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn(
             "GMRuntime.gml_constructor_inherit(_gml_constructor_self, "
             'GMRuntime.gml_selector_get(GMRuntime.gml_global_scope(), "Parent"), '
-            "[value])",
+            "[value], _gml_constructor_self, _gml_constructor_other)",
             script,
         )
         self.assertIn(
@@ -1050,14 +1067,16 @@ class TestScriptConverter(unittest.TestCase):
         )
         first_assignment = script.index('"First"')
         first_new = script.index(
-            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])'
+            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), '
+            "[], self, self)"
         )
         second_assignment = script.index('"Second"')
         self.assertLess(first_assignment, first_new)
         self.assertLess(first_new, second_assignment)
         self.assertEqual(
             script.count(
-                'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])'
+                'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), '
+                "[], self, self)"
             ),
             3,
         )
@@ -1163,13 +1182,28 @@ class TestScriptConverter(unittest.TestCase):
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(
             encoding="utf-8"
         )
-        self.assertIn("var _gm_constructor_scr_modern = GMRuntime.gml_constructor(", script)
-        self.assertIn("func _gm_script_call(_gml_constructor_self = null):", script)
-        self.assertIn('["operate", func(): return GMRuntime.gml_method(', script)
-        self.assertIn('["invert", func(): return GMRuntime.gml_method(', script)
+        self.assertIn(
+            "var _gm_constructor_scr_modern = "
+            "GMRuntime.gml_receiver_constructor(",
+            script,
+        )
+        self.assertIn(
+            "func _gm_script_call("
+            "_gml_constructor_self = null, _gml_constructor_other = null):",
+            script,
+        )
+        self.assertIn(
+            '["operate", func(): return GMRuntime.gml_receiver_method(',
+            script,
+        )
+        self.assertIn(
+            '["invert", func(): return GMRuntime.gml_receiver_method(',
+            script,
+        )
         self.assertIn("GMRuntime.gml_static_bind(", script)
         self.assertIn(
-            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), [])',
+            'GMRuntime.gml_new(GMRuntime.gml_asset_get_index("scr_modern"), '
+            "[], self, self)",
             script,
         )
         self.assertIn("func gm2godot_initialize_top_level():", script)

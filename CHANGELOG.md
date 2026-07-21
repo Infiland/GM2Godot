@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.40 - 2026-07-21
+
+- Added a destination-wide publisher that consumes one verified `ManagedOutputWorkspace` and frozen previous/desired inventories, durably journals identity-bound same-filesystem stages and backups before public mutation, installs managed creates/replacements/removals with canonical attempt/manifest evidence last, and selects the complete new generation through one durable commit pointer.
+- Added reverse ordinary rollback and idempotent pre-/post-decision recovery with byte- and mode-exact verification, attempt-only publication after prior-generation verification, strict bounded records, and a separate machine-readable recovery artifact that preserves ambiguous material and reports the transaction, affected paths, selected generation, and safe retry action.
+- Added focused synthetic multi-directory, stage/commit/rollback/cleanup failure, recovery retry, concurrent replacement, no-follow, symlink, hard-link, mount, POSIX directory-swap, native Windows junction/read-only/write-through, bounded-parser, and deterministic evidence coverage without routing production converters or implementing stale logical-resource cleanup.
+
 ## 0.7.39 - 2026-07-21
 
 - Added one immutable, deterministically sorted managed-generation inventory with normalized destination-relative paths, output kinds, converter-step or explicit shared ownership, byte counts, SHA-256 receipts, and exact rollback modes.

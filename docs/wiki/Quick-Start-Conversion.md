@@ -1,6 +1,6 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.7.39 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.40 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -61,7 +61,7 @@ When `--only` contains at least one key, it takes precedence over `--groups`. Un
 
 1. Read the terminal outcome (CLI). A terminal state can be `success`, `partial`, `failed`, or `cancelled`.
 2. After destination preflight succeeds, read `<GodotProject>/gm2godot/conversion_attempt.json` and `<GodotProject>/gm2godot/conversion_diagnostics.md`. Address errors, unsupported APIs, and relevant warnings. A pre-existing `conversion_manifest.json` may describe an earlier trustworthy run, so inspect the newest attempt ledger first. A rejected preflight intentionally writes no conversion artifacts inside the destination.
-   For a successful or partial v0.7.39 conversion, `conversion_manifest.json` also contains a complete deterministic `generation_inventory`. Selective `--only` runs retain unchanged entries owned by disabled converter steps, while `project.godot` is recorded under shared project-configuration ownership.
+   For a successful or partial v0.7.40 conversion, `conversion_manifest.json` also contains a complete deterministic `generation_inventory`. Selective `--only` runs retain unchanged entries owned by disabled converter steps, while `project.godot` is recorded under shared project-configuration ownership.
 3. Validate the destination project, including the generated resources, with the exact Godot 4.7.1 executable:
 
    ```bash

@@ -3030,8 +3030,17 @@ def _record_from_pointer_or_baseline(
             transaction_id=selected.transaction_id,
             role="desired",
         )
-        if _generation_record_content_for_receipts(public_record) != (
-            _generation_record_content_for_receipts(selected)
+        if (
+            public_record.managed_identities
+            != selected.managed_identities
+            or not _evidence_state_matches(
+                public_record.attempt,
+                selected.attempt,
+            )
+            or not _evidence_state_matches(
+                public_record.manifest,
+                selected.manifest,
+            )
         ):
             raise OSError(
                 "Committed managed-output generation identities changed"

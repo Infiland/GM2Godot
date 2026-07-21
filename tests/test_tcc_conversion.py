@@ -92,8 +92,11 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                completed=5146,
-                skipped=240,
+                # The 240 source conversion gaps remain. The asset-registry
+                # step now also skips its 166 object/room rows whose required
+                # generated outputs are absent, instead of advertising them.
+                completed=4980,
+                skipped=406,
             ),
         )
         if outcome != expected_outcome:

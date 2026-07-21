@@ -36,6 +36,7 @@ _LOCK_CONTENT = b"GM2Godot destination-wide managed-output lock v1\n"
 _MARKER_MAX_BYTES = 1024
 _TRANSACTION_ID_PATTERN = re.compile(r"[0-9a-f]{32}\Z")
 _COPY_CHUNK_BYTES = 1024 * 1024
+_RECOVERY_CLEANUP_MAX_ENTRIES = 100_000
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
 _WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
 _WINDOWS_RESERVED_NAMES = frozenset(
@@ -50,6 +51,22 @@ _WINDOWS_RESERVED_NAMES = frozenset(
     | {f"COM{suffix}" for suffix in "123456789¹²³"}
     | {f"LPT{suffix}" for suffix in "123456789¹²³"}
 )
+
+MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASES: tuple[str, ...] = (
+    "stage_cleanup_quarantined",
+    "cleanup_entry_quarantined",
+    "cleanup_file_removed",
+    "cleanup_directory_removed",
+    "stage_cleanup_removed",
+)
+_MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASE_SET = frozenset(
+    MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASES
+)
+if (
+    len(_MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASE_SET)
+    != len(MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASES)
+):
+    raise AssertionError("Managed-output workspace durable phase names must be unique")
 
 
 FileFingerprint = tuple[int, int, int, int, int, int]
@@ -156,6 +173,18 @@ class _CleanupEntry:
 
 def _before_workspace_phase(_phase: str, _path: str) -> None:
     """Narrow adversarial-test seam around workspace namespace operations."""
+
+
+def _after_workspace_phase(_phase: str, _path: str) -> None:
+    """Subprocess-test seam after one classified cleanup boundary."""
+
+
+def _durable_workspace_phase(phase: str, path: str) -> None:
+    if phase not in _MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASE_SET:
+        raise AssertionError(
+            f"Unclassified managed-output workspace durable phase: {phase!r}"
+        )
+    _after_workspace_phase(phase, path)
 
 
 def _path_is_redirected(path: str, path_stat: os.stat_result) -> bool:
@@ -1925,14 +1954,39 @@ class ManagedOutputWorkspace(
         *,
         counter: list[int],
         require_stage_marker: bool,
+        resume_transaction_id: str | None = None,
     ) -> list[_CleanupEntry]:
+        resume_quarantined = resume_transaction_id is not None
         directory.verify_path()
         names = directory.list_names()
-        if any(name.startswith(_ENTRY_CLEANUP_PREFIX) for name in names):
+        if (
+            not resume_quarantined
+            and any(name.startswith(_ENTRY_CLEANUP_PREFIX) for name in names)
+        ):
             raise OSError(
                 "Unknown reserved cleanup entry was preserved in managed-output "
                 f"workspace: {directory.path}"
             )
+        if resume_transaction_id is not None:
+            expected_cleanup_prefix = (
+                _ENTRY_CLEANUP_PREFIX + resume_transaction_id + "-"
+            )
+            for name in names:
+                if not name.startswith(_ENTRY_CLEANUP_PREFIX):
+                    continue
+                suffix = name.removeprefix(expected_cleanup_prefix)
+                if (
+                    not name.startswith(expected_cleanup_prefix)
+                    or len(suffix) != 8
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in suffix
+                    )
+                ):
+                    raise OSError(
+                        "Unknown reserved detached-cleanup entry was preserved: "
+                        + directory.child_path(name)
+                    )
         if require_stage_marker and WORKSPACE_STAGE_MARKER_NAME not in names:
             raise OSError(
                 "Managed-output workspace ownership marker is missing; transaction "
@@ -1952,12 +2006,21 @@ class ManagedOutputWorkspace(
                     f"preserved at {directory.path}"
                 )
             counter[0] += 1
+            if counter[0] > _RECOVERY_CLEANUP_MAX_ENTRIES:
+                raise OSError(
+                    "Managed-output cleanup tree exceeds its bounded "
+                    f"{_RECOVERY_CLEANUP_MAX_ENTRIES}-entry limit"
+                )
             cleanup_name = (
-                _ENTRY_CLEANUP_PREFIX
-                + self._transaction_id
-                + f"-{counter[0]:08x}"
+                name
+                if resume_quarantined
+                else (
+                    _ENTRY_CLEANUP_PREFIX
+                    + self._transaction_id
+                    + f"-{counter[0]:08x}"
+                )
             )
-            if cleanup_name in names:
+            if not resume_quarantined and cleanup_name in names:
                 raise OSError(
                     "Unknown reserved cleanup collision was preserved at "
                     + directory.child_path(cleanup_name)
@@ -1979,6 +2042,7 @@ class ManagedOutputWorkspace(
                         child,
                         counter=counter,
                         require_stage_marker=False,
+                        resume_transaction_id=resume_transaction_id,
                     )
                 finally:
                     child.close()
@@ -1992,6 +2056,7 @@ class ManagedOutputWorkspace(
                         mode=stat.S_IMODE(path_stat.st_mode),
                         is_directory=True,
                         children=children,
+                        quarantined=resume_quarantined,
                     )
                 )
                 continue
@@ -2021,7 +2086,10 @@ class ManagedOutputWorkspace(
                     expected_device=self._destination_device,
                     expected_mount_id=self._destination_mount_id,
                 )
-                if name == WORKSPACE_STAGE_MARKER_NAME:
+                if (
+                    not resume_quarantined
+                    and name == WORKSPACE_STAGE_MARKER_NAME
+                ):
                     content = _read_bounded_descriptor(
                         file_descriptor,
                         _MARKER_MAX_BYTES + 1,
@@ -2052,10 +2120,74 @@ class ManagedOutputWorkspace(
                     mode=stat.S_IMODE(path_stat.st_mode),
                     is_directory=False,
                     children=[],
+                    quarantined=resume_quarantined,
                 )
             )
         directory.verify_path()
         return entries
+
+    def cleanup_detached_recovery_stage(
+        self,
+        transaction_id: str,
+        expected_identity: PathIdentity,
+    ) -> bool:
+        """Remove a crash-interrupted cleanup stage through its journal identity."""
+
+        selected_transaction_id = _validate_transaction_id(transaction_id)
+        self._verify_base()
+        cleanup_name = (
+            _STAGE_CLEANUP_PREFIX
+            + selected_transaction_id
+            + _STAGE_CLEANUP_SUFFIX
+        )
+        cleanup_path = self._staging_parent.child_path(cleanup_name)
+        try:
+            cleanup_stat = self._staging_parent.stat(cleanup_name)
+        except FileNotFoundError:
+            return False
+        if (
+            _path_is_redirected(cleanup_path, cleanup_stat)
+            or not stat.S_ISDIR(cleanup_stat.st_mode)
+            or (cleanup_stat.st_dev, cleanup_stat.st_ino)
+            != expected_identity
+        ):
+            raise OSError(
+                "Managed-output detached cleanup stage changed and was "
+                f"preserved: {cleanup_path}"
+            )
+        cleanup_stage = self._staging_parent.open_child(
+            cleanup_name,
+            expected_identity=expected_identity,
+            description="managed-output detached recovery cleanup stage",
+        )
+        try:
+            _verify_binding_boundary(
+                cleanup_stage,
+                expected_device=self._destination_device,
+                expected_mount_id=self._destination_mount_id,
+            )
+            cleanup_entries = self._capture_cleanup_entries(
+                cleanup_stage,
+                counter=[0],
+                require_stage_marker=False,
+                resume_transaction_id=selected_transaction_id,
+            )
+            self._remove_cleanup_entries(cleanup_stage, cleanup_entries)
+            stage_mode = stat.S_IMODE(_binding_stat(cleanup_stage).st_mode)
+        finally:
+            cleanup_stage.close()
+        self._rmdir_exact(
+            self._staging_parent,
+            cleanup_name,
+            expected_identity,
+            stage_mode,
+        )
+        self._staging_parent.sync()
+        _durable_workspace_phase(
+            "stage_cleanup_removed",
+            cleanup_path,
+        )
+        return True
 
     @staticmethod
     def _remaining_names(entries: list[_CleanupEntry]) -> set[str]:
@@ -2151,6 +2283,11 @@ class ManagedOutputWorkspace(
                 "Managed-output cleanup file remained after removal: "
                 + directory.child_path(entry.current_name)
             )
+        directory.sync()
+        _durable_workspace_phase(
+            "cleanup_file_removed",
+            directory.child_path(entry.current_name),
+        )
 
     def _chmod_directory_exact(
         self,
@@ -2288,6 +2425,10 @@ class ManagedOutputWorkspace(
                     raise
                 entry.current_name = entry.cleanup_name
                 entry.quarantined = True
+                _durable_workspace_phase(
+                    "cleanup_entry_quarantined",
+                    directory.child_path(entry.current_name),
+                )
             self._verify_cleanup_entry(directory, entry)
             if entry.is_directory:
                 child = directory.open_child(
@@ -2309,6 +2450,11 @@ class ManagedOutputWorkspace(
                     entry.current_name,
                     entry.identity,
                     entry.mode,
+                )
+                directory.sync()
+                _durable_workspace_phase(
+                    "cleanup_directory_removed",
+                    directory.child_path(entry.current_name),
                 )
             else:
                 self._unlink_cleanup_file(directory, entry)
@@ -2393,6 +2539,10 @@ class ManagedOutputWorkspace(
                 raise
             self._stage_name = cleanup_name
             self._stage_quarantined = True
+            _durable_workspace_phase(
+                "stage_cleanup_quarantined",
+                self._staging_parent.child_path(cleanup_name),
+            )
             if self._stage is None:
                 self._reopen_stage()
             else:
@@ -2419,6 +2569,10 @@ class ManagedOutputWorkspace(
                     pass
             raise
         self._staging_parent.sync()
+        _durable_workspace_phase(
+            "stage_cleanup_removed",
+            self._staging_parent.child_path(self._stage_name),
+        )
         self._cleaned = True
 
     def close(self) -> None:
@@ -2482,6 +2636,7 @@ class ManagedOutputWorkspace(
         return None
 __all__ = [
     "DESTINATION_LOCK_NAME",
+    "MANAGED_OUTPUT_WORKSPACE_DURABLE_PHASES",
     "ManagedFileSnapshot",
     "ManagedOutputWorkspace",
     "StagedFileReceipt",

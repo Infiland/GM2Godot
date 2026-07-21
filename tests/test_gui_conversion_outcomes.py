@@ -160,6 +160,19 @@ class MainWindowConversionOutcomeTests(unittest.TestCase):
         self.assertTrue(self.window._action_panel.settings_button.isEnabled())
         self.assertTrue(self.harness.timer_stopped)
 
+    def test_stop_button_clears_converter_cancellation_event(self) -> None:
+        self.window._conversion_running.set()
+        self.window._action_panel.stop_button.setEnabled(True)
+
+        MainWindow._stop_conversion(self.window)
+
+        self.assertFalse(self.window._conversion_running.is_set())
+        self.assertFalse(self.window._action_panel.stop_button.isEnabled())
+        self.assertIn(
+            get_localized("Console_ConversionStopping"),
+            self.window._console._text_edit.toPlainText(),
+        )
+
     def test_success_uses_exact_outcome_even_when_stop_event_is_clear(self) -> None:
         outcome = _outcome("success")
         self.window._progress.progress_bar.set_progress(84)

@@ -3697,6 +3697,14 @@ class TestCIWorkflows(unittest.TestCase):
                 "nul",
             ),
             (
+                "tests.yml",
+                "windows-managed-output-crash-recovery",
+                "Install and verify test dependencies",
+                "windows",
+                "gm2godot-crash-windows-venv",
+                "nul",
+            ),
+            (
                 "release.yml",
                 "build",
                 "Install and verify dependencies",
@@ -3712,7 +3720,7 @@ class TestCIWorkflows(unittest.TestCase):
             "pathlib.Path(os.environ[\"VIRTUAL_ENV\"]).resolve() else 1)'"
         )
 
-        self.assertEqual(len(install_jobs), 9)
+        self.assertEqual(len(install_jobs), 10)
         for (
             workflow_name,
             job_name,
@@ -3893,8 +3901,8 @@ class TestCIWorkflows(unittest.TestCase):
                     (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
                     (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
                     (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
-                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
-                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 2,
+                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 2,
                 }
             ),
             "build_macos.sh": Counter(
@@ -4000,7 +4008,7 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
-        self.assertEqual(non_dependency_lock_command_count, 22)
+        self.assertEqual(non_dependency_lock_command_count, 24)
         self.assertEqual(dependency_lock_command_count, 6)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
@@ -4790,7 +4798,10 @@ class TestCIWorkflows(unittest.TestCase):
     def test_unit_workflow_runs_artifact_transactions_on_windows(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
         content = workflow.read_text(encoding="utf-8")
-        windows_job = content[content.index("  windows-artifact-transactions:"):]
+        windows_job = content[
+            content.index("  windows-artifact-transactions:"):
+            content.index("  windows-managed-output-crash-recovery:")
+        ]
 
         self.assertIn("runs-on: windows-2025", windows_job)
         self.assertIn("python-version: '3.12.10'", windows_job)
@@ -4808,15 +4819,39 @@ class TestCIWorkflows(unittest.TestCase):
             "tests.test_diagnostics",
             "tests.test_architecture_policy",
             "tests.test_converter",
-            "tests.test_managed_output_crash_recovery",
             "tests.test_cli",
-            "tests.test_gui_conversion_outcomes",
             "tests.test_atomic_generated_text",
             "tests.test_included_files.TestIncludedFilesManagedRootTransaction",
             "tests.test_included_files.TestIncludedFilesConverterOutputContainment",
         ):
             with self.subTest(module=module):
                 self.assertIn(module, windows_job)
+
+    def test_unit_workflow_runs_native_windows_crash_matrix_separately(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        content = workflow.read_text(encoding="utf-8")
+        windows_job = content[
+            content.index("  windows-managed-output-crash-recovery:"):
+        ]
+
+        self.assertIn("runs-on: windows-2025", windows_job)
+        self.assertIn("timeout-minutes: 20", windows_job)
+        self.assertIn("python-version: '3.12.10'", windows_job)
+        self.assertIn("architecture: x64", windows_job)
+        self.assertIn("shell: bash", windows_job)
+        self.assertIn(
+            f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
+            f"            --constraint {WINDOWS_CONSTRAINT} \\\n"
+            "            -r requirements.txt",
+            windows_job,
+        )
+        self.assertIn(
+            "tests.test_managed_output_crash_recovery",
+            windows_job,
+        )
+        self.assertIn("tests.test_gui_conversion_outcomes", windows_job)
 
     def test_unit_workflow_gates_managed_output_on_native_macos(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"

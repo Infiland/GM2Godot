@@ -131,7 +131,7 @@ jobs:
 
   windows-artifact-transactions:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       PIP_CONFIG_FILE: nul
     steps:
@@ -194,12 +194,70 @@ jobs:
           tests.test_architecture_policy
           tests.test_converter
           tests.test_converter_transaction
-          tests.test_managed_output_crash_recovery
           tests.test_cli
-          tests.test_gui_conversion_outcomes
           tests.test_asset_registry
           tests.test_atomic_generated_text
           tests.test_managed_output_workspace
           tests.test_managed_output_publisher
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
+
+  windows-managed-output-crash-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PIP_CONFIG_FILE: nul
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+
+      - name: Install and verify test dependencies
+        shell: bash
+        run: |
+          venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-crash-windows-venv"
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python -m venv "$venv_dir"
+          venv_bin="$venv_dir/Scripts"
+          venv_native="$(cygpath -w "$venv_dir")"
+          venv_path_native="$(cygpath -w "$venv_bin")"
+          github_env_file="$(cygpath -u "$GITHUB_ENV")"
+          github_path_file="$(cygpath -u "$GITHUB_PATH")"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
+          printf '%s\n' "$venv_path_native" >> "$github_path_file"
+          export VIRTUAL_ENV="$venv_native"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            pip==26.1.2
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            -r requirements.txt
+          python scripts/verify_dependency_environment.py \
+            --constraint constraints/requirements-windows-py312.txt \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --expected-python 3.12.10 \
+            --expected-platform win32 \
+            --expected-machine AMD64 \
+            --expected-pip 26.1.2 \
+            --output "$RUNNER_TEMP/windows-crash-recovery-dependencies.json"
+
+      - name: Run native Windows crash recovery matrix
+        run: >-
+          python -m unittest -v
+          tests.test_managed_output_crash_recovery
+          tests.test_gui_conversion_outcomes

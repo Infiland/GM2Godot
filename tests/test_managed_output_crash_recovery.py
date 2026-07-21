@@ -747,6 +747,21 @@ class TestManagedOutputCrashRecovery(unittest.TestCase):
             set(),
         )
 
+        workspace_cases = list(enumerate(workspace_events))
+        if sys.platform == "win32":
+            # Process startup and antivirus scanning dominate native Windows.
+            # POSIX gates interrupt every concrete cleanup entry; Windows
+            # interrupts every declared cleanup operation and separately
+            # exercises NTFS read-only, reparse, and write-through behavior.
+            seen_workspace_phases: set[str] = set()
+            selected_workspace_cases: list[tuple[int, str]] = []
+            for index, phase in workspace_cases:
+                if phase in seen_workspace_phases:
+                    continue
+                seen_workspace_phases.add(phase)
+                selected_workspace_cases.append((index, phase))
+            workspace_cases = selected_workspace_cases
+
         cases = [
             *(
                 ("publisher", index, phase, phase_sides[phase])
@@ -754,7 +769,7 @@ class TestManagedOutputCrashRecovery(unittest.TestCase):
             ),
             *(
                 ("workspace", index, phase, "post_commit")
-                for index, phase in enumerate(workspace_events)
+                for index, phase in workspace_cases
             ),
         ]
         for case_index, (source, index, phase, commit_side) in enumerate(cases):

@@ -941,10 +941,14 @@ def _capture_regular_file(
         final_opened_stat = os.fstat(descriptor)
         final_path_stat = parent.stat(name)
         if (
-            _content_fingerprint(final_opened_stat)
-            != _content_fingerprint(opened_stat)
-            or _content_fingerprint(final_path_stat)
-            != _content_fingerprint(opened_stat)
+            not _content_fingerprints_match(
+                _content_fingerprint(final_opened_stat),
+                _content_fingerprint(opened_stat),
+            )
+            or not _content_fingerprints_match(
+                _content_fingerprint(final_path_stat),
+                _content_fingerprint(opened_stat),
+            )
             or byte_count != opened_stat.st_size
         ):
             raise OSError(
@@ -990,6 +994,15 @@ def _content_fingerprint(path_stat: os.stat_result) -> tuple[int, int, int, int,
         path_stat.st_mtime_ns,
         path_stat.st_ctime_ns,
     )
+
+
+def _content_fingerprints_match(
+    actual: tuple[int, int, int, int, int],
+    expected: tuple[int, int, int, int, int],
+) -> bool:
+    # Native Windows path and handle stat can expose different ctime values
+    # for the same file. Identity, size, mtime, bytes, and SHA remain exact.
+    return actual[:4] == expected[:4] if os.name == "nt" else actual == expected
 
 
 def _normalized_enabled_converters(
@@ -1162,10 +1175,14 @@ def _read_existing_manifest(
                 )
                 if (
                     len(content) > GENERATION_INVENTORY_MAX_BYTES
-                    or _content_fingerprint(final_stat)
-                    != _content_fingerprint(opened_stat)
-                    or _content_fingerprint(final_path_stat)
-                    != _content_fingerprint(opened_stat)
+                    or not _content_fingerprints_match(
+                        _content_fingerprint(final_stat),
+                        _content_fingerprint(opened_stat),
+                    )
+                    or not _content_fingerprints_match(
+                        _content_fingerprint(final_path_stat),
+                        _content_fingerprint(opened_stat),
+                    )
                 ):
                     raise OSError(
                         f"Conversion manifest changed while reading: {manifest_path}"

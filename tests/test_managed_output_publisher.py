@@ -378,6 +378,12 @@ class TestManagedOutputPublisher(unittest.TestCase):
                         desired = capture_generation_inventory(
                             workspace.stage_path
                         )
+                        known_public_paths = {
+                            *previous.by_path(),
+                            *desired.by_path(),
+                            "gm2godot/conversion_attempt.json",
+                            "gm2godot/conversion_manifest.json",
+                        }
                         manifest, attempt = self._evidence(desired)
                         with (
                             patch.object(
@@ -418,13 +424,29 @@ class TestManagedOutputPublisher(unittest.TestCase):
                                 rollback_relative.append(
                                     path.partition(
                                         ".stage" + os.sep
-                                    )[2].lstrip(os.sep)
+                                    )[2]
+                                    .lstrip(os.sep)
+                                    .replace("\\", "/")
                                 )
-                        expected = [
-                            os.path.relpath(
-                                path,
-                                os.path.realpath(self.destination),
+
+                        def identify_public_path(path: str) -> str:
+                            normalized = path.replace("\\", "/").casefold()
+                            for candidate in sorted(
+                                known_public_paths,
+                                key=len,
+                                reverse=True,
+                            ):
+                                folded = candidate.casefold()
+                                if normalized == folded or normalized.endswith(
+                                    "/" + folded
+                                ):
+                                    return candidate
+                            raise AssertionError(
+                                f"Unknown installed public path: {path}"
                             )
+
+                        expected = [
+                            identify_public_path(path)
                             for path in reversed(installed_paths)
                             if not path.endswith("sprites/old.png")
                         ]

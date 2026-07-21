@@ -829,6 +829,35 @@ class GodotProjectFile:
 
         return True
 
+    def get_string_setting(self, section: str, key: str) -> str | None:
+        """Read one JSON-quoted Godot string setting without resolving resources."""
+
+        if not os.path.isfile(self.project_godot_path):
+            return None
+        with open(self.project_godot_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        raw_value = self._get_setting_value(content, section, key)
+        if raw_value is None:
+            return None
+        try:
+            value = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        return value if isinstance(value, str) else None
+
+    def remove_setting(self, section: str, key: str) -> bool:
+        """Remove every occurrence of one setting while preserving other text."""
+
+        if not os.path.isfile(self.project_godot_path):
+            return False
+        with open(self.project_godot_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        updated, removed = self._remove_setting(content, section, key)
+        if not removed:
+            return False
+        atomic_rewrite_text(self.project_godot_path, updated)
+        return True
+
     @staticmethod
     def _format_value(value: Any) -> str:
         if isinstance(value, str):
@@ -883,6 +912,52 @@ class GodotProjectFile:
             lines[insert_at - 1] = lines[insert_at - 1] + newline
         lines.insert(insert_at, setting_line + newline)
         return "".join(lines)
+
+    @classmethod
+    def _get_setting_value(
+        cls,
+        content: str,
+        section: str,
+        key: str,
+    ) -> str | None:
+        lines = content.splitlines()
+        section_header = f"[{section}]"
+        in_section = False
+        key_pattern = re.compile(rf"^\s*{re.escape(key)}\s*=(.*)$")
+        for line in lines:
+            stripped = line.strip()
+            if cls._is_section_header(stripped):
+                in_section = stripped == section_header
+                continue
+            if not in_section:
+                continue
+            match = key_pattern.match(line)
+            if match is not None:
+                return match.group(1).strip()
+        return None
+
+    @classmethod
+    def _remove_setting(
+        cls,
+        content: str,
+        section: str,
+        key: str,
+    ) -> tuple[str, bool]:
+        lines = content.splitlines(keepends=True)
+        section_header = f"[{section}]"
+        in_section = False
+        removed = False
+        key_pattern = re.compile(rf"^\s*{re.escape(key)}\s*=")
+        retained: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if cls._is_section_header(stripped):
+                in_section = stripped == section_header
+            if in_section and key_pattern.match(line):
+                removed = True
+                continue
+            retained.append(line)
+        return "".join(retained), removed
 
     @classmethod
     def _set_autoloads(

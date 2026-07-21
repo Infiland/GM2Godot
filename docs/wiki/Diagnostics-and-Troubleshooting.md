@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.42 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -74,6 +74,8 @@ Use `--allow-partial` in CI only after the skipped/failed resources are intentio
 `conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” Managed files and canonical evidence are committed and recovered as one destination-wide generation. Failed or cancelled work before the generation decision publishes only a new attempt after verifying the preserved prior inventory; its staged diagnostics and architecture report never replace the prior canonical files.
 
 Inside the format-v2 manifest, `generation_inventory` is an additive format-v1 object. Its sorted `entries` are the complete desired managed generation, including unchanged disabled-converter carry-forward and jointly managed `project.godot`. Each entry records `path`, `kind`, `owner`, `byte_count`, `sha256`, and `mode`. Existing consumers may continue reading `generated_files`; it is now the path/kind/digest projection of the same frozen inventory, with the existing canonical-manifest `sha256: "self"` row. The inventory excludes the manifest itself, latest attempt, `.godot/`, locks, recovery records, private stages/backups, and unrelated paths.
+
+For a 0.7.43 `partial` commit, selected object, room, sprite, shader, and timeline-action outputs that were unavailable, blocked, skipped, or removed are intentionally absent from the inventory. The generated asset registry omits missing object/room/sprite/shader rows, and timeline metadata omits missing action-script paths; the canonical manifest is reconciled against that same frozen inventory. A failed or cancelled pre-decision attempt is different: it preserves the complete prior generation, so use the attempt state and `canonical_manifest.current_output` before interpreting old resource files.
 
 Read `canonical_manifest` in the attempt ledger:
 

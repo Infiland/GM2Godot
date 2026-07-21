@@ -90,8 +90,11 @@ class TestMonophobiaConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=450,
                 executed=450,
-                completed=447,
-                skipped=3,
+                # Three rooms remain skipped for their known missing sidecars;
+                # the registry now also skips the three rows whose scenes are
+                # intentionally absent.
+                completed=444,
+                skipped=6,
             ),
         )
         if outcome != expected_outcome:
@@ -215,6 +218,21 @@ class TestMonophobiaConversion(unittest.TestCase):
         self.assertEqual(
             warning_signatures,
             [
+                (
+                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
+                    "r_endlessroad",
+                    "None",
+                ),
+                (
+                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
+                    "r_house",
+                    "None",
+                ),
+                (
+                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
+                    "r_road2",
+                    "None",
+                ),
                 (
                     "GM2GD-ROOM-CREATION-MISSING",
                     "r_endlessroad",

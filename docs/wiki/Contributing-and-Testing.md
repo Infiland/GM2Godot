@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.42 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -145,6 +145,20 @@ Managed-generation inventory changes must retain the complete deterministic sche
 
 The inventory suite compares canonical bytes across input order, path separators, single-worker and multi-worker generation, and repeated unchanged CLI runs. It covers a full generation followed by `--only`, disabled-converter and shared-owner carry-forward, jointly managed `project.godot`, bounded format-v2 migration, excluded private/user state, case collisions, malformed and oversized entries, same-size mutation with restored timestamps, POSIX symlink/hard-link/mount rejection, and native Windows junction/read-only behavior. Keep inventory rendering and pre/post-publication validation on the same immutable model. Do not broaden an inventory change into destination-wide commit/recovery or route production converters to the stage.
 
+Stale logical-resource policy changes must run the repeat-conversion suite together with the inventory, registry, room, and destination-transaction regressions:
+
+```bash
+GODOT_BIN=/path/to/Godot-4.7.1 \
+  ./venv/bin/python -m unittest \
+  tests.test_stale_managed_output_invalidation \
+  tests.test_asset_registry \
+  tests.test_rooms \
+  tests.test_converter_transaction \
+  tests.test_generation_inventory
+```
+
+The stale-output suite establishes a successful object/room/sprite/shader/timeline generation, then separately removes YYP resources, loses source files, and injects object, room, and timeline transpilation blockers. It requires all owned multi-file outputs, registry rows, timeline script references, manifest resources, and inventory entries to agree after a committed partial rerun. Cancellation and ordinary publication failure must retain the prior generation; unknown user files under managed roots must fail closed and remain unchanged; unrelated files and disabled-converter output must be preserved. The Godot-gated combined case requires exact `4.7.1.stable.official.a13da4feb` import/resource validation with no engine warnings or errors.
+
 Production conversion-transaction changes must retain both the real mutation/cooperative-cancellation suite and the subprocess crash matrix:
 
 ```bash
@@ -162,7 +176,7 @@ The integration suite establishes a successful project-setting/script/object/reg
 
 `test_managed_output_crash_recovery` discovers the ordered durable phases emitted by a real conversion, requires each phase to be declared `pre_commit` or `post_commit`, and hard-exits subprocesses without Python cleanup at every observed forward and private-cleanup boundary. Separate matrices interrupt reverse rollback and repeated pre-/post-decision recovery. Each case verifies exact inventory bytes and portable modes, canonical manifest/attempt digests, destination-device confinement, unchanged user sentinels, debris-free cleanup, and idempotent second recovery. Add a durable move or cleanup hook without classifying it and the test fails.
 
-The `Tests` workflow gates this behavior on Ubuntu 24.04, macOS 26 arm64, and Windows 2025. The Linux job additionally requires the real bind-mount test with `GM2GODOT_REQUIRE_LINUX_BIND_MOUNT=1`; modeled mount checks are not a substitute. The Windows job retains real NTFS junction/reparse, read-only file/directory, write-through move, and read-only restart-cleanup cases. Do not weaken or skip a native gate to make a platform-specific failure disappear. #715's successful stale logical-resource policy remains separate and must not be folded into crash-recovery changes.
+The `Tests` workflow gates this behavior on Ubuntu 24.04, macOS 26 arm64, and Windows 2025. The Linux job additionally requires the real bind-mount test with `GM2GODOT_REQUIRE_LINUX_BIND_MOUNT=1`; modeled mount checks are not a substitute. The Windows job retains real NTFS junction/reparse, read-only file/directory, write-through move, and read-only restart-cleanup cases. Do not weaken or skip a native gate to make a platform-specific failure disappear. The 0.7.43 stale logical-resource policy consumes this transaction but remains independently covered; do not weaken crash recovery while changing successful invalidation.
 
 Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
 

@@ -6,7 +6,7 @@ import json
 import os
 import posixpath
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, ClassVar, Iterable, cast
 
@@ -39,6 +39,15 @@ from src.conversion.generated_paths import (
 from src.conversion.included_file_paths import (
     canonical_included_file_lookup_path,
     plan_included_file_paths,
+)
+from src.conversion.generation_inventory import (
+    GenerationInventory,
+    capture_generation_inventory,
+)
+from src.conversion.managed_resource_outputs import (
+    STALE_INVALIDATION_RESOURCE_KINDS,
+    managed_resource_outputs,
+    reconcile_timeline_action_outputs,
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -417,6 +426,13 @@ class AssetRegistryPublication:
 
 
 @dataclass(frozen=True)
+class _ManagedResourceReconciliation:
+    entries: tuple[AssetRegistryEntry, ...]
+    unavailable_entries: tuple[AssetRegistryEntry, ...]
+    missing_timeline_scripts: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _ProjectResource:
     kind: str
     name: str
@@ -577,6 +593,7 @@ class AssetRegistryConverter(BaseConverter):
         organize_sounds_by_audio_group: bool = False,
         macro_configuration: str | None = None,
         diagnostics: DiagnosticCollector | None = None,
+        enforce_managed_resource_outputs: bool = False,
     ) -> None:
         super().__init__(
             gm_project_path,
@@ -591,6 +608,9 @@ class AssetRegistryConverter(BaseConverter):
         )
         self.organize_sounds_by_audio_group = bool(organize_sounds_by_audio_group)
         self.macro_configuration = macro_configuration
+        self.enforce_managed_resource_outputs = bool(
+            enforce_managed_resource_outputs
+        )
         self.project_manifest: GameMakerProjectManifest = load_gamemaker_project_manifest(
             self.gm_project_path
         )
@@ -615,7 +635,11 @@ class AssetRegistryConverter(BaseConverter):
 
         return self.prepare_published_entries().entries
 
-    def prepare_published_entries(self) -> AssetRegistryPublication:
+    def prepare_published_entries(
+        self,
+        *,
+        generation_inventory: GenerationInventory | None = None,
+    ) -> AssetRegistryPublication:
         """Capture immutable receipts for one artifact publication attempt."""
 
         plan = self._conversion_plan()
@@ -623,7 +647,14 @@ class AssetRegistryConverter(BaseConverter):
             plan.resources,
             included_file_logical_paths=plan.included_file_logical_paths,
         )
-        return self._prepare_published_entries(entries)
+        publication = self._prepare_published_entries(entries)
+        if generation_inventory is None:
+            return publication
+        reconciliation = self._reconcile_managed_resource_entries(
+            publication.entries,
+            generation_inventory,
+        )
+        return replace(publication, entries=reconciliation.entries)
 
     def revalidate_published_entries(
         self,
@@ -763,6 +794,47 @@ class AssetRegistryConverter(BaseConverter):
             included_files_generation=(
                 self._included_file_publication_generation(receipt_tuple)
             ),
+        )
+
+    @staticmethod
+    def _reconcile_managed_resource_entries(
+        entries: tuple[AssetRegistryEntry, ...],
+        generation_inventory: GenerationInventory,
+    ) -> _ManagedResourceReconciliation:
+        """Keep registry rows and timeline references aligned to frozen files."""
+
+        available_paths = frozenset(generation_inventory.by_path())
+        published: list[AssetRegistryEntry] = []
+        unavailable: list[AssetRegistryEntry] = []
+        missing_timeline_scripts: set[str] = set()
+        for entry in entries:
+            if entry.kind not in STALE_INVALIDATION_RESOURCE_KINDS:
+                published.append(entry)
+                continue
+            if entry.kind == "timelines":
+                metadata, missing = reconcile_timeline_action_outputs(
+                    entry.metadata,
+                    available_paths,
+                )
+                missing_timeline_scripts.update(missing)
+                published.append(replace(entry, metadata=metadata))
+                continue
+            outputs = managed_resource_outputs(
+                entry.kind,
+                entry.godot_path,
+                entry.metadata,
+            )
+            if not all(
+                path in available_paths
+                for path in outputs.required_paths
+            ):
+                unavailable.append(entry)
+                continue
+            published.append(entry)
+        return _ManagedResourceReconciliation(
+            entries=tuple(published),
+            unavailable_entries=tuple(unavailable),
+            missing_timeline_scripts=tuple(sorted(missing_timeline_scripts)),
         )
 
     @staticmethod
@@ -2199,6 +2271,31 @@ class AssetRegistryConverter(BaseConverter):
             )
         self._safe_log(message)
 
+    def _report_unavailable_managed_resource_output(
+        self,
+        entry: AssetRegistryEntry,
+    ) -> None:
+        message = (
+            "Warning: Omitting GameMaker asset-registry resource "
+            f"{entry.name!r} because its complete current {entry.asset_type} "
+            "output is unavailable."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
+                message,
+                source_path=self._diagnostic_source_path(entry.source_path),
+                resource=entry.name,
+                resource_type=entry.asset_type,
+                manifest_entry="generated managed resource output",
+                workaround=(
+                    "Resolve the source-resource conversion diagnostic and "
+                    "rerun the matching converter together with the asset registry."
+                ),
+            )
+        self._safe_log(message)
+
     def _build_entries_from_resources(
         self,
         resources: tuple[_ProjectResource, ...],
@@ -2301,14 +2398,26 @@ class AssetRegistryConverter(BaseConverter):
             self._resource_skipped(resource_key)
             self._report_unavailable_published_included_file(unavailable)
 
+        timeline_completeness: dict[tuple[str, str], bool] = {}
         try:
+            timeline_completeness = self._write_timeline_action_scripts(entries)
+            if self.enforce_managed_resource_outputs:
+                reconciliation = self._reconcile_managed_resource_entries(
+                    entries,
+                    capture_generation_inventory(self.godot_project_path),
+                )
+                entries = reconciliation.entries
+                for entry in reconciliation.unavailable_entries:
+                    resource_key = self._entry_outcome_resource_key(entry)
+                    unavailable_output_keys.add(resource_key)
+                    self._resource_skipped(resource_key)
+                    self._report_unavailable_managed_resource_output(entry)
             texture_groups, audio_groups = self.build_group_registries(entries)
             self._write_group_compatibility_report(
                 entries,
                 texture_groups,
                 audio_groups,
             )
-            timeline_completeness = self._write_timeline_action_scripts(entries)
             write_path_registry(
                 self.gm_project_path,
                 self.godot_project_path,

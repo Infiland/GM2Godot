@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.43 - 2026-07-21
+
+- Added explicit logical output ownership for objects, rooms, sprites, shaders, and timeline action scripts; selected converters now rebuild those outputs from the authoritative YYP instead of carrying their prior inventory entries into a successful or partial candidate.
+- Made successful publication delete unavailable, blocked, skipped, and removed resources through the existing recoverable old-or-new transaction, reconcile aggregate registry/manifest references to the frozen files that remain, and clear only a stale GM2Godot-managed room startup scene.
+- Added repeat-conversion, source-loss, transpile-blocker, multi-file cleanup, cancellation, rollback, fail-closed user-file, disabled-converter compatibility, and exact Godot 4.7.1 validation coverage without changing failed/cancelled preservation or unrelated-file guarantees.
+
 ## 0.7.42 - 2026-07-21
 
 - Added a classified, deterministic subprocess hard-exit matrix over real project-setting, script, object, registry, canonical-evidence, forward commit, reverse rollback, restart recovery, and private cleanup boundaries; every interruption now proves an exact inventory/manifest/attempt-consistent previous or desired generation and idempotent recovery.

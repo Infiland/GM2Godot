@@ -818,22 +818,42 @@ class RoomConverter(BaseConverter):
     def _set_startup_scene(
         self, index: GameMakerResourceIndex, generated_scene_paths: dict[str, str]
     ) -> None:
+        project_file = GodotProjectFile(
+            os.path.join(self.godot_project_path, "project.godot")
+        )
         if not generated_scene_paths:
-            self.log_callback(
-                "Warning: No room scene generated; leaving project.godot main_scene unchanged."
-            )
+            if self._clear_stale_managed_main_scene(
+                project_file,
+                generated_scene_paths,
+            ):
+                self.log_callback(
+                    "Warning: No room scene generated; removed the stale "
+                    "GM2Godot-managed project.godot main_scene."
+                )
+            else:
+                self.log_callback(
+                    "Warning: No room scene generated; leaving project.godot "
+                    "main_scene unchanged."
+                )
             return
 
         first_room = index.first_room()
         if first_room is None or first_room.name not in generated_scene_paths:
-            self.log_callback(
-                "Warning: First GameMaker room scene was not generated; leaving project.godot main_scene unchanged."
-            )
+            if self._clear_stale_managed_main_scene(
+                project_file,
+                generated_scene_paths,
+            ):
+                self.log_callback(
+                    "Warning: First GameMaker room scene was not generated; "
+                    "removed the stale GM2Godot-managed project.godot main_scene."
+                )
+            else:
+                self.log_callback(
+                    "Warning: First GameMaker room scene was not generated; "
+                    "leaving project.godot main_scene unchanged."
+                )
             return
 
-        project_file = GodotProjectFile(
-            os.path.join(self.godot_project_path, "project.godot")
-        )
         scene_path = generated_scene_paths[first_room.name]
         if project_file.set_main_scene(scene_path):
             self.log_callback(
@@ -846,6 +866,23 @@ class RoomConverter(BaseConverter):
             self.log_callback(
                 "Warning: project.godot not found; could not set startup scene."
             )
+
+    @staticmethod
+    def _clear_stale_managed_main_scene(
+        project_file: GodotProjectFile,
+        generated_scene_paths: dict[str, str],
+    ) -> bool:
+        current = project_file.get_string_setting(
+            "application",
+            "run/main_scene",
+        )
+        if (
+            current is None
+            or not current.startswith("res://rooms/")
+            or current in generated_scene_paths.values()
+        ):
+            return False
+        return project_file.remove_setting("application", "run/main_scene")
 
     def convert_rooms(self) -> None:
         index = self._build_resource_index()

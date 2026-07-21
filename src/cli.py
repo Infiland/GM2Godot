@@ -38,7 +38,10 @@ from src.conversion.platform_capabilities import (
     generate_platform_capability_report,
     render_platform_capability_markdown,
 )
-from src.conversion.project_godot import ConversionPreflightError
+from src.conversion.project_godot import (
+    MANAGED_OUTPUT_DIRECTORIES,
+    ConversionPreflightError,
+)
 from src.version import get_version
 
 
@@ -271,6 +274,7 @@ def _run_convert(args: argparse.Namespace) -> int:
     handler_installed = threading.current_thread() is threading.main_thread()
     sigint_handler_restored = False
     sigint_received = False
+    managed_generation_decided = False
     terminal_summary_phase = "idle"
     canonical_reports_authorized = False
     external_report_dir: str | None = args.report_dir
@@ -287,10 +291,12 @@ def _run_convert(args: argparse.Namespace) -> int:
 
     def request_cancellation(_signum: int, _frame: FrameType | None) -> None:
         nonlocal sigint_received
-        if terminal_summary_phase in {"committing", "committed"}:
-            # The buffered outcome line is the CLI's terminal commit point.
-            # Once publication begins, changing the outcome would either
-            # duplicate the line or make stdout disagree with the reports.
+        if managed_generation_decided or terminal_summary_phase in {
+            "committing",
+            "committed",
+        }:
+            # Once the managed generation decision starts, cancellation cannot
+            # imply rollback. The buffered line also remains single-publication.
             return
         if sigint_received:
             raise KeyboardInterrupt
@@ -318,17 +324,50 @@ def _run_convert(args: argparse.Namespace) -> int:
         if handler_installed:
             signal.signal(signal.SIGINT, request_cancellation)
 
+        try:
+            managed_report_relative = _managed_report_relative_path(
+                args.report_dir,
+                args.godot_project,
+            )
+        except ValueError as error:
+            print(
+                f"GM2Godot conversion report destination is unsafe: {error}",
+                file=sys.stderr,
+            )
+            return 2
+        conversion_diagnostics = DiagnosticCollector()
+        _add_platform_diagnostic(conversion_diagnostics, args.platform)
+
+        def write_staged_cli_reports(staged_path: str) -> None:
+            if managed_report_relative is None:
+                return
+            staged_report_root = os.path.normpath(
+                os.path.join(staged_path, managed_report_relative)
+            )
+            _write_static_reports(staged_report_root, args.platform)
+            if managed_report_relative not in {"", os.curdir}:
+                conversion_diagnostics.publish_reports(staged_report_root)
+
         converter = Converter(
             log_callback=lambda message: logs.append(message),
             progress_callback=lambda _value: None,
             status_callback=lambda _message: None,
             conversion_running=running,
+            staged_output_finalizer=(
+                write_staged_cli_reports
+                if managed_report_relative is not None
+                else None
+            ),
         )
-        conversion_diagnostics = DiagnosticCollector()
-        _add_platform_diagnostic(conversion_diagnostics, args.platform)
-
+        transactional_conversion = bool(
+            getattr(converter, "managed_output_transactional", False)
+        )
         def observe_cancellation(current: ConversionOutcome) -> ConversionOutcome:
-            if sigint_received and current.state != "cancelled":
+            if (
+                sigint_received
+                and not managed_generation_decided
+                and current.state != "cancelled"
+            ):
                 current = replace(current, state="cancelled")
             converter.diagnostics.set_outcome(current)
             return current
@@ -556,6 +595,9 @@ def _run_convert(args: argparse.Namespace) -> int:
             preflight_error = error
         except Exception as error:
             runtime_error = error
+        finally:
+            if transactional_conversion:
+                managed_generation_decided = True
 
         if preflight_error is not None:
             diagnostic = converter.diagnostics.add(
@@ -586,10 +628,13 @@ def _run_convert(args: argparse.Namespace) -> int:
             )
 
         canonical_reports_authorized = (
-            preflight_error is None and outcome.failure_phase != "preflight"
+            not transactional_conversion
+            and preflight_error is None
+            and outcome.failure_phase != "preflight"
         )
         protect_managed_reports = (
-            preflight_error is None
+            not transactional_conversion
+            and preflight_error is None
             and runtime_error is None
             and outcome.state in {"success", "partial"}
             and _regular_conversion_manifest_exists(args.godot_project)
@@ -601,6 +646,8 @@ def _run_convert(args: argparse.Namespace) -> int:
             gm_project_path=args.gm_project,
             godot_project_path=args.godot_project,
         )
+        if transactional_conversion and managed_report_relative is not None:
+            external_report_dir = None
 
         state_before_log_flush = outcome.state
         _print_conversion_logs(logs)
@@ -675,6 +722,19 @@ def _run_convert(args: argparse.Namespace) -> int:
             outcome = repair_conversion_reports(observed)
         else:
             outcome = observed
+
+        if transactional_conversion:
+            published_outcome = converter.last_outcome
+            if (
+                isinstance(published_outcome, ConversionOutcome)
+                and published_outcome != outcome
+            ):
+                try:
+                    converter.publish_conversion_attempt(outcome)
+                except Exception as error:
+                    attempt_publication_error = error
+                else:
+                    attempt_publication_error = None
 
         summary_output = ""
         while True:
@@ -875,6 +935,43 @@ def _safe_conversion_report_destination(
     ):
         return None
     return report_dir
+
+
+def _managed_report_relative_path(
+    report_dir: str | None,
+    godot_project_path: str,
+) -> str | None:
+    if report_dir is None:
+        return None
+    project_root = os.path.realpath(os.path.abspath(godot_project_path))
+    report_root = os.path.realpath(os.path.abspath(report_dir))
+    generated_report_root = os.path.join(report_root, _STATIC_REPORT_DIRECTORY)
+    matching_roots = tuple(
+        relative_path
+        for relative_path in MANAGED_OUTPUT_DIRECTORIES
+        if _resolved_path_is_within(
+            generated_report_root,
+            os.path.join(project_root, relative_path),
+        )
+    )
+    if not matching_roots:
+        return None
+    evidence_root = "gm2godot"
+    if evidence_root not in {
+        relative_path.replace("\\", "/") for relative_path in matching_roots
+    }:
+        raise ValueError(
+            "generated reports would enter a converter-owned managed root; "
+            "choose the project root, a path under its gm2godot directory, "
+            "or an external report directory"
+        )
+    try:
+        relative = os.path.relpath(report_root, project_root)
+    except ValueError:
+        return None
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return None
+    return relative
 
 
 def _resolved_path_is_within(path: str, root: str) -> bool:

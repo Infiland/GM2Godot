@@ -47,6 +47,7 @@ from src.conversion.type_defs import JsonDict
 
 CONVERSION_MANIFEST_RELATIVE_PATH = os.path.join("gm2godot", "conversion_manifest.json")
 CONVERSION_ATTEMPT_RELATIVE_PATH = os.path.join("gm2godot", "conversion_attempt.json")
+CONVERSION_EVIDENCE_MAX_BYTES = 32 * 1024 * 1024
 _MANIFEST_FILENAME = os.path.basename(CONVERSION_MANIFEST_RELATIVE_PATH)
 _ATTEMPT_FILENAME = os.path.basename(CONVERSION_ATTEMPT_RELATIVE_PATH)
 _ARTIFACT_DIRECTORY = os.path.dirname(CONVERSION_MANIFEST_RELATIVE_PATH)
@@ -506,6 +507,35 @@ def _conversion_attempt_payload(
             "sha256": manifest_digest,
         },
     }
+
+
+def build_verified_preserved_attempt(
+    attempt_outcome: ConversionOutcome,
+    canonical_manifest_content: bytes | None,
+) -> bytes:
+    """Render attempt-only evidence for a transactionally verified generation."""
+
+    if (
+        canonical_manifest_content is not None
+        and len(canonical_manifest_content) > CONVERSION_EVIDENCE_MAX_BYTES
+    ):
+        raise OSError("Canonical conversion manifest exceeds the evidence limit")
+    manifest_present = canonical_manifest_content is not None
+    return _serialize_json(
+        _conversion_attempt_payload(
+            attempt_outcome,
+            manifest_status=("preserved" if manifest_present else "absent"),
+            manifest_updated=False,
+            current_output_status=(
+                "verified" if manifest_present else "unavailable"
+            ),
+            manifest_digest=(
+                artifact_sha256(canonical_manifest_content)
+                if canonical_manifest_content is not None
+                else None
+            ),
+        )
+    )
 
 
 def _capture_owned_stale_transaction_artifacts(

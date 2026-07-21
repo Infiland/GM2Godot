@@ -658,7 +658,14 @@ class ProjectDestinationCLITests(unittest.TestCase):
         )
         self.assertEqual(diagnostic["source_path"], os.fspath(destination))
         self.assertEqual(sentinel.read_bytes(), b"keep")
-        self.assertEqual([path.name for path in destination.iterdir()], ["keep.txt"])
+        self.assertEqual(
+            sorted(path.name for path in destination.iterdir()),
+            [
+                ".gm2godot-managed-output",
+                ".gm2godot-managed-output.lock",
+                "keep.txt",
+            ],
+        )
 
 
 if __name__ == "__main__":

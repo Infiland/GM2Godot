@@ -1888,6 +1888,37 @@ class ManagedOutputWorkspace(
             self.verify()
         return tuple(receipts)
 
+    def read_staged_bytes(
+        self,
+        relative_path: str | os.PathLike[str],
+        *,
+        maximum: int,
+    ) -> bytes:
+        """Read one confined regular staged file through verified bindings."""
+
+        if type(maximum) is not int or maximum < 0:
+            raise ValueError("Managed-output staged read maximum must be non-negative.")
+        normalized = _validate_relative_path(relative_path)
+        self.verify()
+        bindings, parent, leaf = self._open_relative_parent(
+            self._require_stage(),
+            normalized,
+            create=False,
+            description="managed-output staged read directory",
+        )
+        try:
+            _identity, _mode, content = _read_regular_bytes(
+                parent,
+                leaf,
+                expected_device=self._destination_device,
+                expected_mount_id=self._destination_mount_id,
+                max_bytes=maximum,
+            )
+        finally:
+            self._close_relative_bindings(bindings)
+        self.verify()
+        return content
+
     def _capture_cleanup_entries(
         self,
         directory: VerifiedDirectory,

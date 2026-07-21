@@ -1,6 +1,6 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.7.40 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.41 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -60,8 +60,8 @@ When `--only` contains at least one key, it takes precedence over `--groups`. Un
 ## Verify the first conversion
 
 1. Read the terminal outcome (CLI). A terminal state can be `success`, `partial`, `failed`, or `cancelled`.
-2. After destination preflight succeeds, read `<GodotProject>/gm2godot/conversion_attempt.json` and `<GodotProject>/gm2godot/conversion_diagnostics.md`. Address errors, unsupported APIs, and relevant warnings. A pre-existing `conversion_manifest.json` may describe an earlier trustworthy run, so inspect the newest attempt ledger first. A rejected preflight intentionally writes no conversion artifacts inside the destination.
-   For a successful or partial v0.7.40 conversion, `conversion_manifest.json` also contains a complete deterministic `generation_inventory`. Selective `--only` runs retain unchanged entries owned by disabled converter steps, while `project.godot` is recorded under shared project-configuration ownership.
+2. After destination preflight succeeds, read `<GodotProject>/gm2godot/conversion_attempt.json` and `<GodotProject>/gm2godot/conversion_diagnostics.md`. Address errors, unsupported APIs, and relevant warnings. A pre-existing `conversion_manifest.json` may describe an earlier trustworthy run, so inspect the newest attempt ledger first. A rejected preflight writes no conversion attempt or canonical report, although the persistent private destination lock/workspace parent may have been initialized before the rejection.
+   For a successful or partial v0.7.41 conversion, `conversion_manifest.json` contains the complete deterministic `generation_inventory` committed with the managed files. Selective `--only` runs retain prior output instead of applying the separate stale-resource policy, while `project.godot` is recorded under shared project-configuration ownership. Failed or cancelled reruns preserve the prior inventory byte- and mode-exact and publish an attempt whose preserved canonical generation is `verified`.
 3. Validate the destination project, including the generated resources, with the exact Godot 4.7.1 executable:
 
    ```bash

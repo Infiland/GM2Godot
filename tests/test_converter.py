@@ -29,6 +29,7 @@ from src.conversion.conversion_outcome import (
     ConversionStepResult,
 )
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
+from src.conversion.generation_inventory import GenerationInventory
 from src.conversion.project_godot import ConversionPreflightError
 
 
@@ -111,7 +112,29 @@ class TestConverterOutcomes(unittest.TestCase):
                 return MagicMock() if result is None else result
             raise TypeError("Unsupported diagnostic publication test side effect.")
 
+        workspace = MagicMock()
+        workspace.stage_path = "/godot"
+        workspace.destination_path = "/godot"
+        workspace.preserved_for_recovery = False
+        workspace.read_staged_bytes.return_value = b"{}\n"
+        workspace.__enter__.return_value = workspace
+        workspace.__exit__.return_value = None
+
         with (
+            patch("src.conversion.converter.recover_managed_output_generation"),
+            patch(
+                "src.conversion.converter.ManagedOutputWorkspace.open",
+                return_value=workspace,
+            ),
+            patch("src.conversion.converter.inspect_godot_project_destination"),
+            patch("src.conversion.converter.stage_inventory_carry_forward"),
+            patch(
+                "src.conversion.converter.capture_generation_inventory",
+                return_value=GenerationInventory(),
+            ),
+            patch("src.conversion.converter.validate_staged_generation_inventory"),
+            patch("src.conversion.converter.publish_managed_output_generation"),
+            patch("src.conversion.converter.publish_managed_output_attempt"),
             patch("src.conversion.converter.capture_conversion_output_snapshot") as capture,
             patch(
                 "src.conversion.converter.capture_conversion_diagnostic_reports"
@@ -152,6 +175,7 @@ class TestConverterOutcomes(unittest.TestCase):
                 ),
             ) as write_artifacts,
         ):
+            capture.return_value.generation_inventory = GenerationInventory()
             yield {
                 "capture": capture,
                 "capture_diagnostics": capture_diagnostics,
@@ -624,7 +648,7 @@ class TestConverterOutcomes(unittest.TestCase):
             ConversionCounts(requested=1, executed=1, completed=1),
         )
 
-    def test_failed_second_run_marks_preserved_manifest_output_unverified(
+    def test_failed_second_run_restores_verified_prior_generation(
         self,
     ) -> None:
         with (
@@ -694,12 +718,13 @@ class TestConverterOutcomes(unittest.TestCase):
             ) as project_file:
                 converted_project = project_file.read()
 
-        self.assertIn('config/name="Second Name"', converted_project)
+        self.assertIn('config/name="First Name"', converted_project)
+        self.assertNotIn('config/name="Second Name"', converted_project)
         self.assertEqual(attempt["attempt"]["state"], "failed")
         self.assertEqual(attempt["canonical_manifest"]["status"], "preserved")
         self.assertEqual(
             attempt["canonical_manifest"]["current_output"],
-            "unverified",
+            "verified",
         )
 
     def test_real_missing_project_options_accounts_for_skipped_resource(self) -> None:
@@ -920,13 +945,10 @@ class TestConverterOutcomes(unittest.TestCase):
             self.converter.last_outcome.failure_phase,
             "finalizer",
         )
-        self.assertEqual(calls["write_artifacts"].call_count, 2)
+        self.assertEqual(calls["write_artifacts"].call_count, 1)
         terminal_attempt = calls["write_artifacts"].call_args_list[0].kwargs
-        late_refresh = calls["write_artifacts"].call_args_list[1].kwargs
         self.assertIsNone(terminal_attempt["manifest_outcome"])
         self.assertEqual(terminal_attempt["attempt_outcome"].state, "failed")
-        self.assertIsNone(late_refresh["manifest_outcome"])
-        self.assertEqual(late_refresh["attempt_outcome"].state, "failed")
 
     def test_architecture_checkpoint_restore_failure_revokes_canonical(
         self,

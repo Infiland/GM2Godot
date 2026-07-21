@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.41 - 2026-07-21
+
+- Routed `Converter.convert()`, GUI/library callers, CLI-managed reports, every selected converter and project-setting operation, architecture/diagnostic finalizers, inventory validation, and canonical-manifest construction through one destination-local managed-output workspace.
+- Made runtime, cancellation, finalizer, staged-validation, and ordinary publication failures preserve the prior managed generation byte- and mode-exact while publishing only a separate attempt ledger whose preserved canonical output is transactionally verified; the final cooperative cancellation check now precedes the durable generation decision.
+- Added real project-setting/script/registry mutation coverage for successful publication, failure rollback, cancellation during converter/finalizer/validation work, the pre-decision boundary, user sentinels, and native Windows integration, without adding the exhaustive hard-exit matrix or stale logical-resource invalidation policy.
+
 ## 0.7.40 - 2026-07-21
 
 - Added a destination-wide publisher that consumes one verified `ManagedOutputWorkspace` and frozen previous/desired inventories, durably journals identity-bound same-filesystem stages and backups before public mutation, installs managed creates/replacements/removals with canonical attempt/manifest evidence last, and selects the complete new generation through one durable commit pointer.

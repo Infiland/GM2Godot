@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.40 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.41 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -16,8 +16,8 @@ Paths below are relative to the generated Godot project unless a report director
 | --- | --- | --- |
 | `gm2godot/conversion_attempt.json` | The terminal state of the latest conversion attempt and whether that publication updated, preserved, or found no canonical manifest. | After destination preflight, for every terminal conversion attempt. A rejected preflight does not write into the destination. |
 | `gm2godot/conversion_manifest.json` | Format-v2 canonical record of a trustworthy successful or partial conversion, including enabled converters, source metadata, resources, a complete format-v1 managed-generation inventory, generated-file hashes, source maps, architecture policy, and path diagnostics. | Only when GM2Godot has a trustworthy completed-output candidate. Failed or cancelled work can preserve an older file. |
-| `gm2godot/conversion_diagnostics.json` | Machine-readable diagnostic summary, sorted diagnostic entries, and the terminal `outcome` object. | During conversion; also under an explicit report directory for `report`, `analyze`, or `convert --report-dir`. |
-| `gm2godot/conversion_diagnostics.md` | Human-readable view of the same diagnostics and outcome. | Published as a pair with the JSON report. |
+| `gm2godot/conversion_diagnostics.json` | Machine-readable diagnostic summary, sorted diagnostic entries, and the canonical generation's terminal `outcome` object. | Committed with a successful or partial managed generation; failed/cancelled reruns preserve the prior canonical file. Also written under an explicit external report directory. |
+| `gm2godot/conversion_diagnostics.md` | Human-readable view of the same canonical diagnostics. | Committed with the JSON report in the managed generation. |
 | `gm2godot/godot_validation_report.json` | Godot binary used, resources checked, import/boot return codes and output, detected warnings/errors, and `passed`, `failed`, or `skipped` status. | By `validate` when headless Godot validation runs or is attempted. |
 | `gm2godot/architecture_policy.json` | Generated runtime-manager, room, layer/depth, renderer, collision, audio, file/buffer/network, and signal-queue policy choices. | As part of a conversion. |
 | `gm2godot/gml_manual_scope.md`, `gml_api_compatibility.md`, `platform_capability_report.md`, `platform_capability_report.json` | Current global compatibility and target-capability inventory. | Under `--report-dir` for static reporting, analysis, or conversion. |
@@ -38,7 +38,7 @@ Every valid `convert` command prints exactly one terminal line beginning `GM2God
 | `success` | Every requested converter step and every tracked resource completed. This is not a claim of perfect GameMaker behavior; review compatibility diagnostics and validate in Godot. |
 | `partial` | Every requested converter step completed, but at least one tracked resource was skipped or failed. The output can be useful, but the missing work must be understood. |
 | `failed` | The latest invocation terminated as a failure, so its filesystem output must not be assumed usable. `failed_step` and `failure_phase` identify preflight, runtime, report, or finalizer context when available. A separately digest-verified canonical candidate can still exist from an earlier phase or attempt. |
-| `cancelled` | A user stop request or `SIGINT` was observed before the CLI's terminal-summary commit point. Generated output may be incomplete, although a late cancellation can coexist with a separately digest-verified canonical candidate. |
+| `cancelled` | A user stop request or `SIGINT` was observed before the final cooperative cancellation check that precedes managed-generation publication. The prior public generation is preserved and verified. |
 
 The GUI uses the same terminal outcome instead of inferring success from the worker thread returning. Full success is green, partial output is amber, failure is red, and cancellation is blue. Every state prints the exact resource counts. A usable partial result also prints the absolute path to `gm2godot/conversion_diagnostics.md`; it never receives the green full-success message.
 
@@ -69,7 +69,7 @@ Use `--allow-partial` in CI only after the skipped/failed resources are intentio
 
 ## Attempt ledger versus trusted manifest
 
-`conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” These remain distinct records, but they are now committed and recovered as one generation: a late report failure or cancellation can refer to a valid canonical candidate, while another failed attempt can deliberately preserve an older canonical file.
+`conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” Managed files and canonical evidence are committed and recovered as one destination-wide generation. Failed or cancelled work before the generation decision publishes only a new attempt after verifying the preserved prior inventory; its staged diagnostics and architecture report never replace the prior canonical files.
 
 Inside the format-v2 manifest, `generation_inventory` is an additive format-v1 object. Its sorted `entries` are the complete desired managed generation, including unchanged disabled-converter carry-forward and jointly managed `project.godot`. Each entry records `path`, `kind`, `owner`, `byte_count`, `sha256`, and `mode`. Existing consumers may continue reading `generated_files`; it is now the path/kind/digest projection of the same frozen inventory, with the existing canonical-manifest `sha256: "self"` row. The inventory excludes the manifest itself, latest attempt, `.godot/`, locks, recovery records, private stages/backups, and unrelated paths.
 
@@ -78,6 +78,7 @@ Read `canonical_manifest` in the attempt ledger:
 | `status` | `updated` | `current_output` | How to interpret it |
 | --- | ---: | --- | --- |
 | `updated` | `true` | `verified` | This generation committed a new canonical manifest with the attempt ledger. Verify the file's raw-byte SHA-256 against the ledger before consuming it. |
+| `preserved` | `false` | `verified` | The destination-wide transaction verified or restored the complete prior managed generation and its digest-matching canonical manifest before publishing this attempt. |
 | `preserved` | `false` | `unverified` | A regular canonical file already existed and was left untouched. Its recorded digest identifies those bytes, but preservation does not prove that its schema or contents describe the current destination or latest attempt. |
 | `absent` | `false` | `unavailable` | No canonical manifest exists; `sha256` is `null`. |
 
@@ -88,7 +89,7 @@ The generation pointer persists; the transaction journal is removed only after t
 Even when the digest matches, inspect both records:
 
 1. Read the latest attempt's `attempt.state`, `failed_step`, and `failure_phase`.
-2. Require `canonical_manifest.current_output` to be `verified` when treating this attempt as a fresh canonical publication.
+2. Require `canonical_manifest.current_output` to be `verified` when consuming either a newly committed or transactionally preserved generation.
 3. Compare the recorded digest with the canonical file bytes.
 4. Read the canonical manifest's own `conversion.state`; only `success` and `partial` are canonical states.
 5. For `partial`, inspect resource counts and diagnostics before using the output.
@@ -125,7 +126,7 @@ With a binary available, validation asks Godot to import supported asset types a
 
 | Symptom | What to check |
 | --- | --- |
-| Preflight exits `2` and the destination is unchanged | Use a missing or empty destination, or a valid existing Godot project with a regular `project.godot`. GM2Godot refuses a non-empty non-project directory and unsafe redirected or conflicting managed-output paths. Read the structured stderr diagnostic; a rejected preflight intentionally writes no attempt ledger into that destination. |
+| Preflight exits `2` and no managed generation was published | Use a missing or empty destination, or a valid existing Godot project with a regular `project.godot`. GM2Godot refuses a non-empty non-project directory and unsafe redirected or conflicting managed-output paths. Recovery and lock acquisition precede preflight, so the persistent private lock/workspace parent may be initialized, but no attempt, canonical report, or managed project file is published. |
 | “No `.yyp` found” or the wrong project is analyzed | Pass the GameMaker project root that directly contains the `.yyp`. The GUI rejects multiple `.yyp` files; `analyze` warns about them, while headless project readers select the sorted first valid candidate. Separating projects is safer. |
 | Outcome is `partial` | Read `outcome.resources`, the ordered `steps` ledger, and warning/error rows in `conversion_diagnostics.json`. Search the generated compatibility reports for the affected API or resource family before choosing `--allow-partial`. |
 | Unsupported GML call or extension | Use the diagnostic's `api`, `manifest_entry`, `issue_number`, and `workaround`. Native extensions and service SDKs need a reviewed Godot addon/GDExtension or explicit local mapping; a generated stub is not a working native integration. |

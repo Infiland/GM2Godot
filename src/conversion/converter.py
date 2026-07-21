@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass, replace
 from typing import Callable, Mapping, TypeAlias
 
@@ -22,7 +24,10 @@ from src.conversion.objects import ObjectConverter
 from src.conversion.rooms import RoomConverter
 from src.conversion.shaders import ShaderConverter
 from src.conversion.included_files import IncludedFilesConverter
-from src.conversion.project_godot import prepare_godot_project_destination
+from src.conversion.project_godot import (
+    inspect_godot_project_destination,
+    prepare_godot_project_destination,
+)
 from src.conversion.project_settings import (
     ProjectOperationResult,
     ProjectSettingsConverter,
@@ -41,10 +46,31 @@ from src.conversion.conversion_context import (
     sound_group_folders_enabled,
 )
 from src.conversion.conversion_manifest import (
+    CONVERSION_ATTEMPT_RELATIVE_PATH,
+    CONVERSION_EVIDENCE_MAX_BYTES,
     CONVERSION_MANIFEST_RELATIVE_PATH,
     ConversionOutputSnapshot,
+    build_verified_preserved_attempt,
     capture_conversion_output_snapshot,
     write_conversion_artifacts,
+)
+from src.conversion.generation_inventory import (
+    GenerationInventory,
+    capture_generation_inventory,
+    stage_inventory_carry_forward,
+    validate_staged_generation_inventory,
+)
+from src.conversion.managed_output_publisher import (
+    MANAGED_OUTPUT_POINTER_NAME,
+    publish_managed_output_attempt,
+    publish_managed_output_generation,
+    recover_managed_output_generation,
+)
+from src.conversion.managed_output_workspace import (
+    DESTINATION_LOCK_NAME,
+    WORKSPACE_PARENT_NAME,
+    WORKSPACE_STAGE_MARKER_NAME,
+    ManagedOutputWorkspace,
 )
 from src.conversion.conversion_plan import build_conversion_plan
 from src.conversion.diagnostics import (
@@ -68,6 +94,14 @@ CONVERSION_CATEGORIES: dict[str, list[str]] = {
 
 
 ConverterFn: TypeAlias = Callable[[], object]
+StagedOutputFinalizer: TypeAlias = Callable[[str], None]
+
+
+def _before_conversion_transaction_phase(
+    _phase: str,
+    _path: str,
+) -> None:
+    """Narrow cancellation/failure test seam before the durable decision."""
 
 
 @dataclass
@@ -79,10 +113,13 @@ class _FinalizerReportCheckpoint:
 
 
 class Converter:
+    managed_output_transactional = True
+
     def __init__(self, log_callback: LogCallback, progress_callback: ProgressCallback,
                  status_callback: LogCallback, conversion_running: RunningFlag,
                  update_log_callback: LogCallback | None = None, compact_logging: bool = False,
-                 max_workers: int | None = None) -> None:
+                 max_workers: int | None = None,
+                 staged_output_finalizer: StagedOutputFinalizer | None = None) -> None:
         self.log_callback: LogCallback = log_callback
         self.progress_callback: ProgressCallback = progress_callback
         self.status_callback: LogCallback = status_callback
@@ -92,12 +129,18 @@ class Converter:
         self.update_log_callback: LogCallback = self._raw_update_log_callback
         self.compact_logging = compact_logging
         self.max_workers = max_workers
+        self.staged_output_finalizer = staged_output_finalizer
         self.diagnostics = DiagnosticCollector()
         self.last_outcome: ConversionOutcome | None = None
         self._step_exception_resources = ConversionCounts()
         self._conversion_context: ConversionContext | None = None
         self._output_snapshot: ConversionOutputSnapshot | None = None
         self._canonical_outcome: ConversionOutcome | None = None
+        self._public_godot_path: str | None = None
+        self._active_workspace: ManagedOutputWorkspace | None = None
+        self._desired_inventory: GenerationInventory | None = None
+        self._committed_inventory: GenerationInventory | None = None
+        self._transaction_decided = False
 
     def convert(self, gm_path: str, gm_platform: str, godot_path: str,
                 settings: Mapping[str, BoolSetting], *,
@@ -108,129 +151,446 @@ class Converter:
         self._conversion_context = None
         self._output_snapshot = None
         self._canonical_outcome = None
+        self._public_godot_path = os.path.abspath(godot_path)
+        self._active_workspace = None
+        self._desired_inventory = None
+        self._committed_inventory = None
+        self._transaction_decided = False
         enabled_converters = enabled_converter_keys(settings)
         plan = build_conversion_plan(enabled_converters)
         steps = ConversionStepLedger.from_requested(step.key for step in plan)
+        public_path = self._public_godot_path
+        previous_inventory: GenerationInventory | None = None
+        workspace: ManagedOutputWorkspace | None = None
+        preflight_error: Exception | None = None
+        work_error: Exception | None = None
+        cleanup_error: Exception | None = None
 
+        assert public_path is not None
         try:
-            prepare_godot_project_destination(gm_path, godot_path)
-            output_snapshot = capture_conversion_output_snapshot(godot_path)
+            recover_managed_output_generation(public_path)
+            workspace = ManagedOutputWorkspace.open(public_path)
         except Exception:
             self._set_outcome(
                 self._outcome(
                     "failed",
                     steps=steps,
-                    failure_phase="preflight",
+                    failure_phase="recovery",
                 )
             )
             raise
 
-        self.log_callback = self.diagnostics.wrap_log_callback(self._raw_log_callback)
-        self.update_log_callback = self.diagnostics.wrap_log_callback(self._raw_update_log_callback)
-        context = self._create_context(
-            gm_path,
-            gm_platform,
-            godot_path,
-            settings,
-            enabled_converters=enabled_converters,
-        )
-        self._conversion_context = context
-        self._output_snapshot = output_snapshot
-        resources = ConversionCounts()
-        runtime_error: Exception | None = None
-
+        self._active_workspace = workspace
         try:
-            runners = self._build_step_runners(context)
-            for step in plan:
-                if not context.is_running():
-                    break
-                steps = steps.start(step.key)
-                self._step_exception_resources = ConversionCounts()
-                converter_fn = runners.get(step.key)
-                if converter_fn is None:
-                    raise RuntimeError(
-                        f"No converter runner registered for step {step.key!r}."
-                    )
-                log_message = get_localized(step.log_key)
-                context.log_callback(log_message)
-                context.status_callback(log_message)
-                raw_result = converter_fn()
-                step_result = (
-                    raw_result
-                    if isinstance(raw_result, ConversionStepResult)
-                    else ConversionStepResult()
+            try:
+                output_snapshot = self._attempt_only_output_snapshot(
+                    workspace,
+                    public_path,
                 )
-                resources += step_result.resources
-                context.progress_callback(0)
-                if step_result.cancelled:
-                    break
-                steps = steps.complete(step.key)
-                if not context.is_running():
-                    break
-
-            if steps.active_step is not None or not context.is_running():
-                outcome = self._outcome(
-                    "cancelled",
-                    steps=steps,
-                    resources=resources,
+                if output_snapshot is None:
+                    inspect_godot_project_destination(
+                        public_path,
+                        ignored_transaction_entries=(
+                            DESTINATION_LOCK_NAME,
+                            WORKSPACE_PARENT_NAME,
+                        ),
+                    )
+                    output_snapshot = capture_conversion_output_snapshot(
+                        public_path
+                    )
+                previous_inventory = (
+                    output_snapshot.generation_inventory
+                    if output_snapshot.generation_inventory is not None
+                    else GenerationInventory()
+                )
+                stage_inventory_carry_forward(
+                    workspace,
+                    previous_inventory,
+                    enabled_converters=(),
+                )
+                prepare_godot_project_destination(
+                    gm_path,
+                    workspace.stage_path,
+                    ignored_transaction_entries=(WORKSPACE_STAGE_MARKER_NAME,),
+                )
+            except Exception as error:
+                preflight_error = error
+                self._set_outcome(
+                    self._outcome(
+                        "failed",
+                        steps=steps,
+                        failure_phase="preflight",
+                    )
                 )
             else:
-                state = (
-                    "partial"
-                    if resources.skipped > 0 or resources.failed > 0
-                    else "success"
+                self.log_callback = self.diagnostics.wrap_log_callback(
+                    self._raw_log_callback
                 )
-                outcome = self._outcome(
-                    state,
-                    steps=steps,
-                    resources=resources,
+                self.update_log_callback = self.diagnostics.wrap_log_callback(
+                    self._raw_update_log_callback
                 )
-                self._canonical_outcome = outcome
-            self._set_outcome(outcome)
-        except Exception as error:
-            runtime_error = error
-            resources += self._step_exception_resources
-            failed_step = steps.active_step
-            if failed_step is not None:
-                steps = steps.fail(failed_step)
-            self._set_outcome(
-                self._outcome(
-                    "failed",
-                    steps=steps,
-                    resources=resources,
-                    failed_step=failed_step,
-                    failure_phase="runtime",
+                context = self._create_context(
+                    gm_path,
+                    gm_platform,
+                    workspace.stage_path,
+                    settings,
+                    enabled_converters=enabled_converters,
                 )
-            )
+                self._conversion_context = context
+                self._output_snapshot = output_snapshot
+                resources = ConversionCounts()
+                runtime_error: Exception | None = None
 
-        finalizer_errors = self._run_finalizers(
-            context,
-            preserve_outcome=runtime_error is not None,
-        )
-        if runtime_error is not None:
-            for finalizer_error in finalizer_errors:
-                self._add_secondary_exception_context(
-                    runtime_error,
-                    finalizer_error,
-                    summary_prefix="Conversion finalizer also failed: ",
-                    detail_prefix="Conversion finalizer failure detail: ",
-                )
-            raise runtime_error
-        if finalizer_errors:
-            primary_finalizer_error = finalizer_errors[0]
-            for secondary_error in finalizer_errors[1:]:
-                self._add_secondary_exception_context(
-                    primary_finalizer_error,
-                    secondary_error,
-                    summary_prefix="Additional conversion finalizer failure: ",
-                    detail_prefix=(
-                        "Additional conversion finalizer failure detail: "
-                    ),
-                )
-            raise primary_finalizer_error
+                try:
+                    runners = self._build_step_runners(context)
+                    for step in plan:
+                        if not context.is_running():
+                            break
+                        steps = steps.start(step.key)
+                        self._step_exception_resources = ConversionCounts()
+                        converter_fn = runners.get(step.key)
+                        if converter_fn is None:
+                            raise RuntimeError(
+                                "No converter runner registered for step "
+                                f"{step.key!r}."
+                            )
+                        log_message = get_localized(step.log_key)
+                        context.log_callback(log_message)
+                        context.status_callback(log_message)
+                        raw_result = converter_fn()
+                        step_result = (
+                            raw_result
+                            if isinstance(raw_result, ConversionStepResult)
+                            else ConversionStepResult()
+                        )
+                        resources += step_result.resources
+                        context.progress_callback(0)
+                        if step_result.cancelled:
+                            break
+                        steps = steps.complete(step.key)
+                        if not context.is_running():
+                            break
 
+                    if steps.active_step is not None or not context.is_running():
+                        outcome = self._outcome(
+                            "cancelled",
+                            steps=steps,
+                            resources=resources,
+                        )
+                    else:
+                        state = (
+                            "partial"
+                            if resources.skipped > 0 or resources.failed > 0
+                            else "success"
+                        )
+                        outcome = self._outcome(
+                            state,
+                            steps=steps,
+                            resources=resources,
+                        )
+                        self._canonical_outcome = outcome
+                    self._set_outcome(outcome)
+                except Exception as error:
+                    runtime_error = error
+                    resources += self._step_exception_resources
+                    failed_step = steps.active_step
+                    if failed_step is not None:
+                        steps = steps.fail(failed_step)
+                    self._set_outcome(
+                        self._outcome(
+                            "failed",
+                            steps=steps,
+                            resources=resources,
+                            failed_step=failed_step,
+                            failure_phase="runtime",
+                        )
+                    )
+
+                finalizer_errors = self._run_finalizers(
+                    context,
+                    preserve_outcome=runtime_error is not None,
+                )
+                if runtime_error is not None:
+                    for finalizer_error in finalizer_errors:
+                        self._add_secondary_exception_context(
+                            runtime_error,
+                            finalizer_error,
+                            summary_prefix="Conversion finalizer also failed: ",
+                            detail_prefix="Conversion finalizer failure detail: ",
+                        )
+                    work_error = runtime_error
+                elif finalizer_errors:
+                    work_error = finalizer_errors[0]
+                    for secondary_error in finalizer_errors[1:]:
+                        self._add_secondary_exception_context(
+                            work_error,
+                            secondary_error,
+                            summary_prefix=(
+                                "Additional conversion finalizer failure: "
+                            ),
+                            detail_prefix=(
+                                "Additional conversion finalizer failure detail: "
+                            ),
+                        )
+
+                if work_error is None:
+                    work_error = self._validate_and_publish_candidate(
+                        workspace,
+                        previous_inventory,
+                        context,
+                    )
+        finally:
+            self._active_workspace = None
+            try:
+                workspace.close()
+            except Exception as error:
+                cleanup_error = error
+
+        if cleanup_error is not None:
+            if preflight_error is not None:
+                self._add_secondary_exception_context(
+                    preflight_error,
+                    cleanup_error,
+                    summary_prefix="Managed-output cleanup also failed: ",
+                    detail_prefix="Managed-output cleanup failure detail: ",
+                )
+            elif work_error is not None:
+                self._add_secondary_exception_context(
+                    work_error,
+                    cleanup_error,
+                    summary_prefix="Managed-output cleanup also failed: ",
+                    detail_prefix="Managed-output cleanup failure detail: ",
+                )
+            else:
+                work_error = cleanup_error
+
+        if (
+            preflight_error is None
+            and previous_inventory is not None
+            and not self._transaction_decided
+            and not workspace.preserved_for_recovery
+            and cleanup_error is None
+        ):
+            outcome = self.last_outcome
+            assert outcome is not None
+            try:
+                self._publish_verified_attempt(
+                    previous_inventory,
+                    outcome,
+                )
+            except Exception as attempt_error:
+                if work_error is None:
+                    work_error = attempt_error
+                else:
+                    self._add_secondary_exception_context(
+                        work_error,
+                        attempt_error,
+                        summary_prefix=(
+                            "Publishing the verified conversion attempt also "
+                            "failed: "
+                        ),
+                        detail_prefix=(
+                            "Verified conversion-attempt publication detail: "
+                        ),
+                    )
+
+        if preflight_error is not None:
+            raise preflight_error
+        if work_error is not None:
+            raise work_error
         assert self.last_outcome is not None
         return self.last_outcome
+
+    @staticmethod
+    def _attempt_only_output_snapshot(
+        workspace: ManagedOutputWorkspace,
+        public_path: str,
+    ) -> ConversionOutputSnapshot | None:
+        """Recognize a verified empty generation carrying only its attempt."""
+
+        artifact_directory = os.path.join(public_path, "gm2godot")
+        attempt_path = os.path.join(
+            public_path,
+            CONVERSION_ATTEMPT_RELATIVE_PATH,
+        )
+        pointer_path = os.path.join(
+            public_path,
+            WORKSPACE_PARENT_NAME,
+            MANAGED_OUTPUT_POINTER_NAME,
+        )
+        expected_top_level = {
+            DESTINATION_LOCK_NAME,
+            WORKSPACE_PARENT_NAME,
+            "gm2godot",
+        }
+        try:
+            if set(os.listdir(public_path)) != expected_top_level:
+                return None
+            if set(os.listdir(artifact_directory)) != {
+                os.path.basename(CONVERSION_ATTEMPT_RELATIVE_PATH)
+            }:
+                return None
+            artifact_stat = os.lstat(artifact_directory)
+            attempt_stat = os.lstat(attempt_path)
+            pointer_stat = os.lstat(pointer_path)
+        except OSError:
+            return None
+        is_junction = getattr(os.path, "isjunction", None)
+        if (
+            stat.S_ISLNK(artifact_stat.st_mode)
+            or (
+                callable(is_junction)
+                and bool(is_junction(artifact_directory))
+            )
+            or not stat.S_ISDIR(artifact_stat.st_mode)
+            or not stat.S_ISREG(attempt_stat.st_mode)
+            or attempt_stat.st_nlink != 1
+            or not stat.S_ISREG(pointer_stat.st_mode)
+            or pointer_stat.st_nlink != 1
+        ):
+            return None
+        workspace.verify()
+        snapshot = capture_conversion_output_snapshot(public_path)
+        if (
+            snapshot.files
+            or snapshot.generation_inventory is None
+            or snapshot.generation_inventory.entries
+        ):
+            return None
+        workspace.verify()
+        return snapshot
+
+    def _validate_and_publish_candidate(
+        self,
+        workspace: ManagedOutputWorkspace,
+        previous_inventory: GenerationInventory,
+        context: ConversionContext,
+    ) -> Exception | None:
+        outcome = self.last_outcome
+        if outcome is None:
+            return RuntimeError("Conversion produced no terminal outcome.")
+        if outcome.state not in {"success", "partial"}:
+            self._canonical_outcome = None
+            return None
+        desired_inventory = self._desired_inventory
+        if desired_inventory is None:
+            error = RuntimeError(
+                "Conversion finalizers produced no frozen managed inventory."
+            )
+            self._set_transaction_failure(
+                "managed_output_validation",
+                "validation",
+            )
+            return error
+
+        try:
+            _before_conversion_transaction_phase(
+                "before_staged_validation",
+                workspace.stage_path,
+            )
+            if not context.is_running():
+                self._set_transaction_cancellation()
+                return None
+            validate_staged_generation_inventory(workspace, desired_inventory)
+            _before_conversion_transaction_phase(
+                "after_staged_validation",
+                workspace.stage_path,
+            )
+            if not context.is_running():
+                self._set_transaction_cancellation()
+                return None
+            manifest_content = workspace.read_staged_bytes(
+                CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/"),
+                maximum=CONVERSION_EVIDENCE_MAX_BYTES,
+            )
+            attempt_content = workspace.read_staged_bytes(
+                CONVERSION_ATTEMPT_RELATIVE_PATH.replace(os.sep, "/"),
+                maximum=CONVERSION_EVIDENCE_MAX_BYTES,
+            )
+            validate_staged_generation_inventory(workspace, desired_inventory)
+            _before_conversion_transaction_phase(
+                "before_commit_decision",
+                workspace.destination_path,
+            )
+            if not context.is_running():
+                self._set_transaction_cancellation()
+                return None
+        except Exception as error:
+            self._set_transaction_failure(
+                "managed_output_validation",
+                "validation",
+            )
+            return error
+
+        try:
+            publish_managed_output_generation(
+                workspace,
+                previous_inventory=previous_inventory,
+                desired_inventory=desired_inventory,
+                canonical_manifest_content=manifest_content,
+                attempt_content=attempt_content,
+            )
+        except Exception as error:
+            self._set_transaction_failure(
+                "managed_output_publication",
+                "publication",
+            )
+            return error
+        self._transaction_decided = True
+        self._committed_inventory = desired_inventory
+        return None
+
+    def _set_transaction_failure(
+        self,
+        failed_step: str,
+        failure_phase: str,
+    ) -> None:
+        self._canonical_outcome = None
+        previous = self.last_outcome
+        outcome = (
+            replace(
+                previous,
+                state="failed",
+                failed_step=failed_step,
+                failure_phase=failure_phase,
+            )
+            if previous is not None
+            else ConversionOutcome(
+                state="failed",
+                failed_step=failed_step,
+                failure_phase=failure_phase,
+            )
+        )
+        self._set_outcome(outcome)
+
+    def _set_transaction_cancellation(self) -> None:
+        self._canonical_outcome = None
+        self._set_finalizer_cancellation()
+
+    def _publish_verified_attempt(
+        self,
+        inventory: GenerationInventory,
+        outcome: ConversionOutcome,
+    ) -> str:
+        public_path = self._public_godot_path
+        if public_path is None:
+            raise RuntimeError(
+                "Cannot publish a conversion attempt before conversion preflight."
+            )
+        recover_managed_output_generation(public_path)
+        with ManagedOutputWorkspace.open(public_path) as workspace:
+            publish_managed_output_attempt(
+                workspace,
+                verified_inventory=inventory,
+                attempt_content=lambda manifest_content: (
+                    build_verified_preserved_attempt(
+                        outcome,
+                        manifest_content,
+                    )
+                ),
+            )
+        self._set_outcome(outcome)
+        return os.path.join(public_path, CONVERSION_ATTEMPT_RELATIVE_PATH)
 
     def _run_base_converter(self, converter: BaseConverter) -> ConversionStepResult:
         try:
@@ -295,6 +655,18 @@ class Converter:
         have no canonical candidate. In that case this intentionally degrades
         to attempt-only publication instead of creating a failed manifest.
         """
+        if self._active_workspace is None:
+            attempt_path = self.publish_conversion_attempt(attempt_outcome)
+            public_path = self._public_godot_path
+            assert public_path is not None
+            manifest_path = os.path.join(
+                public_path,
+                CONVERSION_MANIFEST_RELATIVE_PATH,
+            )
+            return (
+                manifest_path if os.path.isfile(manifest_path) else None,
+                attempt_path,
+            )
         return self._write_conversion_artifacts(
             manifest_outcome=self._canonical_outcome,
             attempt_outcome=attempt_outcome,
@@ -305,6 +677,21 @@ class Converter:
         attempt_outcome: ConversionOutcome,
     ) -> str:
         """Publish terminal attempt state without mutating the canonical manifest."""
+        if self._active_workspace is None:
+            public_path = self._public_godot_path
+            if public_path is None:
+                raise RuntimeError(
+                    "Cannot publish a conversion attempt before conversion "
+                    "preflight."
+                )
+            recover_managed_output_generation(public_path)
+            snapshot = capture_conversion_output_snapshot(public_path)
+            inventory = (
+                snapshot.generation_inventory
+                if snapshot.generation_inventory is not None
+                else GenerationInventory()
+            )
+            return self._publish_verified_attempt(inventory, attempt_outcome)
         _manifest_path, attempt_path = self._write_conversion_artifacts(
             manifest_outcome=None,
             attempt_outcome=attempt_outcome,
@@ -323,12 +710,27 @@ class Converter:
             raise RuntimeError(
                 "Cannot write conversion artifacts before conversion preflight."
             )
+        frozen_inventory: GenerationInventory | None = None
+        if manifest_outcome is not None:
+            previous_inventory = (
+                output_snapshot.generation_inventory
+                if output_snapshot.generation_inventory is not None
+                else GenerationInventory()
+            )
+            frozen_inventory = capture_generation_inventory(
+                context.godot_project_path,
+                previous_inventory=previous_inventory,
+                enabled_converters=context.enabled_converters,
+            )
+            self._desired_inventory = frozen_inventory
         paths = write_conversion_artifacts(
             context.gm_project_path,
             context.godot_project_path,
             target_platform=context.target_platform,
             enabled_converters=context.enabled_converters,
             output_snapshot=output_snapshot,
+            generation_inventory=frozen_inventory,
+            generation_root_path=context.godot_project_path,
             manifest_outcome=manifest_outcome,
             attempt_outcome=attempt_outcome,
         )
@@ -432,10 +834,37 @@ class Converter:
                 )
                 diagnostics_current = checkpoint.diagnostics_receipt is not None
 
+        staged_output_current = True
+        if (
+            not preserve_outcome
+            and architecture_current
+            and diagnostics_current
+            and not errors
+            and self._canonical_outcome is not None
+            and self.staged_output_finalizer is not None
+        ):
+            try:
+                self.staged_output_finalizer(context.godot_project_path)
+            except Exception as error:
+                self._record_finalizer_error(
+                    error,
+                    failed_step="staged_output_finalizer",
+                    preserve_outcome=preserve_outcome,
+                    errors=errors,
+                )
+                staged_output_current = False
+            else:
+                self._observe_finalizer_cancellation(
+                    context,
+                    preserve_outcome=preserve_outcome,
+                    errors=errors,
+                )
+
         include_manifest = (
             not preserve_outcome
             and architecture_current
             and diagnostics_current
+            and staged_output_current
             and not errors
             and self._canonical_outcome is not None
         )

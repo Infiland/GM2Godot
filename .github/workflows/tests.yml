@@ -65,7 +65,7 @@ jobs:
 
   windows-artifact-transactions:
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PIP_CONFIG_FILE: nul
     steps:
@@ -127,6 +127,7 @@ jobs:
           tests.test_anchored_artifacts
           tests.test_architecture_policy
           tests.test_converter
+          tests.test_converter_transaction
           tests.test_cli
           tests.test_asset_registry
           tests.test_atomic_generated_text

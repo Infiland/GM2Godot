@@ -122,6 +122,7 @@ jobs:
           python -m unittest -v
           tests.test_conversion_outcome
           tests.test_conversion_manifest
+          tests.test_generation_inventory
           tests.test_diagnostics
           tests.test_anchored_artifacts
           tests.test_architecture_policy

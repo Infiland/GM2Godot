@@ -1,8 +1,8 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.38 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.39 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-20
+> **Last reviewed:** 2026-07-21
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Compatibility and Limitations](Compatibility-and-Limitations)
 
@@ -15,7 +15,7 @@ Paths below are relative to the generated Godot project unless a report director
 | File | What it tells you | When it is written |
 | --- | --- | --- |
 | `gm2godot/conversion_attempt.json` | The terminal state of the latest conversion attempt and whether that publication updated, preserved, or found no canonical manifest. | After destination preflight, for every terminal conversion attempt. A rejected preflight does not write into the destination. |
-| `gm2godot/conversion_manifest.json` | Format-v2 canonical record of a trustworthy successful or partial conversion, including enabled converters, source metadata, resources, generated-file hashes, source maps, architecture policy, and path diagnostics. | Only when GM2Godot has a trustworthy completed-output candidate. Failed or cancelled work can preserve an older file. |
+| `gm2godot/conversion_manifest.json` | Format-v2 canonical record of a trustworthy successful or partial conversion, including enabled converters, source metadata, resources, a complete format-v1 managed-generation inventory, generated-file hashes, source maps, architecture policy, and path diagnostics. | Only when GM2Godot has a trustworthy completed-output candidate. Failed or cancelled work can preserve an older file. |
 | `gm2godot/conversion_diagnostics.json` | Machine-readable diagnostic summary, sorted diagnostic entries, and the terminal `outcome` object. | During conversion; also under an explicit report directory for `report`, `analyze`, or `convert --report-dir`. |
 | `gm2godot/conversion_diagnostics.md` | Human-readable view of the same diagnostics and outcome. | Published as a pair with the JSON report. |
 | `gm2godot/godot_validation_report.json` | Godot binary used, resources checked, import/boot return codes and output, detected warnings/errors, and `passed`, `failed`, or `skipped` status. | By `validate` when headless Godot validation runs or is attempted. |
@@ -71,6 +71,8 @@ Use `--allow-partial` in CI only after the skipped/failed resources are intentio
 
 `conversion_attempt.json` is format v1 and answers “what happened in the latest invocation?” `conversion_manifest.json` is format v2 and answers “what trustworthy successful/partial output was canonically recorded?” These remain distinct records, but they are now committed and recovered as one generation: a late report failure or cancellation can refer to a valid canonical candidate, while another failed attempt can deliberately preserve an older canonical file.
 
+Inside the format-v2 manifest, `generation_inventory` is an additive format-v1 object. Its sorted `entries` are the complete desired managed generation, including unchanged disabled-converter carry-forward and jointly managed `project.godot`. Each entry records `path`, `kind`, `owner`, `byte_count`, `sha256`, and `mode`. Existing consumers may continue reading `generated_files`; it is now the path/kind/digest projection of the same frozen inventory, with the existing canonical-manifest `sha256: "self"` row. The inventory excludes the manifest itself, latest attempt, `.godot/`, locks, recovery records, private stages/backups, and unrelated paths.
+
 Read `canonical_manifest` in the attempt ledger:
 
 | `status` | `updated` | `current_output` | How to interpret it |
@@ -92,6 +94,8 @@ Even when the digest matches, inspect both records:
 5. For `partial`, inspect resource counts and diagnostics before using the output.
 
 After `failed` or `cancelled`, never assume that an existing manifest describes the latest filesystem merely because the file is present. Keep the attempt ledger with any diagnostic bundle you attach to an issue.
+
+Malformed, oversized, absolute, escaping, case-colliding, redirected, mounted, cross-device, non-regular, or multiply-linked inventory state is rejected before a new canonical publication. Preserve the named paths and error instead of editing the manifest to force migration. Inventory records are capped at 32 MiB and 100,000 entries. A digest mismatch after a same-size edit remains a mismatch even if timestamps were restored.
 
 ## Validate with Godot 4.7.1
 

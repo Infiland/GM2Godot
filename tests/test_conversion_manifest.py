@@ -645,7 +645,22 @@ class TestConversionManifest(unittest.TestCase):
 
         self.assertNotIn("unrelated.png", generated_by_path)
         self.assertNotIn("custom.gd", generated_by_path)
-        self.assertNotIn("project.godot", generated_by_path)
+        self.assertEqual(generated_by_path["project.godot"]["kind"], "project")
+        inventory_entries = cast(
+            list[dict[str, object]],
+            cast(dict[str, object], manifest["generation_inventory"])["entries"],
+        )
+        inventory_by_path = {
+            str(entry["path"]): entry
+            for entry in inventory_entries
+        }
+        self.assertEqual(
+            inventory_by_path["project.godot"]["owner"],
+            {
+                "class": "shared_owner",
+                "name": "project_configuration",
+            },
+        )
 
     def test_artifact_pair_commits_attempt_first_through_one_bound_directory(
         self,
@@ -1462,6 +1477,50 @@ class TestConversionManifest(unittest.TestCase):
         self.assertEqual(manifest_path.read_bytes(), manifest_before)
         self.assertEqual(attempt_path.read_bytes(), attempt_before)
         self.assertEqual(self._temporary_artifact_files(godot_dir), [])
+
+    def test_frozen_inventory_same_size_change_rolls_back_artifact_pair(
+        self,
+    ) -> None:
+        godot_dir = self.temp_dir / "frozen-inventory-change"
+        output = godot_dir / "scripts" / "managed.gd"
+        output.parent.mkdir(parents=True)
+        output.write_bytes(b"original bytes")
+        self._write_artifacts(godot_dir)
+        pair_before = self._artifact_pair_snapshot(godot_dir)
+        output_stat = output.stat()
+        real_validate = conversion_manifest_module.validate_generation_inventory
+        validation_count = 0
+
+        def mutate_before_canonical_commit(
+            root_path: str,
+            inventory: object,
+        ) -> None:
+            nonlocal validation_count
+            validation_count += 1
+            if validation_count == 2:
+                output.write_bytes(b"mutated! bytes")
+                os.utime(
+                    output,
+                    ns=(output_stat.st_atime_ns, output_stat.st_mtime_ns),
+                )
+            real_validate(root_path, cast(Any, inventory))
+
+        with (
+            patch.object(
+                conversion_manifest_module,
+                "validate_generation_inventory",
+                side_effect=mutate_before_canonical_commit,
+            ),
+            self.assertRaisesRegex(OSError, "changed"),
+        ):
+            self._write_artifacts(godot_dir)
+
+        self.assertEqual(validation_count, 2)
+        self.assertEqual(
+            self._artifact_pair_snapshot(godot_dir),
+            pair_before,
+        )
+        self.assertEqual(output.read_bytes(), b"mutated! bytes")
 
     def test_included_file_manifest_publication_reads_payload_six_times(
         self,

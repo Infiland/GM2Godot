@@ -1,8 +1,8 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.38 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.39 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-20
+> **Last reviewed:** 2026-07-21
 
 [Home](Home) · [Installation](Installation) · [Quick start](Quick-Start-Conversion) · [Compatibility](Compatibility-and-Limitations) · [Diagnostics](Diagnostics-and-Troubleshooting) · [Contributing](Contributing-and-Testing)
 
@@ -31,6 +31,7 @@ GodotProject/
 ├── included_files/
 ├── notes/
 ├── objects/
+├── paths/
 ├── rooms/
 ├── scripts/
 ├── shaders/
@@ -42,7 +43,7 @@ GodotProject/
 GM2Godot treats these directories as managed output roots:
 
 - `addons/gm2godot_extensions/`
-- `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `rooms/`, `scripts/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
+- `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `paths/`, `rooms/`, `scripts/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
 
 The top-level `default_bus_layout.tres`, `icon.ico`, and `icon.png` are managed files. `project.godot` is jointly managed: GM2Godot can update the generated `GM*` autoload entries and, when a room is generated, set `run/main_scene` from the first GameMaker `RoomOrderNodes` entry. Existing unrelated project settings and unrelated autoloads are preserved.
 
@@ -78,13 +79,23 @@ Subprocess tests terminate conversion without running Python cleanup at every fo
 
 ### Destination-wide workspace foundation
 
-GM2Godot 0.7.38 adds a reusable `ManagedOutputWorkspace` for the complete managed-output transaction planned in later releases. It creates a private transaction directory under `.gm2godot-managed-output/` only after binding the destination, workspace parent, and stage and proving that all three share the destination device and mount. A persistent `.gm2godot-managed-output.lock` file carries one non-blocking operating-system lock for the whole session; file existence alone does not mean a session is active.
+Version 0.7.38 added a reusable `ManagedOutputWorkspace` for the complete managed-output transaction planned in later releases. It creates a private transaction directory under `.gm2godot-managed-output/` only after binding the destination, workspace parent, and stage and proving that all three share the destination device and mount. A persistent `.gm2godot-managed-output.lock` file carries one non-blocking operating-system lock for the whole session; file existence alone does not mean a session is active.
 
 Snapshot and streaming-copy operations accept an exact normalized relative-path allowlist. They reject symbolic links, Windows junctions or other reparse points, hard-linked regular files, nested mounts, cross-device entries, and changed directory bindings without scanning an entire managed root for implied ownership. Bounded canonical markers bind the workspace parent and stage to the destination identity and 32-character transaction identifier. Cleanup first validates the complete private tree, preserves unknown or changed lookalikes, and removes only identity-verified transaction state. Cancellation and ordinary staging errors therefore leave public managed and user-owned destination bytes and modes unchanged.
 
 This is intentionally foundation-only in 0.7.38: `Converter`, CLI orchestration, finalizers, canonical manifests, and individual converters still use their existing destinations. The workspace does not yet define a complete generation inventory, publish or recover public output, alter the conversion-manifest schema, or implement stale logical-resource deletion.
 
 The implementation follows Python 3.12's documented [`dir_fd`, `follow_symlinks`, and file-descriptor capability](https://docs.python.org/3.12/library/os.html#files-and-directories) contracts, [`fcntl.flock`](https://docs.python.org/3.12/library/fcntl.html#fcntl.flock) on POSIX, and [`msvcrt.locking`](https://docs.python.org/3.12/library/msvcrt.html#msvcrt.locking) on Windows. Native Windows bindings use Microsoft's [`CreateFileW`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew) no-follow/reparse and sharing semantics, [`GetFileInformationByHandleEx`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex) identities, non-replacing write-through [`MoveFileExW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw) moves, and the documented [reparse-point model](https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points). No generated GDScript or GameMaker source interpretation changes: the target remains the official [GameMaker LTS 2026 Included Files](https://manual.gamemaker.io/lts/en/Settings/Included_Files.htm) and [file-area](https://manual.gamemaker.io/lts/en/Additional_Information/The_File_System.htm) behavior, with exact Godot 4.7.1 [`FileAccess`](https://docs.godotengine.org/en/4.7/classes/class_fileaccess.html), [`DirAccess`](https://docs.godotengine.org/en/4.7/classes/class_diraccess.html), and [command-line validation](https://docs.godotengine.org/en/4.7/tutorials/editor/command_line_tutorial.html).
+
+### Complete generation inventory
+
+GM2Godot 0.7.39 adds one immutable inventory model for staging carry-forward, staged/public validation, canonical-manifest rendering, and manifest publication guards. Entries are sorted by normalized NFC destination-relative paths using `/` separators and record the output kind, a producing `converter_step` or explicit `shared_owner`, byte count, `sha256:` digest, and exact mode. `project.godot` uses the `project_configuration` shared-owner class because converter steps update only GM2Godot-owned settings while unrelated settings remain user-controlled. Shared generated runtime and evidence files use named shared-owner classes instead of being assigned arbitrarily to one converter.
+
+The format-v2 conversion manifest retains its stable filename and top-level format version. It adds `generation_inventory: {"format_version": 1, "entries": [...]}`. `generated_files` remains for existing consumers, but is now a complete path/kind/digest projection of that same inventory rather than a start-of-invocation fingerprint diff; its canonical-manifest compatibility row remains `sha256: "self"`. The inventory itself excludes the canonical manifest to avoid a self-digest cycle, and also excludes the latest-attempt ledger, `.godot/`, destination/artifact locks, transaction and recovery records, private stages/backups, and files outside the documented managed paths. Canonical bytes use Python 3.12's documented [`json.dumps(..., sort_keys=True)`](https://docs.python.org/3.12/library/json.html#json.dumps) behavior with fixed UTF-8, indentation, ASCII escaping, and a trailing newline.
+
+The first inventory-aware run migrates an existing format-v2 manifest through a 32 MiB canonical-record limit and at most 100,000 entries, then completes its allowlist from the documented managed roots. Absolute, escaping, structurally ambiguous, case-colliding, unsafe native-Windows, malformed, redirected, mounted, cross-device, non-regular, or multiply-linked entries are rejected before staging or artifact publication. A selective run carries every disabled converter's prior inventory entries byte-, mode-, and digest-exactly; shared entries provide the baseline for later joint updates. Canonical bytes are rendered from one frozen inventory, and publication rehashes that same topology and content before and after committing the manifest so a same-size mutation with restored timestamps is still detected.
+
+This release does not route production converters or finalizers to the private stage and does not publish, roll back, or recover the complete managed file set. It also does not remove stale logical resources after a successful conversion. Those remain later transaction and stale-resource steps; v0.7.39 changes generation evidence, not GameMaker conversion or generated Godot runtime semantics.
 
 Treat every generated file under a managed root as reproducible output. A later conversion can replace it even if the converter does not delete the entire directory. For repeatable migrations:
 
@@ -204,7 +215,7 @@ The `gm2godot/` directory is also the evidence bundle for a conversion:
 | Artifact | When it exists | Use it for |
 | --- | --- | --- |
 | `conversion_attempt.json` (format 1) | Every terminal attempt after destination preflight | Latest terminal state, named step ledger, failure/cancellation context, and the canonical-manifest digest relationship |
-| `conversion_manifest.json` (format 2) | Trustworthy success or usable partial conversion | Source metadata, enabled converters, resources, generated paths, source maps, generated-file hashes, architecture policy and path-collision diagnostics |
+| `conversion_manifest.json` (format 2) | Trustworthy success or usable partial conversion | Source metadata, enabled converters, resources, complete format-v1 generation inventory, source maps, generated-file hashes, architecture policy and path-collision diagnostics |
 | `conversion_diagnostics.json` / `.md` | Conversion/report pipeline | Structured warnings, errors, unsupported APIs, source locations, workarounds and outcome |
 | `architecture_policy.json` (format 1) | Conversion policy publication | Project feature scan and selected runtime/backend policies |
 | `platform_capability_report.json` / `.md` | Static report generation | Target permissions, export presets, optional plugins and platform-service gaps |
@@ -217,14 +228,14 @@ Important trust rules:
 - Unsafe destinations rejected during preflight are not modified and do not receive an attempt ledger.
 - A partial canonical manifest is written only when every requested converter step completed; its partiality comes from skipped or failed resources.
 - `conversion_attempt.json` and the optional `conversion_manifest.json` are published as one recoverable generation through a verified `gm2godot/` directory binding. A durable `.gm2godot-conversion-transaction.json` records the complete previous and desired pair before either public file changes; `.gm2godot-conversion-generation.json` is the sole commit pointer.
-- Recovery under `.gm2godot-conversion.lock` restores the complete previous pair when the transaction has no matching pointer, or verifies and finalizes the complete new pair after the pointer switch. The public filenames and format-v1/format-v2 JSON schemas do not change.
+- Recovery under `.gm2godot-conversion.lock` restores the complete previous pair when the transaction has no matching pointer, or verifies and finalizes the complete new pair after the pointer switch. The public filenames, format-v1 attempt schema, and existing format-v2 manifest fields do not change; `generation_inventory` is additive.
 - Consumers should still compare `conversion_attempt.json` → `canonical_manifest.sha256` with the actual canonical manifest as a defense against later replacement or corruption. After migration to the generation pointer, a digest mismatch is rejected recovery state, not a normal interrupted-publication result.
 - `canonical_manifest.status = preserved` is transaction-relative. It does not prove that an older manifest describes the destination after a failed or cancelled attempt.
-- `generated_files` describes files changed from the conversion’s initial output snapshot; it intentionally does not claim ownership of every unchanged pre-existing file.
+- `generation_inventory.entries` is the complete desired managed generation, including exact unchanged carry-forward for disabled converter steps and jointly managed `project.godot`. `generated_files` is the backward-compatible projection of that same frozen inventory.
 
 The first 0.7.32 publication accepts a legacy pair only when its existing attempt digest agrees with the canonical bytes, or both files are absent. A mismatched, malformed, redirected, mounted, hard-linked, or otherwise replaced pair/recovery record is preserved and rejected for manual inspection. Recovery records are canonical JSON capped at 32 MiB and each embedded artifact is capped at 64 MiB uncompressed, so damaged or hostile state cannot request unbounded parsing.
 
-The exact schemas and transaction rules are defined by [`conversion_manifest.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_manifest.py), [`conversion_artifact_generation.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_artifact_generation.py), [`conversion_outcome.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_outcome.py), and their [manifest tests](https://github.com/Infiland/GM2Godot/blob/main/tests/test_conversion_manifest.py).
+The exact schemas and transaction rules are defined by [`generation_inventory.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/generation_inventory.py), [`conversion_manifest.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_manifest.py), [`conversion_artifact_generation.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_artifact_generation.py), [`conversion_outcome.py`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/conversion_outcome.py), and their [inventory](https://github.com/Infiland/GM2Godot/blob/main/tests/test_generation_inventory.py) and [manifest tests](https://github.com/Infiland/GM2Godot/blob/main/tests/test_conversion_manifest.py).
 
 ### Anchored report publication confinement
 

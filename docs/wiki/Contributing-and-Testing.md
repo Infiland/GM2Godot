@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.38 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.39 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-20
+> **Last reviewed:** 2026-07-21
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -134,6 +134,16 @@ Included Files tree-traversal changes must retain the deterministic depth probe 
 ```
 
 The depth probe exercises 25, 50, 100, and 200 nested directories, requires at most `16 * depth + 64` binding checks, and limits each doubling to 2.25x work. Run the native Windows Included Files workflow for path-fallback and junction coverage; POSIX-only descriptor results do not substitute for the Windows path.
+
+Managed-generation inventory changes must retain the complete deterministic schema, migration, carry-forward, and mutation suite:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_generation_inventory \
+  tests.test_conversion_manifest
+```
+
+The inventory suite compares canonical bytes across input order, path separators, single-worker and multi-worker generation, and repeated unchanged CLI runs. It covers a full generation followed by `--only`, disabled-converter and shared-owner carry-forward, jointly managed `project.godot`, bounded format-v2 migration, excluded private/user state, case collisions, malformed and oversized entries, same-size mutation with restored timestamps, POSIX symlink/hard-link/mount rejection, and native Windows junction/read-only behavior. Keep inventory rendering and pre/post-publication validation on the same immutable model. Do not broaden an inventory change into destination-wide commit/recovery or route production converters to the stage.
 
 Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
 

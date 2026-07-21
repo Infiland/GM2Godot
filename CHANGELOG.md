@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.39 - 2026-07-21
+
+- Added one immutable, deterministically sorted managed-generation inventory with normalized destination-relative paths, output kinds, converter-step or explicit shared ownership, byte counts, SHA-256 receipts, and exact rollback modes.
+- Made format-v2 canonical manifests render their additive format-v1 `generation_inventory` and complete backward-compatible `generated_files` view from the same frozen model, including disabled-converter carry-forward and jointly managed `project.godot`, while excluding attempt, lock, recovery, workspace, `.godot/`, and unrelated state.
+- Added bounded legacy-manifest migration, pre/post-publication digest validation, and focused ordering, worker-count, separator, repeated-run, `--only`, collision, malformed/oversized, same-size mutation, POSIX link/mount, and native Windows junction/read-only coverage without routing converters to staging or implementing destination-wide commit/recovery.
+
 ## 0.7.38 - 2026-07-20
 
 - Added a reusable destination-wide managed-output workspace session with a non-blocking operating-system lock, destination-local private stages, explicit same-filesystem proof, and retained no-follow destination, staging-parent, and stage bindings.

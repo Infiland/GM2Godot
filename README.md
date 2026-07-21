@@ -38,7 +38,9 @@ Version 0.7.40 adds the internal destination-wide publisher over that workspace 
 
 Version 0.7.41 routes production conversion through that transaction. Recovery and the destination-wide lock precede mutating preflight; the complete prior managed generation is copied into the same-filesystem stage, and every selected converter, project-setting operation, registry, architecture/diagnostic finalizer, optional CLI report set, inventory validator, and canonical-manifest builder receives the staged project path. A trustworthy `success` or `partial` candidate is frozen, rehashed, and committed with its exact manifest and attempt digest. Runtime, finalizer, validation, cancellation, and ordinary publication failures discard verified private state and retain the prior public bytes and modes; their attempt ledger reports a transactionally verified preserved canonical generation instead of overwriting its diagnostics or architecture report.
 
-The final cooperative cancellation check immediately precedes entry into recoverable publication. Cancellation observed before it preserves the prior generation and reports `cancelled`; once publication starts, GM2Godot completes the old-or-new decision and does not later claim cancellation. This integration does not add the exhaustive process-kill/native-platform boundary matrix planned for the next transaction phase, does not delete stale logical resources, and does not promise safe conversion alongside a live editor, game, or non-cooperating writer.
+The final cooperative cancellation check immediately precedes entry into recoverable publication. Cancellation observed before it preserves the prior generation and reports `cancelled`; once publication starts, GM2Godot completes the old-or-new decision and does not later claim cancellation.
+
+Version 0.7.42 classifies every durable destination-wide forward, rollback, restart-recovery, and cleanup boundary as pre- or post-commit, then terminates real converter subprocesses at every observed boundary on native Linux, macOS, and Windows. Restart must expose and verify either the complete prior inventory plus its exact canonical manifest/attempt evidence or the complete desired inventory and evidence; a second recovery is a no-op. Crash-interrupted cleanup resumes only for the detached stage whose identity is bound by the durable journal. Symlinks, hard links, nested mounts and Linux bind mounts, Windows junctions/reparse points, read-only trees, destination/leaf replacement, and unknown state fail closed without changing external or user-owned sentinels. This work does not implement #715's successful stale logical-resource policy and still does not make conversion safe beside a live Godot editor/game or non-cooperating namespace writer.
 
 ## What GM2Godot Is and Isn't
 
@@ -60,7 +62,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.41`.
+Current source version: `0.7.42`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
@@ -263,6 +265,10 @@ Conversion exit codes are stable for CI:
 `--allow-partial` applies only to the `convert` command. It accepts usable partial output for exit-code purposes, but does not override `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, or `--max-unsupported`.
 
 The final cancellation check before recoverable managed-output publication is the conversion commit point. A `SIGINT` observed before it preserves the prior generation, publishes a `cancelled` attempt, and exits `130`. Once publication begins, the converter resolves the durable old-or-new decision and later signals cannot relabel exposed committed output as cancelled. The CLI still buffers and prints exactly one terminal outcome line.
+
+Direct `Converter.convert()` callers use the same contract as the GUI and CLI. Supply a live cooperative `conversion_running` flag; cancellation observed before publication returns a `cancelled` outcome with the verified prior generation, while clearing the flag after publication begins does not change the selected terminal generation. Runtime, validation, publication, or recovery errors are raised and remain available through `last_outcome`; callers must not infer trust from return-versus-exception alone.
+
+If `.gm2godot-managed-output/.gm2godot-managed-output-recovery.json` exists, close Godot and every other writer, preserve that artifact together with the named journal/stage/generation records, and retry conversion or call `recover_managed_output_generation(destination_path)` before reading managed output. `selected_generation` reports `previous`, `desired`, or `unknown`; `desired` can accompany a cleanup exception after the new generation was durably selected, while `unknown` requires preserving the destination for inspection. Never edit the pointer, journal, transaction ID, affected paths, or digest to force recovery. Every private stage, backup, journal, recovery artifact, generation record, and namespace move must stay on the destination filesystem; cross-device copy/delete fallback is intentionally unavailable.
 
 Useful conversion and validation filters:
 - `--groups assets,project,wip` selects conversion groups.

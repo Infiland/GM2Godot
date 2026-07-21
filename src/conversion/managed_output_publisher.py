@@ -81,10 +81,72 @@ _WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
 GenerationRole = Literal["previous", "desired"]
 TransitionKind = Literal["managed", "attempt", "manifest"]
 DirectoryDisposition = Literal["existing", "staged"]
+ManagedOutputCommitSide = Literal["pre_commit", "post_commit"]
+
+MANAGED_OUTPUT_DURABLE_PHASES: tuple[
+    tuple[str, ManagedOutputCommitSide],
+    ...,
+] = (
+    ("journal_durable", "pre_commit"),
+    ("directory_installed", "pre_commit"),
+    ("public_displaced", "pre_commit"),
+    ("public_installed", "pre_commit"),
+    ("desired_generation_verified", "pre_commit"),
+    ("previous_pointer_displaced", "pre_commit"),
+    ("commit_decision_published", "post_commit"),
+    ("rollback_desired_staged", "pre_commit"),
+    ("rollback_previous_restored", "pre_commit"),
+    ("rollback_directory_staged", "pre_commit"),
+    ("rollback_pointer_restored", "pre_commit"),
+    ("rollback_complete", "pre_commit"),
+    ("recovery_artifact_previous_durable", "pre_commit"),
+    ("recovery_artifact_unknown_durable", "pre_commit"),
+    ("recovery_artifact_desired_durable", "post_commit"),
+    ("previous_private_stage_cleaned", "pre_commit"),
+    ("desired_private_stage_cleaned", "post_commit"),
+    ("previous_generation_record_retired", "pre_commit"),
+    ("desired_generation_record_retired", "post_commit"),
+    ("previous_recovery_artifact_retired", "pre_commit"),
+    ("desired_recovery_artifact_retired", "post_commit"),
+    ("previous_journal_retired", "pre_commit"),
+    ("desired_journal_retired", "post_commit"),
+    ("previous_transaction_cleanup_complete", "pre_commit"),
+    ("desired_transaction_cleanup_complete", "post_commit"),
+)
+_MANAGED_OUTPUT_DURABLE_PHASE_SIDES = dict(MANAGED_OUTPUT_DURABLE_PHASES)
+if len(_MANAGED_OUTPUT_DURABLE_PHASE_SIDES) != len(MANAGED_OUTPUT_DURABLE_PHASES):
+    raise AssertionError("Managed-output durable phase names must be unique")
+
+_MOVE_DURABLE_PHASES: dict[str, str | None] = {
+    "journal_publish": "journal_durable",
+    "before_directory_install": "directory_installed",
+    "before_public_displace": "public_displaced",
+    "before_public_install": "public_installed",
+    "before_previous_pointer_displace": "previous_pointer_displaced",
+    "commit_decision": "commit_decision_published",
+    "before_rollback_desired": "rollback_desired_staged",
+    "before_rollback_previous": "rollback_previous_restored",
+    "before_rollback_directory": "rollback_directory_staged",
+    "before_pointer_rollback": "rollback_pointer_restored",
+    "recovery_artifact_publish": None,
+}
 
 
 def _before_managed_output_phase(_phase: str, _path: str | None) -> None:
     """Narrow fault-injection seam around publication and recovery phases."""
+
+
+def _after_managed_output_phase(_phase: str, _path: str | None) -> None:
+    """Subprocess-test seam after one classified durable boundary."""
+
+
+def _durable_managed_output_phase(phase: str, path: str | None) -> None:
+    if phase not in _MANAGED_OUTPUT_DURABLE_PHASE_SIDES:
+        raise AssertionError(
+            f"Unclassified managed-output durable phase: {phase!r}"
+        )
+    _before_managed_output_phase(phase, path)
+    _after_managed_output_phase(phase, path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2340,6 +2402,11 @@ def _move_exact_noreplace(
     expect_directory: bool,
     phase: str,
 ) -> None:
+    if phase not in _MOVE_DURABLE_PHASES:
+        raise AssertionError(
+            f"Managed-output move phase is not classified: {phase!r}"
+        )
+    durable_phase = _MOVE_DURABLE_PHASES[phase]
     source_bindings, source_parent, source_leaf = _open_relative_parent(
         workspace,
         source_root,
@@ -2356,14 +2423,14 @@ def _move_exact_noreplace(
             description="managed-output move destination",
         )
     )
+    source_display = source_parent.child_path(source_leaf)
+    destination_display = destination_parent.child_path(destination_leaf)
     moved = False
     mode_changed = False
     original_mode = 0
     expected_kind = stat.S_ISDIR if expect_directory else stat.S_ISREG
     try:
         source_stat = source_parent.stat(source_leaf)
-        source_display = source_parent.child_path(source_leaf)
-        destination_display = destination_parent.child_path(destination_leaf)
         if (
             workspace_module._path_is_redirected(source_display, source_stat)
             or not expected_kind(source_stat.st_mode)
@@ -2488,6 +2555,11 @@ def _move_exact_noreplace(
     finally:
         _close_bindings(workspace, destination_bindings)
         _close_bindings(workspace, source_bindings)
+    if durable_phase is not None:
+        _durable_managed_output_phase(
+            durable_phase,
+            destination_display,
+        )
 
 
 def _remove_file_exact(
@@ -3317,10 +3389,6 @@ def _publish_journal(
     )
     if content != prepared.journal_content:
         raise OSError("Managed-output journal changed after publication")
-    _before_managed_output_phase(
-        "journal_durable",
-        workspace._staging_parent.child_path(MANAGED_OUTPUT_JOURNAL_NAME),
-    )
     return receipt
 
 
@@ -3433,10 +3501,6 @@ def _install_directory_roots(
             expect_directory=True,
             phase="before_directory_install",
         )
-        _before_managed_output_phase(
-            "directory_installed",
-            os.path.join(workspace.destination_path, *root.path.split("/")),
-        )
     _verify_all_directories(workspace, directories)
 
 
@@ -3544,13 +3608,6 @@ def _install_transition(
             expect_directory=False,
             phase="before_public_displace",
         )
-        _before_managed_output_phase(
-            "public_displaced",
-            os.path.join(
-                workspace.destination_path,
-                *transition.path.split("/"),
-            ),
-        )
     if transition.desired is not None:
         if transition.desired_stage is None:
             raise AssertionError("Desired content requires a stage")
@@ -3563,13 +3620,6 @@ def _install_transition(
             expected_identity=transition.desired_stage.identity,
             expect_directory=False,
             phase="before_public_install",
-        )
-        _before_managed_output_phase(
-            "public_installed",
-            os.path.join(
-                workspace.destination_path,
-                *transition.path.split("/"),
-            ),
         )
     _verify_transition_desired(workspace, transition)
     _verify_transition_directories(
@@ -3622,7 +3672,7 @@ def _verify_desired_publication(
         prepared.journal,
         prepared.journal_content,
     )
-    _before_managed_output_phase(
+    _durable_managed_output_phase(
         "desired_generation_verified",
         workspace.destination_path,
     )
@@ -3702,10 +3752,6 @@ def _publish_commit_decision(
         pointer_stage.identity,
     ):
         raise OSError("Managed-output commit decision did not publish")
-    _before_managed_output_phase(
-        "commit_decision_published",
-        workspace._staging_parent.child_path(MANAGED_OUTPUT_POINTER_NAME),
-    )
     return cast(_PointerSnapshot, current)
 
 
@@ -3898,10 +3944,13 @@ def _rollback_directories(
                     stage,
                     root.stage_path,
                 )
-            except FileNotFoundError as error:
-                raise OSError(
-                    f"Managed-output directory rollback material is missing: {root.path!r}"
-                ) from error
+            except FileNotFoundError:
+                # A prior rollback or recovery pass may already have removed
+                # the created public directory and then cleaned its private
+                # stage. Transition verification above proves that no managed
+                # file still requires this directory before absence is
+                # accepted as the completed rollback state.
+                continue
             if staged_identity != root.identity:
                 raise OSError(
                     f"Managed-output directory stage changed: {root.path!r}"
@@ -4014,8 +4063,11 @@ def _rollback_publication(
         _verify_generation_record(workspace, previous_record)
     except BaseException as error:
         errors.append(error)
-    _before_managed_output_phase("after_rollback", workspace.destination_path)
     if not errors:
+        _durable_managed_output_phase(
+            "rollback_complete",
+            workspace.destination_path,
+        )
         return None
     combined = OSError(
         "Managed-output rollback did not complete: "
@@ -4232,15 +4284,19 @@ def _publish_recovery_artifact(
         or published[1]["transaction_id"] != journal.transaction_id
     ):
         raise OSError("Managed-output recovery artifact did not publish")
+    _durable_managed_output_phase(
+        f"recovery_artifact_{selected_generation}_durable",
+        workspace._staging_parent.child_path(MANAGED_OUTPUT_RECOVERY_NAME),
+    )
 
 
 def _remove_matching_recovery_artifact(
     workspace: ManagedOutputWorkspace,
     transaction_id: str,
-) -> None:
+) -> bool:
     existing = _read_recovery_artifact(workspace)
     if existing is None:
-        return
+        return False
     receipt, payload = existing
     if payload["transaction_id"] != transaction_id:
         raise OSError(
@@ -4253,12 +4309,13 @@ def _remove_matching_recovery_artifact(
         MANAGED_OUTPUT_RECOVERY_NAME,
         receipt.identity,
     )
+    return True
 
 
 def _remove_record_if_present(
     workspace: ManagedOutputWorkspace,
     reference: _RecordReference,
-) -> None:
+) -> bool:
     try:
         receipt, _content = _capture_file(
             workspace,
@@ -4272,23 +4329,24 @@ def _remove_record_if_present(
             ),
         )
     except FileNotFoundError:
-        return
+        return False
     _remove_file_exact(
         workspace,
         workspace._staging_parent,
         reference.name,
         receipt.identity,
     )
+    return True
 
 
 def _remove_journal_if_present(
     workspace: ManagedOutputWorkspace,
     journal: _Journal,
     journal_content: bytes,
-) -> None:
+) -> bool:
     record = _read_journal(workspace)
     if record is None:
-        return
+        return False
     receipt, content, parsed = record
     if content != journal_content or parsed != journal:
         raise OSError(
@@ -4300,6 +4358,7 @@ def _remove_journal_if_present(
         MANAGED_OUTPUT_JOURNAL_NAME,
         receipt.identity,
     )
+    return True
 
 
 def _cleanup_transaction(
@@ -4316,24 +4375,48 @@ def _cleanup_transaction(
     if workspace._stage is not None and not workspace._cleaned:
         workspace.resume_recovery_cleanup()
         workspace.cleanup()
+        _durable_managed_output_phase(
+            f"{selected}_private_stage_cleaned",
+            workspace._staging_parent.path,
+        )
+    def retire_record(reference: _RecordReference) -> None:
+        if not _remove_record_if_present(workspace, reference):
+            return
+        _durable_managed_output_phase(
+            f"{selected}_generation_record_retired",
+            workspace._staging_parent.child_path(reference.name),
+        )
+
     if selected == "desired":
         if journal.previous_record.name != journal.desired_record.name:
-            _remove_record_if_present(workspace, journal.previous_record)
+            retire_record(journal.previous_record)
     else:
-        _remove_record_if_present(workspace, journal.desired_record)
+        retire_record(journal.desired_record)
         if journal.previous_pointer is None:
-            _remove_record_if_present(workspace, journal.previous_record)
-    _remove_matching_recovery_artifact(
+            retire_record(journal.previous_record)
+    if _remove_matching_recovery_artifact(
         workspace,
         journal.transaction_id,
-    )
-    _remove_journal_if_present(
+    ):
+        _durable_managed_output_phase(
+            f"{selected}_recovery_artifact_retired",
+            workspace._staging_parent.child_path(
+                MANAGED_OUTPUT_RECOVERY_NAME
+            ),
+        )
+    if _remove_journal_if_present(
         workspace,
         journal,
         journal_content,
-    )
-    _before_managed_output_phase(
-        "transaction_cleanup_complete",
+    ):
+        _durable_managed_output_phase(
+            f"{selected}_journal_retired",
+            workspace._staging_parent.child_path(
+                MANAGED_OUTPUT_JOURNAL_NAME
+            ),
+        )
+    _durable_managed_output_phase(
+        f"{selected}_transaction_cleanup_complete",
         workspace.destination_path,
     )
 
@@ -4725,6 +4808,10 @@ def _recover_committed(
             journal.desired_record,
         )
         _verify_generation_record(workspace, desired_record)
+        workspace.cleanup_detached_recovery_stage(
+            journal.transaction_id,
+            journal.stage_identity,
+        )
         _cleanup_transaction(
             workspace,
             journal,
@@ -4750,7 +4837,8 @@ def _recover_committed(
                 "Publishing the managed-output recovery artifact also failed: "
                 f"{artifact_error}"
             )
-        _preserve_workspace_if_available(workspace, error)
+        if reopened_original_stage:
+            _preserve_workspace_if_available(workspace, error)
         raise
 
 
@@ -4786,34 +4874,8 @@ def _recover_precommit(
                 "Publishing the managed-output recovery artifact also failed: "
                 f"{artifact_error}"
             )
-        _preserve_workspace_if_available(workspace, error)
-        raise error
-    if (
-        not reopened_original_stage
-        or workspace.transaction_id != journal.transaction_id
-        or workspace._stage_identity != journal.stage_identity
-    ):
-        error = OSError(
-            "The pre-commit managed-output recovery stage is unavailable; "
-            "exact rollback material was preserved"
-        )
-        if reopen_error is not None:
-            error.add_note(
-                f"Reopening the original recovery stage failed: {reopen_error}"
-            )
-        try:
-            _publish_recovery_artifact(
-                workspace,
-                journal,
-                error,
-                selected_generation="previous",
-            )
-        except BaseException as artifact_error:
-            error.add_note(
-                "Publishing the managed-output recovery artifact also failed: "
-                f"{artifact_error}"
-            )
-        _preserve_workspace_if_available(workspace, error)
+        if reopened_original_stage:
+            _preserve_workspace_if_available(workspace, error)
         raise error
     previous_record = _read_generation_record(
         workspace,
@@ -4825,6 +4887,10 @@ def _recover_precommit(
         previous_record,
     )
     if rollback_error is not None:
+        if reopen_error is not None:
+            rollback_error.add_note(
+                f"Reopening the original recovery stage failed: {reopen_error}"
+            )
         try:
             _publish_recovery_artifact(
                 workspace,
@@ -4837,9 +4903,14 @@ def _recover_precommit(
                 "Publishing the managed-output recovery artifact also failed: "
                 f"{artifact_error}"
             )
-        _preserve_workspace_if_available(workspace, rollback_error)
+        if reopened_original_stage:
+            _preserve_workspace_if_available(workspace, rollback_error)
         raise rollback_error
     try:
+        workspace.cleanup_detached_recovery_stage(
+            journal.transaction_id,
+            journal.stage_identity,
+        )
         _cleanup_transaction(
             workspace,
             journal,
@@ -4859,7 +4930,8 @@ def _recover_precommit(
                 "Publishing the managed-output recovery artifact also failed: "
                 f"{artifact_error}"
             )
-        _preserve_workspace_if_available(workspace, cleanup_error)
+        if reopened_original_stage:
+            _preserve_workspace_if_available(workspace, cleanup_error)
         raise
     return "rolled back the interrupted managed-output generation"
 
@@ -4971,6 +5043,7 @@ def recover_managed_output_generation(
 
 
 __all__ = [
+    "MANAGED_OUTPUT_DURABLE_PHASES",
     "MANAGED_OUTPUT_JOURNAL_NAME",
     "MANAGED_OUTPUT_POINTER_NAME",
     "MANAGED_OUTPUT_RECOVERY_NAME",

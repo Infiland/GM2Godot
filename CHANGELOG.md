@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.42 - 2026-07-21
+
+- Added a classified, deterministic subprocess hard-exit matrix over real project-setting, script, object, registry, canonical-evidence, forward commit, reverse rollback, restart recovery, and private cleanup boundaries; every interruption now proves an exact inventory/manifest/attempt-consistent previous or desired generation and idempotent recovery.
+- Made crash-interrupted cleanup remove only the journal-identity-bound detached stage on restart, including read-only native Windows trees, and made repeated pre-commit recovery accept an already-removed created directory only after every managed transition verifies the complete prior generation.
+- Added strict real-mutation recovery-artifact, ambiguity, independent recovery-failure, CLI `SIGINT`, GUI stop-event, direct-library cancellation, same-filesystem, Linux bind-mount, Windows junction/reparse/write-through, and native Linux/macOS/Windows CI gates while retaining the #715 stale-resource policy and live-writer guarantees as non-goals.
+
 ## 0.7.41 - 2026-07-21
 
 - Routed `Converter.convert()`, GUI/library callers, CLI-managed reports, every selected converter and project-setting operation, architecture/diagnostic finalizers, inventory validation, and canonical-manifest construction through one destination-local managed-output workspace.

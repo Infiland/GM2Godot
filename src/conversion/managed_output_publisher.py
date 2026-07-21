@@ -575,6 +575,49 @@ def _close_bindings(
         workspace._close_relative_bindings(bindings)
 
 
+def _sync_exact_windows_file(
+    parent: VerifiedDirectory,
+    leaf: str,
+    identity: PathIdentity,
+    mode: int,
+) -> None:
+    descriptor = -1
+    mode_changed = not bool(mode & stat.S_IWUSR)
+    try:
+        if mode_changed:
+            parent.chmod_exact(
+                leaf,
+                identity,
+                mode | stat.S_IWUSR,
+                require_single_link=True,
+            )
+        descriptor = parent.open_file(
+            leaf,
+            os.O_RDWR | getattr(os, "O_BINARY", 0),
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != identity
+        ):
+            raise OSError(
+                "Managed-output file changed before its Windows durability "
+                f"barrier: {parent.child_path(leaf)}"
+            )
+        os.fsync(descriptor)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if mode_changed and parent.lexists(leaf):
+            parent.chmod_exact(
+                leaf,
+                identity,
+                mode,
+                require_single_link=True,
+            )
+
+
 def _capture_file(
     workspace: ManagedOutputWorkspace,
     root: VerifiedDirectory,
@@ -645,7 +688,7 @@ def _capture_file(
             digest.update(chunk)
             if chunks is not None:
                 chunks.append(chunk)
-        if durable:
+        if durable and os.name != "nt":
             os.fsync(descriptor)
         final_opened = os.fstat(descriptor)
         final_path = parent.stat(leaf)
@@ -679,6 +722,23 @@ def _capture_file(
         ):
             raise OSError(
                 f"Managed-output publication content changed: {relative_path!r}"
+            )
+        if durable and os.name == "nt":
+            os.close(descriptor)
+            descriptor = -1
+            _sync_exact_windows_file(
+                parent,
+                leaf,
+                identity,
+                receipt.content.mode,
+            )
+            _capture_file(
+                workspace,
+                root,
+                relative_path,
+                expected_identity=identity,
+                expected_content=receipt.content,
+                maximum=maximum,
             )
         if durable:
             parent.sync()

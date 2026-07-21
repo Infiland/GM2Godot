@@ -65,7 +65,7 @@ jobs:
 
   windows-artifact-transactions:
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PIP_CONFIG_FILE: nul
     steps:

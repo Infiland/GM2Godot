@@ -1133,6 +1133,69 @@ def _create_stage(
         raise
 
 
+def _open_existing_stage(
+    destination: VerifiedDirectory,
+    parent: VerifiedDirectory,
+    transaction_id: str,
+    *,
+    expected_device: int,
+    expected_mount_id: int | None,
+) -> tuple[VerifiedDirectory, str, bytes, PathIdentity, int]:
+    stage_name = _STAGE_PREFIX + transaction_id + _STAGE_SUFFIX
+    stage_path = parent.child_path(stage_name)
+    try:
+        stage_stat = parent.stat(stage_name)
+    except FileNotFoundError as error:
+        raise OSError(
+            "Managed-output recovery stage is unavailable for transaction "
+            f"{transaction_id}: {stage_path}"
+        ) from error
+    if (
+        _path_is_redirected(stage_path, stage_stat)
+        or not stat.S_ISDIR(stage_stat.st_mode)
+    ):
+        raise OSError(
+            "Refusing redirected or non-directory managed-output recovery "
+            f"stage: {stage_path}"
+        )
+    stage_identity = stage_stat.st_dev, stage_stat.st_ino
+    stage = parent.open_child(
+        stage_name,
+        expected_identity=stage_identity,
+        description="managed-output recovery stage",
+    )
+    try:
+        _verify_binding_boundary(
+            stage,
+            expected_device=expected_device,
+            expected_mount_id=expected_mount_id,
+        )
+        marker_content = _stage_marker_content(
+            destination.identity,
+            parent.identity,
+            stage.identity,
+            transaction_id,
+        )
+        marker_identity, marker_mode, actual_content = _read_regular_bytes(
+            stage,
+            WORKSPACE_STAGE_MARKER_NAME,
+            expected_device=expected_device,
+            expected_mount_id=expected_mount_id,
+            max_bytes=_MARKER_MAX_BYTES,
+        )
+        if actual_content != marker_content:
+            raise OSError(
+                "Managed-output recovery stage marker changed; exact state was "
+                f"preserved at {stage_path}"
+            )
+        parent.verify_path()
+        destination.verify_path()
+        return stage, stage_name, marker_content, marker_identity, marker_mode
+    except BaseException:
+        stage.close()
+        raise
+
+
 class ManagedOutputWorkspace(
     AbstractContextManager["ManagedOutputWorkspace"],
 ):
@@ -1178,6 +1241,7 @@ class ManagedOutputWorkspace(
         self._destination_mount_id = destination_mount_id
         self._cleanup_entries: list[_CleanupEntry] | None = None
         self._stage_quarantined = False
+        self._preserve_stage = False
         self._cleaned = False
         self._closed = False
 
@@ -1187,8 +1251,14 @@ class ManagedOutputWorkspace(
         destination_path: str | os.PathLike[str],
         *,
         transaction_id: str | None = None,
+        reuse_existing: bool = False,
     ) -> ManagedOutputWorkspace:
         path_value = os.fspath(destination_path)
+        if reuse_existing and transaction_id is None:
+            raise ValueError(
+                "Reopening a managed-output recovery stage requires its "
+                "transaction identifier."
+            )
         selected_transaction_id = _validate_transaction_id(
             secrets.token_hex(16) if transaction_id is None else transaction_id
         )
@@ -1230,12 +1300,22 @@ class ManagedOutputWorkspace(
                 stage_marker,
                 stage_marker_identity,
                 stage_marker_mode,
-            ) = _create_stage(
-                destination,
-                staging_parent,
-                selected_transaction_id,
-                expected_device=destination_device,
-                expected_mount_id=destination_mount_id,
+            ) = (
+                _open_existing_stage(
+                    destination,
+                    staging_parent,
+                    selected_transaction_id,
+                    expected_device=destination_device,
+                    expected_mount_id=destination_mount_id,
+                )
+                if reuse_existing
+                else _create_stage(
+                    destination,
+                    staging_parent,
+                    selected_transaction_id,
+                    expected_device=destination_device,
+                    expected_mount_id=destination_mount_id,
+                )
             )
             workspace = cls(
                 destination=destination,
@@ -1311,6 +1391,28 @@ class ManagedOutputWorkspace(
     @property
     def locked(self) -> bool:
         return self._destination_lock.locked
+
+    @property
+    def preserved_for_recovery(self) -> bool:
+        return self._preserve_stage
+
+    def preserve_for_recovery(self) -> None:
+        """Retain exact private state while releasing the destination lock."""
+
+        self._verify_base()
+        if self._stage is not None:
+            _verify_binding_boundary(
+                self._stage,
+                expected_device=self._destination_device,
+                expected_mount_id=self._destination_mount_id,
+            )
+        self._preserve_stage = True
+
+    def resume_recovery_cleanup(self) -> None:
+        """Allow a verified reopened session to clean its retained stage."""
+
+        self._require_open()
+        self._preserve_stage = False
 
     def _require_open(self) -> None:
         if self._closed:
@@ -2207,6 +2309,11 @@ class ManagedOutputWorkspace(
         self._require_open()
         if self._cleaned:
             return
+        if self._preserve_stage:
+            raise OSError(
+                "Managed-output workspace is preserving exact recovery state for "
+                f"transaction {self._transaction_id}"
+            )
         self._verify_base()
         stage = self._require_stage()
         _verify_binding_boundary(
@@ -2287,10 +2394,11 @@ class ManagedOutputWorkspace(
         if self._closed:
             return
         active_error: BaseException | None = None
-        try:
-            self.cleanup()
-        except BaseException as error:
-            active_error = error
+        if not self._preserve_stage:
+            try:
+                self.cleanup()
+            except BaseException as error:
+                active_error = error
         if self._stage is not None:
             try:
                 self._stage.close()

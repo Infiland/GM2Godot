@@ -147,7 +147,9 @@ def write_conversion_artifacts(
             macro_configuration=target_platform,
         )
         manifest_asset_publication = (
-            manifest_asset_converter.prepare_published_entries()
+            manifest_asset_converter.prepare_published_entries(
+                generation_inventory=frozen_inventory,
+            )
         )
         manifest_payload = _build_conversion_manifest(
             gm_project_path,
@@ -298,11 +300,6 @@ def build_conversion_manifest(
         conversion_outcome,
         _planned_step_names(enabled_converter_keys),
     )
-    asset_entries = _asset_registry_entries(
-        gm_project_path,
-        godot_project_path,
-        macro_configuration=target_platform,
-    )
     inventory_root = (
         godot_project_path
         if generation_root_path is None
@@ -318,6 +315,12 @@ def build_conversion_manifest(
         )
     )
     validate_generation_inventory(inventory_root, frozen_inventory)
+    asset_entries = _asset_registry_entries(
+        gm_project_path,
+        godot_project_path,
+        generation_inventory=frozen_inventory,
+        macro_configuration=target_platform,
+    )
     return _build_conversion_manifest(
         gm_project_path,
         godot_project_path,
@@ -585,6 +588,7 @@ def _asset_registry_entries(
     gm_project_path: str,
     godot_project_path: str,
     *,
+    generation_inventory: GenerationInventory,
     macro_configuration: str | None = None,
 ) -> tuple[AssetRegistryEntry, ...]:
     converter = _asset_registry_converter(
@@ -592,7 +596,9 @@ def _asset_registry_entries(
         godot_project_path,
         macro_configuration=macro_configuration,
     )
-    return converter.prepare_published_entries().entries
+    return converter.prepare_published_entries(
+        generation_inventory=generation_inventory,
+    ).entries
 
 
 def _asset_registry_converter(

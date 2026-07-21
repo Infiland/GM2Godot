@@ -72,6 +72,9 @@ from src.conversion.managed_output_workspace import (
     WORKSPACE_STAGE_MARKER_NAME,
     ManagedOutputWorkspace,
 )
+from src.conversion.managed_resource_outputs import (
+    STALE_INVALIDATION_CONVERTER_KEYS,
+)
 from src.conversion.conversion_plan import build_conversion_plan
 from src.conversion.diagnostics import (
     ConversionDiagnosticReportPublicationReceipt,
@@ -206,7 +209,11 @@ class Converter:
                 stage_inventory_carry_forward(
                     workspace,
                     previous_inventory,
-                    enabled_converters=(),
+                    enabled_converters=(
+                        key
+                        for key in enabled_converters
+                        if key in STALE_INVALIDATION_CONVERTER_KEYS
+                    ),
                 )
                 prepare_godot_project_destination(
                     gm_path,
@@ -1439,6 +1446,7 @@ class Converter:
                     organize_sounds_by_audio_group=context.group_sounds_by_audio_group,
                     macro_configuration=context.target_platform,
                     diagnostics=context.diagnostics,
+                    enforce_managed_resource_outputs=True,
                 )
             ),
         }

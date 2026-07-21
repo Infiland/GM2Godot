@@ -1,6 +1,6 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.7.42 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.43 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -61,7 +61,7 @@ When `--only` contains at least one key, it takes precedence over `--groups`. Un
 
 1. Read the terminal outcome (CLI). A terminal state can be `success`, `partial`, `failed`, or `cancelled`.
 2. After destination preflight succeeds, read `<GodotProject>/gm2godot/conversion_attempt.json` and `<GodotProject>/gm2godot/conversion_diagnostics.md`. Address errors, unsupported APIs, and relevant warnings. A pre-existing `conversion_manifest.json` may describe an earlier trustworthy run, so inspect the newest attempt ledger first. A rejected preflight writes no conversion attempt or canonical report, although the persistent private destination lock/workspace parent may have been initialized before the rejection.
-   For a successful or partial v0.7.42 conversion, `conversion_manifest.json` contains the complete deterministic `generation_inventory` committed with the managed files. Selective `--only` runs retain prior output instead of applying the separate stale-resource policy, while `project.godot` is recorded under shared project-configuration ownership. Failed or cancelled pre-decision reruns preserve the prior inventory byte- and mode-exact and publish an attempt whose preserved canonical generation is `verified`. If the private managed-output recovery artifact exists, close Godot and all writers and complete recovery before trusting either generation.
+   For a successful or partial v0.7.43 conversion, `conversion_manifest.json` contains the complete deterministic `generation_inventory` committed with the managed files. Selected object, room, sprite, shader, and asset-registry/timeline converters rebuild their owned logical-resource outputs, so current unavailable, blocked, skipped, or YYP-removed resources do not leave earlier files or registry references behind. A converter omitted by `--only` remains disabled and carries its prior inventory exactly; include `asset_registry` when selectively rebuilding resource outputs that must be reflected in the runtime registry. `project.godot` remains under shared project-configuration ownership, with only a missing GM2Godot-managed room startup scene cleared. Failed or cancelled pre-decision reruns preserve the prior inventory byte- and mode-exact and publish an attempt whose preserved canonical generation is `verified`. If the private managed-output recovery artifact exists, close Godot and all writers and complete recovery before trusting either generation.
 3. Validate the destination project, including the generated resources, with the exact Godot 4.7.1 executable:
 
    ```bash

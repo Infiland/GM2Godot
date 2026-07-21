@@ -33,6 +33,13 @@ MANAGED_OUTPUT_FILES: tuple[str, ...] = (
     "icon.ico",
     "icon.png",
 )
+_TRANSACTION_PREFLIGHT_AUXILIARIES = frozenset(
+    {
+        ".gm2godot-managed-output.lock",
+        ".gm2godot-managed-output",
+        ".gm2godot-workspace-stage.json",
+    }
+)
 
 
 class GodotProjectDestinationState(Enum):
@@ -63,9 +70,14 @@ def format_godot_string(value: str) -> str:
 
 def inspect_godot_project_destination(
     godot_project_path: StrPath,
+    *,
+    ignored_transaction_entries: Iterable[str] = (),
 ) -> GodotProjectDestinationState:
     """Classify a destination without creating or modifying any files."""
     destination = os.fspath(godot_project_path)
+    ignored_entries = _validate_ignored_transaction_entries(
+        ignored_transaction_entries
+    )
     try:
         destination_stat = os.lstat(destination)
     except FileNotFoundError:
@@ -93,7 +105,11 @@ def inspect_godot_project_destination(
     directory_fd = _open_destination_directory(destination)
     try:
         _verify_destination_identity(destination, directory_fd)
-        state = _inspect_open_destination(destination, directory_fd)
+        state = _inspect_open_destination(
+            destination,
+            directory_fd,
+            ignored_entries=ignored_entries,
+        )
         if state is GodotProjectDestinationState.EXISTING_PROJECT:
             _validate_managed_output_paths(destination)
         _verify_destination_identity(destination, directory_fd)
@@ -105,12 +121,24 @@ def inspect_godot_project_destination(
 def prepare_godot_project_destination(
     gm_project_path: StrPath,
     godot_project_path: StrPath,
+    *,
+    ignored_transaction_entries: Iterable[str] = (),
 ) -> str:
     """Preserve an existing Godot project or initialize a safe empty destination."""
     gm_path = os.fspath(gm_project_path)
     destination = os.fspath(godot_project_path)
     project_path = os.path.join(destination, GODOT_PROJECT_FILENAME)
-    destination_state = inspect_godot_project_destination(destination)
+    ignored_entries = _validate_ignored_transaction_entries(
+        ignored_transaction_entries
+    )
+    destination_state = (
+        inspect_godot_project_destination(
+            destination,
+            ignored_transaction_entries=ignored_entries,
+        )
+        if ignored_entries
+        else inspect_godot_project_destination(destination)
+    )
 
     if destination_state is GodotProjectDestinationState.EXISTING_PROJECT:
         return project_path
@@ -125,7 +153,11 @@ def prepare_godot_project_destination(
     directory_fd = _open_destination_directory(destination)
     try:
         _verify_destination_identity(destination, directory_fd)
-        refreshed_state = _inspect_open_destination(destination, directory_fd)
+        refreshed_state = _inspect_open_destination(
+            destination,
+            directory_fd,
+            ignored_entries=ignored_entries,
+        )
         if refreshed_state is not GodotProjectDestinationState.EMPTY:
             raise ConversionPreflightError(
                 "GM2GD-CONVERT-DESTINATION-CHANGED",
@@ -211,10 +243,16 @@ def _verify_destination_identity(
 def _inspect_open_destination(
     destination: str,
     directory_fd: int | None,
+    *,
+    ignored_entries: frozenset[str] = frozenset(),
 ) -> GodotProjectDestinationState:
     try:
         existing_entries = sorted(
-            os.listdir(directory_fd if directory_fd is not None else destination)
+            entry
+            for entry in os.listdir(
+                directory_fd if directory_fd is not None else destination
+            )
+            if entry not in ignored_entries
         )
     except OSError as error:
         raise _destination_io_error(destination, "inspect", error) from error
@@ -249,6 +287,19 @@ def _inspect_open_destination(
             ),
         )
     return GodotProjectDestinationState.EMPTY
+
+
+def _validate_ignored_transaction_entries(
+    entries: Iterable[str],
+) -> frozenset[str]:
+    selected = frozenset(entries)
+    unknown = sorted(selected - _TRANSACTION_PREFLIGHT_AUXILIARIES)
+    if unknown:
+        raise ValueError(
+            "Unsupported transaction preflight auxiliary entries: "
+            + ", ".join(repr(entry) for entry in unknown)
+        )
+    return selected
 
 
 def _validate_managed_output_paths(destination: str) -> None:

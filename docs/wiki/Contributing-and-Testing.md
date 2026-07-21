@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.40 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.41 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-21
 
@@ -144,6 +144,19 @@ Managed-generation inventory changes must retain the complete deterministic sche
 ```
 
 The inventory suite compares canonical bytes across input order, path separators, single-worker and multi-worker generation, and repeated unchanged CLI runs. It covers a full generation followed by `--only`, disabled-converter and shared-owner carry-forward, jointly managed `project.godot`, bounded format-v2 migration, excluded private/user state, case collisions, malformed and oversized entries, same-size mutation with restored timestamps, POSIX symlink/hard-link/mount rejection, and native Windows junction/read-only behavior. Keep inventory rendering and pre/post-publication validation on the same immutable model. Do not broaden an inventory change into destination-wide commit/recovery or route production converters to the stage.
+
+Production conversion-transaction changes must also retain the real mutation and cooperative-cancellation matrix:
+
+```bash
+./venv/bin/python -m unittest \
+  tests.test_converter_transaction \
+  tests.test_converter \
+  tests.test_cli \
+  tests.test_project_preflight \
+  tests.test_managed_output_publisher
+```
+
+The integration suite establishes a successful project-setting/script/registry baseline, changes source bytes, and injects runtime, finalizer, staged-validation, publication, and cancellation boundaries. Every unsuccessful rerun must preserve all prior inventory bytes and modes, omit newly staged files publicly, retain unrelated sentinels, and publish only a digest-consistent verified attempt. Keep the final cooperative cancellation check before recoverable publication. The exhaustive hard-exit/native-platform phase matrix and stale logical-resource policy are separate work.
 
 Conversion attempt/manifest generation changes must run both process-kill matrices on POSIX and native Windows:
 

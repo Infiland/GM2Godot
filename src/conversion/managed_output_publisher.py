@@ -1470,7 +1470,7 @@ def _validate_evidence_pair(
                 "A canonical conversion manifest cannot exist without its "
                 "latest-attempt record"
             )
-        if inventory.entries:
+        if inventory.entries and require_updated:
             raise OSError(
                 "A non-empty managed generation requires canonical conversion "
                 "evidence"
@@ -1502,7 +1502,7 @@ def _validate_evidence_pair(
             raise OSError(
                 "Conversion attempt disagrees with absent canonical evidence"
             )
-        if inventory.entries:
+        if inventory.entries and require_updated:
             raise OSError(
                 "A non-empty managed generation cannot select an absent manifest"
             )
@@ -4571,7 +4571,7 @@ def publish_managed_output_attempt(
     workspace: ManagedOutputWorkspace,
     *,
     verified_inventory: GenerationInventory,
-    attempt_content: bytes,
+    attempt_content: bytes | Callable[[bytes | None], bytes],
 ) -> ManagedOutputPublicationReceipt:
     """Publish attempt-only evidence after verifying the prior generation."""
 
@@ -4581,6 +4581,11 @@ def publish_managed_output_attempt(
         verified_inventory,
     )
     _attempt, manifest = _capture_public_evidence(workspace)
+    resolved_attempt_content = (
+        attempt_content(manifest.content)
+        if callable(attempt_content)
+        else attempt_content
+    )
     stage_inventory_carry_forward(
         workspace,
         verified_inventory,
@@ -4590,7 +4595,7 @@ def publish_managed_output_attempt(
         workspace,
         previous_inventory=verified_inventory,
         desired_inventory=verified_inventory,
-        attempt_content=attempt_content,
+        attempt_content=resolved_attempt_content,
         manifest_content=manifest.content,
         require_updated=False,
     )

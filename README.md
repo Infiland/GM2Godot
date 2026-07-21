@@ -36,7 +36,9 @@ The inventory excludes `.godot/`, `conversion_attempt.json`, the canonical manif
 
 Version 0.7.40 adds the internal destination-wide publisher over that workspace and frozen inventory. It durably records exact prior and desired generation records, verified stage/backup/public identities, canonical manifest and attempt receipts, and required directory bindings before the first public move. Managed creates, replacements, removals, and evidence are installed through same-filesystem no-follow moves with the canonical manifest last; one durable generation pointer then selects the complete new file/evidence set. Before that pointer, ordinary failure and recovery restore the complete previous bytes and modes in reverse order. After it, recovery verifies the new generation and finishes only identity-bound cleanup. Unsafe rollback publishes a separate bounded recovery artifact with transaction, path, selected-generation, and retry diagnostics while preserving exact recovery material.
 
-The 0.7.40 publisher is still an internal transaction surface: `Converter`, the CLI, finalizers, and individual converters are not routed through it yet. Exhaustive real-converter/process-kill integration and operator documentation remain later transaction work, and logical stale-resource invalidation is unchanged. Current generated GameMaker/Godot semantics are therefore unchanged.
+Version 0.7.41 routes production conversion through that transaction. Recovery and the destination-wide lock precede mutating preflight; the complete prior managed generation is copied into the same-filesystem stage, and every selected converter, project-setting operation, registry, architecture/diagnostic finalizer, optional CLI report set, inventory validator, and canonical-manifest builder receives the staged project path. A trustworthy `success` or `partial` candidate is frozen, rehashed, and committed with its exact manifest and attempt digest. Runtime, finalizer, validation, cancellation, and ordinary publication failures discard verified private state and retain the prior public bytes and modes; their attempt ledger reports a transactionally verified preserved canonical generation instead of overwriting its diagnostics or architecture report.
+
+The final cooperative cancellation check immediately precedes entry into recoverable publication. Cancellation observed before it preserves the prior generation and reports `cancelled`; once publication starts, GM2Godot completes the old-or-new decision and does not later claim cancellation. This integration does not add the exhaustive process-kill/native-platform boundary matrix planned for the next transaction phase, does not delete stale logical resources, and does not promise safe conversion alongside a live editor, game, or non-cooperating writer.
 
 ## What GM2Godot Is and Isn't
 
@@ -58,7 +60,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.40`.
+Current source version: `0.7.41`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
@@ -221,7 +223,7 @@ python main.py validate --godot-project path/to/GodotProject --fail-on-unsupport
 
 You can also invoke the same headless interface directly with `python -m src.cli`.
 
-CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md`, `gml_api_compatibility.md`, and the JSON/Markdown platform capability reports.
+CLI reports are written under `gm2godot/` inside the selected report or Godot project directory. The diagnostic outputs are `conversion_diagnostics.json` and `conversion_diagnostics.md`; static compatibility outputs include `gml_manual_scope.md`, `gml_api_compatibility.md`, and the JSON/Markdown platform capability reports. A report set that resolves inside the project's managed `gm2godot/` evidence root is staged with the conversion; a destination that would put reports under another converter-owned root is rejected instead of creating untracked post-commit output.
 
 The four static compatibility reports publish as one ordered transaction through a retained verified `gm2godot/` directory binding. Ordinary render or publication failures preserve the complete prior set with its exact modes instead of deleting it; successful return means all four new reports passed durability and final receipt validation.
 
@@ -233,14 +235,15 @@ Every valid `convert` invocation prints exactly one terminal outcome summary aft
 
 The named `steps` ledger uses conversion-plan order. `completed`, `skipped`, and `failed` partition the requested steps; completed and failed steps were executed. A step interrupted by cancellation is both executed and skipped, so `executed` and `skipped` are intentionally not disjoint. A `partial` outcome means every requested converter step completed but one or more resources were skipped or failed.
 
-After destination preflight, every terminal run writes format-v1 `conversion_attempt.json`. A trustworthy successful or partial conversion also writes format-v2 `conversion_manifest.json`. The attempt state and canonical-manifest trust are independent: a late report failure or cancellation can occur after a trustworthy canonical manifest was already committed.
+After destination preflight, every terminal run writes format-v1 `conversion_attempt.json`. A trustworthy successful or partial conversion also writes format-v2 `conversion_manifest.json`. Managed output and canonical evidence are selected together; failed or cancelled work before the generation decision publishes only non-canonical attempt evidence after verifying the preserved generation.
 
 The format-v2 manifest now carries an additive `generation_inventory` object at inventory format 1. Its canonical `entries` array is the complete managed generation rather than an invocation-local diff. Every row contains `path`, `kind`, `owner` (`converter_step` or `shared_owner`), `byte_count`, `sha256`, and `mode`. The legacy `generated_files` field and stable manifest/attempt paths remain; `generated_files` is rendered from the same inventory, with the canonical manifest retaining its existing `sha256: "self"` compatibility row.
 
 | `canonical_manifest.status` | `updated` | `current_output` | `sha256` meaning |
 | --- | ---: | --- | --- |
 | `updated` | `true` | `verified` | Expected digest of the canonical manifest committed last by this publication transaction |
-| `preserved` | `false` | `unverified` | Digest of an existing regular file left untouched by this publication |
+| `preserved` | `false` | `verified` | Digest of the prior canonical manifest after the managed-output transaction verified or restored its complete generation |
+| `preserved` | `false` | `unverified` | Legacy artifact-only publication left an existing regular file untouched without destination-wide generation verification |
 | `absent` | `false` | `unavailable` | `null`; no canonical manifest exists |
 
 The two public ledger paths, attempt schema, and existing manifest fields stay stable; the inventory is additive. Their publication is one recoverable generation. GM2Godot durably records the complete prior and desired pair before replacing the attempt and optional canonical manifest, then switches one persistent generation pointer as the commit decision. Recovery under a project-local operating-system lock restores the prior pair before that switch or verifies the new pair afterward. Consumers should still verify `canonical_manifest.sha256` as defense against later replacement or corruption, but a mismatch is rejected recovery state rather than a normal interrupted-publication result. `status` remains transaction-relative, not whole-run provenance; inspect the latest attempt before trusting preserved output after failed or cancelled work.
@@ -255,11 +258,11 @@ Conversion exit codes are stable for CI:
 | Any diagnostic threshold violation, including with `--allow-partial` | `2` |
 | Preflight rejection | `2` |
 | Failed conversion or runtime exception | `1` |
-| Cancelled conversion or first `SIGINT` received before the terminal outcome line begins committing | `130` |
+| Cancelled conversion or first `SIGINT` observed before the managed-generation decision | `130` |
 
 `--allow-partial` applies only to the `convert` command. It accepts usable partial output for exit-code purposes, but does not override `--fail-on-unsupported`, `--max-warnings`, `--max-errors`, or `--max-unsupported`.
 
-The single terminal outcome line is the CLI commit point. A `SIGINT` received before that commit rewrites reports to `cancelled` and exits `130`; once stdout publication has begun, the completed outcome is not retroactively changed or printed a second time.
+The final cancellation check before recoverable managed-output publication is the conversion commit point. A `SIGINT` observed before it preserves the prior generation, publishes a `cancelled` attempt, and exits `130`. Once publication begins, the converter resolves the durable old-or-new decision and later signals cannot relabel exposed committed output as cancelled. The CLI still buffers and prints exactly one terminal outcome line.
 
 Useful conversion and validation filters:
 - `--groups assets,project,wip` selects conversion groups.

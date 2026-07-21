@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import posixpath
-import stat
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
@@ -23,7 +21,6 @@ from src.conversion.asset_registry import (
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.conversion_plan import build_conversion_plan, conversion_step_map
 from src.conversion.conversion_artifact_generation import (
-    is_conversion_generation_auxiliary,
     publish_conversion_artifact_generation,
     recover_conversion_artifact_generation,
 )
@@ -34,6 +31,12 @@ from src.conversion.generated_paths import (
     is_snake_case_path_segment,
     res_path_segments,
     snake_case_res_path,
+)
+from src.conversion.generation_inventory import (
+    GenerationInventory,
+    capture_generation_inventory,
+    migrate_generation_inventory,
+    validate_generation_inventory,
 )
 from src.conversion.included_file_paths import (
     canonical_included_file_lookup_path,
@@ -48,10 +51,6 @@ _MANIFEST_FILENAME = os.path.basename(CONVERSION_MANIFEST_RELATIVE_PATH)
 _ATTEMPT_FILENAME = os.path.basename(CONVERSION_ATTEMPT_RELATIVE_PATH)
 _ARTIFACT_DIRECTORY = os.path.dirname(CONVERSION_MANIFEST_RELATIVE_PATH)
 _ARTIFACT_DIRECTORY_DESCRIPTION = "conversion artifact directory"
-_IMAGE_EXTENSIONS = frozenset({".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".webp"})
-_AUDIO_EXTENSIONS = frozenset({".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"})
-_FONT_EXTENSIONS = frozenset({".otf", ".ttf", ".woff", ".woff2"})
-
 FileFingerprint: TypeAlias = tuple[int, int, int, int, int]
 
 
@@ -60,10 +59,13 @@ class ConversionOutputSnapshot:
     """Destination state captured before a conversion starts."""
 
     files: Mapping[str, FileFingerprint]
+    generation_inventory: GenerationInventory | None = None
 
 
 @dataclass(frozen=True)
 class GeneratedFileEntry:
+    """Backward-compatible generated-files projection for library consumers."""
+
     path: str
     kind: str
     sha256: str
@@ -83,6 +85,8 @@ def write_conversion_artifacts(
     target_platform: str,
     enabled_converters: Iterable[str],
     output_snapshot: ConversionOutputSnapshot,
+    generation_inventory: GenerationInventory | None = None,
+    generation_root_path: str | None = None,
     manifest_outcome: ConversionOutcome | None,
     attempt_outcome: ConversionOutcome,
 ) -> tuple[str | None, str]:
@@ -119,7 +123,23 @@ def write_conversion_artifacts(
     manifest_asset_publication: AssetRegistryPublication | None = None
     manifest_digest: str | None = None
     attempt_content: bytes | None = None
+    frozen_inventory: GenerationInventory | None = None
+    inventory_root = (
+        godot_project_path
+        if generation_root_path is None
+        else generation_root_path
+    )
     if manifest_outcome is not None:
+        frozen_inventory = (
+            generation_inventory
+            if generation_inventory is not None
+            else capture_generation_inventory(
+                inventory_root,
+                previous_inventory=output_snapshot.generation_inventory,
+                enabled_converters=enabled_converter_keys,
+            )
+        )
+        validate_generation_inventory(inventory_root, frozen_inventory)
         manifest_asset_converter = _asset_registry_converter(
             gm_project_path,
             godot_project_path,
@@ -136,6 +156,7 @@ def write_conversion_artifacts(
             output_snapshot=output_snapshot,
             conversion_outcome=manifest_outcome,
             asset_entries=manifest_asset_publication.entries,
+            generation_inventory=frozen_inventory,
         )
         manifest_content = _serialize_json(manifest_payload)
         manifest_digest = artifact_sha256(manifest_content)
@@ -188,10 +209,13 @@ def write_conversion_artifacts(
             if (
                 manifest_asset_converter is None
                 or manifest_asset_publication is None
+                or frozen_inventory is None
             ):
                 raise AssertionError(
-                    "Canonical publication requires prepared asset receipts."
+                    "Canonical publication requires prepared asset and inventory "
+                    "receipts."
                 )
+            validate_generation_inventory(inventory_root, frozen_inventory)
             manifest_asset_converter.revalidate_publication(
                 manifest_asset_publication,
                 validate_content=False,
@@ -203,14 +227,17 @@ def write_conversion_artifacts(
             if (
                 manifest_asset_converter is None
                 or manifest_asset_publication is None
+                or frozen_inventory is None
             ):
                 raise AssertionError(
-                    "Canonical publication requires prepared asset receipts."
+                    "Canonical publication requires prepared asset and inventory "
+                    "receipts."
                 )
             manifest_asset_converter.revalidate_publication(
                 manifest_asset_publication,
                 validate_content=True,
             )
+            validate_generation_inventory(inventory_root, frozen_inventory)
 
         publish_conversion_artifact_generation(
             transaction,
@@ -262,6 +289,8 @@ def build_conversion_manifest(
     enabled_converters: Iterable[str],
     output_snapshot: ConversionOutputSnapshot,
     conversion_outcome: ConversionOutcome,
+    generation_inventory: GenerationInventory | None = None,
+    generation_root_path: str | None = None,
 ) -> JsonDict:
     enabled_converter_keys = _normalized_enabled_converter_keys(enabled_converters)
     _validate_canonical_outcome(
@@ -273,6 +302,21 @@ def build_conversion_manifest(
         godot_project_path,
         macro_configuration=target_platform,
     )
+    inventory_root = (
+        godot_project_path
+        if generation_root_path is None
+        else generation_root_path
+    )
+    frozen_inventory = (
+        generation_inventory
+        if generation_inventory is not None
+        else capture_generation_inventory(
+            inventory_root,
+            previous_inventory=output_snapshot.generation_inventory,
+            enabled_converters=enabled_converter_keys,
+        )
+    )
+    validate_generation_inventory(inventory_root, frozen_inventory)
     return _build_conversion_manifest(
         gm_project_path,
         godot_project_path,
@@ -281,6 +325,7 @@ def build_conversion_manifest(
         output_snapshot=output_snapshot,
         conversion_outcome=conversion_outcome,
         asset_entries=asset_entries,
+        generation_inventory=frozen_inventory,
     )
 
 
@@ -293,9 +338,24 @@ def _build_conversion_manifest(
     output_snapshot: ConversionOutputSnapshot,
     conversion_outcome: ConversionOutcome,
     asset_entries: tuple[AssetRegistryEntry, ...],
+    generation_inventory: GenerationInventory,
 ) -> JsonDict:
     project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
-    generated_files = _generated_files(godot_project_path, output_snapshot)
+    generated_files = [
+        GeneratedFileEntry(
+            path=entry.path,
+            kind=entry.kind,
+            sha256=entry.sha256,
+        ).to_dict()
+        for entry in generation_inventory.entries
+    ]
+    generated_files.append(
+        GeneratedFileEntry(
+            path=CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/"),
+            kind="manifest",
+            sha256="self",
+        ).to_dict()
+    )
     return {
         "format_version": 2,
         "conversion": _conversion_record(conversion_outcome),
@@ -309,10 +369,11 @@ def _build_conversion_manifest(
             "ide_version": project_manifest.ide_version,
         },
         "resources": [entry.to_godot_dict() for entry in asset_entries],
-        "generated_files": [entry.to_dict() for entry in generated_files],
+        "generation_inventory": generation_inventory.to_dict(),
+        "generated_files": generated_files,
         "source_maps": [
-            entry.to_dict()
-            for entry in generated_files
+            entry.to_generated_file_dict()
+            for entry in generation_inventory.entries
             if entry.path.endswith(".gmlmap.json")
         ],
         "architecture_policies": build_architecture_policy_report(
@@ -521,85 +582,25 @@ def _asset_registry_converter(
 
 
 def capture_conversion_output_snapshot(godot_project_path: str) -> ConversionOutputSnapshot:
-    """Capture destination files before conversion so emitted outputs are identifiable."""
-    files = {
-        relative_path: fingerprint
-        for _path, relative_path, fingerprint in _destination_files(godot_project_path)
-    }
-    return ConversionOutputSnapshot(files=files)
+    """Capture the prior inventory and canonical-manifest presence."""
 
-
-def _generated_files(
-    godot_project_path: str,
-    output_snapshot: ConversionOutputSnapshot,
-) -> tuple[GeneratedFileEntry, ...]:
-    entries: list[GeneratedFileEntry] = []
+    generation_inventory = migrate_generation_inventory(godot_project_path)
     manifest_relative_path = CONVERSION_MANIFEST_RELATIVE_PATH.replace(os.sep, "/")
-    for path, relative_path, fingerprint in _destination_files(godot_project_path):
-        if (
-            relative_path == manifest_relative_path
-            or _is_auxiliary_conversion_artifact(relative_path)
-        ):
-            continue
-        if output_snapshot.files.get(relative_path) == fingerprint:
-            continue
-        entries.append(
-            GeneratedFileEntry(
-                path=relative_path,
-                kind=_generated_file_kind(relative_path),
-                sha256=_sha256_file(path),
-            )
-        )
-    entries.append(
-        GeneratedFileEntry(
-            path=manifest_relative_path,
-            kind="manifest",
-            sha256="self",
-        )
+    manifest_path = os.path.join(
+        godot_project_path,
+        CONVERSION_MANIFEST_RELATIVE_PATH,
     )
-    return tuple(sorted(entries, key=lambda entry: entry.path))
-
-
-def _is_auxiliary_conversion_artifact(relative_path: str) -> bool:
-    normalized_path = relative_path.replace("\\", "/")
-    attempt_relative_path = CONVERSION_ATTEMPT_RELATIVE_PATH.replace(os.sep, "/")
-    if normalized_path == attempt_relative_path:
-        return True
-    artifact_directory = os.path.dirname(attempt_relative_path)
-    relative_directory, filename = os.path.split(normalized_path)
-    if relative_directory != artifact_directory:
-        return False
-    if is_conversion_generation_auxiliary(filename):
-        return True
-    return any(
-        filename.startswith(f".{artifact_filename}.")
-        and filename.endswith((".tmp", ".backup"))
-        for artifact_filename in (_MANIFEST_FILENAME, _ATTEMPT_FILENAME)
+    files: dict[str, FileFingerprint] = {}
+    try:
+        manifest_stat = os.stat(manifest_path, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        files[manifest_relative_path] = _file_fingerprint(manifest_stat)
+    return ConversionOutputSnapshot(
+        files=files,
+        generation_inventory=generation_inventory,
     )
-
-
-def _destination_files(
-    godot_project_path: str,
-) -> Iterable[tuple[str, str, FileFingerprint]]:
-    if os.path.islink(godot_project_path) or not os.path.isdir(godot_project_path):
-        return
-    for root, dirs, files in os.walk(godot_project_path):
-        dirs[:] = sorted(
-            directory
-            for directory in dirs
-            if directory != ".godot"
-            and not os.path.islink(os.path.join(root, directory))
-        )
-        for filename in sorted(files):
-            path = os.path.join(root, filename)
-            try:
-                path_stat = os.stat(path, follow_symlinks=False)
-            except OSError:
-                continue
-            if not stat.S_ISREG(path_stat.st_mode):
-                continue
-            relative_path = os.path.relpath(path, godot_project_path).replace(os.sep, "/")
-            yield path, relative_path, _file_fingerprint(path_stat)
 
 
 def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
@@ -610,33 +611,6 @@ def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
         path_stat.st_mtime_ns,
         path_stat.st_ctime_ns,
     )
-
-
-def _generated_file_kind(relative_path: str) -> str:
-    if relative_path == "project.godot":
-        return "project"
-    if relative_path.endswith(".gmlmap.json"):
-        return "source_map"
-    if relative_path.endswith(".json"):
-        return "report"
-    if relative_path.endswith(".gd"):
-        return "gdscript"
-    if relative_path.endswith(".gdshader"):
-        return "shader"
-    if relative_path.endswith(".tscn"):
-        return "scene"
-    if relative_path.endswith(".tres"):
-        return "resource"
-    extension = os.path.splitext(relative_path)[1].lower()
-    if extension in _IMAGE_EXTENSIONS:
-        return "image"
-    if extension in _AUDIO_EXTENSIONS:
-        return "audio"
-    if extension in _FONT_EXTENSIONS:
-        return "font"
-    if extension == ".import":
-        return "import_metadata"
-    return "file"
 
 
 def _path_diagnostics(entries: tuple[AssetRegistryEntry, ...]) -> list[JsonDict]:
@@ -797,11 +771,3 @@ def _relative_source_path(path: str | None, gm_project_path: str) -> str:
         return os.path.relpath(path, gm_project_path).replace(os.sep, "/")
     except ValueError:
         return path.replace(os.sep, "/")
-
-
-def _sha256_file(path: str) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()

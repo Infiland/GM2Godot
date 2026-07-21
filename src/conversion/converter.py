@@ -113,8 +113,8 @@ class Converter:
         steps = ConversionStepLedger.from_requested(step.key for step in plan)
 
         try:
-            output_snapshot = capture_conversion_output_snapshot(godot_path)
             prepare_godot_project_destination(gm_path, godot_path)
+            output_snapshot = capture_conversion_output_snapshot(godot_path)
         except Exception:
             self._set_outcome(
                 self._outcome(

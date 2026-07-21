@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -368,6 +369,41 @@ class TestLTS2026Conversion(unittest.TestCase):
             canonical_record["sha256"],
             "sha256:" + hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         )
+        inventory = cast(
+            dict[str, Any],
+            result.manifest["generation_inventory"],
+        )
+        inventory_entries = cast(
+            list[dict[str, Any]],
+            inventory["entries"],
+        )
+        self.assertEqual(inventory["format_version"], 1)
+        self.assertEqual(
+            [str(entry["path"]) for entry in inventory_entries],
+            sorted(str(entry["path"]) for entry in inventory_entries),
+        )
+        for entry in inventory_entries:
+            relative_path = str(entry["path"])
+            output_path = result.godot_path / relative_path
+            with self.subTest(
+                fixture=spec.name,
+                inventory_path=relative_path,
+            ):
+                self.assertTrue(output_path.is_file())
+                output_bytes = output_path.read_bytes()
+                self.assertEqual(entry["byte_count"], len(output_bytes))
+                self.assertEqual(
+                    entry["sha256"],
+                    "sha256:" + hashlib.sha256(output_bytes).hexdigest(),
+                )
+                self.assertEqual(
+                    entry["mode"],
+                    stat.S_IMODE(output_path.stat().st_mode),
+                )
+                self.assertIn(
+                    cast(dict[str, Any], entry["owner"])["class"],
+                    {"converter_step", "shared_owner"},
+                )
         self.assertEqual(source_project["ide_version"], spec.expected_ide_version)
         self.assertEqual(result.outcome.state, spec.expected_outcome_state)
         self.assertEqual(

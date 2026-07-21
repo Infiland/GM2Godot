@@ -30,7 +30,11 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 
 Version 0.7.38 also provides the internal destination-wide workspace foundation for the next transaction stages. A `ManagedOutputWorkspace` holds a non-blocking operating-system lock at `.gm2godot-managed-output.lock`, proves that its private transaction directory under `.gm2godot-managed-output/` shares the destination filesystem, and snapshots or copies only an explicit allowlist of regular files. Strict ownership markers bind cleanup to the exact transaction; redirected, mounted, multiply-linked, replaced, or unknown reserved state is preserved with an error instead of traversed or guessed at.
 
-This foundation does **not** route `Converter`, the CLI, or individual converters to staging yet, and it does not inventory, publish, roll back, or recover the complete managed generation. Those remain separate transaction steps. Current conversion semantics and generated GameMaker/Godot runtime behavior are unchanged in 0.7.38.
+Version 0.7.39 adds the next foundation: one immutable complete inventory for the desired managed generation. Each entry records a normalized slash-separated destination-relative path, output kind, producing converter step or explicit shared-owner class, byte count, SHA-256, and exact file mode. The additive `generation_inventory` object in the format-v2 canonical manifest is sorted independently of source enumeration, worker count, and host path separator. It includes unchanged output carried forward from disabled converter steps and jointly managed `project.godot`; `generated_files` remains available to existing consumers as a complete path/kind/digest view.
+
+The inventory excludes `.godot/`, `conversion_attempt.json`, the canonical manifest's self-referential bytes, destination and artifact locks, transaction/recovery records, private stages/backups, and files outside the documented managed roots. Existing format-v2 manifests migrate through bounded parsing plus those roots; malformed, absolute, escaping, redirected, mounted, multiply-linked, or case-colliding state fails closed. Canonical manifest bytes are rendered from one frozen inventory and the same inventory is rehashed before and after manifest publication, including detection of same-size content changes with restored timestamps.
+
+This foundation still does **not** route `Converter`, the CLI, or individual converters to the private workspace stage, and it does not publish, roll back, or recover the destination-wide managed file set. Those remain separate transaction steps. Current generated GameMaker/Godot semantics are unchanged in 0.7.39.
 
 ## What GM2Godot Is and Isn't
 
@@ -52,7 +56,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.38`.
+Current source version: `0.7.39`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
@@ -229,13 +233,15 @@ The named `steps` ledger uses conversion-plan order. `completed`, `skipped`, and
 
 After destination preflight, every terminal run writes format-v1 `conversion_attempt.json`. A trustworthy successful or partial conversion also writes format-v2 `conversion_manifest.json`. The attempt state and canonical-manifest trust are independent: a late report failure or cancellation can occur after a trustworthy canonical manifest was already committed.
 
+The format-v2 manifest now carries an additive `generation_inventory` object at inventory format 1. Its canonical `entries` array is the complete managed generation rather than an invocation-local diff. Every row contains `path`, `kind`, `owner` (`converter_step` or `shared_owner`), `byte_count`, `sha256`, and `mode`. The legacy `generated_files` field and stable manifest/attempt paths remain; `generated_files` is rendered from the same inventory, with the canonical manifest retaining its existing `sha256: "self"` compatibility row.
+
 | `canonical_manifest.status` | `updated` | `current_output` | `sha256` meaning |
 | --- | ---: | --- | --- |
 | `updated` | `true` | `verified` | Expected digest of the canonical manifest committed last by this publication transaction |
 | `preserved` | `false` | `unverified` | Digest of an existing regular file left untouched by this publication |
 | `absent` | `false` | `unavailable` | `null`; no canonical manifest exists |
 
-The two public ledger paths and JSON schemas stay stable, but their publication is one recoverable generation. GM2Godot durably records the complete prior and desired pair before replacing the attempt and optional canonical manifest, then switches one persistent generation pointer as the commit decision. Recovery under a project-local operating-system lock restores the prior pair before that switch or verifies the new pair afterward. Consumers should still verify `canonical_manifest.sha256` as defense against later replacement or corruption, but a mismatch is rejected recovery state rather than a normal interrupted-publication result. `status` remains transaction-relative, not whole-run provenance; inspect the latest attempt before trusting preserved output after failed or cancelled work.
+The two public ledger paths, attempt schema, and existing manifest fields stay stable; the inventory is additive. Their publication is one recoverable generation. GM2Godot durably records the complete prior and desired pair before replacing the attempt and optional canonical manifest, then switches one persistent generation pointer as the commit decision. Recovery under a project-local operating-system lock restores the prior pair before that switch or verifies the new pair afterward. Consumers should still verify `canonical_manifest.sha256` as defense against later replacement or corruption, but a mismatch is rejected recovery state rather than a normal interrupted-publication result. `status` remains transaction-relative, not whole-run provenance; inspect the latest attempt before trusting preserved output after failed or cancelled work.
 
 Conversion exit codes are stable for CI:
 

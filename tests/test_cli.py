@@ -1530,7 +1530,7 @@ class TestCLIReports(unittest.TestCase):
             ),
         )
 
-    def test_real_nested_managed_report_dir_enters_manifest_file_ledger(
+    def test_real_nested_report_dir_stays_outside_managed_inventory(
         self,
     ) -> None:
         gm_dir, godot_dir = self._write_real_script_project("NestedReports")
@@ -1556,18 +1556,21 @@ class TestCLIReports(unittest.TestCase):
             entry["path"]: entry["sha256"]
             for entry in manifest["generated_files"]
         }
-        managed_report_paths = (
+        inventory_paths = {
+            entry["path"]
+            for entry in manifest["generation_inventory"]["entries"]
+        }
+        external_report_paths = (
             *(f"reports/gm2godot/{name}" for name in self._STATIC_REPORT_FILENAMES),
             "reports/" + DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
             "reports/"
             + DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
         )
-        for relative_path in managed_report_paths:
+        for relative_path in external_report_paths:
             with self.subTest(relative_path=relative_path):
-                self.assertEqual(
-                    generated_files[relative_path],
-                    self._artifact_sha256(godot_dir, relative_path),
-                )
+                self.assertNotIn(relative_path, generated_files)
+                self.assertNotIn(relative_path, inventory_paths)
+                self.assertTrue(os.path.isfile(os.path.join(godot_dir, relative_path)))
 
     def test_nested_managed_report_repair_failure_is_terminal(self) -> None:
         gm_dir, godot_dir = self._write_real_script_project(
@@ -1721,6 +1724,8 @@ class TestCLIReports(unittest.TestCase):
         managed_diagnostics = (
             DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
             DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
+        )
+        external_diagnostics = (
             "reports/" + DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH.replace(os.sep, "/"),
             "reports/"
             + DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH.replace(os.sep, "/"),
@@ -1731,6 +1736,10 @@ class TestCLIReports(unittest.TestCase):
                     generated_files[relative_path],
                     self._artifact_sha256(godot_dir, relative_path),
                 )
+        for relative_path in external_diagnostics:
+            with self.subTest(relative_path=relative_path):
+                self.assertNotIn(relative_path, generated_files)
+                self.assertTrue(os.path.isfile(os.path.join(godot_dir, relative_path)))
 
     def test_managed_report_symlink_alias_restores_after_cancelled_refresh_failure(
         self,

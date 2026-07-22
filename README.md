@@ -54,6 +54,8 @@ Version 0.7.47 converts supported authored sequence asset and parameter tracks i
 
 Version 0.7.48 parses paired GameMaker GLSL ES shader stages before generating one Godot CanvasItem shader. The supported 2D subset maps `in_Position`, `in_Colour`/`in_Colour0`, `in_TextureCoord`, varyings, custom uniforms and arrays, `gm_BaseTexture`, and fixed world/view/projection matrix constants. Multi-line and comma-separated declarations are normalized without regex-only inference. Custom/normal vertex attributes, unsupported clip-space or 3D transforms, preprocessor directives, stage conflicts, and unlinked varyings fail the logical shader resource with source-linked diagnostics instead of publishing plausible but incorrect output.
 
+Version 0.7.49 expands the clickable release-notes view to the ten newest published changelogs. Each entry is labeled and linked to its GitHub release, and **Show more** appends the next ten entries while preserving the history already displayed.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -74,7 +76,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.48`.
+Current source version: `0.7.49`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

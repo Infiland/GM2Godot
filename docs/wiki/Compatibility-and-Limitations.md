@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.48 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -90,6 +90,8 @@ Version 0.7.46 implements #706 only. Authored GameMaker particle assets now prod
 
 Version 0.7.47 implements #707 only. Supported authored sprite, instance, audio, text, nested-sequence, mapped audio-effect, moment, and broadcast tracks now produce managed descriptors and deterministic runtime evaluation. Length, frames-per-second or frames-per-game-frame speed, assign/linear interpolation, transforms, top-to-bottom draw order, eager object creation, nested playback, same-frame moment-before-broadcast order, broadcast `event_data`, and crossed legacy timeline GML moments are covered under exact Godot 4.7.1. Unsupported track/key/effect/action types emit `GM2GD-SEQUENCE-TRACK-UNSUPPORTED`, `GM2GD-SEQUENCE-KEY-UNSUPPORTED`, `GM2GD-SEQUENCE-EFFECT-UNSUPPORTED`, or `GM2GD-TIMELINE-ACTION-UNSUPPORTED` against the source field and make that resource partial. Animation-curve keys, clip masks/groups, particle sequence tracks, sequence lifecycle event bindings, runtime track/key authoring, object-track overrides, unmapped text/audio effects, and #708 shader semantics are not implied.
 
+Version 0.7.48 implements #708 only. Paired GameMaker GLSL ES stages are tokenized before their declarations and functions share one Godot scope. The supported 2D CanvasItem path maps `in_Position` to local `VERTEX` with a zero Z component, `in_Colour`/`in_Colour0` to vertex `COLOR`, `in_TextureCoord` to `UV`, `gm_BaseTexture` to `TEXTURE`, and fixed world/view/projection constants to `MODEL_MATRIX`, `CANVAS_MATRIX`, and `SCREEN_MATRIX`. A standard GameMaker clip transform is lowered back to local `VERTEX` so Godot applies its transform once. Matching varyings, custom uniforms, constants, fixed one-dimensional arrays, precision qualifiers, and multi-line/comma-separated declarations are supported. Custom or normal vertex attributes, extra colour/texture-coordinate streams, dynamic matrices, arbitrary clip-space/3D transforms, global mutable state, preprocessor directives, conflicting stage declarations/functions, and unlinked fragment varyings emit source-linked `GM2GD-SHADER-*` diagnostics and fail that logical shader resource without publishing output. Full GLSL ES, custom vertex-buffer binding, multi-pass effects, renderer-state parity, and visual equivalence remain non-goals.
+
 These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or startup-established content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
 
 ## Known limitation areas
@@ -98,7 +100,7 @@ The following areas require especially careful manual review. This list is inten
 
 - Exact GameMaker value, coercion, lookup, lifecycle, and event-order edge cases can differ from GDScript and Godot callbacks.
 - Imported static/per-frame precise sprite masks are supported by the generated compatibility runtime; runtime-authored masks, `mask_index`, skeletal/tile masks, and GameMaker physics fixtures are not guaranteed to match Godot physics.
-- Shader translation, surfaces, GPU/draw state, cameras, the application surface, GUI scaling, and render ordering can need manual Godot work.
+- Supported 2D shader inputs and transforms convert with fail-closed diagnostics, but custom vertex streams, 3D/clip-space logic, macros, multi-pass effects, surfaces, GPU/draw state, cameras, the application surface, GUI scaling, and render ordering still need manual Godot work and visual review.
 - Authored particle assets and room elements convert through the documented approximation; advanced particle modifiers, dynamic particle APIs, room/layer mutation, tilemaps, texture groups, sequences, timelines, animation curves, and dynamic asset APIs still have partial or metadata-only areas.
 - Audio groups, streaming/compression, positional audio, async payload timing, networking, and filesystem sandbox behavior can vary by target.
 - Native extensions, marketplace SDKs, Steam, IAP, cloud, push, console, browser, and mobile services require explicit Godot plugins, permissions, or project-specific bridges; metadata and stubs are not working SDK integrations.

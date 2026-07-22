@@ -52,6 +52,8 @@ Version 0.7.46 converts authored GameMaker particle systems into stable `.tres` 
 
 Version 0.7.47 converts supported authored sequence asset and parameter tracks into managed `.tres` descriptors and deterministic runtime nodes. Sprite, instance, audio, text, nested-sequence, mapped audio-effect, moment, and broadcast keys preserve playback speed modes, assign/linear interpolation, transforms, draw/action order, and nesting; timeline moment GML runs in frame order without skipped intermediate moments. Unsupported track/key/effect/action types produce source-linked partial-conversion diagnostics instead of being dropped.
 
+Version 0.7.48 parses paired GameMaker GLSL ES shader stages before generating one Godot CanvasItem shader. The supported 2D subset maps `in_Position`, `in_Colour`/`in_Colour0`, `in_TextureCoord`, varyings, custom uniforms and arrays, `gm_BaseTexture`, and fixed world/view/projection matrix constants. Multi-line and comma-separated declarations are normalized without regex-only inference. Custom/normal vertex attributes, unsupported clip-space or 3D transforms, preprocessor directives, stage conflicts, and unlinked varyings fail the logical shader resource with source-linked diagnostics instead of publishing plausible but incorrect output.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -63,7 +65,7 @@ Version 0.7.47 converts supported authored sequence asset and parameter tracks i
 **GM2Godot isn't:**
 - A perfect 1:1 conversion tool
 - A complete implementation of every current GameMaker GML Code and GML Reference page yet
-- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, runtime-authored masks or sequence tracks, sequence animation-curve/clip-mask keys, advanced particle modifiers, Godot physics fixtures, shaders, and target-specific runtime APIs
+- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, runtime-authored masks or sequence tracks, sequence animation-curve/clip-mask keys, advanced particle modifiers, Godot physics fixtures, custom/3D/macro-driven or multi-pass shaders, and target-specific runtime APIs
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Compatibility Todo List
@@ -72,7 +74,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.47`.
+Current source version: `0.7.48`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

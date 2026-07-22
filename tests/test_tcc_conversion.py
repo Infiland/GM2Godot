@@ -96,8 +96,12 @@ class TestTCCConversion(unittest.TestCase):
                 # step now also skips its 166 object/room rows whose required
                 # generated outputs are absent, plus the authored sequence whose
                 # embedded animation curve is intentionally diagnosed by #707.
-                completed=4979,
-                skipped=407,
+                # Eleven shaders fail closed for custom vertex data, reserved
+                # Godot globals, or unsupported scalar matrix constructors and
+                # are omitted once more from the registry.
+                completed=4957,
+                skipped=418,
+                failed=11,
             ),
         )
         if outcome != expected_outcome:
@@ -336,6 +340,27 @@ class TestTCCConversion(unittest.TestCase):
             if diagnostic.get("code") == "GM2GD-SEQUENCE-KEY-UNSUPPORTED"
         }
         self.assertEqual(unsupported_sequence_keys, {"seq_magentaswing"})
+        unsupported_shaders = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in diagnostic_entries
+            if str(diagnostic.get("code", "")).startswith("GM2GD-SHADER-")
+        }
+        self.assertEqual(
+            unsupported_shaders,
+            {
+                "__shd_scribble",
+                "__shd_scribble_bake_effect_4dir",
+                "__shd_scribble_bake_effect_8dir",
+                "__shd_scribble_bake_effect_8dir_2px",
+                "__shd_scribble_bake_outline_4dir",
+                "__shd_scribble_bake_outline_8dir",
+                "__shd_scribble_bake_outline_8dir_2px",
+                "__shd_scribble_bake_shadow",
+                "xot_cbs_shDeuteranopia",
+                "xot_cbs_shProtanopia",
+                "xot_cbs_shTritanopia",
+            },
+        )
 
         expected_skipped_resources_path = os.path.join(
             PROJECT_ROOT,
@@ -357,6 +382,7 @@ class TestTCCConversion(unittest.TestCase):
             ),
             "rooms": sorted(room_creation_missing_resources | room_transpile_resources),
             "sequences": sorted(unsupported_sequence_keys),
+            "shaders": sorted(unsupported_shaders),
         }
         self.assertEqual(actual_skipped_resources, expected_skipped_resources)
 

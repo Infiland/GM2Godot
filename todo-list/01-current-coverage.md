@@ -71,9 +71,11 @@ This file records what the current codebase appears to support. Partial features
 - [x] Preserve tile size, separation, margins, tile count, and subfolders.
 - [ ] Partial: TileDataFormat variants, animated tiles, brushes, autotile metadata, tile transforms, tile collisions, and runtime tilemap APIs.
 
-- [x] Convert shader files into `.gdshader` files with basic string substitutions.
+- [x] Parse paired shader stages and convert the supported 2D attribute, varying, uniform, base-texture, and matrix subset into one `.gdshader`.
+- [x] Parse multi-line, array, and comma-separated declarations and fail unsupported constructs with source-linked diagnostics.
+- [x] Compile and load the provenance-pinned supported shader corpus under exact Godot 4.7.1.
 - [ ] Partial: full GLSL ES to Godot shader language translation.
-- [ ] Partial: attributes, varyings, uniforms, samplers, macros, precision qualifiers, multi-pass effects, and shader compiler diagnostics.
+- [ ] Partial: custom/normal vertex streams, macros, arbitrary clip-space and 3D transforms, mutable globals, multi-pass effects, renderer state, and visual parity.
 
 - [x] Generate an asset registry covering sprites, sounds, rooms, objects, scripts, fonts, paths, shaders, tilesets, timelines, sequences, and included files.
 - [x] Generate stable asset IDs and metadata for many resource types.

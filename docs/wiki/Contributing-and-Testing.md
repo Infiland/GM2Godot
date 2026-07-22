@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.48 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -151,6 +151,20 @@ Included Files tree-traversal changes must retain the deterministic depth probe 
 ```
 
 The depth probe exercises 25, 50, 100, and 200 nested directories, requires at most `16 * depth + 64` binding checks, and limits each doubling to 2.25x work. Run the native Windows Included Files workflow for path-fallback and junction coverage; POSIX-only descriptor results do not substitute for the Windows path.
+
+Shader translation changes must run the token/declaration, converter outcome, stale-output, real-corpus, and exact Godot load coverage:
+
+```bash
+GODOT_BIN=/path/to/Godot-4.7.1 \
+  ./venv/bin/python -m unittest \
+  tests.test_shader_translation \
+  tests.test_shaders \
+  tests.test_shaders_godot \
+  tests.test_stale_managed_output_invalidation \
+  tests.test_resource_matrix_godot
+```
+
+Keep `tests/fixtures/shader_corpus/manifest.json` provenance and SHA-256 values pinned. Every supported corpus pair must produce one collision-safe `.gdshader` and load under `4.7.1.stable.official.a13da4feb`. Every unsupported construct must retain a source-linked `GM2GD-SHADER-*` diagnostic and failed logical-resource count without a placeholder output. Do not replace parser coverage with regex substitutions or broaden a bounded 2D mapping into guessed custom vertex-buffer, 3D, macro, multi-pass, or renderer-state semantics.
 
 Authored sequence/timeline changes must run their descriptor, registry, runtime-segment, API-manifest, generated timeline GML, and exact Godot playback/order coverage:
 

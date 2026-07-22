@@ -1,0 +1,60 @@
+{
+  "format_version": 1,
+  "cases": [
+    {
+      "name": "tcc_wave",
+      "vertex": "tcc_wave/tcc_wave.vsh",
+      "fragment": "tcc_wave/tcc_wave.fsh",
+      "vertex_sha256": "e149adaa8ee80d69ce3ea92c17191efc27442b1fd4031d1d7987fe4eaf5903a3",
+      "fragment_sha256": "942b4f336b5c64a77269ffb82e95272959c7e09326360e292b552355dcd1b203",
+      "origin": "https://github.com/Infiland/TheColorfulCreature/tree/4b6e942caca4d58af49dc006a037404d2f2a348c/shaders/shd_wave",
+      "license": "Apache-2.0",
+      "features": [
+        "MATRIX_WORLD_VIEW_PROJECTION",
+        "in_Position",
+        "in_TextureCoord",
+        "custom uniforms",
+        "varying",
+        "gm_BaseTexture"
+      ]
+    },
+    {
+      "name": "tcc_grayscale",
+      "vertex": "tcc_grayscale/tcc_grayscale.vsh",
+      "fragment": "tcc_grayscale/tcc_grayscale.fsh",
+      "vertex_sha256": "a7befc2c4604fe095299dfa0841cfe12a10a454227b40cd03f9be6378e2b6c11",
+      "fragment_sha256": "ed001ca868eedd31ce24b3fc89982b8df8c017e44b8ed9d3282f61645018fe68",
+      "origin": "https://github.com/Infiland/TheColorfulCreature/tree/4b6e942caca4d58af49dc006a037404d2f2a348c/shaders/xot_cbs_shGrayscale",
+      "license": "Apache-2.0",
+      "features": [
+        "MATRIX_WORLD_VIEW_PROJECTION",
+        "in_Position.xyz",
+        "in_TextureCoord",
+        "const",
+        "varying",
+        "gm_BaseTexture"
+      ]
+    },
+    {
+      "name": "standard_color",
+      "vertex": "standard_color/standard_color.vsh",
+      "fragment": "standard_color/standard_color.fsh",
+      "vertex_sha256": "0869b2689044c6ab8210a6fcafad97c84d8c2a0602c68ac42c1aff63bfb6b7a1",
+      "fragment_sha256": "ed8ba175b8caea1d2203a823852a364cd205951d33f4072073398c11a684928a",
+      "origin": "GM2Godot issue #708 regression fixture",
+      "license": "Apache-2.0",
+      "features": [
+        "MATRIX_WORLD_VIEW_PROJECTION",
+        "in_Position",
+        "in_Colour",
+        "in_TextureCoord",
+        "multi-line declarations",
+        "array declarations",
+        "comma-separated declarations",
+        "custom uniforms",
+        "varyings",
+        "gm_BaseTexture"
+      ]
+    }
+  ]
+}

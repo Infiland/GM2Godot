@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.48 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -26,6 +26,8 @@ Paths below are relative to the generated Godot project unless a report director
 The JSON diagnostic entries can include `source_path`, line and column, resource and event/API context, a manifest entry, tracking issue, and workaround. Start with the first `error`, then unsupported warnings, then other warnings.
 
 For authored sequences and timelines, `GM2GD-SEQUENCE-TRACK-UNSUPPORTED`, `GM2GD-SEQUENCE-KEY-UNSUPPORTED`, `GM2GD-SEQUENCE-EFFECT-UNSUPPORTED`, and `GM2GD-TIMELINE-ACTION-UNSUPPORTED` identify the exact `.yy` track/key/effect/action path that was deliberately omitted. The affected sequence or timeline is recorded as skipped in an otherwise usable partial conversion; supported sibling tracks remain in its descriptor. Do not hand-edit the generated descriptor to remove the warning—change the authored asset or add a tested converter/runtime mapping.
+
+For shaders, `GM2GD-SHADER-*` identifies the exact `.vsh` or `.fsh` line/column, stage, construct, resource, and workaround that prevented safe translation. Unsupported attributes, position/matrix paths, declarations, directives, function conflicts, or varying links fail that logical shader and produce no `.gdshader`; the overall completed conversion is `partial` and a successful rerun removes any prior managed shader/registry row. Fix the GameMaker source to the documented 2D subset or port the pair manually outside managed output. Do not copy an older generated shader back into `res://shaders/`.
 
 The JSON/Markdown pair uses one verified report-directory binding for capture, staging, ordered replacement, rollback, invalidation and cleanup. POSIX hosts use descriptor-relative no-follow operations; Windows retains reparse-checked, no-delete-share handles and write-through moves. When an explicit external report root is missing, GM2Godot creates and durability-syncs each parent entry before descending. Ordinary failures restore the complete prior pair, but a hard crash between the two file commits is not yet pair-atomic, so keep the reports with the latest attempt evidence rather than treating either filename alone as a generation marker.
 
@@ -137,6 +139,7 @@ With a binary available, validation asks Godot to import supported asset types a
 | Preflight exits `2` and no managed generation was published | Use a missing or empty destination, or a valid existing Godot project with a regular `project.godot`. GM2Godot refuses a non-empty non-project directory and unsafe redirected or conflicting managed-output paths. Recovery and lock acquisition precede preflight, so the persistent private lock/workspace parent may be initialized, but no attempt, canonical report, or managed project file is published. |
 | “No `.yyp` found” or the wrong project is analyzed | Pass the GameMaker project root that directly contains the `.yyp`. The GUI rejects multiple `.yyp` files; `analyze` warns about them, while headless project readers select the sorted first valid candidate. Separating projects is safer. |
 | Outcome is `partial` | Read `outcome.resources`, the ordered `steps` ledger, and warning/error rows in `conversion_diagnostics.json`. Search the generated compatibility reports for the affected API or resource family before choosing `--allow-partial`. |
+| A shader has no generated `.gdshader` | Filter diagnostics for `GM2GD-SHADER-`. Use its `source_path`, line/column, `event` stage, `manifest_entry` construct, and workaround. Custom/normal vertex streams, arbitrary clip-space/3D transforms, macros, mutable globals, and conflicting stage declarations require source simplification or a manual Godot shader. |
 | Unsupported GML call or extension | Use the diagnostic's `api`, `manifest_entry`, `issue_number`, and `workaround`. Native extensions and service SDKs need a reviewed Godot addon/GDExtension or explicit local mapping; a generated stub is not a working native integration. |
 | Runtime says a custom Godot `Callable` lacks explicit receiver metadata | Do not add or remove guessed arguments. Use a transpiled GML function/method or the generated script registry path so GM2Godot can preserve the receiver contract. If converter-generated output reaches this error without hand edits or an extension bridge, report the minimal GML source and generated call site. |
 | Godot validation is `skipped` | Fix `--godot-bin`/`GODOT_BIN`, check executable permissions, and confirm `--version` reports the official 4.7.1 build. |

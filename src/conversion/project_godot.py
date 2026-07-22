@@ -20,6 +20,8 @@ MANAGED_OUTPUT_DIRECTORIES: tuple[str, ...] = (
     "included_files",
     "notes",
     "objects",
+    "particles",
+    "particlesystems",
     "paths",
     "rooms",
     "scripts",

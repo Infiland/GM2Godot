@@ -769,7 +769,11 @@ def _particle_system_asset_lines(
     node_name: str,
     parent_path: str,
 ) -> list[str]:
-    particle_system_id = _dict_value(asset.get("particlesystemId"))
+    particle_system_id = _dict_value(
+        asset.get("particleSystemId")
+        if asset.get("particleSystemId") is not None
+        else asset.get("particlesystemId")
+    )
     particle_system_name = particle_system_id.get("name")
     if not isinstance(particle_system_name, str) or not particle_system_name:
         particle_system_name = _asset_name(asset)

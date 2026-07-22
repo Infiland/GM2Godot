@@ -421,6 +421,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(first_timeline_action["source_path"], "timelines/tl_intro/Moment_2.gml")
         self.assertEqual(first_timeline_action["script_path"], "res://gm2godot/timelines/tl_intro_2.gd")
         self.assertEqual(by_name["ps_spark"].asset_type, "particle_system")
+        self.assertEqual(
+            by_name["ps_spark"].godot_path,
+            "res://particlesystems/ps_spark/ps_spark.tres",
+        )
         particle_metadata = by_name["ps_spark"].metadata
         self.assertIsNotNone(particle_metadata)
         assert particle_metadata is not None
@@ -443,6 +447,110 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(extension_metadata["files"][0]["functions"][0]["name"], "ads_show_rewarded")
         self.assertEqual(by_name["config/game.json"].asset_type, "included_file")
         self.assertEqual(by_name["config/game.json"].godot_path, "res://included_files/config/game.json")
+
+    def test_authored_particle_descriptor_and_modifier_diagnostics(self) -> None:
+        _write_yyp(self.gm_dir, [("particles", "ps_authored")])
+        self._write_resource(
+            "particles",
+            "ps_authored",
+            "GMParticleSystem",
+            "folders/Particles.yy",
+            {
+                "drawOrder": 1,
+                "xorigin": 4,
+                "yorigin": 6,
+                "emitters": [
+                    {
+                        "$GMPSEmitter": "",
+                        "name": "Smoke",
+                        "enabled": True,
+                        "mode": 0,
+                        "emitCount": 2,
+                        "regionX": 10,
+                        "regionY": 20,
+                        "regionW": 30,
+                        "regionH": 40,
+                        "shape": 1,
+                        "distribution": 2,
+                        "texture": 12,
+                        "lifetimeMin": 30,
+                        "lifetimeMax": 60,
+                        "startColour": 0xFFFFFFFF,
+                        "midColour": 0x80FFFFFF,
+                        "endColour": 0x00FFFFFF,
+                        "spawnOnDeathCount": 3,
+                        "spawnOnDeathId": {"name": "Secondary"},
+                    }
+                ],
+                "attractors": [{"name": "pull"}],
+                "destroyers": [{"name": "kill"}],
+                "deflectors": [{"name": "bounce"}],
+                "changers": [{"name": "change"}],
+            },
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        entry = converter.build_entries()[0]
+
+        self.assertEqual(entry.asset_type, "particle_system")
+        self.assertTrue(entry.godot_path.endswith("/ps_authored.tres"))
+        assert entry.metadata is not None
+        self.assertEqual(entry.metadata["descriptor_format_version"], 1)
+        self.assertEqual(entry.metadata["draw_order"], "new_to_old")
+        self.assertEqual(entry.metadata["types"][0]["shape"], "smoke")
+        self.assertEqual(entry.metadata["types"][0]["life_min"], 30.0)
+        self.assertEqual(
+            entry.metadata["types"][0]["spawn_on_death"]["count"],
+            3.0,
+        )
+        self.assertEqual(
+            entry.metadata["emitters"][0]["region"],
+            {
+                "xmin": -5.0,
+                "xmax": 25.0,
+                "ymin": 0.0,
+                "ymax": 40.0,
+                "shape": "ellipse",
+                "distribution": "invgaussian",
+            },
+        )
+        self.assertEqual(
+            entry.metadata["unsupported_modifiers"],
+            ["attractors", "destroyers", "deflectors", "changers"],
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            *entry.godot_path.removeprefix("res://").split("/"),
+        )
+        with open(output_path, encoding="utf-8") as descriptor_file:
+            descriptor = descriptor_file.read()
+        self.assertIn("[gd_resource type=\"Resource\" format=3]", descriptor)
+        self.assertIn(
+            "metadata/gamemaker_particle_descriptor",
+            descriptor,
+        )
+        modifier_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-PARTICLE-MODIFIER-UNSUPPORTED"
+        ]
+        self.assertEqual(
+            {diagnostic.manifest_entry for diagnostic in modifier_diagnostics},
+            {"attractors", "destroyers", "deflectors", "changers"},
+        )
+        for diagnostic in modifier_diagnostics:
+            self.assertEqual(diagnostic.resource, "ps_authored")
+            self.assertEqual(diagnostic.resource_type, "particle_system")
+            self.assertEqual(diagnostic.issue_number, 706)
+            self.assertIsNotNone(diagnostic.source_path)
+            assert diagnostic.source_path is not None
+            self.assertTrue(
+                diagnostic.source_path.endswith(
+                    "particles/ps_authored/ps_authored.yy"
+                )
+            )
 
     def test_timeline_source_fields_resolve_owner_and_project_relative_paths(self) -> None:
         _write_yyp(self.gm_dir, [("timelines", "tl_paths")])

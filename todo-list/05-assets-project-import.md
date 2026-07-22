@@ -189,9 +189,9 @@ This file tracks GameMaker project/resource data that the converter must eventua
 ## Particles, Effects, Animation Curves
 
 - [x] Runtime has particle compatibility subset.
-- [ ] Convert particle system assets.
-- [ ] Convert particle types, emitters, attractors, destroyers, deflectors, and changers where applicable.
-- [ ] Convert room particle system layer elements.
+- [x] Convert particle system assets into stable generated descriptors.
+- [x] Convert authored particle types and emitters, with source-linked diagnostics for unsupported attractors, destroyers, deflectors, and changers.
+- [x] Convert room particle system layer elements.
 - [ ] Convert built-in effects and filters.
 - [ ] Convert effect parameters and ordering.
 - [ ] Convert animation curve assets.

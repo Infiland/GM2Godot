@@ -1192,7 +1192,15 @@ class TestRoomConverter(unittest.TestCase):
                 "resourceType": "GMRAssetLayer",
                 "assets": [
                     {"%Name": "seq_intro", "resourceType": "GMRSequenceGraphic", "x": 1},
-                    {"%Name": "ps_fx", "resourceType": "GMRParticleSystem", "x": 2},
+                    {
+                        "%Name": "particle_fx",
+                        "resourceType": "GMRParticleSystem",
+                        "particleSystemId": {
+                            "name": "ps_fx",
+                            "path": "particles/ps_fx/ps_fx.yy",
+                        },
+                        "x": 2,
+                    },
                     {"%Name": "legacy_tile", "resourceType": "GMRTileGraphic", "x": 3},
                     {"%Name": "label", "resourceType": "GMRTextGraphic", "x": 4},
                 ],
@@ -1206,6 +1214,12 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_element_type = "sequence"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "particle_system"', content)
         self.assertIn("metadata/gamemaker_particle_system_layer_element = true", content)
+        self.assertIn('metadata/gamemaker_particle_system_name = "ps_fx"', content)
+        self.assertIn(
+            'metadata/gamemaker_particle_system_id = {"name": "ps_fx", '
+            '"path": "particles/ps_fx/ps_fx.yy"}',
+            content,
+        )
         self.assertIn('metadata/gamemaker_layer_element_type = "tile"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "undefined"', content)
         self.assertEqual(content.count("metadata/gamemaker_unsupported_asset = true"), 3)

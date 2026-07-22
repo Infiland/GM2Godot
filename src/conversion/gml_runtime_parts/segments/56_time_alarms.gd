@@ -60,6 +60,12 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 	gml_time_source_tick_all(seconds, frames)
 	_gml_event_scheduler_record_phase("time_sources", "", null, frame)
 	gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
+	gml_sequence_timeline_scheduler_frame(
+		seconds,
+		frames,
+		_gml_event_scheduler_live_instances(),
+		frame
+	)
 	gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
 	_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
 	gml_collision_event_dispatch_frame(_gml_event_scheduler_live_instances(), frame)

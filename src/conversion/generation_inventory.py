@@ -382,6 +382,7 @@ def generation_output_owner(
         "paths": "asset_registry",
         "rooms": "rooms",
         "scripts": "scripts",
+        "sequences": "asset_registry",
         "shaders": "shaders",
         "sounds": "sounds",
         "sprites": "sprites",

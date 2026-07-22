@@ -51,6 +51,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "50_static_types_and_clone.gd",
     "60_conversion_helpers.gd",
     "61_sequences_timelines.gd",
+    "62_authored_sequence_tracks.gd",
     "65_files_ini_json.gd",
     "66_buffers.gd",
     "67_async_runtime.gd",

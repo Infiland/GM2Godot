@@ -208,8 +208,9 @@ This file tracks the generated GML compatibility runtime needed inside Godot.
 - [x] Sequence/timeline compatibility subset.
 - [x] Flex panel compatibility subset.
 - [x] Authored particle system descriptors, emitter/type instantiation, and room layer elements.
+- [x] Supported authored sequence tracks/keyframes, nested playback, moments/broadcasts, audio effects, and timeline GML moments.
 - [ ] Full `part_*` and effect APIs.
-- [ ] Full sequence asset conversion.
+- [ ] Full sequence asset conversion, including curves, clip masks/groups, particle tracks, and every effect family.
 - [ ] Full sequence track/keyframe authoring APIs.
 - [ ] Full sequence object override/get-object APIs.
 - [ ] Full timeline asset conversion and frame moment scheduler.

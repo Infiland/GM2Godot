@@ -688,16 +688,39 @@ static func _gml_object_has_builtin_field(object_value, member_name):
 static func _gml_object_builtin_field_get(object_value, member_name):
 	var key = str(member_name)
 	if object_value is Node2D:
+		var in_sequence = bool(
+			object_value.get_meta("gamemaker_in_sequence", false)
+		)
 		if key == "x":
-			return object_value.position.x
+			return (
+				object_value.global_position.x
+				if in_sequence
+				else object_value.position.x
+			)
 		if key == "y":
-			return object_value.position.y
+			return (
+				object_value.global_position.y
+				if in_sequence
+				else object_value.position.y
+			)
 		if key == "image_angle":
-			return object_value.rotation_degrees
+			return (
+				-rad_to_deg(object_value.global_rotation)
+				if in_sequence
+				else object_value.rotation_degrees
+			)
 		if key == "image_xscale":
-			return object_value.scale.x
+			return (
+				object_value.global_transform.get_scale().x
+				if in_sequence
+				else object_value.scale.x
+			)
 		if key == "image_yscale":
-			return object_value.scale.y
+			return (
+				object_value.global_transform.get_scale().y
+				if in_sequence
+				else object_value.scale.y
+			)
 	return gml_undefined()
 
 
@@ -705,10 +728,16 @@ static func _gml_object_builtin_field_set(object_value, member_name, value):
 	var key = str(member_name)
 	if object_value is Node2D:
 		if key == "x":
-			object_value.position.x = _to_real(value)
+			if bool(object_value.get_meta("gamemaker_in_sequence", false)):
+				object_value.global_position.x = _to_real(value)
+			else:
+				object_value.position.x = _to_real(value)
 			return value
 		if key == "y":
-			object_value.position.y = _to_real(value)
+			if bool(object_value.get_meta("gamemaker_in_sequence", false)):
+				object_value.global_position.y = _to_real(value)
+			else:
+				object_value.position.y = _to_real(value)
 			return value
 		if key == "image_angle":
 			object_value.rotation_degrees = _to_real(value)

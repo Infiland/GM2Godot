@@ -244,5 +244,8 @@
     "setLanguageDependingOnRegion",
     "startnewgame",
     "switchlang"
+  ],
+  "sequences": [
+    "seq_magentaswing"
   ]
 }

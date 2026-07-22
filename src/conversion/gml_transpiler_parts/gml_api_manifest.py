@@ -336,7 +336,7 @@ def _sequence_timeline_entries() -> tuple[GMLAPIEntry, ...]:
             "partial",
             "yes" if name in {"timeline_moment_add_script", "timeline_step"} else "no",
             _TIMELINE_DOCS_PATH,
-            "Timeline asset lookup and runtime moment scheduling are supported through explicit GMRuntime timeline state; authored timeline asset conversion remains metadata-only.",
+            "Timeline asset lookup, deterministic authored GML moment conversion, and frame-ordered runtime scheduling are supported; dynamic timeline creation/deletion remains outside this authored-asset slice.",
             issue_number=567,
         )
         for name in sorted(_TIMELINE_PARTIAL_APIS)
@@ -362,7 +362,7 @@ def _sequence_timeline_entries() -> tuple[GMLAPIEntry, ...]:
             }
             else "no",
             _SEQUENCE_DOCS_PATH,
-            "Sequence object/instance metadata and playback state are supported; authored tracks are preserved as metadata with explicit diagnostics until AnimationPlayer conversion is implemented.",
+            "Sequence object/instance state and supported authored sprite, instance, audio, text, nested-sequence, effect, moment, and broadcast tracks use deterministic generated descriptors and runtime evaluation; unsupported track/key types are diagnosed.",
             issue_number=567,
         )
         for name in sorted(_SEQUENCE_PARTIAL_APIS)

@@ -47,6 +47,14 @@ timelines/sequences, input edge clearing, draw phases, GUI phases, and queued
 async delivery. Tests that depend on these phases should assert the generated
 method names or manager queues rather than incidental node order.
 
+Supported authored sequences are normalized into managed descriptors and advanced
+by `GMEvents` using either frames-per-second or frames-per-game-frame speed.
+Track/key order, assign/linear interpolation, nested state, mapped audio effects,
+moments, broadcasts, and legacy timeline GML moments are evaluated
+deterministically. Unsupported track/key/effect/action types make the source
+resource partial with a source-linked diagnostic; the runtime never guesses their
+semantics.
+
 Known semantic differences must be documented where they are introduced. Current
 examples include precise pixel collision masks falling back to Godot collision
 shape bounds, shader-language differences between GLSL ES and Godot shaders,

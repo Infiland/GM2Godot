@@ -70,6 +70,10 @@ from src.conversion.particle_assets import (
     particle_system_unsupported_modifier_fields,
     render_particle_system_resource,
 )
+from src.conversion.sequence_assets import (
+    normalize_sequence_asset,
+    render_sequence_resource,
+)
 from src.conversion.extension_registry import (
     collision_safe_extension_stub_resource_paths,
     extension_entry_from_yy,
@@ -561,6 +565,7 @@ class AssetRegistryConverter(BaseConverter):
         "paths": ".tscn",
         "particles": ".tres",
         "particlesystems": ".tres",
+        "sequences": ".tres",
     }
     KIND_ORDER: ClassVar[dict[str, int]] = {
         kind: index for index, kind in enumerate(RESOURCE_TYPE_BY_KIND)
@@ -623,6 +628,7 @@ class AssetRegistryConverter(BaseConverter):
         )
         self._system_font_paths: dict[str, str | None] = {}
         self._timeline_action_source_failures: set[tuple[str, str]] = set()
+        self._sequence_incomplete_resources: set[tuple[str, str]] = set()
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
         resources = self._ordered_project_resources()
@@ -2312,6 +2318,7 @@ class AssetRegistryConverter(BaseConverter):
     ) -> tuple[tuple[AssetRegistryEntry, ...], int]:
         """Build entries and report how many base resources began processing."""
         self._timeline_action_source_failures.clear()
+        self._sequence_incomplete_resources.clear()
         room_order_indices = self._room_order_indices(resources)
         godot_paths = self._stable_godot_paths(
             resources,
@@ -2408,6 +2415,7 @@ class AssetRegistryConverter(BaseConverter):
         timeline_completeness: dict[tuple[str, str], bool] = {}
         try:
             self._write_particle_system_resources(entries)
+            self._write_sequence_resources(entries)
             timeline_completeness = self._write_timeline_action_scripts(entries)
             if self.enforce_managed_resource_outputs:
                 reconciliation = self._reconcile_managed_resource_entries(
@@ -2470,6 +2478,11 @@ class AssetRegistryConverter(BaseConverter):
             if (
                 resource.kind == "timelines"
                 and not timeline_completeness.get(timeline_key, True)
+            ):
+                self._resource_skipped(resource_key)
+            elif (
+                resource.kind == "sequences"
+                and timeline_key in self._sequence_incomplete_resources
             ):
                 self._resource_skipped(resource_key)
             else:
@@ -3116,7 +3129,7 @@ class AssetRegistryConverter(BaseConverter):
             }
 
         if resource.kind == "sequences":
-            return self._sequence_metadata(resource.raw_data)
+            return self._sequence_metadata(resource)
 
         if resource.kind == "timelines":
             return self._timeline_metadata(
@@ -3333,23 +3346,31 @@ class AssetRegistryConverter(BaseConverter):
                 return value
         return False
 
-    def _sequence_metadata(self, raw_data: JsonDict) -> JsonDict:
-        length = raw_data.get("length")
-        if length is None:
-            length = raw_data.get("duration")
-        playback_speed = raw_data.get("playbackSpeed")
-        loopmode = raw_data.get("playback")
-        if loopmode is None:
-            loopmode = raw_data.get("loopmode")
-        tracks = raw_data.get("tracks")
-        return {
-            "length": self._metadata_float(length, 0.0),
-            "playback_speed": self._metadata_float(playback_speed, 1.0),
-            "loopmode": self._metadata_int(loopmode, 0),
-            "tracks": tracks if isinstance(tracks, list) else [],
-            "moments": self._sequence_event_metadata(raw_data, ("moments", "momentEvents")),
-            "broadcasts": self._sequence_event_metadata(raw_data, ("broadcastMessages", "broadcasts")),
-        }
+    def _sequence_metadata(self, resource: _ProjectResource) -> JsonDict:
+        descriptor, issues = normalize_sequence_asset(resource.raw_data)
+        if issues:
+            self._sequence_incomplete_resources.add(
+                (resource.name, resource.source_path)
+            )
+        if self.diagnostics is not None:
+            for issue in issues:
+                self.diagnostics.add(
+                    "warning",
+                    issue.code,
+                    (
+                        f"GameMaker sequence {resource.name!r}: "
+                        f"{issue.message}"
+                    ),
+                    source_path=self._diagnostic_source_path(
+                        resource.source_path
+                    ),
+                    resource=resource.name,
+                    resource_type="sequence",
+                    manifest_entry=issue.manifest_entry,
+                    issue_number=707,
+                    workaround=issue.workaround,
+                )
+        return descriptor
 
     def _timeline_metadata(
         self,
@@ -3407,6 +3428,7 @@ class AssetRegistryConverter(BaseConverter):
             )
             moments.append({
                 "frame": frame,
+                "order": index,
                 "actions": actions,
                 "source_path": resource.source_path,
             })
@@ -3416,13 +3438,22 @@ class AssetRegistryConverter(BaseConverter):
                 resource,
                 script_stem=resolved_script_stem,
             )
-            for frame, actions in discovered_actions:
+            for discovered_index, (frame, actions) in enumerate(
+                discovered_actions
+            ):
                 moments.append({
                     "frame": frame,
+                    "order": discovered_index,
                     "actions": actions,
                     "source_path": resource.source_path,
                 })
-        return sorted(moments, key=lambda item: self._metadata_int(item.get("frame"), 0))
+        return sorted(
+            moments,
+            key=lambda item: (
+                self._metadata_int(item.get("frame"), 0),
+                self._metadata_int(item.get("order"), 0),
+            ),
+        )
 
     def _timeline_action_metadata(
         self,
@@ -3433,10 +3464,50 @@ class AssetRegistryConverter(BaseConverter):
         script_stem: str | None = None,
     ) -> list[JsonDict]:
         actions: list[JsonDict] = []
-        for raw_action in self._raw_action_items(moment):
+        reported_unsupported = False
+        for action_index, raw_action in enumerate(
+            self._raw_action_items(moment)
+        ):
             action = self._timeline_action_from_raw(raw_action)
-            if action is not None:
+            if action is not None and action.get("kind") != "metadata":
                 actions.append(action)
+                continue
+            self._timeline_action_source_failures.add(
+                (resource.name, resource.source_path)
+            )
+            reported_unsupported = True
+            if self.diagnostics is not None:
+                action_type = (
+                    self._metadata_string(
+                        cast(JsonDict, raw_action).get("resourceType"),
+                        "metadata",
+                    )
+                    if isinstance(raw_action, dict)
+                    else type(raw_action).__name__
+                )
+                self.diagnostics.add(
+                    "warning",
+                    "GM2GD-TIMELINE-ACTION-UNSUPPORTED",
+                    (
+                        f"GameMaker timeline {resource.name!r} moment {frame} "
+                        f"contains unsupported authored action type "
+                        f"{action_type!r}."
+                    ),
+                    source_path=self._diagnostic_source_path(
+                        resource.source_path
+                    ),
+                    resource=resource.name,
+                    resource_type="timeline",
+                    event=f"moment {frame}",
+                    manifest_entry=(
+                        f"momentList[frame={frame}].actions[{action_index}]"
+                    ),
+                    issue_number=707,
+                    workaround=(
+                        "Convert this action to GML in the timeline moment or "
+                        "replace it with a supported script/callable action."
+                    ),
+                )
 
         source_path = self._timeline_source_path(resource, moment, frame)
         if source_path:
@@ -3448,6 +3519,31 @@ class AssetRegistryConverter(BaseConverter):
                     frame,
                 ),
             })
+        elif not actions and not reported_unsupported:
+            self._timeline_action_source_failures.add(
+                (resource.name, resource.source_path)
+            )
+            if self.diagnostics is not None:
+                self.diagnostics.add(
+                    "warning",
+                    "GM2GD-TIMELINE-ACTION-UNSUPPORTED",
+                    (
+                        f"GameMaker timeline {resource.name!r} moment {frame} "
+                        "has no readable GML source or supported action."
+                    ),
+                    source_path=self._diagnostic_source_path(
+                        resource.source_path
+                    ),
+                    resource=resource.name,
+                    resource_type="timeline",
+                    event=f"moment {frame}",
+                    manifest_entry=f"momentList[frame={frame}]",
+                    issue_number=707,
+                    workaround=(
+                        "Restore the authored Moment_<frame>.gml source or "
+                        "remove the empty timeline moment."
+                    ),
+                )
         return actions
 
     def _timeline_discovered_source_actions(
@@ -3585,29 +3681,6 @@ class AssetRegistryConverter(BaseConverter):
             return {"kind": "script", "script": script}
         return {"kind": "metadata", "raw": action}
 
-    def _sequence_event_metadata(self, raw_data: JsonDict, keys: tuple[str, ...]) -> list[JsonDict]:
-        events: list[JsonDict] = []
-        for key in keys:
-            raw_events = raw_data.get(key)
-            if not isinstance(raw_events, list):
-                continue
-            for index, raw_event in enumerate(cast(list[object], raw_events)):
-                if not isinstance(raw_event, dict):
-                    continue
-                event = cast(JsonDict, raw_event)
-                frame = self._metadata_float(
-                    event.get("frame", event.get("moment", event.get("time", index))),
-                    float(index),
-                )
-                normalized: JsonDict = {"frame": frame}
-                for name in ("name", "message", "event", "callable", "script"):
-                    value = event.get(name)
-                    if isinstance(value, str) and value:
-                        normalized[name] = value
-                normalized["raw"] = event
-                events.append(normalized)
-        return sorted(events, key=lambda item: self._metadata_float(item.get("frame"), 0.0))
-
     def _particle_system_metadata(self, resource: _ProjectResource) -> JsonDict:
         unsupported_fields = particle_system_unsupported_modifier_fields(
             resource.raw_data
@@ -3655,6 +3728,33 @@ class AssetRegistryConverter(BaseConverter):
             self._atomic_write_text(
                 output_path,
                 render_particle_system_resource(
+                    entry.name,
+                    entry.source_path,
+                    entry.metadata,
+                ),
+                confinement_root=self.godot_project_path,
+            )
+
+    def _write_sequence_resources(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> None:
+        for entry in entries:
+            if (
+                entry.asset_type != "sequence"
+                or not entry.godot_path.startswith("res://")
+                or entry.metadata is None
+            ):
+                continue
+            relative_path = entry.godot_path.removeprefix("res://")
+            output_path = os.path.join(
+                self.godot_project_path,
+                *relative_path.split("/"),
+            )
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            self._atomic_write_text(
+                output_path,
+                render_sequence_resource(
                     entry.name,
                     entry.source_path,
                     entry.metadata,

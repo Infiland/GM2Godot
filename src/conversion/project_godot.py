@@ -25,6 +25,7 @@ MANAGED_OUTPUT_DIRECTORIES: tuple[str, ...] = (
     "paths",
     "rooms",
     "scripts",
+    "sequences",
     "shaders",
     "sounds",
     "sprites",

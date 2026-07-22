@@ -100,6 +100,7 @@ static func gm2godot_runtime_shutdown():
 	# Script/static registries can form RefCounted cycles through a method's
 	# bound receiver or Callable. Detach those edges before clearing the
 	# containers so Godot can release generated script instances at shutdown.
+	gml_sequence_runtime_cleanup_all()
 	_gml_shutdown_detach_methods([
 		_gml_script_registry,
 		_gml_script_argument_stack,

@@ -141,7 +141,8 @@ This file records what the current codebase appears to support. Partial features
 - [ ] Partial: collisions and masks are approximations.
 - [ ] Partial: surfaces and application surface behavior are approximations.
 - [ ] Partial: platform services are hook-backed, not actual SDK integrations.
-- [ ] Partial: sequences/timelines are compatibility stubs/metadata, not full authored conversion.
+- [x] Convert supported authored sequence tracks/keyframes, transforms, ordering, nesting, mapped effects, moments/broadcasts, and timeline GML moments through managed descriptors and the runtime scheduler.
+- [ ] Partial: sequence curves, clip masks/groups, particle tracks, lifecycle events, runtime track/key authoring, object overrides, and unmapped effects remain diagnosed rather than converted.
 
 ## Event Coverage
 

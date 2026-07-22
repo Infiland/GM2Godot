@@ -117,6 +117,20 @@ class TestManagedResourceOutputPolicy(unittest.TestCase):
             )
         )
 
+        sequence_outputs = managed_resource_outputs(
+            "sequences",
+            "res://sequences/seq_stale/seq_stale.tres",
+        )
+        self.assertEqual(
+            sequence_outputs.required_paths,
+            ("sequences/seq_stale/seq_stale.tres",),
+        )
+        self.assertTrue(
+            sequence_outputs.owns(
+                "sequences/seq_stale/seq_stale.tres"
+            )
+        )
+
 
 class TestStaleManagedOutputInvalidation(unittest.TestCase):
     OBJECT_NAME = "o_stale"

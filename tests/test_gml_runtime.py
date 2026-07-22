@@ -2775,7 +2775,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("gml_layer_register_scene(scene)", GML_RUNTIME_SCRIPT)
         self.assertIn("var resolved_layer = _gml_layer_resolve_node(layer)", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_sequence_timeline_helpers_preserve_metadata(self):
+    def test_runtime_sequence_timeline_helpers_evaluate_authored_descriptors(self):
         self.assertIn('const GML_SEQUENCE_HANDLE_KIND = "sequence"', GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_TIMELINE_HANDLE_KIND = "timeline"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_timeline_moment_add_script(timeline, step, script):", GML_RUNTIME_SCRIPT)
@@ -2783,7 +2783,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_sequence_create():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_sequence_create(layer, x, y, sequence):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_layer_sequence_get_instance(sequence_element_id):", GML_RUNTIME_SCRIPT)
-        self.assertIn("GM2Godot preserves sequence playback metadata", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_SEQUENCE_DESCRIPTOR_FORMAT_VERSION = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_sequence_prepare_instance(instance):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_sequence_evaluate_instance(instance):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_sequence_timeline_scheduler_frame(", GML_RUNTIME_SCRIPT)
 
     def test_runtime_ds_collection_runtime_functions(self):
         self.assertIn('const GML_DS_LIST_HANDLE_KIND = "ds_list"', GML_RUNTIME_SCRIPT)

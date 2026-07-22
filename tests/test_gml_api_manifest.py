@@ -328,7 +328,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         assert layer_sequence_create is not None
         self.assertEqual(layer_sequence_create.status, "partial")
         self.assertEqual(layer_sequence_create.issue_number, 567)
-        self.assertIn("metadata", layer_sequence_create.notes)
+        self.assertIn("authored", layer_sequence_create.notes)
         sequence_track_new = get_gml_api_entry("sequence_track_new")
         self.assertIsNotNone(sequence_track_new)
         assert sequence_track_new is not None

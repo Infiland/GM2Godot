@@ -17,6 +17,7 @@ STALE_INVALIDATION_RESOURCE_KINDS = frozenset(
         "particles",
         "particlesystems",
         "rooms",
+        "sequences",
         "shaders",
         "sprites",
         "timelines",

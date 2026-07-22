@@ -24,7 +24,7 @@ Current summary:
 - `[x]` GM2Godot already has broad resource conversion for sprites, sounds, fonts, notes, included files, objects, scripts, rooms, tilesets, shaders, asset registries, path registries, and project settings.
 - `[x]` GM2Godot already has a substantial GML parser/transpiler and generated Godot runtime compatibility layer.
 - `[x]` GM2Godot already has many unit tests and Godot smoke tests for generated runtime areas.
-- `[ ]` Full compatibility is not complete. The largest gaps are exact event scheduling, full input/collision/draw phase dispatch, full GameMaker runtime API coverage, full shader conversion, platform services, native extensions, sequences/timelines, texture groups, advanced surfaces/GPU state, and real Godot CI validation.
+- `[ ]` Full compatibility is not complete. The largest gaps are exact event scheduling, full input/collision/draw phase dispatch, full GameMaker runtime API coverage, full shader conversion, platform services, native extensions, advanced sequence curves/track families, texture groups, advanced surfaces/GPU state, and real Godot CI validation.
 
 ## Documentation Index
 

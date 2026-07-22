@@ -85,7 +85,8 @@ This file separates mapped callback names from full GameMaker event execution. A
 - [ ] Dispatch animation end/update/event callbacks from sprite/sequence state.
 - [ ] Dispatch path ended callbacks from path runtime state.
 - [ ] Dispatch user events through `event_user` and `event_perform`.
-- [ ] Dispatch broadcast message events from sequences/sprites/extensions.
+- [x] Dispatch authored sequence broadcast message events with scoped `event_data`.
+- [ ] Dispatch broadcast message events from sprites/extensions.
 - [ ] Dispatch async events to all listening instances with matching event code.
 - [ ] Fix Async HTTP mapped callback versus runtime callback naming.
 - [ ] Ensure Destroy and Clean Up ordering matches GameMaker for `instance_destroy`, room end, game end, and direct Godot node removal.

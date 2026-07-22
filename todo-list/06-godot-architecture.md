@@ -138,6 +138,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [ ] Run event-order tests.
 - [ ] Run draw-order/depth tests.
 - [x] Run exact Godot rectangle/precise/per-frame collision mask tests.
-- [ ] Run alarm/timeline/async ordering tests.
+- [x] Run exact authored sequence/timeline playback and moment-order tests.
+- [ ] Run combined alarm/async ordering tests.
 - [ ] Run surface/shader compatibility tests.
 - [ ] Run export checks for desktop, web, and mobile targets where feasible.

@@ -94,9 +94,10 @@ class TestTCCConversion(unittest.TestCase):
                 executed=5386,
                 # The 240 source conversion gaps remain. The asset-registry
                 # step now also skips its 166 object/room rows whose required
-                # generated outputs are absent, instead of advertising them.
-                completed=4980,
-                skipped=406,
+                # generated outputs are absent, plus the authored sequence whose
+                # embedded animation curve is intentionally diagnosed by #707.
+                completed=4979,
+                skipped=407,
             ),
         )
         if outcome != expected_outcome:
@@ -329,6 +330,13 @@ class TestTCCConversion(unittest.TestCase):
         self.assertNotIn("", room_creation_missing_resources)
         self.assertEqual(len(room_creation_missing_resources), 64)
 
+        unsupported_sequence_keys = {
+            str(diagnostic.get("resource", ""))
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-SEQUENCE-KEY-UNSUPPORTED"
+        }
+        self.assertEqual(unsupported_sequence_keys, {"seq_magentaswing"})
+
         expected_skipped_resources_path = os.path.join(
             PROJECT_ROOT,
             "tests",
@@ -348,6 +356,7 @@ class TestTCCConversion(unittest.TestCase):
                 | {resource for resource, _event in object_collision_source_missing}
             ),
             "rooms": sorted(room_creation_missing_resources | room_transpile_resources),
+            "sequences": sorted(unsupported_sequence_keys),
         }
         self.assertEqual(actual_skipped_resources, expected_skipped_resources)
 

@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.46 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -24,6 +24,8 @@ Paths below are relative to the generated Godot project unless a report director
 | `gm2godot/extension_compatibility_report.json` and `group_compatibility_report.json` | Project extension/native-binding findings and texture/audio group compatibility details. | When the corresponding converters inspect those resources. |
 
 The JSON diagnostic entries can include `source_path`, line and column, resource and event/API context, a manifest entry, tracking issue, and workaround. Start with the first `error`, then unsupported warnings, then other warnings.
+
+For authored sequences and timelines, `GM2GD-SEQUENCE-TRACK-UNSUPPORTED`, `GM2GD-SEQUENCE-KEY-UNSUPPORTED`, `GM2GD-SEQUENCE-EFFECT-UNSUPPORTED`, and `GM2GD-TIMELINE-ACTION-UNSUPPORTED` identify the exact `.yy` track/key/effect/action path that was deliberately omitted. The affected sequence or timeline is recorded as skipped in an otherwise usable partial conversion; supported sibling tracks remain in its descriptor. Do not hand-edit the generated descriptor to remove the warning—change the authored asset or add a tested converter/runtime mapping.
 
 The JSON/Markdown pair uses one verified report-directory binding for capture, staging, ordered replacement, rollback, invalidation and cleanup. POSIX hosts use descriptor-relative no-follow operations; Windows retains reparse-checked, no-delete-share handles and write-through moves. When an explicit external report root is missing, GM2Godot creates and durability-syncs each parent entry before descending. Ordinary failures restore the complete prior pair, but a hard crash between the two file commits is not yet pair-atomic, so keep the reports with the latest attempt evidence rather than treating either filename alone as a generation marker.
 
@@ -76,6 +78,8 @@ Use `--allow-partial` in CI only after the skipped/failed resources are intentio
 Inside the format-v2 manifest, `generation_inventory` is an additive format-v1 object. Its sorted `entries` are the complete desired managed generation, including unchanged disabled-converter carry-forward and jointly managed `project.godot`. Each entry records `path`, `kind`, `owner`, `byte_count`, `sha256`, and `mode`. Existing consumers may continue reading `generated_files`; it is now the path/kind/digest projection of the same frozen inventory, with the existing canonical-manifest `sha256: "self"` row. The inventory excludes the manifest itself, latest attempt, `.godot/`, locks, recovery records, private stages/backups, and unrelated paths.
 
 For a 0.7.43 `partial` commit, selected object, room, sprite, shader, and timeline-action outputs that were unavailable, blocked, skipped, or removed are intentionally absent from the inventory. The generated asset registry omits missing object/room/sprite/shader rows, and timeline metadata omits missing action-script paths; the canonical manifest is reconciled against that same frozen inventory. A failed or cancelled pre-decision attempt is different: it preserves the complete prior generation, so use the attempt state and `canonical_manifest.current_output` before interpreting old resource files.
+
+From 0.7.47, sequence descriptors are also required asset-registry-owned outputs. A supported sequence with an unsupported sibling track/key remains present as a freshly generated partial descriptor; a missing or rejected sequence output is omitted rather than retaining a stale `.tres`.
 
 Read `canonical_manifest` in the attempt ledger:
 

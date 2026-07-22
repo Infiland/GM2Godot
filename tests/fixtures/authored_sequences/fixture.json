@@ -1,0 +1,524 @@
+{
+  "root": {
+    "$GMSequence": "v1",
+    "%Name": "seq_authored",
+    "name": "seq_authored",
+    "resourceType": "GMSequence",
+    "resourceVersion": "2.0",
+    "length": 8.0,
+    "playback": 0,
+    "playbackSpeed": 2.0,
+    "playbackSpeedType": 1,
+    "timeUnits": 1,
+    "volume": 0.8,
+    "xorigin": 3,
+    "yorigin": 4,
+    "moments": {
+      "$KeyframeStore<MomentsEventKeyframe>": "",
+      "Keyframes": [
+        {
+          "$Keyframe<MomentsEventKeyframe>": "",
+          "Channels": {
+            "0": {
+              "$MomentsEventKeyframe": "",
+              "Events": [
+                "seq_moment_a",
+                "seq_moment_b"
+              ],
+              "resourceType": "MomentsEventKeyframe",
+              "resourceVersion": "2.0"
+            }
+          },
+          "Disabled": false,
+          "Key": 2.0,
+          "Length": 1.0,
+          "Stretch": false,
+          "resourceType": "Keyframe<MomentsEventKeyframe>",
+          "resourceVersion": "2.0"
+        }
+      ],
+      "resourceType": "KeyframeStore<MomentsEventKeyframe>",
+      "resourceVersion": "2.0"
+    },
+    "events": {
+      "$KeyframeStore<MessageEventKeyframe>": "",
+      "Keyframes": [
+        {
+          "$Keyframe<MessageEventKeyframe>": "",
+          "Channels": {
+            "0": {
+              "$MessageEventKeyframe": "",
+              "Events": [
+                "first",
+                "second"
+              ],
+              "resourceType": "MessageEventKeyframe",
+              "resourceVersion": "2.0"
+            }
+          },
+          "Disabled": false,
+          "Key": 2.0,
+          "Length": 1.0,
+          "Stretch": false,
+          "resourceType": "Keyframe<MessageEventKeyframe>",
+          "resourceVersion": "2.0"
+        }
+      ],
+      "resourceType": "KeyframeStore<MessageEventKeyframe>",
+      "resourceVersion": "2.0"
+    },
+    "eventStubScript": null,
+    "eventToFunction": {
+      "0": "",
+      "1": "",
+      "2": "",
+      "3": "",
+      "4": "",
+      "5": "",
+      "6": ""
+    },
+    "tracks": [
+      {
+        "$GMGraphicTrack": "",
+        "%Name": "Hero",
+        "name": "Hero",
+        "resourceType": "GMGraphicTrack",
+        "resourceVersion": "2.0",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "$AssetSpriteKeyframe": "",
+                  "Id": {
+                    "name": "spr_hero",
+                    "path": "sprites/spr_hero/spr_hero.yy"
+                  },
+                  "resourceType": "AssetSpriteKeyframe",
+                  "resourceVersion": "2.0"
+                }
+              },
+              "Disabled": false,
+              "Key": 0.0,
+              "Length": 8.0,
+              "Stretch": false
+            }
+          ]
+        },
+        "tracks": [
+          {
+            "$GMRealTrack": "",
+            "name": "position",
+            "resourceType": "GMRealTrack",
+            "interpolation": 1,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 0.0,
+                      "resourceType": "RealKeyframe"
+                    },
+                    "1": {
+                      "RealValue": 0.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 0.0
+                },
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 8.0,
+                      "resourceType": "RealKeyframe"
+                    },
+                    "1": {
+                      "RealValue": 4.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 4.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMRealTrack": "",
+            "name": "rotation",
+            "resourceType": "GMRealTrack",
+            "interpolation": 0,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 30.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMColourTrack": "",
+            "name": "blend_multiply",
+            "resourceType": "GMColourTrack",
+            "interpolation": 1,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "Colour": 4278190335,
+                      "resourceType": "ColourKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          }
+        ]
+      },
+      {
+        "$GMInstanceTrack": "",
+        "name": "Actor",
+        "resourceType": "GMInstanceTrack",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "Id": {
+                    "name": "obj_actor",
+                    "path": "objects/obj_actor/obj_actor.yy"
+                  },
+                  "resourceType": "AssetInstanceKeyframe"
+                }
+              },
+              "Key": 3.0,
+              "Length": 4.0
+            }
+          ]
+        },
+        "tracks": []
+      },
+      {
+        "$GMAudioTrack": "",
+        "name": "Sound",
+        "resourceType": "GMAudioTrack",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "Id": {
+                    "name": "snd_theme",
+                    "path": "sounds/snd_theme/snd_theme.yy"
+                  },
+                  "Mode": 1,
+                  "resourceType": "AudioKeyframe"
+                }
+              },
+              "Key": 1.0,
+              "Length": 6.0
+            }
+          ]
+        },
+        "tracks": [
+          {
+            "$GMRealTrack": "",
+            "name": "gain",
+            "resourceType": "GMRealTrack",
+            "interpolation": 1,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 0.5,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMAudioEffectTrack": "",
+            "name": "audioEffect_gain",
+            "effectType": "gain",
+            "effect": {
+              "bypass": false,
+              "gain": 0.5
+            },
+            "resourceType": "GMAudioEffectTrack",
+            "tracks": [
+              {
+                "$GMRealTrack": "",
+                "name": "gain",
+                "resourceType": "GMRealTrack",
+                "interpolation": 1,
+                "keyframes": {
+                  "Keyframes": [
+                    {
+                      "Channels": {
+                        "0": {
+                          "RealValue": 0.5,
+                          "resourceType": "RealKeyframe"
+                        }
+                      },
+                      "Key": 0.0,
+                      "Length": 0.0
+                    },
+                    {
+                      "Channels": {
+                        "0": {
+                          "RealValue": 1.0,
+                          "resourceType": "RealKeyframe"
+                        }
+                      },
+                      "Key": 4.0,
+                      "Length": 1.0
+                    }
+                  ]
+                },
+                "tracks": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "$GMTextTrack": "",
+        "name": "Caption",
+        "resourceType": "GMTextTrack",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "Alignment": 257,
+                  "EnableEffects": true,
+                  "EnableGlow": false,
+                  "EnableOutline": true,
+                  "EnableShadow": true,
+                  "Id": {
+                    "name": "fnt_caption",
+                    "path": "fonts/fnt_caption/fnt_caption.yy"
+                  },
+                  "Text": "Hello",
+                  "Wrap": true,
+                  "resourceType": "AssetTextKeyframe"
+                }
+              },
+              "Key": 0.0,
+              "Length": 8.0
+            }
+          ]
+        },
+        "tracks": [
+          {
+            "$GMRealTrack": "",
+            "name": "frameSize",
+            "resourceType": "GMRealTrack",
+            "interpolation": 0,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 160.0,
+                      "resourceType": "RealKeyframe"
+                    },
+                    "1": {
+                      "RealValue": 40.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMRealTrack": "",
+            "name": "characterSpacing",
+            "resourceType": "GMRealTrack",
+            "interpolation": 0,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 2.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMColourTrack": "",
+            "name": "outlineColour",
+            "resourceType": "GMColourTrack",
+            "interpolation": 0,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "Colour": 4278190335,
+                      "resourceType": "ColourKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          },
+          {
+            "$GMRealTrack": "",
+            "name": "outlineDist",
+            "resourceType": "GMRealTrack",
+            "interpolation": 0,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 2.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          }
+        ]
+      },
+      {
+        "$GMSequenceTrack": "",
+        "name": "Nested",
+        "resourceType": "GMSequenceTrack",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "Id": {
+                    "name": "seq_nested",
+                    "path": "sequences/seq_nested/seq_nested.yy"
+                  },
+                  "resourceType": "AssetSequenceKeyframe"
+                }
+              },
+              "Key": 0.0,
+              "Length": 8.0
+            }
+          ]
+        },
+        "tracks": []
+      }
+    ]
+  },
+  "nested": {
+    "$GMSequence": "v1",
+    "%Name": "seq_nested",
+    "name": "seq_nested",
+    "resourceType": "GMSequence",
+    "resourceVersion": "2.0",
+    "length": 8.0,
+    "playback": 0,
+    "playbackSpeed": 1.0,
+    "playbackSpeedType": 1,
+    "timeUnits": 1,
+    "events": {
+      "Keyframes": []
+    },
+    "moments": {
+      "Keyframes": []
+    },
+    "eventToFunction": {},
+    "tracks": [
+      {
+        "$GMGraphicTrack": "",
+        "name": "NestedSprite",
+        "resourceType": "GMGraphicTrack",
+        "interpolation": 1,
+        "keyframes": {
+          "Keyframes": [
+            {
+              "Channels": {
+                "0": {
+                  "Id": {
+                    "name": "spr_nested",
+                    "path": "sprites/spr_nested/spr_nested.yy"
+                  },
+                  "resourceType": "AssetSpriteKeyframe"
+                }
+              },
+              "Key": 0.0,
+              "Length": 8.0
+            }
+          ]
+        },
+        "tracks": [
+          {
+            "$GMRealTrack": "",
+            "name": "position",
+            "resourceType": "GMRealTrack",
+            "interpolation": 1,
+            "keyframes": {
+              "Keyframes": [
+                {
+                  "Channels": {
+                    "0": {
+                      "RealValue": 1.0,
+                      "resourceType": "RealKeyframe"
+                    },
+                    "1": {
+                      "RealValue": 2.0,
+                      "resourceType": "RealKeyframe"
+                    }
+                  },
+                  "Key": 0.0,
+                  "Length": 1.0
+                }
+              ]
+            },
+            "tracks": []
+          }
+        ]
+      }
+    ]
+  }
+}

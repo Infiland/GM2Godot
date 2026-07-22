@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.46 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -152,6 +152,20 @@ Included Files tree-traversal changes must retain the deterministic depth probe 
 
 The depth probe exercises 25, 50, 100, and 200 nested directories, requires at most `16 * depth + 64` binding checks, and limits each doubling to 2.25x work. Run the native Windows Included Files workflow for path-fallback and junction coverage; POSIX-only descriptor results do not substitute for the Windows path.
 
+Authored sequence/timeline changes must run their descriptor, registry, runtime-segment, API-manifest, generated timeline GML, and exact Godot playback/order coverage:
+
+```bash
+GODOT_BIN=/path/to/Godot-4.7.1 \
+  ./venv/bin/python -m unittest \
+  tests.test_sequences_timelines_godot \
+  tests.test_asset_registry \
+  tests.test_gml_runtime_segments \
+  tests.test_gml_api_manifest \
+  tests.test_stale_managed_output_invalidation
+```
+
+The mixed current-LTS fixture covers supported sprite, instance, audio, text, nested-sequence, mapped audio-effect, moment, and broadcast keys. Keep same-frame moment/broadcast order, eager object creation, playback-speed modes, interpolation/transforms, generated `.tres` loading, timeline GML order, audio-bus cleanup, and source-linked unsupported-type diagnostics under exact `4.7.1.stable.official.a13da4feb`.
+
 Managed-generation inventory changes must retain the complete deterministic schema, migration, carry-forward, and mutation suite:
 
 ```bash
@@ -174,7 +188,7 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
   tests.test_generation_inventory
 ```
 
-The stale-output suite establishes a successful object/room/sprite/shader/timeline generation, then separately removes YYP resources, loses source files, and injects object, room, and timeline transpilation blockers. It requires all owned multi-file outputs, registry rows, timeline script references, manifest resources, and inventory entries to agree after a committed partial rerun. Cancellation and ordinary publication failure must retain the prior generation; unknown user files under managed roots must fail closed and remain unchanged; unrelated files and disabled-converter output must be preserved. The Godot-gated combined case requires exact `4.7.1.stable.official.a13da4feb` import/resource validation with no engine warnings or errors.
+The stale-output suite establishes a successful object/room/sprite/shader/sequence/timeline generation, then separately removes YYP resources, loses source files, and injects object, room, sequence, and timeline blockers. It requires all owned multi-file outputs, sequence descriptors, registry rows, timeline script references, manifest resources, and inventory entries to agree after a committed partial rerun. Cancellation and ordinary publication failure must retain the prior generation; unknown user files under managed roots must fail closed and remain unchanged; unrelated files and disabled-converter output must be preserved. The Godot-gated combined case requires exact `4.7.1.stable.official.a13da4feb` import/resource validation with no engine warnings or errors.
 
 Production conversion-transaction changes must retain both the real mutation/cooperative-cancellation suite and the subprocess crash matrix:
 

@@ -176,15 +176,16 @@ This file tracks GameMaker project/resource data that the converter must eventua
 
 - [x] Asset registry recognizes sequence and timeline categories.
 - [x] Runtime has a compatibility subset for sequences/timelines.
-- [ ] Convert sequence metadata.
-- [ ] Convert sequence playback length and speed.
-- [ ] Convert tracks and keyframes.
+- [x] Convert sequence metadata.
+- [x] Convert sequence playback length and speed.
+- [x] Convert supported tracks and keyframes.
 - [ ] Convert curve interpolation.
-- [ ] Convert sprite, instance, audio, text, nested sequence, graphic, and effect tracks.
-- [ ] Convert broadcast messages and moment events.
-- [ ] Convert timeline moments and GML actions.
-- [ ] Implement timeline variables and runtime control.
-- [ ] Implement sequence layer elements and runtime sequence APIs.
+- [x] Convert sprite, instance, audio, text, nested sequence, graphic, and supported effect tracks.
+- [x] Convert broadcast messages and moment events.
+- [x] Convert timeline moments and GML actions.
+- [x] Implement timeline variables and runtime control.
+- [x] Implement supported sequence layer element lifecycle and playback APIs.
+- [ ] Convert clip-mask/group/particle sequence tracks, runtime-authored tracks/keys, object overrides, and unsupported effect families.
 
 ## Particles, Effects, Animation Curves
 

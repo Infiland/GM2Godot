@@ -16,6 +16,13 @@ from unittest.mock import MagicMock, patch
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+AUTHORED_SEQUENCE_FIXTURE = os.path.join(
+    PROJECT_ROOT,
+    "tests",
+    "fixtures",
+    "authored_sequences",
+    "fixture.json",
+)
 
 from src.conversion.asset_registry import (
     ASSET_REGISTRY_RELATIVE_PATH,
@@ -301,7 +308,28 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 "length": 120,
                 "playbackSpeed": 30,
                 "playback": 1,
-                "tracks": [{"name": "Title"}],
+                "tracks": [
+                    {
+                        "resourceType": "GMGraphicTrack",
+                        "name": "Title",
+                        "interpolation": 1,
+                        "keyframes": {
+                            "Keyframes": [
+                                {
+                                    "Key": 0,
+                                    "Length": 120,
+                                    "Channels": {
+                                        "0": {
+                                            "resourceType": "AssetSpriteKeyframe",
+                                            "Id": {"name": "s_player"},
+                                        }
+                                    },
+                                }
+                            ]
+                        },
+                        "tracks": [],
+                    }
+                ],
                 "moments": [{"frame": 2, "callable": "_on_sequence_moment"}],
                 "broadcastMessages": [{"frame": 4, "message": "beat"}],
             },
@@ -408,9 +436,19 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(sequence_metadata["length"], 120.0)
         self.assertEqual(sequence_metadata["playback_speed"], 30.0)
         self.assertEqual(sequence_metadata["loopmode"], 1)
-        self.assertEqual(sequence_metadata["tracks"], [{"name": "Title"}])
+        self.assertEqual(sequence_metadata["descriptor_format_version"], 1)
+        self.assertEqual(sequence_metadata["tracks"][0]["kind"], "sprite")
+        self.assertEqual(sequence_metadata["tracks"][0]["name"], "Title")
+        self.assertEqual(
+            sequence_metadata["tracks"][0]["keyframes"][0]["asset"],
+            "s_player",
+        )
         self.assertEqual(sequence_metadata["moments"][0]["callable"], "_on_sequence_moment")
         self.assertEqual(sequence_metadata["broadcasts"][0]["message"], "beat")
+        self.assertEqual(
+            by_name["seq_intro"].godot_path,
+            "res://sequences/seq_intro/seq_intro.tres",
+        )
         self.assertEqual(by_name["tl_intro"].asset_type, "timeline")
         timeline_metadata = by_name["tl_intro"].metadata
         self.assertIsNotNone(timeline_metadata)
@@ -551,6 +589,247 @@ class TestAssetRegistryConverter(unittest.TestCase):
                     "particles/ps_authored/ps_authored.yy"
                 )
             )
+
+    def test_authored_sequence_descriptors_generate_managed_resources(self) -> None:
+        with open(AUTHORED_SEQUENCE_FIXTURE, encoding="utf-8") as fixture_file:
+            fixture = cast(JsonDict, json.load(fixture_file))
+        _write_yyp(
+            self.gm_dir,
+            [
+                ("sequences", "seq_authored"),
+                ("sequences", "seq_nested"),
+            ],
+        )
+        self._write_resource(
+            "sequences",
+            "seq_authored",
+            "GMSequence",
+            "folders/Sequences.yy",
+            cast(dict[str, object], fixture["root"]),
+        )
+        self._write_resource(
+            "sequences",
+            "seq_nested",
+            "GMSequence",
+            "folders/Sequences.yy",
+            cast(dict[str, object], fixture["nested"]),
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        entries = {entry.name: entry for entry in converter.build_entries()}
+
+        root = entries["seq_authored"]
+        self.assertEqual(
+            root.godot_path,
+            "res://sequences/seq_authored/seq_authored.tres",
+        )
+        assert root.metadata is not None
+        self.assertTrue(root.metadata["complete"])
+        self.assertEqual(
+            [track["kind"] for track in root.metadata["tracks"]],
+            ["sprite", "instance", "audio", "text", "sequence"],
+        )
+        output_path = os.path.join(
+            self.godot_dir,
+            *root.godot_path.removeprefix("res://").split("/"),
+        )
+        with open(output_path, encoding="utf-8") as resource_file:
+            resource = resource_file.read()
+        self.assertIn(
+            'metadata/gamemaker_resource_type = "GMSequence"',
+            resource,
+        )
+        self.assertIn("metadata/gamemaker_sequence_descriptor", resource)
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=2,
+                executed=2,
+                completed=2,
+            ),
+        )
+        self.assertFalse(
+            [
+                diagnostic
+                for diagnostic in diagnostics.diagnostics()
+                if diagnostic.issue_number == 707
+            ]
+        )
+
+    def test_unsupported_sequence_track_and_key_are_partial_source_diagnostics(
+        self,
+    ) -> None:
+        _write_yyp(self.gm_dir, [("sequences", "seq_partial")])
+        self._write_resource(
+            "sequences",
+            "seq_partial",
+            "GMSequence",
+            "folders/Sequences.yy",
+            {
+                "length": 10,
+                "events": {"Keyframes": []},
+                "moments": {"Keyframes": []},
+                "tracks": [
+                    {
+                        "resourceType": "GMClipMaskTrack",
+                        "name": "Unsupported Mask",
+                    },
+                    {
+                        "resourceType": "GMGraphicTrack",
+                        "name": "Broken Sprite",
+                        "keyframes": {
+                            "Keyframes": [
+                                {
+                                    "Channels": {
+                                        "1": {
+                                            "resourceType": "UnknownSpriteKey",
+                                            "Id": {"name": "spr_missing"},
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "tracks": [],
+                    },
+                    {
+                        "resourceType": "GMAudioTrack",
+                        "name": "Unsupported Effect",
+                        "keyframes": {
+                            "Keyframes": [
+                                {
+                                    "Channels": {
+                                        "0": {
+                                            "resourceType": "AudioKeyframe",
+                                            "Id": {"name": "snd_test"},
+                                        }
+                                    },
+                                    "Length": 10,
+                                }
+                            ]
+                        },
+                        "tracks": [
+                            {
+                                "resourceType": "GMAudioEffectTrack",
+                                "name": "audioEffect_bitcrusher",
+                                "effectType": "bitcrusher",
+                                "tracks": [],
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        entry = converter.build_entries()[0]
+
+        assert entry.metadata is not None
+        self.assertFalse(entry.metadata["complete"])
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        sequence_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code
+            in {
+                "GM2GD-SEQUENCE-EFFECT-UNSUPPORTED",
+                "GM2GD-SEQUENCE-TRACK-UNSUPPORTED",
+                "GM2GD-SEQUENCE-KEY-UNSUPPORTED",
+            }
+        ]
+        self.assertEqual(
+            {diagnostic.code for diagnostic in sequence_diagnostics},
+            {
+                "GM2GD-SEQUENCE-EFFECT-UNSUPPORTED",
+                "GM2GD-SEQUENCE-TRACK-UNSUPPORTED",
+                "GM2GD-SEQUENCE-KEY-UNSUPPORTED",
+            },
+        )
+        for diagnostic in sequence_diagnostics:
+            self.assertEqual(diagnostic.issue_number, 707)
+            self.assertEqual(diagnostic.resource, "seq_partial")
+            self.assertEqual(diagnostic.resource_type, "sequence")
+            self.assertIsNotNone(diagnostic.manifest_entry)
+            self.assertIsNotNone(diagnostic.source_path)
+            assert diagnostic.source_path is not None
+            self.assertTrue(
+                diagnostic.source_path.endswith(
+                    "sequences/seq_partial/seq_partial.yy"
+                )
+            )
+
+    def test_unsupported_timeline_action_is_partial_source_diagnostic(
+        self,
+    ) -> None:
+        _write_yyp(self.gm_dir, [("timelines", "tl_partial")])
+        self._write_resource(
+            "timelines",
+            "tl_partial",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {
+                "momentList": [
+                    {
+                        "moment": 4,
+                        "actions": [
+                            {
+                                "resourceType": "GMVisualAction",
+                                "actionName": "unsupported",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+
+        self.assertEqual(
+            converter.conversion_step_result(
+                finalize_unfinished_as=None,
+            ).resources,
+            ConversionCounts(
+                requested=1,
+                executed=1,
+                skipped=1,
+            ),
+        )
+        unsupported = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-TIMELINE-ACTION-UNSUPPORTED"
+        ]
+        self.assertEqual(len(unsupported), 1)
+        self.assertEqual(unsupported[0].issue_number, 707)
+        self.assertEqual(unsupported[0].resource, "tl_partial")
+        self.assertEqual(unsupported[0].event, "moment 4")
+        self.assertEqual(
+            unsupported[0].manifest_entry,
+            "momentList[frame=4].actions[0]",
+        )
+        self.assertIsNotNone(unsupported[0].source_path)
+        assert unsupported[0].source_path is not None
+        self.assertTrue(
+            unsupported[0].source_path.endswith(
+                "timelines/tl_partial/tl_partial.yy"
+            )
+        )
 
     def test_timeline_source_fields_resolve_owner_and_project_relative_paths(self) -> None:
         _write_yyp(self.gm_dir, [("timelines", "tl_paths")])

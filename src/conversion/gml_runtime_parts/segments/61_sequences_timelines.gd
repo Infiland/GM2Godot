@@ -1,4 +1,4 @@
-const GML_SEQUENCE_TRACKS_UNSUPPORTED_MESSAGE = "GM2Godot preserves sequence playback metadata, but authored track/keyframe evaluation is not yet converted to AnimationPlayer tracks."
+const GML_SEQUENCE_DESCRIPTOR_FORMAT_VERSION = 1
 
 
 static func gml_timeline_exists(timeline):
@@ -65,6 +65,31 @@ static func gml_timeline_step(instance):
 	var state = _gml_timeline_state(instance)
 	if state == null:
 		return false
+	state["index"] = _gml_object_timeline_get(
+		instance,
+		"timeline_index",
+		state.get("index", -1)
+	)
+	state["position"] = _gml_object_timeline_get(
+		instance,
+		"timeline_position",
+		state.get("position", 0.0)
+	)
+	state["speed"] = _gml_object_timeline_get(
+		instance,
+		"timeline_speed",
+		state.get("speed", 1.0)
+	)
+	state["running"] = _gml_object_timeline_get(
+		instance,
+		"timeline_running",
+		state.get("running", false)
+	)
+	state["loop"] = _gml_object_timeline_get(
+		instance,
+		"timeline_loop",
+		state.get("loop", false)
+	)
 	if not bool(state.get("running", false)):
 		return true
 	var timeline = state.get("index", -1)
@@ -75,11 +100,26 @@ static func gml_timeline_step(instance):
 	var previous_position = position
 	position += speed_value
 	var max_moment = gml_timeline_max_moment(timeline)
-	if bool(state.get("loop", false)) and max_moment >= 0 and position > float(max_moment):
-		position = 0.0
+	if bool(state.get("loop", false)) and max_moment >= 0:
+		var span = float(max_moment + 1)
+		_gml_timeline_dispatch_wrapped(
+			instance,
+			timeline,
+			previous_position,
+			position,
+			span
+		)
+		position = fposmod(position, span)
+	else:
+		_gml_timeline_dispatch_between(
+			instance,
+			timeline,
+			previous_position,
+			position,
+			speed_value
+		)
 	state["position"] = position
 	_gml_timeline_apply_state(instance, state)
-	_gml_timeline_dispatch_between(instance, timeline, previous_position, position, speed_value)
 	return true
 
 
@@ -135,8 +175,7 @@ static func gml_layer_sequence_create(layer, x, y, sequence):
 	var handle = _gml_layer_element_register(node)
 	instance["elementID"] = handle
 	_gml_sequence_elements_by_index[handle.index] = instance
-	if _gml_sequence_has_tracks(sequence_object):
-		push_warning(GML_SEQUENCE_TRACKS_UNSUPPORTED_MESSAGE)
+	_gml_sequence_prepare_instance(instance)
 	return handle
 
 
@@ -146,6 +185,7 @@ static func gml_layer_sequence_destroy(sequence_element_id):
 		return false
 	var element = instance.get("elementID", null)
 	var node = _gml_layer_element_resolve_node(element)
+	_gml_sequence_cleanup_instance(instance)
 	if element is GMLHandle:
 		_gml_sequence_elements_by_index.erase(element.index)
 		_gml_layer_element_unregister_handle(element)
@@ -169,6 +209,7 @@ static func gml_layer_sequence_headpos(sequence_element_id, position):
 	if instance == null:
 		return false
 	instance["headPosition"] = _gml_sequence_clamp_head_position(instance, _to_real(position))
+	_gml_sequence_evaluate_instance(instance)
 	return true
 
 
@@ -244,10 +285,7 @@ static func gml_layer_sequence_step(sequence_element_id, frames = 1.0):
 	if bool(instance.get("paused", false)) or bool(instance.get("finished", false)):
 		return true
 	var delta = _to_real(frames) * _to_real(instance.get("speedScale", 1.0)) * float(instance.get("headDirection", 1))
-	var previous_position = _to_real(instance.get("headPosition", 0.0))
-	var next_position = _to_real(instance.get("headPosition", 0.0)) + delta
-	instance["headPosition"] = _gml_sequence_clamp_head_position(instance, next_position)
-	_gml_sequence_dispatch_between(instance, previous_position, _to_real(instance["headPosition"]), delta)
+	_gml_sequence_advance_instance(instance, delta)
 	return true
 
 
@@ -318,6 +356,39 @@ static func _gml_timeline_dispatch_between(instance, timeline, previous_position
 			_gml_sequence_timeline_dispatch_action(instance, action)
 
 
+static func _gml_timeline_dispatch_wrapped(instance, timeline, previous_position, position, span):
+	var moments = _gml_timeline_moments(timeline)
+	if moments == null or span <= 0.0 or is_equal_approx(previous_position, position):
+		return
+	var ordered_moments = moments.keys()
+	ordered_moments.sort()
+	var direction = 1 if position > previous_position else -1
+	if direction < 0:
+		ordered_moments.reverse()
+	var first_cycle = int(floor(previous_position / span))
+	var last_cycle = int(floor(position / span))
+	var cycle = first_cycle
+	while (
+		(direction > 0 and cycle <= last_cycle)
+		or (direction < 0 and cycle >= last_cycle)
+	):
+		for moment in ordered_moments:
+			var event_position = float(moment) + float(cycle) * span
+			if direction > 0 and (
+				event_position <= previous_position
+				or event_position > position
+			):
+				continue
+			if direction < 0 and (
+				event_position >= previous_position
+				or event_position < position
+			):
+				continue
+			for action in moments[moment]:
+				_gml_sequence_timeline_dispatch_action(instance, action)
+		cycle += direction
+
+
 static func _gml_object_timeline_get(instance, member_name, fallback):
 	if instance is Object and _object_has_property(instance, member_name):
 		return instance.get(member_name)
@@ -361,7 +432,11 @@ static func _gml_sequence_object_from_entry(entry):
 		"asset": int(entry["id"]),
 		"length": length,
 		"playbackSpeed": playback_speed,
+		"playbackSpeedType": int(metadata.get("playback_speed_type", 0)) if typeof(metadata) == TYPE_DICTIONARY else 0,
 		"loopmode": loopmode,
+		"volume": _to_real(metadata.get("volume", 1.0)) if typeof(metadata) == TYPE_DICTIONARY else 1.0,
+		"xorigin": _to_real(metadata.get("xorigin", 0.0)) if typeof(metadata) == TYPE_DICTIONARY else 0.0,
+		"yorigin": _to_real(metadata.get("yorigin", 0.0)) if typeof(metadata) == TYPE_DICTIONARY else 0.0,
 		"tracks": metadata.get("tracks", []) if typeof(metadata) == TYPE_DICTIONARY else [],
 		"moments": metadata.get("moments", []) if typeof(metadata) == TYPE_DICTIONARY else [],
 		"broadcasts": metadata.get("broadcasts", []) if typeof(metadata) == TYPE_DICTIONARY else [],
@@ -382,6 +457,7 @@ static func _gml_sequence_instance_record(node, sequence_object):
 		"paused": false,
 		"finished": false,
 		"activeTracks": [],
+		"trackStates": [],
 		"eventLog": [],
 	}
 
@@ -405,7 +481,17 @@ static func _gml_sequence_clamp_head_position(instance, position):
 		return max(_to_real(position), 0.0)
 	var loopmode = int(sequence_object.get("loopmode", 0)) if typeof(sequence_object) == TYPE_DICTIONARY else 0
 	if loopmode == 1:
+		instance["finished"] = false
 		return fposmod(_to_real(position), length)
+	if loopmode == 2:
+		instance["finished"] = false
+		var period = length * 2.0
+		var pingpong_position = fposmod(_to_real(position), period)
+		if pingpong_position > length:
+			instance["headDirection"] = -1
+			return period - pingpong_position
+		instance["headDirection"] = 1
+		return pingpong_position
 	var clamped = clamp(_to_real(position), 0.0, length)
 	instance["finished"] = clamped >= length
 	return clamped
@@ -457,21 +543,28 @@ static func _gml_sequence_dispatch_between(instance, previous_position, position
 			for event_key in event.keys():
 				event_action[event_key] = event[event_key]
 			event_action["kind"] = key.trim_suffix("s")
+			event_action["_direction"] = -1 if speed_value < 0.0 else 1
 			event_action["owner"] = instance.get("owner", null)
 			event_action["node"] = instance.get("node", null)
+			event_action["element_id"] = instance.get("elementID", null)
 			actions.append(event_action)
 	actions.sort_custom(_gml_sequence_event_sort)
 	for action in actions:
 		instance["eventLog"].append(action)
-		_gml_sequence_timeline_dispatch_action(instance.get("owner", null), action)
+		_gml_sequence_timeline_dispatch_action(instance, action)
 
 
 static func _gml_sequence_event_sort(left, right):
 	var left_frame = _to_real(left.get("frame", 0.0)) if typeof(left) == TYPE_DICTIONARY else 0.0
 	var right_frame = _to_real(right.get("frame", 0.0)) if typeof(right) == TYPE_DICTIONARY else 0.0
+	var direction = int(left.get("_direction", 1)) if typeof(left) == TYPE_DICTIONARY else 1
 	if left_frame == right_frame:
-		return str(left.get("kind", "")) < str(right.get("kind", ""))
-	return left_frame < right_frame
+		var left_kind_order = 0 if str(left.get("kind", "")) == "moment" else 1
+		var right_kind_order = 0 if str(right.get("kind", "")) == "moment" else 1
+		if left_kind_order != right_kind_order:
+			return left_kind_order < right_kind_order
+		return int(left.get("order", 0)) < int(right.get("order", 0))
+	return left_frame < right_frame if direction >= 0 else left_frame > right_frame
 
 
 static func _gml_sequence_timeline_dispatch_action(instance, action):
@@ -481,6 +574,8 @@ static func _gml_sequence_timeline_dispatch_action(instance, action):
 	if typeof(action) != TYPE_DICTIONARY:
 		gml_script_execute(action, [instance])
 		return
+	if str(action.get("kind", "")) == "broadcast":
+		_gml_sequence_emit_broadcast(instance, action)
 	var owner = action.get("owner", instance)
 	var callable_name = action.get("callable", "")
 	if is_string(callable_name) and owner is Object and owner.has_method(str(callable_name)):
@@ -492,7 +587,12 @@ static func _gml_sequence_timeline_dispatch_action(instance, action):
 		return
 	var script = action.get("script", null)
 	if script != null:
-		gml_script_execute(script, [instance])
+		gml_script_execute(
+			script,
+			[],
+			instance,
+			action.get("owner", gml_instance_noone())
+		)
 
 
 static func _gml_sequence_timeline_execute_script_path(script_path, instance):

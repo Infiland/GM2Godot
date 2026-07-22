@@ -229,6 +229,18 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_sequences_timelines_godot.py",),
     ),
     _segment(
+        "62_authored_sequence_tracks.gd",
+        "Authored sequence track, keyframe, nested playback, effect, and broadcast evaluation.",
+        depends_on=(
+            "10_handles_and_instances.gd",
+            "48_drawing_basic_forms.gd",
+            "54_audio_runtime.gd",
+            "56_time_alarms.gd",
+            "61_sequences_timelines.gd",
+        ),
+        tests=("tests/test_sequences_timelines_godot.py",),
+    ),
+    _segment(
         "65_files_ini_json.gd",
         "Filesystem, text file, binary file, INI, and JSON helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "60_conversion_helpers.gd"),

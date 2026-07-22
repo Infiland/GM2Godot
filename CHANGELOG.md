@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.47 - 2026-07-22
+
+- Converted supported authored GameMaker sprite, instance, audio, text, nested-sequence, and audio-effect tracks into deterministic managed sequence descriptors with ordered asset/parameter keys, assign/linear interpolation, transforms, playback speed modes, draw order, and nested runtime evaluation.
+- Converted sequence moments and broadcast keyframes plus legacy timeline GML moments into deterministic GameMaker frame order, including broadcast `event_data`, eager object-track creation, managed per-track audio buses/effects, and exact cleanup.
+- Added source-linked partial-conversion diagnostics for every unsupported sequence track/key/effect or timeline action type, mixed current-LTS fixtures, and exact Godot 4.7.1 resource/playback/order coverage. Runtime-authored tracks, object overrides, animation-curve keys, clip masks/groups, particle sequence tracks, and unmapped audio/text effects remain explicit non-goals.
+
 ## 0.7.46 - 2026-07-22
 
 - Converted authored GameMaker particle systems into stable generated Godot resources and normalized runtime descriptors for embedded particle types, emitters, origins, draw order, regions, timing, secondary-spawn metadata, and supported visual properties.

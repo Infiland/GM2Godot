@@ -355,7 +355,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "Particle Systems",
         "GML Reference: Asset Management",
         "partial",
-        592,
+        707,
         "particle asset converter and runtime",
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Particle_Systems/Particle_Systems.htm",
@@ -403,7 +403,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequences.htm",
         ("Sequences and Timelines",),
         ("tests/test_sequences_timelines_godot.py",),
-        "Runtime compatibility subset exists; authored conversion and scheduler integration remain open.",
+        "Supported authored tracks, keyframes, transforms, effects, moments, broadcasts, nesting, and timeline GML scheduling are converted; runtime track authoring, object overrides, curves, and unsupported track families remain explicit non-goals.",
     ),
     _entry(
         "reference_shaders",

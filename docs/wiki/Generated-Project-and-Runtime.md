@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.46 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -35,6 +35,7 @@ GodotProject/
 ├── paths/
 ├── rooms/
 ├── scripts/
+├── sequences/
 ├── shaders/
 ├── sounds/
 ├── sprites/
@@ -44,7 +45,7 @@ GodotProject/
 GM2Godot treats these directories as managed output roots:
 
 - `addons/gm2godot_extensions/`
-- `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `paths/`, `rooms/`, `scripts/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
+- `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `paths/`, `rooms/`, `scripts/`, `sequences/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
 
 The top-level `default_bus_layout.tres`, `icon.ico`, and `icon.png` are managed files. `project.godot` is jointly managed: GM2Godot can update the generated `GM*` autoload entries and, when a room is generated, set `run/main_scene` from the first GameMaker `RoomOrderNodes` entry. Existing unrelated project settings and unrelated autoloads are preserved.
 
@@ -131,6 +132,8 @@ When one of the selected object, room, sprite, shader, or asset-registry/timelin
 Before the runtime asset registry is rendered, object/room/sprite/shader rows are checked against the confined candidate inventory. Rows whose required outputs are absent are omitted, and missing timeline action-script references are stripped while retaining the timeline's supported metadata. Canonical manifest resources are reconciled against the same frozen inventory used to render `generated_files`. If room conversion leaves a previous `run/main_scene` pointing to a missing `res://rooms/` output, that one GM2Godot-managed setting is removed; unrelated project settings and non-room startup scenes remain unchanged.
 
 Disabled converters retain the prior byte-, mode-, and digest-exact inventory by design, so a selective run must include `asset_registry` when its runtime registry also needs refreshing. A failed or cancelled run before the durable decision still exposes the complete prior generation, not the candidate's planned deletions. Files outside the documented managed roots are never deletion candidates. Unknown files added inside a managed root make the frozen topology disagree with its manifest and fail closed while preserving the file; GM2Godot does not infer ownership from location alone after a canonical inventory exists.
+
+Version 0.7.47 adds each generated sequence descriptor `.tres` as the required private output of its logical sequence resource under the `asset_registry` owner. A removed, rejected, or partial sequence therefore cannot leave an earlier descriptor masquerading as current output; supported partial descriptors are regenerated with their source-linked unsupported-type diagnostics.
 
 The source-of-truth policy follows GameMaker LTS 2026's official [Project Format](https://manual.gamemaker.io/lts/en/Additional_Information/Project_Format.htm): the root YYP describes project resources, while each YY describes one resource and its associated files. Shader ownership follows the LTS [Shader Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Shaders.htm) two-stage asset model, and timeline action ownership follows the LTS [Timeline Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Timelines.htm) moment/code model. Validation uses Godot 4.7's documented [`--import`](https://docs.godotengine.org/en/4.7/tutorials/editor/command_line_tutorial.html) scan and [import process](https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/import_process.html), under which project assets are rescanned from files while imported cache state lives under `.godot/` and can be regenerated.
 
@@ -224,6 +227,7 @@ For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Ro
 Begin Step
 → time sources
 → alarms
+→ authored sequences and timelines
 → Step
 → motion/path update
 → collision dispatch
@@ -252,6 +256,16 @@ At runtime, each authored emitter becomes a managed `GPUParticles2D` with a `Par
 A `GMRParticleSystem` room asset keeps its layer visibility, inverse-depth `z_index`, layer offset, element position/rotation/scale/modulate, source asset ID, and source metadata. Room entry creates its system below that element. Tree exit destroys the system's emitter and owned-type handles and frees every managed particle node; directly created one-shot nodes also free themselves after Godot's `finished` signal. Non-empty legacy attractor, destroyer, deflector, or changer fields do not silently disappear: conversion records `GM2GD-PARTICLE-MODIFIER-UNSUPPORTED` against the source `.yy` field and retains the unsupported category in the descriptor.
 
 These mappings follow the GameMaker LTS [Particle System Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Particle_Systems.htm), [`particle_get_info`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/particle_get_info.htm), and [`part_system_create`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Systems/part_system_create.htm) contracts. Generated behavior and cleanup are tested with exact Godot 4.7.1 [`GPUParticles2D`](https://docs.godotengine.org/en/4.7/classes/class_gpuparticles2d.html) and [`ParticleProcessMaterial`](https://docs.godotengine.org/en/4.7/classes/class_particleprocessmaterial.html) APIs.
+
+### Authored sequences and timeline moments
+
+Version 0.7.47 normalizes each supported `GMSequence` into a deterministic descriptor and a managed loadable resource under `res://sequences/<path>/<name>.tres`. Asset and parameter key order, key frame/length/stretch/disabled state, assign or linear interpolation, sequence length, both playback-speed modes, one-shot/loop/ping-pong state, origins, volume, track visibility, and top-to-bottom draw order are retained. Supported asset tracks are sprite, instance, audio, text, and nested sequence. Object-track instances are created with the sequence and visibility-gated at their authored keys, matching GameMaker rather than repeatedly creating them.
+
+The generated runtime evaluates position, rotation (with GameMaker-to-Godot direction conversion), origin, scale, colour multiply, image index/speed, audio position/gain/pitch, text frame/alignment/wrapping/spacing/outline/shadow, and nested sequence state. Each audio track owns a collision-safe temporary Godot bus; gain, reverb, delay, LPF, HPF, high-shelf, and low-shelf effects are installed in authored order when their documented properties map safely. Sequence destruction unregisters eager object instances, stops players, recursively cleans nested state, and removes every owned bus.
+
+Moment keys call converted script functions in sequence-instance scope before same-frame broadcast keys. Broadcast strings preserve authored order and expose GameMaker-compatible `event_data` keys (`event_type`, `message`, and `element_id`) to each listening object. Legacy timeline moment GML is transpiled to source-linked scripts and all crossed moments run in ascending or descending frame order, including speeds greater than one. Unsupported track/key/effect/action types, animation-curve keys, lifecycle event bindings, clip masks/groups, particle sequence tracks, runtime-authored track/key structures, and object-track overrides are not guessed: they produce source-linked partial-conversion diagnostics.
+
+The mapping follows the GameMaker LTS [Sequence Track Struct](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequence_Structs/The_Track_Struct.htm), [Keyframe Struct](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequence_Structs/The_Keyframe_Struct.htm), [events/moments/broadcast](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Sequences/Sequence_Events_Moments_Broadcast.htm), [sound/effect](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sequence_Properties/Sound_in_Sequences.htm), and [timeline](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Timelines/Timelines.htm) contracts. Runtime nodes and effects are validated against exact Godot 4.7.1 [`Label`](https://docs.godotengine.org/en/4.7/classes/class_label.html), [`AudioStreamPlayer2D`](https://docs.godotengine.org/en/4.7/classes/class_audiostreamplayer2d.html), [`AudioServer`](https://docs.godotengine.org/en/4.7/classes/class_audioserver.html), and audio-effect APIs.
 
 `GMDraw` independently dispatches the ordered drawing phases:
 

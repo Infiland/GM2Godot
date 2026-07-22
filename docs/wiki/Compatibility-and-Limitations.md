@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.44 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.45 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -84,6 +84,8 @@ Version 0.7.44 makes bound-method context explicit. Generated method and constru
 
 This contract follows the official GameMaker LTS [Method Variables](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Method_Variables.htm), [`self`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/self.htm), [`other`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/other.htm), and [`method`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/method.htm) semantics. The generated implementation uses exact Godot 4.7.1 [`Callable`](https://docs.godotengine.org/en/4.7/classes/class_callable.html) and [GDScript lambda](https://docs.godotengine.org/en/4.7/tutorials/scripting/gdscript/gdscript_basics.html#lambda-functions) behavior. It does not claim unrelated #696 fidelity work such as precise collision masks, particles, sequences/timelines, or complete shader semantics.
 
+Version 0.7.45 implements the next #696 child without widening into those other areas. Imported GameMaker Precise masks use the alpha threshold and inclusive mask bounds from the sprite metadata. Static masks union all subimages; Precise Per Frame masks switch exact pixel geometry with the displayed frame. Origin and object transforms apply to both image and geometry, and generated collision events and query helpers consume the same active mask. Unsupported or inconsistent source data emits `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` before using a valid rectangle fallback. Runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures are not implied.
+
 These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or startup-established content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
 
 ## Known limitation areas
@@ -91,7 +93,7 @@ These locks serialize cooperating GM2Godot publishers; they do not authorize con
 The following areas require especially careful manual review. This list is intentionally high level; the generated reports and roadmap hold the detailed, current status.
 
 - Exact GameMaker value, coercion, lookup, lifecycle, and event-order edge cases can differ from GDScript and Godot callbacks.
-- Precise sprite masks, pixel-perfect collisions, collision dispatch, and GameMaker physics behavior are not guaranteed to match Godot physics.
+- Imported static/per-frame precise sprite masks are supported by the generated compatibility runtime; runtime-authored masks, `mask_index`, skeletal/tile masks, and GameMaker physics fixtures are not guaranteed to match Godot physics.
 - Shader translation, surfaces, GPU/draw state, cameras, the application surface, GUI scaling, and render ordering can need manual Godot work.
 - Advanced room/layer mutation, tilemaps, texture groups, sequences, timelines, particles, animation curves, and dynamic asset APIs have partial or metadata-only areas.
 - Audio groups, streaming/compression, positional audio, async payload timing, networking, and filesystem sandbox behavior can vary by target.

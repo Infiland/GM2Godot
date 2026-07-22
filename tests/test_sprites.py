@@ -1259,6 +1259,7 @@ class TestSpriteGeneratedPathCollisions(unittest.TestCase):
 
 def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], layer_guids: list[str],
                                     collision_kind: int = 1, bbox_mode: int = 0,
+                                    collision_tolerance: int = 0,
                                     bbox_left: int = 0, bbox_right: int = 31,
                                     bbox_top: int = 0, bbox_bottom: int = 31,
                                     width: int = 32, height: int = 32,
@@ -1279,6 +1280,7 @@ def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], la
     return (
         '{{\n'
         '  "collisionKind": {ck},\n'
+        '  "collisionTolerance": {ct},\n'
         '  "bboxMode": {bm},\n'
         '  "bbox_left": {bl},\n'
         '  "bbox_right": {br},\n'
@@ -1296,7 +1298,7 @@ def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], la
         '  "resourceVersion":"2.0",\n'
         '}}'
     ).format(
-        ck=collision_kind, bm=bbox_mode,
+        ck=collision_kind, ct=collision_tolerance, bm=bbox_mode,
         bl=bbox_left, br=bbox_right, bt=bbox_top, bb=bbox_bottom,
         w=width, h=height, orig=origin, xo=xorigin, yo=yorigin,
         frames=frames_json, layers=layers_json, name=sprite_name,
@@ -1305,6 +1307,7 @@ def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], la
 
 def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], layer_guids: list[str],
                                      collision_kind: int = 1, bbox_mode: int = 0,
+                                     collision_tolerance: int = 0,
                                      bbox_left: int = 0, bbox_right: int = 31,
                                      bbox_top: int = 0, bbox_bottom: int = 31,
                                      width: int = 32, height: int = 32,
@@ -1337,6 +1340,7 @@ def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], lay
     return (
         '{{\n'
         '  "collisionKind": {ck},\n'
+        '  "collisionTolerance": {ct},\n'
         '  "bboxMode": {bm},\n'
         '  "bbox_left": {bl},\n'
         '  "bbox_right": {br},\n'
@@ -1366,7 +1370,7 @@ def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], lay
         '  "resourceVersion":"2.0",\n'
         '}}'
     ).format(
-        ck=collision_kind, bm=bbox_mode,
+        ck=collision_kind, ct=collision_tolerance, bm=bbox_mode,
         bl=bbox_left, br=bbox_right, bt=bbox_top, bb=bbox_bottom,
         w=width, h=height, orig=origin, xo=xorigin, yo=yorigin,
         frames=frames_json, layers=layers_json, name=sprite_name,
@@ -2019,6 +2023,7 @@ class TestParseCollisionData(unittest.TestCase):
         content = _make_yy_content_with_collision(
             "spr_test", ["frame1"], ["layer1"],
             collision_kind=1, bbox_mode=2,
+            collision_tolerance=127,
             bbox_left=5, bbox_right=27,
             bbox_top=3, bbox_bottom=29,
             width=32, height=32, origin=4,
@@ -2029,6 +2034,7 @@ class TestParseCollisionData(unittest.TestCase):
         self.assertIsNotNone(result)
         result = cast(CollisionData, result)
         self.assertEqual(result["collisionKind"], 1)
+        self.assertEqual(result["collisionTolerance"], 127)
         self.assertEqual(result["bboxMode"], 2)
         self.assertEqual(result["bbox_left"], 5)
         self.assertEqual(result["bbox_right"], 27)
@@ -2052,6 +2058,26 @@ class TestParseCollisionData(unittest.TestCase):
         self.assertEqual(result["origin"], 9)
         self.assertEqual(result["xorigin"], 10)
         self.assertEqual(result["yorigin"], 20)
+
+    def test_parses_current_lts_custom_origin_from_sequence(self):
+        self._write_yy(
+            "spr_sequence_origin",
+            (
+                '{"collisionKind":0,"collisionTolerance":0,"bboxMode":2,'
+                '"bbox_left":0,"bbox_right":7,"bbox_top":0,"bbox_bottom":7,'
+                '"width":8,"height":8,"origin":9,'
+                '"sequence":{"xorigin":3,"yorigin":6},'
+                '"frames":[],"layers":[],"resourceType":"GMSprite",'
+                '"resourceVersion":"2.0"}'
+            ),
+        )
+
+        result = self.converter._parse_collision_data("spr_sequence_origin")
+
+        self.assertIsNotNone(result)
+        result = cast(CollisionData, result)
+        self.assertEqual(result["xorigin"], 3)
+        self.assertEqual(result["yorigin"], 6)
 
     def test_returns_none_for_missing_file(self):
         result = self.converter._parse_collision_data("nonexistent_sprite")
@@ -2077,7 +2103,7 @@ class TestComputeOriginOffset(unittest.TestCase):
     def _make_data(self, origin: int, w: int = 64, h: int = 32,
                    xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
-            "collisionKind": 1, "bboxMode": 0,
+            "collisionKind": 1, "collisionTolerance": 0, "bboxMode": 0,
             "bbox_left": 0, "bbox_right": w - 1,
             "bbox_top": 0, "bbox_bottom": h - 1,
             "width": w, "height": h,
@@ -2141,6 +2167,7 @@ class TestGenerateSpriteScene(unittest.TestCase):
                               origin: int = 0, xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
             "collisionKind": collision_kind,
+            "collisionTolerance": 0,
             "bboxMode": 0,
             "bbox_left": bbox_left, "bbox_right": bbox_right,
             "bbox_top": bbox_top, "bbox_bottom": bbox_bottom,
@@ -2195,6 +2222,30 @@ class TestGenerateSpriteScene(unittest.TestCase):
         self.assertIn("position = Vector2(0.0, 0.0)", content)
         self.assertIn("metadata/gamemaker_origin_x = 16.0", content)
         self.assertIn("metadata/gamemaker_origin_y = 16.0", content)
+
+    def test_top_left_origin_offsets_visual_and_collision_together(self):
+        data = self._make_collision_data(
+            collision_kind=1,
+            origin=0,
+            width=32,
+            height=32,
+            bbox_left=0,
+            bbox_right=31,
+            bbox_top=0,
+            bbox_bottom=31,
+        )
+        self.converter._generate_sprite_scene("spr_top_left", data, 1)
+
+        tscn_path = os.path.join(
+            self.godot_dir,
+            "sprites",
+            "spr_top_left",
+            "spr_top_left.tscn",
+        )
+        with open(tscn_path, encoding="utf-8") as scene_file:
+            content = scene_file.read()
+
+        self.assertEqual(content.count("position = Vector2(16.0, 16.0)"), 2)
 
     def test_multiframe_references_first_frame(self):
         data = self._make_collision_data(collision_kind=1)
@@ -2265,15 +2316,122 @@ class TestGenerateSpriteScene(unittest.TestCase):
         self.assertIn('type="ConvexPolygonShape2D"', content)
         self.assertIn("PackedVector2Array(", content)
 
-    def test_precise_falls_back_to_rectangle(self):
+    def test_static_precise_scene_uses_alpha_mask_rectangles(self):
         data = self._make_collision_data(collision_kind=0)
+        sprite_dir = os.path.join(self.godot_dir, "sprites", "spr_precise")
+        os.makedirs(sprite_dir, exist_ok=True)
+        image = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        for x in range(4):
+            for y in range(4):
+                image.putpixel((x, y), (255, 255, 255, 255))
+        image.save(os.path.join(sprite_dir, "spr_precise.png"))
         self.converter._generate_sprite_scene("spr_precise", data, 1)
 
         tscn_path = os.path.join(self.godot_dir, "sprites", "spr_precise", "spr_precise.tscn")
         with open(tscn_path, "r") as f:
             content = f.read()
 
+        self.assertIn("metadata/gamemaker_precise_mask = true", content)
+        self.assertIn("size = Vector2(4, 4)", content)
+        self.assertIn("position = Vector2(2.0, 2.0)", content)
+        self.assertIn("metadata/gamemaker_collision_bounds = true", content)
+
+    def test_static_precise_multiframe_mask_composites_all_frames(self):
+        data = self._make_collision_data(
+            collision_kind=0,
+            bbox_right=3,
+            bbox_bottom=3,
+            width=4,
+            height=4,
+        )
+        sprite_dir = os.path.join(self.godot_dir, "sprites", "spr_composite")
+        os.makedirs(sprite_dir, exist_ok=True)
+        for index, opaque_pixel in enumerate(((0, 0), (3, 3)), start=1):
+            image = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+            image.putpixel(opaque_pixel, (255, 255, 255, 255))
+            image.save(os.path.join(sprite_dir, f"spr_composite_{index}.png"))
+
+        self.converter._generate_sprite_scene(
+            "spr_composite",
+            data,
+            2,
+            AnimationData(
+                playbackSpeed=30.0,
+                playbackSpeedType=0,
+                loop=True,
+                frame_durations=[1.0, 1.0],
+            ),
+        )
+
+        tscn_path = os.path.join(sprite_dir, "spr_composite.tscn")
+        with open(tscn_path, encoding="utf-8") as scene_file:
+            content = scene_file.read()
+        self.assertEqual(content.count("metadata/gamemaker_precise_mask = true"), 2)
+        self.assertNotIn("metadata/gamemaker_mask_frame =", content)
+        self.assertNotIn("_collision_mask.gd", content)
+
+    def test_precise_mask_uses_strict_alpha_tolerance(self):
+        data = self._make_collision_data(
+            collision_kind=0,
+            bbox_right=1,
+            bbox_bottom=0,
+            width=2,
+            height=1,
+        )
+        data["collisionTolerance"] = 128
+        sprite_dir = os.path.join(self.godot_dir, "sprites", "spr_tolerance")
+        os.makedirs(sprite_dir, exist_ok=True)
+        image = Image.new("RGBA", (2, 1), (255, 255, 255, 0))
+        image.putpixel((0, 0), (255, 255, 255, 128))
+        image.putpixel((1, 0), (255, 255, 255, 129))
+        image.save(os.path.join(sprite_dir, "spr_tolerance.png"))
+
+        self.converter._generate_sprite_scene("spr_tolerance", data, 1)
+
+        with open(
+            os.path.join(sprite_dir, "spr_tolerance.tscn"),
+            encoding="utf-8",
+        ) as scene_file:
+            content = scene_file.read()
+        self.assertEqual(content.count("metadata/gamemaker_precise_mask = true"), 1)
+        self.assertIn("position = Vector2(1.5, 0.5)", content)
+
+    def test_unreadable_precise_source_emits_structured_fallback_diagnostic(self):
+        diagnostics = DiagnosticCollector()
+        logs: list[str] = []
+        converter = SpriteConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        )
+        data = self._make_collision_data(collision_kind=4)
+
+        converter._generate_sprite_scene("spr_missing_mask", data, 1)
+
+        precise_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-SPRITE-PRECISE-MASK-FALLBACK"
+        ]
+        self.assertEqual(len(precise_diagnostics), 1)
+        self.assertEqual(precise_diagnostics[0].issue_number, 705)
+        self.assertIn("could not be represented exactly", precise_diagnostics[0].message)
+        self.assertTrue(any("safe fallback" in message for message in logs))
+        with open(
+            os.path.join(
+                self.godot_dir,
+                "sprites",
+                "spr_missing_mask",
+                "spr_missing_mask.tscn",
+            ),
+            encoding="utf-8",
+        ) as scene_file:
+            content = scene_file.read()
         self.assertIn('type="RectangleShape2D"', content)
+        self.assertNotIn("metadata/gamemaker_precise_mask = true", content)
 
 
 class TestParseAnimationData(unittest.TestCase):
@@ -2410,6 +2568,7 @@ class TestGenerateAnimatedScene(unittest.TestCase):
                               origin: int = 0, xorigin: int = 0, yorigin: int = 0) -> CollisionData:
         return {
             "collisionKind": collision_kind,
+            "collisionTolerance": 0,
             "bboxMode": 0,
             "bbox_left": bbox_left, "bbox_right": bbox_right,
             "bbox_top": bbox_top, "bbox_bottom": bbox_bottom,
@@ -2482,6 +2641,52 @@ class TestGenerateAnimatedScene(unittest.TestCase):
         self.converter._generate_sprite_scene("spr_col", collision, 2, anim)
         content = self._read_tscn("spr_col")
         self.assertIn('type="CollisionShape2D"', content)
+
+    def test_per_frame_precise_scene_switches_distinct_masks(self):
+        collision = self._make_collision_data(
+            collision_kind=4,
+            bbox_right=3,
+            bbox_bottom=3,
+            width=4,
+            height=4,
+            origin=9,
+            xorigin=2,
+            yorigin=2,
+        )
+        anim = self._make_anim_data(durations=[1.0, 1.0])
+        sprite_dir = os.path.join(self.godot_dir, "sprites", "spr_per_frame")
+        os.makedirs(sprite_dir, exist_ok=True)
+        for index, opaque_pixel in enumerate(((0, 0), (3, 3)), start=1):
+            image = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+            image.putpixel(opaque_pixel, (255, 255, 255, 255))
+            image.save(os.path.join(sprite_dir, f"spr_per_frame_{index}.png"))
+
+        self.converter._generate_sprite_scene(
+            "spr_per_frame",
+            collision,
+            2,
+            anim,
+        )
+
+        content = self._read_tscn("spr_per_frame")
+        self.assertIn("spr_per_frame_collision_mask.gd", content)
+        self.assertIn("metadata/gamemaker_mask_frame_count = 2", content)
+        self.assertIn("metadata/gamemaker_mask_frame = 0", content)
+        self.assertIn("metadata/gamemaker_mask_frame = 1", content)
+        self.assertEqual(content.count("metadata/gamemaker_precise_mask = true"), 2)
+        self.assertEqual(content.count("disabled = true"), 2)
+        script_path = os.path.join(
+            sprite_dir,
+            "spr_per_frame_collision_mask.gd",
+        )
+        with open(script_path, encoding="utf-8") as script_file:
+            script = script_file.read()
+        self.assertIn("visual.frame_changed.connect", script)
+        self.assertIn("func _gm_set_collision_frame(value):", script)
+        self.assertIn(
+            'child.set_deferred("disabled", disabled)',
+            script,
+        )
 
     def test_animated_scene_autoplay(self):
         collision = self._make_collision_data()

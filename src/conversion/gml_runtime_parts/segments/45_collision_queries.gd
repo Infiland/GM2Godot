@@ -26,88 +26,126 @@ static func gml_position_meeting(current_self, x, y, target):
 static func gml_instance_place(current_self, x, y, target):
 	if current_self == null:
 		return gml_instance_noone()
-	var subject_rects = _gml_collision_rects_for_instance(current_self)
-	if subject_rects.is_empty():
+	var subject_polygons = _gml_collision_polygons_for_instance(current_self, true)
+	if subject_polygons.is_empty():
 		return gml_instance_noone()
 	var target_position = Vector2(_to_real(x), _to_real(y))
 	var delta = target_position - _gml_instance_position(current_self)
-	return _gml_collision_first_rect_hit(
-		_gml_collision_translate_rects(subject_rects, delta),
+	return _gml_collision_first_polygon_hit(
+		_gml_collision_translate_polygons(subject_polygons, delta),
 		target,
 		current_self,
+		true,
 		true
 	)
 
 
 static func gml_instance_position(current_self, x, y, target):
-	return _gml_collision_first_point_hit(Vector2(_to_real(x), _to_real(y)), target, current_self, false)
-
-
-static func gml_collision_point(current_self, x, y, target, precise = false, notme = false):
-	_gml_collision_warn_precise_approximation(precise)
 	return _gml_collision_first_point_hit(
 		Vector2(_to_real(x), _to_real(y)),
 		target,
 		current_self,
-		gml_bool(notme)
+		false,
+		true
+	)
+
+
+static func gml_collision_point(current_self, x, y, target, precise = false, notme = false):
+	return _gml_collision_first_point_hit(
+		Vector2(_to_real(x), _to_real(y)),
+		target,
+		current_self,
+		gml_bool(notme),
+		gml_bool(precise)
 	)
 
 
 static func gml_collision_rectangle(current_self, x1, y1, x2, y2, target, precise = false, notme = false):
-	_gml_collision_warn_precise_approximation(precise)
 	var query_rect = _gml_collision_rect_from_bounds(x1, y1, x2, y2)
-	return _gml_collision_first_rect_hit([query_rect], target, current_self, gml_bool(notme))
+	return _gml_collision_first_polygon_hit(
+		[_gml_collision_polygon_from_rect(query_rect)],
+		target,
+		current_self,
+		gml_bool(notme),
+		gml_bool(precise)
+	)
 
 
 static func gml_collision_line(current_self, x1, y1, x2, y2, target, precise = false, notme = false):
-	_gml_collision_warn_precise_approximation(precise)
 	return _gml_collision_first_line_hit(
 		Vector2(_to_real(x1), _to_real(y1)),
 		Vector2(_to_real(x2), _to_real(y2)),
 		target,
 		current_self,
-		gml_bool(notme)
+		gml_bool(notme),
+		gml_bool(precise)
 	)
 
 
 static func gml_collision_circle(current_self, x, y, radius, target, precise = false, notme = false):
-	_gml_collision_warn_precise_approximation(precise)
 	return _gml_collision_first_circle_hit(
 		Vector2(_to_real(x), _to_real(y)),
 		abs(_to_real(radius)),
 		target,
 		current_self,
-		gml_bool(notme)
+		gml_bool(notme),
+		gml_bool(precise)
 	)
 
 
 static func gml_collision_point_list(current_self, x, y, target, precise, notme, list_id, ordered):
-	_gml_collision_warn_precise_approximation(precise)
 	var point = Vector2(_to_real(x), _to_real(y))
-	var hits = _gml_collision_collect_point_hits(point, target, current_self, gml_bool(notme), point)
+	var hits = _gml_collision_collect_point_hits(
+		point,
+		target,
+		current_self,
+		gml_bool(notme),
+		point,
+		gml_bool(precise)
+	)
 	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
 
 
 static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
-	_gml_collision_warn_precise_approximation(precise)
 	var query_rect = _gml_collision_rect_from_bounds(x1, y1, x2, y2)
 	var origin = query_rect.position + query_rect.size * 0.5
-	var hits = _gml_collision_collect_rect_hits([query_rect], target, current_self, gml_bool(notme), origin)
+	var hits = _gml_collision_collect_polygon_hits(
+		[_gml_collision_polygon_from_rect(query_rect)],
+		target,
+		current_self,
+		gml_bool(notme),
+		origin,
+		gml_bool(precise)
+	)
 	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
 
 
 static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
-	_gml_collision_warn_precise_approximation(precise)
 	var start = Vector2(_to_real(x1), _to_real(y1))
 	var finish = Vector2(_to_real(x2), _to_real(y2))
-	var hits = _gml_collision_collect_line_hits(start, finish, target, current_self, gml_bool(notme), start)
+	var hits = _gml_collision_collect_line_hits(
+		start,
+		finish,
+		target,
+		current_self,
+		gml_bool(notme),
+		start,
+		gml_bool(precise)
+	)
 	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
 
 
 static func gml_collision_circle_list(current_self, x, y, radius, target, precise, notme, list_id, ordered):
-	_gml_collision_warn_precise_approximation(precise)
 	var center = Vector2(_to_real(x), _to_real(y))
-	var hits = _gml_collision_collect_circle_hits(center, abs(_to_real(radius)), target, current_self, gml_bool(notme), center)
+	var hits = _gml_collision_collect_circle_hits(
+		center,
+		abs(_to_real(radius)),
+		target,
+		current_self,
+		gml_bool(notme),
+		center,
+		gml_bool(precise)
+	)
 	return _gml_collision_append_hits_to_list(list_id, hits, ordered)
 
 
@@ -151,15 +189,6 @@ static func gml_collision_event_dispatch_frame(instances = null, frame = -1):
 	return dispatched
 
 
-static func _gml_collision_warn_precise_approximation(precise):
-	if not gml_bool(precise):
-		return
-	if _gml_collision_precise_warning_emitted:
-		return
-	_gml_collision_precise_warning_emitted = true
-	push_warning("GML precise collision masks are approximated with generated collision shape bounds")
-
-
 static func _gml_collision_live_instances():
 	var instances = []
 	for entry in _gml_live_instance_entries():
@@ -189,15 +218,15 @@ static func _gml_collision_binding_target_matches(other_inst, binding):
 
 
 static func _gml_collision_pair_intersects(left, right):
-	var left_rects = _gml_collision_rects_for_instance(left)
-	if left_rects.is_empty():
+	var left_polygons = _gml_collision_polygons_for_instance(left, true)
+	if left_polygons.is_empty():
 		return false
-	var right_rects = _gml_collision_rects_for_instance(right)
-	if right_rects.is_empty():
+	var right_polygons = _gml_collision_polygons_for_instance(right, true)
+	if right_polygons.is_empty():
 		return false
-	for left_rect in left_rects:
-		for right_rect in right_rects:
-			if left_rect.intersects(right_rect, true):
+	for left_polygon in left_polygons:
+		for right_polygon in right_polygons:
+			if _gml_collision_polygons_intersect(left_polygon, right_polygon):
 				return true
 	return false
 
@@ -252,58 +281,58 @@ static func _gml_collision_dispatch_binding(inst, other_inst, binding, frame):
 	return 1
 
 
-static func _gml_collision_first_point_hit(point, target, current_self, notme):
+static func _gml_collision_first_point_hit(point, target, current_self, notme, target_precise):
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_rect_has_point(rect, point):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_polygon_has_point(polygon, point):
 				return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
 
 
-static func _gml_collision_first_rect_hit(query_rects, target, current_self, notme):
+static func _gml_collision_first_polygon_hit(query_polygons, target, current_self, notme, target_precise):
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		var target_rects = _gml_collision_rects_for_instance(instance)
-		for query_rect in query_rects:
-			for target_rect in target_rects:
-				if query_rect.intersects(target_rect, true):
+		var target_polygons = _gml_collision_polygons_for_instance(instance, target_precise)
+		for query_polygon in query_polygons:
+			for target_polygon in target_polygons:
+				if _gml_collision_polygons_intersect(query_polygon, target_polygon):
 					return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
 
 
-static func _gml_collision_first_line_hit(start, finish, target, current_self, notme):
+static func _gml_collision_first_line_hit(start, finish, target, current_self, notme, target_precise):
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_line_intersects_rect(start, finish, rect):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_line_intersects_polygon(start, finish, polygon):
 				return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
 
 
-static func _gml_collision_first_circle_hit(center, radius, target, current_self, notme):
+static func _gml_collision_first_circle_hit(center, radius, target, current_self, notme, target_precise):
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_circle_intersects_rect(center, radius, rect):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_circle_intersects_polygon(center, radius, polygon):
 				return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
 
 
-static func _gml_collision_collect_point_hits(point, target, current_self, notme, order_origin):
+static func _gml_collision_collect_point_hits(point, target, current_self, notme, order_origin, target_precise):
 	var hits = []
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_rect_has_point(rect, point):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_polygon_has_point(polygon, point):
 				hits.append(_gml_collision_hit_record(instance, order_origin))
 				break
 	return hits
 
 
-static func _gml_collision_collect_rect_hits(query_rects, target, current_self, notme, order_origin):
+static func _gml_collision_collect_polygon_hits(query_polygons, target, current_self, notme, order_origin, target_precise):
 	var hits = []
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		var target_rects = _gml_collision_rects_for_instance(instance)
+		var target_polygons = _gml_collision_polygons_for_instance(instance, target_precise)
 		var hit = false
-		for query_rect in query_rects:
-			for target_rect in target_rects:
-				if query_rect.intersects(target_rect, true):
+		for query_polygon in query_polygons:
+			for target_polygon in target_polygons:
+				if _gml_collision_polygons_intersect(query_polygon, target_polygon):
 					hit = true
 					break
 			if hit:
@@ -313,21 +342,21 @@ static func _gml_collision_collect_rect_hits(query_rects, target, current_self, 
 	return hits
 
 
-static func _gml_collision_collect_line_hits(start, finish, target, current_self, notme, order_origin):
+static func _gml_collision_collect_line_hits(start, finish, target, current_self, notme, order_origin, target_precise):
 	var hits = []
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_line_intersects_rect(start, finish, rect):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_line_intersects_polygon(start, finish, polygon):
 				hits.append(_gml_collision_hit_record(instance, order_origin))
 				break
 	return hits
 
 
-static func _gml_collision_collect_circle_hits(center, radius, target, current_self, notme, order_origin):
+static func _gml_collision_collect_circle_hits(center, radius, target, current_self, notme, order_origin, target_precise):
 	var hits = []
 	for instance in _gml_collision_candidate_instances(target, current_self, notme):
-		for rect in _gml_collision_rects_for_instance(instance):
-			if _gml_collision_circle_intersects_rect(center, radius, rect):
+		for polygon in _gml_collision_polygons_for_instance(instance, target_precise):
+			if _gml_collision_circle_intersects_polygon(center, radius, polygon):
 				hits.append(_gml_collision_hit_record(instance, order_origin))
 				break
 	return hits
@@ -385,31 +414,80 @@ static func _gml_collision_same_instance(left, right):
 
 static func _gml_collision_rects_for_instance(instance):
 	var rects = []
-	if not (instance is Node):
-		return rects
-	_gml_collision_collect_shape_rects(instance, rects)
+	for polygon in _gml_collision_polygons_for_instance(instance, true):
+		var rect = _gml_collision_polygon_bounds(polygon)
+		if rect != null:
+			rects.append(rect)
 	return rects
 
 
-static func _gml_collision_collect_shape_rects(node, rects):
+static func _gml_collision_polygons_for_instance(instance, use_precise = true):
+	var polygons = []
+	if not (instance is Node):
+		return polygons
+	_gml_collision_collect_shape_polygons(instance, polygons, gml_bool(use_precise))
+	return polygons
+
+
+static func _gml_collision_collect_shape_polygons(node, polygons, use_precise):
 	if node is CollisionShape2D:
-		var rect = _gml_collision_rect_for_shape_node(node)
-		if rect != null:
-			rects.append(rect)
+		var is_precise = node.has_meta("gamemaker_precise_mask")
+		var is_bounds = node.has_meta("gamemaker_collision_bounds")
+		var include_shape = false
+		var preserve_rotation = false
+		if is_bounds:
+			include_shape = not use_precise
+		elif is_precise:
+			var active_mask = not node.disabled
+			if node.has_meta("gamemaker_mask_frame"):
+				var mask_root = node.get_parent()
+				var active_frame = 0
+				if mask_root != null:
+					active_frame = int(mask_root.get_meta("gamemaker_active_mask_frame", 0))
+				active_mask = int(node.get_meta("gamemaker_mask_frame")) == active_frame
+			include_shape = use_precise and active_mask
+			preserve_rotation = include_shape
+		elif not node.disabled:
+			include_shape = true
+		if include_shape:
+			var polygon = _gml_collision_polygon_for_shape_node(node, preserve_rotation)
+			if not polygon.is_empty():
+				polygons.append(polygon)
 	for child in node.get_children():
 		if child is Node:
-			_gml_collision_collect_shape_rects(child, rects)
+			_gml_collision_collect_shape_polygons(child, polygons, use_precise)
 
 
 static func _gml_collision_rect_for_shape_node(shape_node):
-	if shape_node.disabled:
-		return null
-	var shape = shape_node.shape
+	var polygon = _gml_collision_polygon_for_shape_node(shape_node, false)
+	return _gml_collision_polygon_bounds(polygon)
+
+
+static func _gml_collision_polygon_for_shape_node(shape_node, preserve_rotation):
+	if shape_node.shape == null:
+		return PackedVector2Array()
+	if abs(shape_node.global_transform.determinant()) <= 0.000001:
+		return PackedVector2Array()
+	var local_points = _gml_collision_local_points_for_shape(shape_node.shape)
+	if local_points.is_empty():
+		return PackedVector2Array()
+	var polygon = PackedVector2Array()
+	for point in local_points:
+		polygon.append(shape_node.global_transform * point)
+	if preserve_rotation:
+		return polygon
+	var bounds = _gml_collision_polygon_bounds(polygon)
+	if bounds == null:
+		return PackedVector2Array()
+	return _gml_collision_polygon_from_rect(bounds)
+
+
+static func _gml_collision_local_points_for_shape(shape):
 	if shape == null:
-		return null
+		return PackedVector2Array()
 	if shape is RectangleShape2D:
 		var half_size = shape.size * 0.5
-		return _gml_collision_rect_from_local_points(shape_node, [
+		return PackedVector2Array([
 			Vector2(-half_size.x, -half_size.y),
 			Vector2(half_size.x, -half_size.y),
 			Vector2(half_size.x, half_size.y),
@@ -417,7 +495,7 @@ static func _gml_collision_rect_for_shape_node(shape_node):
 		])
 	if shape is CircleShape2D:
 		var radius = shape.radius
-		return _gml_collision_rect_from_local_points(shape_node, [
+		return PackedVector2Array([
 			Vector2(-radius, -radius),
 			Vector2(radius, -radius),
 			Vector2(radius, radius),
@@ -426,31 +504,39 @@ static func _gml_collision_rect_for_shape_node(shape_node):
 	if shape is CapsuleShape2D:
 		var half_width = shape.radius
 		var half_height = shape.height * 0.5
-		return _gml_collision_rect_from_local_points(shape_node, [
+		return PackedVector2Array([
 			Vector2(-half_width, -half_height),
 			Vector2(half_width, -half_height),
 			Vector2(half_width, half_height),
 			Vector2(-half_width, half_height)
 		])
 	if shape is ConvexPolygonShape2D:
-		return _gml_collision_rect_from_local_points(shape_node, shape.points)
-	return null
+		return shape.points
+	return PackedVector2Array()
 
 
-static func _gml_collision_rect_from_local_points(node, points):
-	if points.is_empty():
+static func _gml_collision_polygon_bounds(polygon):
+	if polygon == null or polygon.is_empty():
 		return null
 	var min_x = INF
 	var min_y = INF
 	var max_x = -INF
 	var max_y = -INF
-	for point in points:
-		var global_point = node.global_transform * point
-		min_x = min(min_x, global_point.x)
-		min_y = min(min_y, global_point.y)
-		max_x = max(max_x, global_point.x)
-		max_y = max(max_y, global_point.y)
+	for point in polygon:
+		min_x = min(min_x, point.x)
+		min_y = min(min_y, point.y)
+		max_x = max(max_x, point.x)
+		max_y = max(max_y, point.y)
 	return Rect2(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y))
+
+
+static func _gml_collision_polygon_from_rect(rect):
+	return PackedVector2Array([
+		rect.position,
+		rect.position + Vector2(rect.size.x, 0),
+		rect.position + rect.size,
+		rect.position + Vector2(0, rect.size.y)
+	])
 
 
 static func _gml_collision_translate_rects(rects, delta):
@@ -458,6 +544,113 @@ static func _gml_collision_translate_rects(rects, delta):
 	for rect in rects:
 		translated.append(Rect2(rect.position + delta, rect.size))
 	return translated
+
+
+static func _gml_collision_translate_polygons(polygons, delta):
+	var translated = []
+	for polygon in polygons:
+		var moved = PackedVector2Array()
+		for point in polygon:
+			moved.append(point + delta)
+		translated.append(moved)
+	return translated
+
+
+static func _gml_collision_polygons_intersect(left, right):
+	if left.size() < 3 or right.size() < 3:
+		return false
+	var left_bounds = _gml_collision_polygon_bounds(left)
+	var right_bounds = _gml_collision_polygon_bounds(right)
+	if left_bounds == null or right_bounds == null:
+		return false
+	if not left_bounds.intersects(right_bounds, true):
+		return false
+	return (
+		not _gml_collision_polygon_has_separating_axis(left, left, right)
+		and not _gml_collision_polygon_has_separating_axis(right, left, right)
+	)
+
+
+static func _gml_collision_polygon_has_separating_axis(axis_polygon, left, right):
+	for index in range(axis_polygon.size()):
+		var start = axis_polygon[index]
+		var finish = axis_polygon[(index + 1) % axis_polygon.size()]
+		var edge = finish - start
+		if edge.length_squared() <= 0.000000000001:
+			continue
+		var axis = Vector2(-edge.y, edge.x)
+		var left_min = INF
+		var left_max = -INF
+		for point in left:
+			var projection = point.dot(axis)
+			left_min = min(left_min, projection)
+			left_max = max(left_max, projection)
+		var right_min = INF
+		var right_max = -INF
+		for point in right:
+			var projection = point.dot(axis)
+			right_min = min(right_min, projection)
+			right_max = max(right_max, projection)
+		if left_max < right_min - 0.000001 or right_max < left_min - 0.000001:
+			return true
+	return false
+
+
+static func _gml_collision_polygon_has_point(polygon, point):
+	if polygon.size() < 3:
+		return false
+	var winding_sign = 0
+	for index in range(polygon.size()):
+		var start = polygon[index]
+		var finish = polygon[(index + 1) % polygon.size()]
+		var cross = (finish - start).cross(point - start)
+		if abs(cross) <= 0.000001:
+			continue
+		var edge_sign = 1 if cross > 0.0 else -1
+		if winding_sign != 0 and edge_sign != winding_sign:
+			return false
+		winding_sign = edge_sign
+	return winding_sign != 0
+
+
+static func _gml_collision_line_intersects_polygon(start, finish, polygon):
+	if (
+		_gml_collision_polygon_has_point(polygon, start)
+		or _gml_collision_polygon_has_point(polygon, finish)
+	):
+		return true
+	for index in range(polygon.size()):
+		if _gml_collision_segments_intersect(
+			start,
+			finish,
+			polygon[index],
+			polygon[(index + 1) % polygon.size()]
+		):
+			return true
+	return false
+
+
+static func _gml_collision_circle_intersects_polygon(center, radius, polygon):
+	if _gml_collision_polygon_has_point(polygon, center):
+		return true
+	var radius_squared = radius * radius
+	for index in range(polygon.size()):
+		if _gml_collision_point_segment_distance_squared(
+			center,
+			polygon[index],
+			polygon[(index + 1) % polygon.size()]
+		) <= radius_squared:
+			return true
+	return false
+
+
+static func _gml_collision_point_segment_distance_squared(point, start, finish):
+	var segment = finish - start
+	var length_squared = segment.length_squared()
+	if length_squared <= 0.000000000001:
+		return point.distance_squared_to(start)
+	var amount = clamp((point - start).dot(segment) / length_squared, 0.0, 1.0)
+	return point.distance_squared_to(start + segment * amount)
 
 
 static func _gml_collision_rect_from_bounds(x1, y1, x2, y2):

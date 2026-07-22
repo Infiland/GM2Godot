@@ -121,7 +121,11 @@ class TestArchitecturePolicy(unittest.TestCase):
         )
         self.assertEqual(
             cast(dict[str, object], report["collision"])["precise_masks"],
-            "planned_custom_mask_backend",
+            "generated_alpha_mask_geometry",
+        )
+        self.assertEqual(
+            cast(dict[str, object], report["collision"])["query_api"],
+            "generated bounds and active precise-mask polygons",
         )
         self.assertEqual(cast(dict[str, object], report["audio"])["mode"], "pooled_audio_stream_players")
         self.assertEqual(
@@ -137,6 +141,46 @@ class TestArchitecturePolicy(unittest.TestCase):
                 }
                 for policy in signal_policy
             ],
+        )
+
+    def test_precise_sprite_metadata_selects_generated_mask_backend(self) -> None:
+        _write_json(
+            self.gm_dir / "PreciseSprite.yyp",
+            {
+                "resources": [
+                    {
+                        "id": {
+                            "name": "spr_precise",
+                            "path": "sprites/spr_precise/spr_precise.yy",
+                            "resourceType": "GMSprite",
+                        },
+                        "resourceType": "GMSprite",
+                    }
+                ]
+            },
+        )
+        _write_json(
+            self.gm_dir / "sprites" / "spr_precise" / "spr_precise.yy",
+            {
+                "name": "spr_precise",
+                "resourceType": "GMSprite",
+                "resourceVersion": "2.0",
+                "collisionKind": 4,
+            },
+        )
+
+        report = build_architecture_policy_report(
+            str(self.gm_dir),
+            target_platform="linux",
+            enabled_converters=["sprites"],
+        )
+
+        features = cast(dict[str, object], report["project_features"])
+        collision = cast(dict[str, object], report["collision"])
+        self.assertEqual(features["has_precise_collision_request"], True)
+        self.assertEqual(
+            collision["precise_masks"],
+            "generated_alpha_mask_geometry",
         )
 
     def test_write_report_emits_deterministic_json(self) -> None:

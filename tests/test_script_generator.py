@@ -481,6 +481,11 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
+        self.assertIn('func _gm_sync_collision_mask_frame(frame_index):', content)
+        self.assertIn(
+            'current.call("_gm_set_collision_frame", frame_index)',
+            content,
+        )
         self.assertIn('func _gm_apply_image_transform():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
         self.assertIn('func _ready():\n\t_gm_initialize_sprite_runtime()', content)

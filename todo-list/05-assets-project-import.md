@@ -42,7 +42,7 @@ This file tracks GameMaker project/resource data that the converter must eventua
 - [x] Origin metadata.
 - [x] Basic collision mask shape generation.
 - [x] Playback speed and loop metadata.
-- [ ] Precise masks.
+- [x] Precise and precise-per-frame alpha masks.
 - [ ] Bounding box modes exactly matching GameMaker.
 - [ ] Nine-slice data.
 - [ ] Sprite tags.

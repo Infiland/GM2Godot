@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.44 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.45 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -232,6 +232,16 @@ Begin Step
 
 Collision is therefore evaluated after motion/path updates and before End Step. Do not attach correctness to the incidental `_process()` order of individual object nodes.
 
+### Precise sprite collision masks
+
+Version 0.7.45 derives Precise collision geometry from the alpha channel of each converted RGBA frame, clips it to the inclusive GameMaker bounding box, and includes pixels whose alpha is strictly greater than `collisionTolerance`. A static Precise mask unions every subimage before converting contiguous pixels into exact rectangle geometry. Precise Per Frame keeps separate geometry for each subimage; the generated sprite scene switches enabled shapes on `AnimatedSprite2D.frame_changed`, and generated `image_index` handling explicitly synchronizes the same frame.
+
+The visual and mask use the GameMaker origin as their common local reference. The object transform then applies position, `image_xscale`, `image_yscale`, and `image_angle` to both. Collision events, place/position and motion checks, and point/rectangle/line/circle single-result and list APIs read the active transformed polygons. An advanced query with `precise = false` uses the transformed GameMaker mask bounds; `precise = true` uses precise pixels when the target has them.
+
+If frame bytes are unreadable, dimensions or bounds disagree, tolerance is invalid, or exact decomposition exceeds 16,384 rectangles, conversion emits `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` and retains the prior bounding-box fallback when that box is valid. Runtime-created/modified sprite masks, `mask_index` overrides, skeletal meshes, tile-set masks, and GameMaker physics fixtures remain separate compatibility areas.
+
+This follows the GameMaker LTS [Sprite Editor collision-mask rules](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm), [collision rotation/scaling and precise-query semantics](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Movement_And_Collisions/Collisions/Collisions.htm), and [`sprite_collision_mask`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Sprites/Sprite_Manipulation/sprite_collision_mask.htm). Generated behavior is validated against Godot 4.7.1 [`AnimatedSprite2D.frame_changed`](https://docs.godotengine.org/en/4.7/classes/class_animatedsprite2d.html), [`CollisionShape2D`](https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html), and [`Transform2D`](https://docs.godotengine.org/en/4.7/classes/class_transform2d.html).
+
 `GMDraw` independently dispatches the ordered drawing phases:
 
 ```text
@@ -329,7 +339,7 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 
 | Area | Current behavior |
 | --- | --- |
-| Precise collision masks | Precise requests are reported, but runtime collision uses generated shape bounds; pixel-perfect mask parity is not implemented. |
+| Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
 | Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
 | Shaders and GPU state | GameMaker GLSL ES and Godot shader language/state do not map one-to-one; generated output needs visual review. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |

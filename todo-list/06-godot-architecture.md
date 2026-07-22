@@ -97,7 +97,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [ ] Avoid changing GameMaker semantics by overusing `move_and_slide()` or Godot body callbacks.
 - [ ] Generate collision layer/mask names and mapping docs.
 - [ ] Generate direct shape dimensions rather than scaling collision shapes where possible.
-- [ ] Add pixel-perfect mask data backend for precise collision projects.
+- [x] Add imported pixel-mask geometry backend for precise collision projects.
 
 ## Audio Architecture
 
@@ -137,7 +137,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [ ] Run room startup order tests.
 - [ ] Run event-order tests.
 - [ ] Run draw-order/depth tests.
-- [ ] Run collision mask tests.
+- [x] Run exact Godot rectangle/precise/per-frame collision mask tests.
 - [ ] Run alarm/timeline/async ordering tests.
 - [ ] Run surface/shader compatibility tests.
 - [ ] Run export checks for desktop, web, and mobile targets where feasible.

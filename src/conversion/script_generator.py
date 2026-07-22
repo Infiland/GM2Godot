@@ -88,6 +88,7 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_current_sprite_scene_root",
     "_gm_initialize_sprite_runtime",
     "_gm_room_colour_alpha",
+    "_gm_sync_collision_mask_frame",
     "_gm_sprite_visual_node",
     "Vector2",
 })
@@ -355,12 +356,18 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t\tframe_index = min(frame_index, frame_count - 1)"
         "\n\t\tsprite_node.frame = frame_index"
         "\n\t\tsprite_node.frame_progress = 0.0"
+        "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
         "\n\t\treturn"
         "\n\tif sprite_node is Sprite2D:"
         "\n\t\tvar frame_count = sprite_node.hframes * sprite_node.vframes"
         "\n\t\timage_number = max(frame_count, 1)"
         "\n\t\tif frame_count > 1:"
         "\n\t\t\tsprite_node.frame = min(frame_index, frame_count - 1)"
+        "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
+        "\n\nfunc _gm_sync_collision_mask_frame(frame_index):"
+        "\n\tvar current = _gm_current_sprite_scene_root()"
+        "\n\tif current != null and current.has_method(\"_gm_set_collision_frame\"):"
+        "\n\t\tcurrent.call(\"_gm_set_collision_frame\", frame_index)"
         "\n\nfunc _gm_apply_image_transform():"
         "\n\trotation_degrees = float(image_angle)"
         "\n\tscale = Vector2(float(image_xscale), float(image_yscale))"

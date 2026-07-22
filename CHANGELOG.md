@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.46 - 2026-07-22
+
+- Converted authored GameMaker particle systems into stable generated Godot resources and normalized runtime descriptors for embedded particle types, emitters, origins, draw order, regions, timing, secondary-spawn metadata, and supported visual properties.
+- Instantiated asset-backed particle systems from GML and room particle-layer elements with preserved layer visibility/depth and element transforms, mapped lifetime, shape, motion, colour/alpha, scale, textures, blend and stream/burst behavior to Godot 4.7.1 particles, and cleaned up room-owned systems, emitters, types, and nodes.
+- Added source-linked diagnostics for unsupported attractor, destroyer, deflector, and changer data plus a current authored asset/room fixture and exact Godot 4.7.1 descriptor, lifecycle, and leak coverage.
+
 ## 0.7.45 - 2026-07-22
 
 - Converted GameMaker Precise masks into alpha-tolerance-clipped pixel geometry, compositing all subimages for static masks and generating independently switchable geometry for Precise Per Frame sprites.

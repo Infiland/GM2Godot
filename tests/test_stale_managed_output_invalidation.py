@@ -103,6 +103,20 @@ class TestManagedResourceOutputPolicy(unittest.TestCase):
             ("gm2godot/timelines/tl_stale_3.gd",),
         )
 
+        particle_outputs = managed_resource_outputs(
+            "particlesystems",
+            "res://particlesystems/ps_stale/ps_stale.tres",
+        )
+        self.assertEqual(
+            particle_outputs.required_paths,
+            ("particlesystems/ps_stale/ps_stale.tres",),
+        )
+        self.assertTrue(
+            particle_outputs.owns(
+                "particlesystems/ps_stale/ps_stale.tres"
+            )
+        )
+
 
 class TestStaleManagedOutputInvalidation(unittest.TestCase):
     OBJECT_NAME = "o_stale"

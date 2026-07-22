@@ -15,7 +15,7 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.1 output. It c
 - **Asset Conversion**: Converts GameMaker project resources to Godot format:
   - Sprites, collision masks, animation metadata, and generated scenes
   - Sound effects, audio groups, bus layouts, and runtime playback metadata
-  - Fonts, notes, scripts, objects, rooms, tilesets, shaders, paths, timelines, sequences, particles, extensions, texture groups, and options metadata where supported
+  - Fonts, notes, scripts, objects, rooms, tilesets, shaders, paths, timelines, sequences, asset-backed particles, extensions, texture groups, and options metadata where supported
   - Included Files under `res://included_files/`, with GameMaker packaged-path normalization, `user://gm2godot/`-first read precedence, and deterministic collision-safe suffixes and diagnostics
   - Project settings, game icons, platform options, and validation reports
 - **Platform Support**: Converts settings for multiple platforms:
@@ -48,6 +48,8 @@ Version 0.7.44 preserves GameMaker bound-method context across generated GDScrip
 
 Version 0.7.45 generates alpha-derived pixel geometry for GameMaker Precise and Precise Per Frame sprite masks. Static masks composite all subimages; per-frame masks switch with the displayed image. Generated collision events and point, rectangle, line, circle, position, place, and movement checks share the active transformed geometry, including sprite origin, scale, rotation, `sprite_index`, and `image_index` changes. A structured `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` warning retains the bounding-box fallback when malformed, unreadable, mismatched, or excessively complex source data cannot be represented exactly.
 
+Version 0.7.46 converts authored GameMaker particle systems into stable `.tres` descriptors and instantiates their embedded types and emitters from GML or room particle-layer elements. Generated Godot 4.7.1 particles preserve supported origin, draw order, region, lifetime, stream/burst, shape, motion, colour/alpha, scale, texture, blend, and secondary-spawn metadata, while room ownership deterministically releases systems, emitters, types, and nodes. Legacy attractor, destroyer, deflector, and changer data remains fail-closed with source-linked diagnostics.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -59,7 +61,7 @@ Version 0.7.45 generates alpha-derived pixel geometry for GameMaker Precise and 
 **GM2Godot isn't:**
 - A perfect 1:1 conversion tool
 - A complete implementation of every current GameMaker GML Code and GML Reference page yet
-- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, runtime-authored masks, Godot physics fixtures, shaders, and target-specific runtime APIs
+- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, runtime-authored masks, advanced particle modifiers, Godot physics fixtures, shaders, and target-specific runtime APIs
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Compatibility Todo List
@@ -68,7 +70,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.45`.
+Current source version: `0.7.46`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

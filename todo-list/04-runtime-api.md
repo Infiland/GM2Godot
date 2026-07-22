@@ -207,7 +207,7 @@ This file tracks the generated GML compatibility runtime needed inside Godot.
 - [x] Particle compatibility subset.
 - [x] Sequence/timeline compatibility subset.
 - [x] Flex panel compatibility subset.
-- [ ] Full authored particle system asset conversion.
+- [x] Authored particle system descriptors, emitter/type instantiation, and room layer elements.
 - [ ] Full `part_*` and effect APIs.
 - [ ] Full sequence asset conversion.
 - [ ] Full sequence track/keyframe authoring APIs.

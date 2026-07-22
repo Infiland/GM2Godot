@@ -88,7 +88,7 @@ This file records what the current codebase appears to support. Partial features
 - [ ] Timeline converter.
 - [ ] Sequence converter.
 - [ ] Animation curve converter.
-- [ ] Particle system asset converter.
+- [x] Particle system asset converter.
 - [ ] Extension converter for native/plugin-backed behavior.
 - [ ] Texture group converter.
 - [ ] Full audio group behavior.

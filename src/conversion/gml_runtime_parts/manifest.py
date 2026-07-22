@@ -181,6 +181,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
             "10_handles_and_instances.gd",
             "11_layers.gd",
             "15_asset_registry.gd",
+            "51_particles.gd",
             "52_cameras_display.gd",
         ),
         tests=("tests/test_room_game_flow_godot.py",),

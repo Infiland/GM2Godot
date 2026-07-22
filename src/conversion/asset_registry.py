@@ -65,6 +65,11 @@ from src.conversion.type_defs import (
 )
 from src.conversion.path_registry import write_path_registry
 from src.conversion.animation_curve_registry import write_animation_curve_registry
+from src.conversion.particle_assets import (
+    normalize_particle_system_asset,
+    particle_system_unsupported_modifier_fields,
+    render_particle_system_resource,
+)
 from src.conversion.extension_registry import (
     collision_safe_extension_stub_resource_paths,
     extension_entry_from_yy,
@@ -554,6 +559,8 @@ class AssetRegistryConverter(BaseConverter):
         "rooms": ".tscn",
         "tilesets": ".tres",
         "paths": ".tscn",
+        "particles": ".tres",
+        "particlesystems": ".tres",
     }
     KIND_ORDER: ClassVar[dict[str, int]] = {
         kind: index for index, kind in enumerate(RESOURCE_TYPE_BY_KIND)
@@ -2400,6 +2407,7 @@ class AssetRegistryConverter(BaseConverter):
 
         timeline_completeness: dict[tuple[str, str], bool] = {}
         try:
+            self._write_particle_system_resources(entries)
             timeline_completeness = self._write_timeline_action_scripts(entries)
             if self.enforce_managed_resource_outputs:
                 reconciliation = self._reconcile_managed_resource_entries(
@@ -3117,7 +3125,7 @@ class AssetRegistryConverter(BaseConverter):
             )
 
         if resource.kind in {"particles", "particlesystems"}:
-            return self._particle_system_metadata(resource.raw_data)
+            return self._particle_system_metadata(resource)
 
         if resource.kind == "extensions":
             return extension_entry_metadata(
@@ -3600,16 +3608,59 @@ class AssetRegistryConverter(BaseConverter):
                 events.append(normalized)
         return sorted(events, key=lambda item: self._metadata_float(item.get("frame"), 0.0))
 
-    def _particle_system_metadata(self, raw_data: JsonDict) -> JsonDict:
-        return {
-            "types": self._json_list(raw_data, ("particleTypes", "types")),
-            "emitters": self._json_list(raw_data, ("emitters",)),
-            "attractors": self._json_list(raw_data, ("attractors",)),
-            "destroyers": self._json_list(raw_data, ("destroyers",)),
-            "deflectors": self._json_list(raw_data, ("deflectors",)),
-            "changers": self._json_list(raw_data, ("changers",)),
-            "raw": raw_data,
-        }
+    def _particle_system_metadata(self, resource: _ProjectResource) -> JsonDict:
+        unsupported_fields = particle_system_unsupported_modifier_fields(
+            resource.raw_data
+        )
+        if self.diagnostics is not None:
+            for field in unsupported_fields:
+                self.diagnostics.add(
+                    "warning",
+                    "GM2GD-PARTICLE-MODIFIER-UNSUPPORTED",
+                    (
+                        f"GameMaker particle system {resource.name!r} contains "
+                        f"authored {field} behavior. The descriptor preserves the "
+                        "category, but GM2Godot does not emulate that legacy "
+                        "particle modifier."
+                    ),
+                    source_path=self._diagnostic_source_path(resource.source_path),
+                    resource=resource.name,
+                    resource_type="particle_system",
+                    manifest_entry=field,
+                    issue_number=706,
+                    workaround=(
+                        "Replace this modifier with supported particle type motion "
+                        "or project-specific Godot logic."
+                    ),
+                )
+        return normalize_particle_system_asset(resource.raw_data)
+
+    def _write_particle_system_resources(
+        self,
+        entries: tuple[AssetRegistryEntry, ...],
+    ) -> None:
+        for entry in entries:
+            if (
+                entry.kind not in {"particles", "particlesystems"}
+                or not entry.godot_path.startswith("res://")
+                or entry.metadata is None
+            ):
+                continue
+            relative_path = entry.godot_path.removeprefix("res://")
+            output_path = os.path.join(
+                self.godot_project_path,
+                *relative_path.split("/"),
+            )
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            self._atomic_write_text(
+                output_path,
+                render_particle_system_resource(
+                    entry.name,
+                    entry.source_path,
+                    entry.metadata,
+                ),
+                confinement_root=self.godot_project_path,
+            )
 
     def _write_timeline_action_scripts(
         self,

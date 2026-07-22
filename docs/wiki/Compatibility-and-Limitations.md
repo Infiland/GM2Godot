@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.45 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.46 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -86,6 +86,8 @@ This contract follows the official GameMaker LTS [Method Variables](https://manu
 
 Version 0.7.45 implements the next #696 child without widening into those other areas. Imported GameMaker Precise masks use the alpha threshold and inclusive mask bounds from the sprite metadata. Static masks union all subimages; Precise Per Frame masks switch exact pixel geometry with the displayed frame. Origin and object transforms apply to both image and geometry, and generated collision events and query helpers consume the same active mask. Unsupported or inconsistent source data emits `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` before using a valid rectangle fallback. Runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures are not implied.
 
+Version 0.7.46 implements #706 only. Authored GameMaker particle assets now produce stable generated resources and normalized descriptors, and asset-backed GML calls plus room particle-layer elements instantiate managed Godot 4.7.1 emitters. Supported origin, draw order, region, lifetime, stream/burst, shape, motion, colour/alpha, scale, sprite or built-in texture, blend, timing, and secondary-spawn metadata is retained; room layer visibility/depth and element transforms remain on the generated hierarchy. Godot particle materials approximate GameMaker distributions, per-step wiggle/increment behavior, and editor timing where the engines do not map one-to-one. Attractor, destroyer, deflector, and changer data emits `GM2GD-PARTICLE-MODIFIER-UNSUPPORTED` with the source asset and field. Full `part_*` parity, built-in effects, sequences/timelines, and shader work are not implied.
+
 These locks serialize cooperating GM2Godot publishers; they do not authorize conversion while the generated game or another non-cooperating process is using the destination. A running Godot process does not participate and may retain open files or startup-established content verification. Close the game and any editor operation that is actively loading generated outputs, let conversion or recovery finish, and reopen it afterward. Stable public paths preserve existing `res://included_files/`, attempt-ledger, and canonical-manifest references across recovered generations.
 
 ## Known limitation areas
@@ -95,7 +97,7 @@ The following areas require especially careful manual review. This list is inten
 - Exact GameMaker value, coercion, lookup, lifecycle, and event-order edge cases can differ from GDScript and Godot callbacks.
 - Imported static/per-frame precise sprite masks are supported by the generated compatibility runtime; runtime-authored masks, `mask_index`, skeletal/tile masks, and GameMaker physics fixtures are not guaranteed to match Godot physics.
 - Shader translation, surfaces, GPU/draw state, cameras, the application surface, GUI scaling, and render ordering can need manual Godot work.
-- Advanced room/layer mutation, tilemaps, texture groups, sequences, timelines, particles, animation curves, and dynamic asset APIs have partial or metadata-only areas.
+- Authored particle assets and room elements convert through the documented approximation; advanced particle modifiers, dynamic particle APIs, room/layer mutation, tilemaps, texture groups, sequences, timelines, animation curves, and dynamic asset APIs still have partial or metadata-only areas.
 - Audio groups, streaming/compression, positional audio, async payload timing, networking, and filesystem sandbox behavior can vary by target.
 - Native extensions, marketplace SDKs, Steam, IAP, cloud, push, console, browser, and mobile services require explicit Godot plugins, permissions, or project-specific bridges; metadata and stubs are not working SDK integrations.
 - Importing a resource does not prove exact runtime semantics, visual parity, performance, or export readiness. Large and renderer-sensitive projects need representative target-device tests.

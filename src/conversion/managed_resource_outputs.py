@@ -12,7 +12,15 @@ from src.conversion.type_defs import JsonDict
 
 
 STALE_INVALIDATION_RESOURCE_KINDS = frozenset(
-    {"objects", "rooms", "shaders", "sprites", "timelines"}
+    {
+        "objects",
+        "particles",
+        "particlesystems",
+        "rooms",
+        "shaders",
+        "sprites",
+        "timelines",
+    }
 )
 STALE_INVALIDATION_CONVERTER_KEYS = frozenset(
     {"asset_registry", "objects", "rooms", "shaders", "sprites"}

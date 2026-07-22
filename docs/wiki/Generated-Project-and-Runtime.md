@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.45 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.46 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -207,11 +207,12 @@ See [`runtime_managers.md`](https://github.com/Infiland/GM2Godot/blob/main/src/c
 Generated object `_ready()` methods register the instance, initialize motion state, and run converted Create behavior when present. The generated room root then performs the room-entry sequence:
 
 1. Register layer and view metadata.
-2. Update the current room and room globals.
-3. Run instance creation code in declared GameMaker creation order.
-4. Dispatch Game Start once for the running game.
-5. Run room creation code.
-6. Dispatch Room Start.
+2. Instantiate authored room particle-layer systems.
+3. Update the current room and room globals.
+4. Run instance creation code in declared GameMaker creation order.
+5. Dispatch Game Start once for the running game.
+6. Run room creation code.
+7. Dispatch Room Start.
 
 For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, restores those instances, and runs the entry sequence for the new scene.
 
@@ -241,6 +242,16 @@ The visual and mask use the GameMaker origin as their common local reference. Th
 If frame bytes are unreadable, dimensions or bounds disagree, tolerance is invalid, or exact decomposition exceeds 16,384 rectangles, conversion emits `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` and retains the prior bounding-box fallback when that box is valid. Runtime-created/modified sprite masks, `mask_index` overrides, skeletal meshes, tile-set masks, and GameMaker physics fixtures remain separate compatibility areas.
 
 This follows the GameMaker LTS [Sprite Editor collision-mask rules](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm), [collision rotation/scaling and precise-query semantics](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Movement_And_Collisions/Collisions/Collisions.htm), and [`sprite_collision_mask`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Sprites/Sprite_Manipulation/sprite_collision_mask.htm). Generated behavior is validated against Godot 4.7.1 [`AnimatedSprite2D.frame_changed`](https://docs.godotengine.org/en/4.7/classes/class_animatedsprite2d.html), [`CollisionShape2D`](https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html), and [`Transform2D`](https://docs.godotengine.org/en/4.7/classes/class_transform2d.html).
+
+### Authored particle assets and room elements
+
+Version 0.7.46 normalizes each current `GMParticleSystem` asset into one deterministic descriptor and writes it as a loadable resource under its collision-safe `res://particlesystems/` path (`res://particles/` for the legacy resource family). The descriptor keeps system origin and draw order, one embedded particle type per current editor emitter, emitter order/name/mode/count/region/distribution/relative and timing fields, visual and motion ranges, and secondary-spawn references. The generated asset registry carries the same descriptor so static asset IDs passed to `part_system_create` and `part_system_create_layer` resolve without guessing.
+
+At runtime, each authored emitter becomes a managed `GPUParticles2D` with a `ParticleProcessMaterial`. Lifetime frames and per-step speed/gravity are converted at the generated room speed; region shapes, initial direction/spread, orientation, size ranges/increment curves, colour/alpha ramps, additive blend, built-in particle textures, custom sprite textures, and stream or one-shot burst mode are applied where Godot has a safe mapping. Exact GameMaker Gaussian/inverse-Gaussian placement, wiggle/increment evolution, sprite flipbooks, delay/interval scheduling, and secondary spawning remain descriptor-preserved approximations rather than claimed native parity.
+
+A `GMRParticleSystem` room asset keeps its layer visibility, inverse-depth `z_index`, layer offset, element position/rotation/scale/modulate, source asset ID, and source metadata. Room entry creates its system below that element. Tree exit destroys the system's emitter and owned-type handles and frees every managed particle node; directly created one-shot nodes also free themselves after Godot's `finished` signal. Non-empty legacy attractor, destroyer, deflector, or changer fields do not silently disappear: conversion records `GM2GD-PARTICLE-MODIFIER-UNSUPPORTED` against the source `.yy` field and retains the unsupported category in the descriptor.
+
+These mappings follow the GameMaker LTS [Particle System Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Particle_Systems.htm), [`particle_get_info`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/particle_get_info.htm), and [`part_system_create`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Systems/part_system_create.htm) contracts. Generated behavior and cleanup are tested with exact Godot 4.7.1 [`GPUParticles2D`](https://docs.godotengine.org/en/4.7/classes/class_gpuparticles2d.html) and [`ParticleProcessMaterial`](https://docs.godotengine.org/en/4.7/classes/class_particleprocessmaterial.html) APIs.
 
 `GMDraw` independently dispatches the ordered drawing phases:
 
@@ -340,6 +351,7 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 | Area | Current behavior |
 | --- | --- |
 | Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
+| Advanced particle behavior | Authored systems and room elements instantiate managed emitters, but legacy field modifiers and engine-specific distribution, timing, wiggle, flipbook, and secondary-spawn details need diagnostics-guided visual review. |
 | Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
 | Shaders and GPU state | GameMaker GLSL ES and Godot shader language/state do not map one-to-one; generated output needs visual review. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |

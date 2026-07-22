@@ -360,8 +360,11 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Particle_Systems/Particle_Systems.htm",
         ("Particles GPU Effects",),
-        ("tests/test_particles_runtime_godot.py",),
-        "Runtime subset exists; authored particle assets and layer elements remain open.",
+        (
+            "tests/test_particles_runtime_godot.py",
+            "tests/test_authored_particles_godot.py",
+        ),
+        "Authored systems, embedded types, emitters, room elements, and common visual properties convert; legacy field modifiers remain diagnostic-only.",
     ),
     _entry(
         "reference_paths",

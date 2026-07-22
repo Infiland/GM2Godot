@@ -21,6 +21,7 @@ static func gml_room_enter_scene(scene, force = false):
 	_gml_room_pending_entry = null
 	gml_layer_register_scene(scene)
 	_gml_view_register_scene(scene)
+	_gml_particle_room_enter_scene(scene)
 	_gml_room_update_current(entry, scene)
 	_gml_room_warn_persistent_room(scene)
 	_gml_room_run_instance_creation_code(scene)

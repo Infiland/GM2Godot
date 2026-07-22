@@ -377,6 +377,8 @@ def generation_output_owner(
         "included_files": "included_files",
         "notes": "notes",
         "objects": "objects",
+        "particles": "asset_registry",
+        "particlesystems": "asset_registry",
         "paths": "asset_registry",
         "rooms": "rooms",
         "scripts": "scripts",

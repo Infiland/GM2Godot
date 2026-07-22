@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.47 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.48 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-22
 
@@ -136,6 +136,14 @@ Disabled converters retain the prior byte-, mode-, and digest-exact inventory by
 Version 0.7.47 adds each generated sequence descriptor `.tres` as the required private output of its logical sequence resource under the `asset_registry` owner. A removed, rejected, or partial sequence therefore cannot leave an earlier descriptor masquerading as current output; supported partial descriptors are regenerated with their source-linked unsupported-type diagnostics.
 
 The source-of-truth policy follows GameMaker LTS 2026's official [Project Format](https://manual.gamemaker.io/lts/en/Additional_Information/Project_Format.htm): the root YYP describes project resources, while each YY describes one resource and its associated files. Shader ownership follows the LTS [Shader Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Shaders.htm) two-stage asset model, and timeline action ownership follows the LTS [Timeline Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Timelines.htm) moment/code model. Validation uses Godot 4.7's documented [`--import`](https://docs.godotengine.org/en/4.7/tutorials/editor/command_line_tutorial.html) scan and [import process](https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/import_process.html), under which project assets are rescanned from files while imported cache state lives under `.godot/` and can be regenerated.
+
+### Shader translation boundary
+
+Version 0.7.48 parses both GameMaker GLSL ES stages into declarations and function spans before generating one `shader_type canvas_item` resource. GameMaker's standard 2D vertex inputs map to Godot processing inputs: `in_Position` becomes `vec3(VERTEX, 0.0)`, `in_Colour`/`in_Colour0` becomes vertex `COLOR`, and `in_TextureCoord` becomes `UV`. The converter removes the GameMaker world/view/projection prefix from supported `gl_Position` assignments and writes the resulting local XY value to `VERTEX`; Godot then applies `MODEL_MATRIX`, `CANVAS_MATRIX`, and `SCREEN_MATRIX` exactly once. Other fixed `gm_Matrices` accesses map to those matrices or their documented products. Fragment `gm_BaseTexture`, `texture2D`, and `gl_FragColor` map to `TEXTURE`, `texture`, and `COLOR`.
+
+Matching varyings and shared uniforms are emitted once. Fixed one-dimensional arrays, constants, precision qualifiers, and multi-line/comma-separated global declarations are normalized into unambiguous declarations. A conflict, Godot built-in name collision, unsupported scalar matrix constructor, unsupported attribute or matrix, arbitrary clip-space/3D transform, preprocessor directive, mutable global, or unlinked fragment varying produces a source-line `GM2GD-SHADER-*` diagnostic, fails the shader resource, and publishes no `.gdshader`; a committed partial rerun therefore cannot retain the old managed shader or registry row. The supported corpus is compiled and loaded under exact Godot `4.7.1.stable.official.a13da4feb`. Custom vertex formats, macro expansion, multi-pass effects, renderer state, and visual parity still require manual Godot work.
+
+The mapping boundary follows the official GameMaker LTS [shader guide](https://manual.gamemaker.io/lts/en/Additional_Information/Guide_To_Using_Shaders.htm), [built-in shader constants](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Shaders/Shader_Constants.htm), and [vertex-format mapping](https://manual.gamemaker.io/lts/en/Additional_Information/Guide_To_Primitives_And_Vertex_Building.htm), together with Godot 4.7's [CanvasItem built-ins](https://docs.godotengine.org/en/4.7/tutorials/shaders/shader_reference/canvas_item_shader.html), [GLSL conversion guidance](https://docs.godotengine.org/en/4.7/tutorials/shaders/converting_glsl_to_godot_shaders.html), and [shading-language declaration/array/varying rules](https://docs.godotengine.org/en/4.7/tutorials/shaders/shader_reference/shading_language.html).
 
 `Converter.convert()` is the direct-library contract used by the GUI worker and CLI. A cooperative `conversion_running` flag cleared during converter/finalizer/validation work, or during recovery before new work begins, yields `cancelled` only before publication and leaves the verified prior generation public. Once publication starts, cancellation is deferred until the old-or-new decision and cannot relabel a committed generation. Exceptions expose `last_outcome`, but public trust comes from the canonical evidence plus any recovery artifact—not from return-versus-exception alone.
 
@@ -367,7 +375,7 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 | Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
 | Advanced particle behavior | Authored systems and room elements instantiate managed emitters, but legacy field modifiers and engine-specific distribution, timing, wiggle, flipbook, and secondary-spawn details need diagnostics-guided visual review. |
 | Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
-| Shaders and GPU state | GameMaker GLSL ES and Godot shader language/state do not map one-to-one; generated output needs visual review. |
+| Shaders and GPU state | Supported 2D attributes, varyings, uniforms, base-texture sampling, and matrix transforms compile under exact Godot 4.7.1; custom vertex streams, macros, 3D/clip-space logic, multi-pass effects, GPU state, and visual parity remain manual review areas. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |
 | `game_end` | Maps to `SceneTree.quit()`; platform-specific close prompts and window behavior are not emulated. |
 | Custom Godot callbacks/signals | Only generated manager queues participate in the GameMaker ordering contract. Direct custom callbacks can observe a different order. |

@@ -359,12 +359,10 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
     def _valid_shader_source() -> str:
         return (
             "precision highp float;\n"
-            "varying vec2 v_vTexcoord;\n"
-            "varying vec4 v_vColour;\n"
             "uniform sampler2D gm_BaseTexture;\n"
             "void main() {\n"
             "    gl_FragColor = texture2D("
-            "gm_BaseTexture, v_vTexcoord) * v_vColour;\n"
+            "gm_BaseTexture, vec2(0.5));\n"
             "}\n"
         )
 
@@ -541,6 +539,45 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
         self.assertIsNone(self._manifest_resource(self.SHADER_NAME))
         self.assertNotIn(f'"name": "{self.SHADER_NAME}"', self._registry())
         self._assert_absent_from_inventory((output,))
+        self._assert_user_file_preserved()
+
+    def test_unsupported_shader_removes_prior_output_with_diagnostic(
+        self,
+    ) -> None:
+        self._write_shader(
+            "#define SAMPLE_AT(uv) texture2D(gm_BaseTexture, uv)\n"
+            "void main() {\n"
+            "    gl_FragColor = SAMPLE_AT(vec2(0.5));\n"
+            "}\n"
+        )
+
+        outcome = self._convert()
+
+        output = self._shader_output()
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(outcome.resources.failed, 1)
+        self.assertFalse(output.exists())
+        self.assertIsNone(self._manifest_resource(self.SHADER_NAME))
+        self.assertNotIn(f'"name": "{self.SHADER_NAME}"', self._registry())
+        self._assert_absent_from_inventory((output,))
+        diagnostics = json.loads(
+            (
+                self.godot_dir
+                / "gm2godot"
+                / "conversion_diagnostics.json"
+            ).read_text(encoding="utf-8")
+        )
+        shader_diagnostics = [
+            diagnostic
+            for diagnostic in diagnostics["diagnostics"]
+            if diagnostic["code"] == "GM2GD-SHADER-CONSTRUCT-UNSUPPORTED"
+        ]
+        self.assertEqual(len(shader_diagnostics), 1, shader_diagnostics)
+        self.assertEqual(
+            shader_diagnostics[0]["source_path"],
+            f"shaders/{self.SHADER_NAME}/{self.SHADER_NAME}.fsh",
+        )
+        self.assertEqual(shader_diagnostics[0]["line"], 1)
         self._assert_user_file_preserved()
 
     def test_timeline_transpile_failure_removes_prior_action_script_reference(

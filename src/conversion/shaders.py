@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -19,6 +18,12 @@ from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
+)
+from src.conversion.shader_translation import (
+    ShaderStage,
+    ShaderStageSource,
+    ShaderTranslationIssue,
+    translate_gamemaker_shader,
 )
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
@@ -76,13 +81,10 @@ class _ShaderConversionPlan:
     skipped_names: tuple[str, ...]
 
 
-_FUNCTION_START_RE = re.compile(
-    r"^\s*[A-Za-z_]\w*(?:\s*\[[^\]]+\])?\s+[A-Za-z_]\w*\s*\(",
-)
-_DECLARATION_RE = re.compile(
-    r"^\s*(uniform|varying|const|in|out)\b.*?\b([A-Za-z_]\w*)\s*"
-    r"(?:\[[^\]]*\])?\s*;\s*$",
-)
+@dataclass(frozen=True)
+class _ShaderRenderResult:
+    source: str | None
+    reported_failure: bool = False
 
 
 class ShaderConverter(BaseConverter):
@@ -112,87 +114,38 @@ class ShaderConverter(BaseConverter):
             return
         with open(resolved_input.filesystem_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        stage = (
+        stage: ShaderStage = (
             "vertex"
             if resolved_input.filesystem_path.lower().endswith(".vsh")
             else "fragment"
         )
-        translated = self._translate_shader_source(content, stage)
-        self._atomic_write_text(
-            output_file,
-            self._merge_shader_sources((translated,)),
+        translation = translate_gamemaker_shader(
+            (ShaderStageSource(stage=stage, source=content),)
         )
-
-    @staticmethod
-    def _translate_shader_source(content: str, stage: str) -> str:
-        content = re.sub(
-            r"(?m)^\s*precision\s+(?:lowp|mediump|highp)\s+\w+\s*;\s*$",
-            "",
-            content,
-        )
-        content = re.sub(
-            r"(?m)^\s*shader_type\s+\w+\s*;\s*$",
-            "",
-            content,
-        )
-        content = re.sub(
-            r"(?m)^\s*uniform\s+sampler2D\s+gm_BaseTexture\s*;\s*$",
-            "",
-            content,
-        )
-
-        content = re.sub(r'\battribute\b', 'in', content)
-        content = re.sub(r'gl_FragColor', 'COLOR', content)
-        content = re.sub(r'texture2D', 'texture', content)
-        content = re.sub(r'gl_Position', 'VERTEX', content)
-
-        if stage == "vertex":
-            content = re.sub(r'void main\(\)', 'void vertex()', content)
-        else:
-            content = re.sub(r'void main\(\)', 'void fragment()', content)
-
-        content = re.sub(r'gm_BaseTexture', 'TEXTURE', content)
-        content = re.sub(r'gm_Matrices\[MATRIX_WORLD_VIEW_PROJECTION\]',
-                         'PROJECTION_MATRIX * MODELVIEW_MATRIX', content)
-
-        if 'u_fTime' in content:
-            content = content.replace('u_fTime', 'TIME')
-
-        return content.strip()
-
-    @classmethod
-    def _merge_shader_sources(cls, sources: tuple[str, ...]) -> str:
-        preambles: list[str] = []
-        bodies: list[str] = []
-        seen_declarations: set[tuple[str, str]] = set()
-        for source in sources:
-            preamble, body = cls._split_shader_source(source)
-            filtered_preamble: list[str] = []
-            for line in preamble.splitlines():
-                declaration = _DECLARATION_RE.match(line)
-                if declaration is not None:
-                    key = (declaration.group(1), declaration.group(2))
-                    if key in seen_declarations:
-                        continue
-                    seen_declarations.add(key)
-                filtered_preamble.append(line)
-            rendered_preamble = "\n".join(filtered_preamble).strip()
-            if rendered_preamble:
-                preambles.append(rendered_preamble)
-            rendered_body = body.strip()
-            if rendered_body:
-                bodies.append(rendered_body)
-
-        sections = ["shader_type canvas_item;", *preambles, *bodies]
-        return "\n\n".join(sections).rstrip() + "\n"
-
-    @staticmethod
-    def _split_shader_source(source: str) -> tuple[str, str]:
-        lines = source.splitlines()
-        for index, line in enumerate(lines):
-            if _FUNCTION_START_RE.match(line):
-                return ("\n".join(lines[:index]), "\n".join(lines[index:]))
-        return (source, "")
+        if translation.source is None:
+            self._report_shader_translation_issues(
+                _ShaderAsset(
+                    name=os.path.splitext(
+                        os.path.basename(resolved_input.filesystem_path)
+                    )[0],
+                    subfolder="",
+                    owner_path=resolved_input.source_path,
+                    vertex_path=(
+                        resolved_input.filesystem_path
+                        if stage == "vertex"
+                        else None
+                    ),
+                    fragment_path=(
+                        resolved_input.filesystem_path
+                        if stage == "fragment"
+                        else None
+                    ),
+                ),
+                translation.issues,
+                {stage: resolved_input.filesystem_path},
+            )
+            return
+        self._atomic_write_text(output_file, translation.source)
 
     @staticmethod
     def _atomic_write_text(output_file: str, content: str) -> None:
@@ -221,12 +174,14 @@ class ShaderConverter(BaseConverter):
                 except FileNotFoundError:
                     pass
 
-    def _render_shader_asset(self, asset: _ShaderAsset) -> str | None:
-        translated_sources: list[str] = []
-        for stage, source_path in (
+    def _render_shader_asset(self, asset: _ShaderAsset) -> _ShaderRenderResult:
+        stage_sources: list[ShaderStageSource] = []
+        source_paths: dict[ShaderStage, str] = {}
+        stage_paths: tuple[tuple[ShaderStage, str | None], ...] = (
             ("vertex", asset.vertex_path),
             ("fragment", asset.fragment_path),
-        ):
+        )
+        for stage, source_path in stage_paths:
             if source_path is None:
                 continue
             resolved_source = self._resolve_discovered_project_source(
@@ -239,7 +194,7 @@ class ShaderConverter(BaseConverter):
             if resolved_source is None or not os.path.isfile(
                 resolved_source.filesystem_path
             ):
-                return None
+                return _ShaderRenderResult(source=None)
             try:
                 with open(
                     resolved_source.filesystem_path,
@@ -248,16 +203,58 @@ class ShaderConverter(BaseConverter):
                 ) as source_file:
                     source = source_file.read()
             except OSError:
-                return None
+                return _ShaderRenderResult(source=None)
             if not source.strip():
-                return None
-            translated_source = self._translate_shader_source(source, stage)
-            if not translated_source.strip():
-                return None
-            translated_sources.append(translated_source)
-        if not translated_sources:
-            return None
-        return self._merge_shader_sources(tuple(translated_sources))
+                return _ShaderRenderResult(source=None)
+            stage_sources.append(ShaderStageSource(stage=stage, source=source))
+            source_paths[stage] = resolved_source.filesystem_path
+        if not stage_sources:
+            return _ShaderRenderResult(source=None)
+        translation = translate_gamemaker_shader(tuple(stage_sources))
+        if translation.source is None:
+            self._report_shader_translation_issues(
+                asset,
+                translation.issues,
+                source_paths,
+            )
+            return _ShaderRenderResult(source=None, reported_failure=True)
+        return _ShaderRenderResult(source=translation.source)
+
+    def _report_shader_translation_issues(
+        self,
+        asset: _ShaderAsset,
+        issues: tuple[ShaderTranslationIssue, ...],
+        source_paths: dict[ShaderStage, str],
+    ) -> None:
+        for issue in issues:
+            source_path = self._diagnostic_source_path(
+                source_paths.get(issue.stage)
+            )
+            location = (
+                f"{source_path or asset.source_label}:"
+                f"{issue.line}:{issue.column}"
+            )
+            message = (
+                f"Warning: GameMaker shader {asset.name!r} {issue.stage} "
+                f"stage at {location}: {issue.message}"
+            )
+            with self._lock:
+                if self.diagnostics is not None:
+                    self.diagnostics.add(
+                        "warning",
+                        issue.code,
+                        message,
+                        source_path=source_path,
+                        line=issue.line,
+                        column=issue.column,
+                        resource=asset.name,
+                        resource_type="shader",
+                        event=issue.stage,
+                        manifest_entry=issue.construct,
+                        issue_number=708,
+                        workaround=issue.workaround,
+                    )
+                self.log_callback(message)
 
     def _process_shader(
         self,
@@ -278,14 +275,15 @@ class ShaderConverter(BaseConverter):
                 else self.godot_shaders_path
             )
             output_path = os.path.join(output_dir, output_name)
-        shader_source = self._render_shader_asset(asset)
-        if shader_source is None:
-            self._safe_log(
-                f"Warning: GameMaker shader {asset.name} does not have a "
-                "complete, non-empty readable stage set during conversion."
-            )
+        render_result = self._render_shader_asset(asset)
+        if render_result.source is None:
+            if not render_result.reported_failure:
+                self._safe_log(
+                    f"Warning: GameMaker shader {asset.name} does not have a "
+                    "complete, non-empty readable stage set during conversion."
+                )
             return None
-        self._atomic_write_text(output_path, shader_source)
+        self._atomic_write_text(output_path, render_result.source)
         return (asset.source_label, output_name)
 
     def _process_shader_with_outcome(

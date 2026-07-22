@@ -104,16 +104,23 @@ This file tracks GameMaker project/resource data that the converter must eventua
 
 ## Shaders
 
-- [x] Copy/convert shader files into `.gdshader` with basic replacements.
+- [x] Group vertex and fragment stages into one collision-safe `.gdshader`.
+- [x] Tokenize global declarations instead of relying on line regexes.
+- [x] Map the supported 2D GameMaker position, colour, texture-coordinate, base-texture, varying, uniform, and matrix subset.
+- [x] Parse fixed arrays plus multi-line and comma-separated declarations.
+- [x] Emit source-linked diagnostics and fail the logical shader resource for unsupported constructs.
+- [x] Compile and load every supported pinned-corpus case through exact Godot 4.7.1.
 - [ ] Full vertex shader translation.
 - [ ] Full fragment shader translation.
-- [ ] Attribute mapping.
-- [ ] Varying mapping.
-- [ ] Uniform mapping and runtime binding.
-- [ ] Sampler/texture mapping.
-- [ ] Precision qualifier handling.
+- [ ] Custom/normal/additional vertex attribute streams and custom vertex-buffer binding.
+- [ ] Arbitrary clip-space, perspective, and 3D matrix semantics.
+- [x] Standard varying mapping with cross-stage declaration validation.
+- [x] Custom uniform preservation and runtime binding for the supported declaration subset.
+- [x] `gm_BaseTexture` and `texture2D` mapping for the supported fragment subset.
+- [x] Default and declaration-level precision qualifier handling.
+- [ ] Preprocessor directives, global mutable state, and unsupported GLSL ES types/built-ins.
 - [ ] Multi-pass effect conversion.
-- [ ] Shader compile validation through Godot headless.
+- [ ] Visual and renderer-state parity across target renderers and platforms.
 
 ## Rooms And Layers
 

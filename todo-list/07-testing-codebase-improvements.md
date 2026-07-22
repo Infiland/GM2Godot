@@ -44,7 +44,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Emit conversion report for unsupported syntax.
 - [ ] Emit conversion report for unsupported GML APIs.
 - [ ] Emit conversion report for skipped resources.
-- [ ] Emit conversion report for unsupported shaders.
+- [x] Emit source-linked conversion diagnostics for unsupported shader constructs and failed logical shader resources.
 - [ ] Emit conversion report for unsupported platform services.
 - [ ] Emit conversion report for generated invalid GDScript.
 - [ ] Add fail-on-unsupported mode.

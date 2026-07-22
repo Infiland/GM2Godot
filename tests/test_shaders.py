@@ -19,14 +19,11 @@ from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
 SAMPLE_FSH = """\
 precision highp float;
-varying vec2 v_vTexcoord;
-varying vec4 v_vColour;
 uniform sampler2D gm_BaseTexture;
 
 void main()
 {
-    vec4 col = texture2D(gm_BaseTexture, v_vTexcoord);
-    gl_FragColor = col * v_vColour;
+    gl_FragColor = texture2D(gm_BaseTexture, vec2(0.5));
 }
 """
 
@@ -139,7 +136,9 @@ class TestShaderConverterBasic(unittest.TestCase):
         with open(vertex_path, "w", encoding="utf-8") as vertex_file:
             vertex_file.write(
                 "attribute vec3 in_Position;\n"
-                "void main() { gl_Position = vec4(in_Position, 1.0); }\n"
+                "void main() { gl_Position = "
+                "gm_Matrices[MATRIX_WORLD_VIEW_PROJECTION] * "
+                "vec4(in_Position, 1.0); }\n"
             )
         fragment_path = self.fsh_path
 
@@ -398,11 +397,13 @@ class TestShaderAssetOwnershipAndStages(unittest.TestCase):
     def test_dual_stage_asset_publishes_one_complete_shader(self) -> None:
         vertex_source = """\
 precision highp float;
+attribute vec3 in_Position;
 varying vec2 v_shared;
 uniform float amount;
 
 void main()
 {
+    gl_Position = gm_Matrices[MATRIX_WORLD_VIEW_PROJECTION] * vec4(in_Position, 1.0);
     v_shared = vec2(amount);
 }
 // VERTEX_MARKER
@@ -564,6 +565,113 @@ class TestShaderManifestOutcomeAccounting(unittest.TestCase):
             outcome.converters,
             ConversionCounts(requested=1, executed=1, completed=1),
         )
+
+    def test_unsupported_construct_fails_resource_with_structured_diagnostic(
+        self,
+    ) -> None:
+        shader_name = "shd_unsupported_normal"
+        shader_directory = os.path.join(
+            self.gm_dir,
+            "shaders",
+            shader_name,
+        )
+        os.makedirs(shader_directory)
+        with open(
+            os.path.join(shader_directory, shader_name + ".yy"),
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+            json.dump(
+                {"name": shader_name, "resourceType": "GMShader"},
+                metadata_file,
+            )
+        with open(
+            os.path.join(shader_directory, shader_name + ".vsh"),
+            "w",
+            encoding="utf-8",
+        ) as vertex_file:
+            vertex_file.write(
+                "attribute vec3 in_Position;\n"
+                "attribute vec3 in_Normal;\n"
+                "void main()\n"
+                "{\n"
+                "    vec2 offset = in_Normal.xy;\n"
+                "    gl_Position = "
+                "gm_Matrices[MATRIX_WORLD_VIEW_PROJECTION] * "
+                "vec4(in_Position.xy + offset, 0.0, 1.0);\n"
+                "}\n"
+            )
+        with open(
+            os.path.join(shader_directory, shader_name + ".fsh"),
+            "w",
+            encoding="utf-8",
+        ) as fragment_file:
+            fragment_file.write(SAMPLE_FSH)
+        self._write_yyp(
+            [
+                self._shader_declaration(
+                    shader_name,
+                    f"shaders/{shader_name}/{shader_name}.yy",
+                )
+            ]
+        )
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+            max_workers=1,
+        )
+
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"shaders": _EnabledSetting()},
+        )
+
+        self.assertEqual(outcome.state, "partial")
+        self.assertEqual(
+            outcome.resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(
+                    self.godot_dir,
+                    "shaders",
+                    shader_name + ".gdshader",
+                )
+            )
+        )
+        with open(
+            os.path.join(
+                self.godot_dir,
+                "gm2godot",
+                "conversion_diagnostics.json",
+            ),
+            encoding="utf-8",
+        ) as diagnostics_file:
+            diagnostics = json.load(diagnostics_file)
+        unsupported = [
+            diagnostic
+            for diagnostic in diagnostics["diagnostics"]
+            if diagnostic["code"] == "GM2GD-SHADER-ATTRIBUTE-UNSUPPORTED"
+        ]
+        self.assertEqual(len(unsupported), 1, unsupported)
+        self.assertEqual(unsupported[0]["resource"], shader_name)
+        self.assertEqual(unsupported[0]["resource_type"], "shader")
+        self.assertEqual(unsupported[0]["event"], "vertex")
+        self.assertEqual(unsupported[0]["source_path"], (
+            f"shaders/{shader_name}/{shader_name}.vsh"
+        ))
+        self.assertEqual(unsupported[0]["line"], 5)
+        self.assertEqual(unsupported[0]["column"], 19)
+        self.assertEqual(unsupported[0]["manifest_entry"], "in_Normal")
+        self.assertEqual(unsupported[0]["issue_number"], 708)
+        self.assertTrue(unsupported[0]["workaround"])
 
     def test_safe_and_missing_manifest_shaders_have_strict_counts(self) -> None:
         safe_directory = os.path.join(

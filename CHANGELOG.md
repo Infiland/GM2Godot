@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.48 - 2026-07-22
+
+- Replaced heuristic shader substitutions with a tokenized GameMaker GLSL ES declaration parser that handles multi-line, array, and comma-separated attributes, varyings, uniforms, constants, and precision declarations before merging paired stages.
+- Mapped supported 2D position, colour, texture-coordinate, base-texture, varying, and world/view/projection semantics to Godot 4.7.1 CanvasItem shaders while retaining custom uniforms instead of guessing time semantics.
+- Added source-linked fail-closed diagnostics and failed-resource accounting for unsupported attributes, matrix/clip-space paths, scalar matrix constructors, Godot built-in name collisions, preprocessor directives, conflicting declarations/functions, and unlinked varyings, plus a provenance-pinned real shader corpus compiled and loaded by exact Godot 4.7.1.
+
 ## 0.7.47 - 2026-07-22
 
 - Converted supported authored GameMaker sprite, instance, audio, text, nested-sequence, and audio-effect tracks into deterministic managed sequence descriptors with ordered asset/parameter keys, assign/linear interpolation, transforms, playback speed modes, draw order, and nested runtime evaluation.

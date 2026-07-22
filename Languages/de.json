@@ -175,6 +175,7 @@
 "Prompt_Path_Godot" : "Wählen Sie Ihr Godot-Projekt aus",
 
 "ReleaseNotes_Title" : "Versionshinweise",
+"ReleaseNotes_ShowMore" : "Mehr anzeigen",
 "ReleaseNotes_Error_NoInternet" : ["Fehler", "Versionshinweise können nicht abgerufen werden. Bitte überprüfen Sie Ihre Internetverbindung und versuchen Sie es erneut."],
 "ReleaseNotes_Error_Generic" : "Fehler beim Abrufen der Versionshinweise: {error}",
 

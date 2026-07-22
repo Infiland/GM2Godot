@@ -175,6 +175,7 @@
 "Prompt_Path_Godot" : "Select your Godot Project",
 
 "ReleaseNotes_Title" : "Release Notes",
+"ReleaseNotes_ShowMore" : "Show more",
 "ReleaseNotes_Error_NoInternet" : ["Error", "Unable to fetch release notes. Please check your internet connection and try again."],
 "ReleaseNotes_Error_Generic" : "Error fetching release notes: {error}",
 

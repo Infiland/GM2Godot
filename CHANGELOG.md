@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.49 - 2026-07-22
+
+- Expanded the clickable release-notes view from the latest release to the ten newest published GitHub release changelogs, each labeled and linked to its release.
+- Added a localized **Show more** action that requests subsequent ten-release pages, appends them without discarding visible history, and remains retryable after a transient failure.
+- Added strict GitHub response validation plus focused network, pagination, rendering, localization, and failure-preservation tests.
+
 ## 0.7.48 - 2026-07-22
 
 - Replaced heuristic shader substitutions with a tokenized GameMaker GLSL ES declaration parser that handles multi-line, array, and comma-separated attributes, varyings, uniforms, constants, and precision declarations before merging paired stages.

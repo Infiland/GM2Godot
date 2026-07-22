@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.45 - 2026-07-22
+
+- Converted GameMaker Precise masks into alpha-tolerance-clipped pixel geometry, compositing all subimages for static masks and generating independently switchable geometry for Precise Per Frame sprites.
+- Kept active masks aligned with sprite origin, frame, `sprite_index`, `image_index`, scale, and rotation, and made collision events, movement checks, and point/rectangle/line/circle query variants consume the same transformed geometry.
+- Added structured safe-fallback diagnostics for masks that cannot be represented exactly plus focused conversion tests and an exact Godot 4.7.1 fixture distinguishing rectangle, static precise, and per-frame outcomes.
+
 ## 0.7.44 - 2026-07-22
 
 - Made generated bound methods receive invocation-time `other` from the calling `self` through nested dynamic calls, `method_call`, script dispatch, and array/struct callbacks instead of retaining declaration-time scope.

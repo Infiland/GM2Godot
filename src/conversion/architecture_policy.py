@@ -35,15 +35,19 @@ GODOT_ARCHITECTURE_SOURCES: dict[str, str] = {
     "autoload": "https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html",
     "canvas_layer": "https://docs.godotengine.org/en/stable/tutorials/2d/canvas_layers.html",
     "physics_2d": "https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html",
+    "collision_shape_2d": "https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html",
+    "transform_2d": "https://docs.godotengine.org/en/4.7/classes/class_transform2d.html",
     "audio_server": "https://docs.godotengine.org/en/stable/classes/class_audioserver.html",
     "http_request": "https://docs.godotengine.org/en/stable/classes/class_httprequest.html",
-    "game_maker_event_order": "https://manual.gamemaker.io/monthly/en/The_Asset_Editors/Object_Properties/Event_Order.htm",
+    "game_maker_event_order": "https://manual.gamemaker.io/lts/en/The_Asset_Editors/Object_Properties/Event_Order.htm",
+    "game_maker_sprite_masks": "https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm",
 }
 
 _DRAW_RE = re.compile(r"\b(draw_|shader_|gpu_|font_|sprite_)", re.IGNORECASE)
 _SURFACE_RE = re.compile(r"\b(surface_|application_surface)", re.IGNORECASE)
 _COLLISION_RE = re.compile(r"\b(collision_|place_meeting|position_meeting|instance_place|instance_position)", re.IGNORECASE)
 _PRECISE_COLLISION_RE = re.compile(r"\bcollision_[A-Za-z0-9_]*\s*\([^;]*,\s*true\s*,", re.IGNORECASE)
+_PRECISE_SPRITE_KIND_RE = re.compile(r'"collisionKind"\s*:\s*(?:0|4)\b')
 _AUDIO_RE = re.compile(r"\b(audio_|sound_)", re.IGNORECASE)
 _NETWORK_RE = re.compile(r"\b(network_|http_|url_open|steam_ugc_download)", re.IGNORECASE)
 _BUFFER_FILE_RE = re.compile(r"\b(buffer_|file_|ini_|json_)", re.IGNORECASE)
@@ -347,7 +351,10 @@ def inspect_architecture_features(gm_project_path: str) -> ArchitectureFeatures:
         has_draw_code=_matches(script_text, _DRAW_RE),
         has_surface_code=_matches(script_text, _SURFACE_RE),
         has_collision_code=_matches(script_text, _COLLISION_RE),
-        has_precise_collision_request=_matches(script_text, _PRECISE_COLLISION_RE),
+        has_precise_collision_request=(
+            _matches(script_text, _PRECISE_COLLISION_RE)
+            or _has_precise_sprite_resource(gm_project_path, index)
+        ),
         has_audio_code=_matches(script_text, _AUDIO_RE),
         has_sound_assets=bool(index.resources.get("sounds")),
         has_network_code=_matches(script_text, _NETWORK_RE),
@@ -414,7 +421,10 @@ def collision_backend_policy(features: ArchitectureFeatures) -> JsonDict:
         rationale = "Rooms with GameMaker physics enabled are routed through Godot 2D physics primitives plus compatibility metadata."
     elif features.has_collision_code:
         mode = "generated_bounds_direct_queries"
-        rationale = "Query-style collision APIs are evaluated against generated bounds in the GameMaker event scheduler."
+        rationale = (
+            "Query-style collision APIs are evaluated against generated bounds "
+            "or active precise-mask polygons in the GameMaker event scheduler."
+        )
     else:
         mode = "generated_bounds_idle"
         rationale = "No collision API usage was detected; generated bounds remain available for later instance APIs."
@@ -422,9 +432,13 @@ def collision_backend_policy(features: ArchitectureFeatures) -> JsonDict:
         "domain": "collision",
         "mode": mode,
         "manager": "GMEvents",
-        "query_api": "generated bounds and direct runtime queries",
+        "query_api": "generated bounds and active precise-mask polygons",
         "godot_native_signals": "queued through GMEvents when used",
-        "precise_masks": "planned_custom_mask_backend" if features.has_precise_collision_request else "bounds_compatible",
+        "precise_masks": (
+            "generated_alpha_mask_geometry"
+            if features.has_precise_collision_request
+            else "bounds_compatible"
+        ),
         "rationale": rationale,
     }
 
@@ -534,6 +548,28 @@ def _read_gml_sources(gm_project_path: str) -> str:
             except (OSError, ProjectSourcePathError):
                 continue
     return "\n".join(chunks)
+
+
+def _has_precise_sprite_resource(
+    gm_project_path: str,
+    index: GameMakerResourceIndex,
+) -> bool:
+    for resource in index.resources.get("sprites", {}).values():
+        try:
+            resolved = resolve_project_filesystem_source_path(
+                gm_project_path,
+                resource.yy_path,
+            )
+            with open(
+                resolved.filesystem_path,
+                "r",
+                encoding="utf-8",
+            ) as sprite_file:
+                if _PRECISE_SPRITE_KIND_RE.search(sprite_file.read()) is not None:
+                    return True
+        except (OSError, ProjectSourcePathError):
+            continue
+    return False
 
 
 def _matches(value: str, pattern: re.Pattern[str]) -> bool:

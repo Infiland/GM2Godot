@@ -82,7 +82,7 @@
 "Console_Convertor_Sprites_YYParseFailed" : "Warning: Could not parse {yy_path}, using fallback frame ordering for {sprite_name}.",
 "Console_Convertor_Sprites_Skipped" : "Skipped orphaned sprite not in .yyp: {sprite_name}",
 "Console_Convertor_Sprites_YYPFilterWarning" : "Warning: Could not parse .yyp file for sprite filtering. All sprites will be converted.",
-"Console_Convertor_Sprites_CollisionPreciseWarning" : "Warning: {name} uses precise collision (unsupported). Using bounding box rectangle as fallback.",
+"Console_Convertor_Sprites_CollisionPreciseWarning" : "Warning: {name}'s precise collision mask could not be represented exactly ({reason}). Using its bounding box rectangle as a safe fallback.",
 "Console_Convertor_Sprites_SceneGenerated" : "Generated scene: sprites/{name}/{name}.tscn",
 "Console_Convertor_Sprites_SceneAnimated" : "  Animation: {frame_count} frames at {fps} FPS (loop: {loop})",
 "Console_Convertor_Sprites_SpeedTypeWarning" : "  Note: {name} uses per-game-frame speed. Converted assuming 60fps game rate.",

@@ -22,12 +22,13 @@ choices used for a project.
     code needs ordered `CanvasItem` dispatch.
   - `surface_viewport` when surface/application-surface APIs require a
     `SubViewport`/`ViewportTexture` path.
-- Collision mode is selected from room/script features:
+- Collision mode is selected from room, script, and sprite features:
   - `generated_bounds_idle` when no collision use is detected.
   - `generated_bounds_direct_queries` for GameMaker query-style collision APIs.
   - `godot_physics_world_bridge` when a GameMaker physics room is enabled.
-  - Precise masks are explicitly reported as a planned custom-mask backend until
-    exact mask data is generated.
+  - Imported Precise and Precise Per Frame sprites use generated alpha-mask
+    geometry shared by collision events, movement, and direct query helpers.
+    Unsupported source masks emit a structured rectangle-fallback diagnostic.
 - Audio uses pooled `AudioStreamPlayer`/`AudioStreamPlayer2D` nodes, audio buses,
   and `AudioServer` state through `GMAudio`; playback-ended signals are queued
   into `GMAsync`.
@@ -49,7 +50,9 @@ metadata and queued through managers:
 
 - Godot autoloads: https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html
 - Godot CanvasLayer: https://docs.godotengine.org/en/stable/tutorials/2d/canvas_layers.html
-- Godot physics: https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html
+- Godot 4.7.1 CollisionShape2D: https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html
+- Godot 4.7.1 Transform2D: https://docs.godotengine.org/en/4.7/classes/class_transform2d.html
 - Godot AudioServer: https://docs.godotengine.org/en/stable/classes/class_audioserver.html
 - Godot HTTPRequest: https://docs.godotengine.org/en/stable/classes/class_httprequest.html
-- GameMaker event order: https://manual.gamemaker.io/monthly/en/The_Asset_Editors/Object_Properties/Event_Order.htm
+- GameMaker LTS collision masks: https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm
+- GameMaker LTS event order: https://manual.gamemaker.io/lts/en/The_Asset_Editors/Object_Properties/Event_Order.htm

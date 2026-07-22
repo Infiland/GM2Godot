@@ -46,6 +46,8 @@ Version 0.7.43 applies that separate policy to selected object, room, sprite, sh
 
 Version 0.7.44 preserves GameMaker bound-method context across generated GDScript. Receiver-aware callables now declare hidden `self`/`other` metadata explicitly instead of relying on Godot's standard/custom `Callable` classification. Every transpiled dynamic call passes its current `self`; nested methods and callbacks therefore receive invocation-time `other`, while ordinary script calls retain their caller scope. Rebinding a script reference preserves its receiver contract, and constructors inject the new struct exactly once while using the documented caller or bound-constructor scope as `other`. Unmarked custom Godot callables fail closed instead of receiving guessed arguments.
 
+Version 0.7.45 generates alpha-derived pixel geometry for GameMaker Precise and Precise Per Frame sprite masks. Static masks composite all subimages; per-frame masks switch with the displayed image. Generated collision events and point, rectangle, line, circle, position, place, and movement checks share the active transformed geometry, including sprite origin, scale, rotation, `sprite_index`, and `image_index` changes. A structured `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` warning retains the bounding-box fallback when malformed, unreadable, mismatched, or excessively complex source data cannot be represented exactly.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -57,7 +59,7 @@ Version 0.7.44 preserves GameMaker bound-method context across generated GDScrip
 **GM2Godot isn't:**
 - A perfect 1:1 conversion tool
 - A complete implementation of every current GameMaker GML Code and GML Reference page yet
-- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, precise collision masks, shaders, and target-specific runtime APIs
+- A guarantee that converted gameplay semantics match GameMaker without manual review, especially for unsupported platform services, runtime-authored masks, Godot physics fixtures, shaders, and target-specific runtime APIs
 - A tool for converting compiled GM projects (use [UndertaleToolMod](https://github.com/UnderminersTeam/UndertaleModTool) instead)
 
 ## Compatibility Todo List
@@ -66,7 +68,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.44`.
+Current source version: `0.7.45`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

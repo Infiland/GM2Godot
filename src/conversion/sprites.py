@@ -20,8 +20,12 @@ from src.conversion.project_source_paths import (
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
+_MAX_PRECISE_COLLISION_RECTANGLES = 16384
+
+
 class CollisionData(TypedDict):
     collisionKind: int
+    collisionTolerance: int
     bboxMode: int
     bbox_left: int
     bbox_right: int
@@ -51,6 +55,26 @@ class _DeclaredSpriteResource:
     source_path: str | None
     owner_source_path: str | None
     manifest_field: str | None
+
+
+@dataclass(frozen=True)
+class _MaskRectangle:
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class _CollisionBlock:
+    sub_resources: str = ""
+    nodes: str = ""
+    resource_count: int = 0
+    precise_per_frame: bool = False
+
+
+class _PreciseMaskError(ValueError):
+    pass
 
 
 class SpriteConverter(BaseConverter):
@@ -546,8 +570,16 @@ class SpriteConverter(BaseConverter):
         if data is None:
             return None
         try:
+            collision_kind = int(data.get("collisionKind", 1))
+            try:
+                collision_tolerance = int(data.get("collisionTolerance", 0))
+            except (TypeError, ValueError):
+                collision_tolerance = -1 if collision_kind in (0, 4) else 0
+            sequence = data.get("sequence")
+            sequence_data = cast(JsonDict, sequence) if isinstance(sequence, dict) else {}
             return {
-                "collisionKind": int(data.get("collisionKind", 1)),
+                "collisionKind": collision_kind,
+                "collisionTolerance": collision_tolerance,
                 "bboxMode": int(data.get("bboxMode", 0)),
                 "bbox_left": int(data.get("bbox_left", 0)),
                 "bbox_right": int(data.get("bbox_right", 0)),
@@ -556,8 +588,8 @@ class SpriteConverter(BaseConverter):
                 "width": int(data.get("width", 0)),
                 "height": int(data.get("height", 0)),
                 "origin": int(data.get("origin", 0)),
-                "xorigin": int(data.get("xorigin", 0)),
-                "yorigin": int(data.get("yorigin", 0)),
+                "xorigin": int(data.get("xorigin", sequence_data.get("xorigin", 0))),
+                "yorigin": int(data.get("yorigin", sequence_data.get("yorigin", 0))),
             }
         except (KeyError, TypeError, ValueError):
             return None
@@ -647,14 +679,54 @@ class SpriteConverter(BaseConverter):
             return (collision_data["xorigin"], collision_data["yorigin"])
         return origin_map.get(origin, (0, 0))
 
-    def _build_collision_block(self, collision_data: CollisionData | None) -> tuple[str | None, str | None, str | None]:
-        """Build collision sub_resource text, shape id, and node text from collision data.
-
-        Returns (sub_resource_text, shape_id, node_text) or (None, None, None)
-        if collision_data is None.
-        """
+    def _build_collision_block(
+        self,
+        sprite_name: str,
+        collision_data: CollisionData | None,
+        frame_count: int,
+        subfolder: str,
+    ) -> _CollisionBlock:
         if collision_data is None:
-            return (None, None, None)
+            return _CollisionBlock()
+
+        if collision_data["collisionKind"] in (0, 4):
+            try:
+                return self._build_precise_collision_block(
+                    sprite_name,
+                    collision_data,
+                    frame_count,
+                    subfolder,
+                )
+            except _PreciseMaskError as error:
+                can_fallback = (
+                    collision_data["width"] > 0
+                    and collision_data["height"] > 0
+                    and collision_data["bbox_right"]
+                    >= collision_data["bbox_left"]
+                    and collision_data["bbox_bottom"]
+                    >= collision_data["bbox_top"]
+                )
+                self._report_precise_mask_fallback(
+                    sprite_name,
+                    str(error),
+                    fallback_emitted=can_fallback,
+                )
+                if can_fallback:
+                    return self._build_basic_collision_block(
+                        collision_data,
+                        collision_kind=1,
+                    )
+                return _CollisionBlock()
+
+        return self._build_basic_collision_block(collision_data)
+
+    def _build_basic_collision_block(
+        self,
+        collision_data: CollisionData,
+        *,
+        collision_kind: int | None = None,
+    ) -> _CollisionBlock:
+        """Build one of the legacy non-precise collision shapes."""
 
         bbox_left = collision_data["bbox_left"]
         bbox_right = collision_data["bbox_right"]
@@ -667,17 +739,18 @@ class SpriteConverter(BaseConverter):
         bbox_center_x = (bbox_left + bbox_right + 1) / 2
         bbox_center_y = (bbox_top + bbox_bottom + 1) / 2
 
-        # Godot Sprite2D defaults to centered=true, so visual center (w/2, h/2)
-        # is at position (0,0). Collision offset must be relative to that center.
-        sprite_center_x = collision_data["width"] / 2
-        sprite_center_y = collision_data["height"] / 2
-        offset_x = bbox_center_x - sprite_center_x
-        offset_y = bbox_center_y - sprite_center_y
+        origin_x, origin_y = self._compute_origin_offset(collision_data)
+        offset_x = bbox_center_x - origin_x
+        offset_y = bbox_center_y - origin_y
 
-        collision_kind = collision_data["collisionKind"]
+        effective_collision_kind = (
+            collision_data["collisionKind"]
+            if collision_kind is None
+            else collision_kind
+        )
 
         # Build shape resource and node based on collision kind
-        if collision_kind == 2:
+        if effective_collision_kind == 2:
             # Ellipse
             if abs(bbox_w - bbox_h) < 2:
                 shape_type = "CircleShape2D"
@@ -689,14 +762,14 @@ class SpriteConverter(BaseConverter):
                 radius = min(bbox_w, bbox_h) / 2
                 height = max(bbox_w, bbox_h)
                 shape_props = f"radius = {radius}\nheight = {height}"
-        elif collision_kind == 3:
+        elif effective_collision_kind == 3:
             # Diamond - ConvexPolygonShape2D
-            mid_x = (bbox_left + bbox_right) / 2 - sprite_center_x
-            mid_y = (bbox_top + bbox_bottom) / 2 - sprite_center_y
-            top = bbox_top - sprite_center_y
-            bottom = bbox_bottom - sprite_center_y
-            left = bbox_left - sprite_center_x
-            right = bbox_right - sprite_center_x
+            mid_x = (bbox_left + bbox_right) / 2 - origin_x
+            mid_y = (bbox_top + bbox_bottom) / 2 - origin_y
+            top = bbox_top - origin_y
+            bottom = bbox_bottom - origin_y
+            left = bbox_left - origin_x
+            right = bbox_right - origin_x
 
             shape_type = "ConvexPolygonShape2D"
             shape_id = "ConvexPolygonShape2D_1"
@@ -708,7 +781,7 @@ class SpriteConverter(BaseConverter):
             shape_props = f"size = Vector2({bbox_w}, {bbox_h})"
 
         # Diamond uses position on the node differently: offset already baked into points
-        if collision_kind == 3:
+        if effective_collision_kind == 3:
             position_line = ""
         else:
             position_line = f'\nposition = Vector2({offset_x}, {offset_y})'
@@ -723,7 +796,275 @@ class SpriteConverter(BaseConverter):
             f'shape = SubResource("{shape_id}"){position_line}\n'
         )
 
-        return (sub_resource_text, shape_id, node_text)
+        return _CollisionBlock(
+            sub_resources=sub_resource_text,
+            nodes=node_text,
+            resource_count=1,
+        )
+
+    def _build_precise_collision_block(
+        self,
+        sprite_name: str,
+        collision_data: CollisionData,
+        frame_count: int,
+        subfolder: str,
+    ) -> _CollisionBlock:
+        width = collision_data["width"]
+        height = collision_data["height"]
+        tolerance = collision_data["collisionTolerance"]
+        bbox_left = collision_data["bbox_left"]
+        bbox_right = collision_data["bbox_right"]
+        bbox_top = collision_data["bbox_top"]
+        bbox_bottom = collision_data["bbox_bottom"]
+
+        if width <= 0 or height <= 0:
+            raise _PreciseMaskError(
+                f"sprite dimensions must be positive, found {width}x{height}"
+            )
+        if not 0 <= tolerance <= 255:
+            raise _PreciseMaskError(
+                f"collisionTolerance must be between 0 and 255, found {tolerance}"
+            )
+        if not (
+            0 <= bbox_left <= bbox_right < width
+            and 0 <= bbox_top <= bbox_bottom < height
+        ):
+            raise _PreciseMaskError(
+                "collision bounding box is outside the sprite image or has invalid bounds"
+            )
+        if frame_count <= 0:
+            raise _PreciseMaskError("sprite has no converted frames")
+
+        masks: list[bytearray] = []
+        for frame_path in self._generated_frame_paths(
+            sprite_name,
+            frame_count,
+            subfolder,
+        ):
+            try:
+                with Image.open(frame_path) as image:
+                    rgba = image.convert("RGBA")
+                    if rgba.size != (width, height):
+                        raise _PreciseMaskError(
+                            "converted frame dimensions "
+                            f"{rgba.width}x{rgba.height} do not match sprite metadata "
+                            f"{width}x{height}"
+                        )
+                    alpha = rgba.getchannel("A").tobytes()
+            except _PreciseMaskError:
+                raise
+            except (OSError, ValueError) as error:
+                raise _PreciseMaskError(
+                    f"converted frame could not be read: {error}"
+                ) from error
+
+            mask = bytearray(width * height)
+            for y in range(bbox_top, bbox_bottom + 1):
+                row_offset = y * width
+                for x in range(bbox_left, bbox_right + 1):
+                    index = row_offset + x
+                    if alpha[index] > tolerance:
+                        mask[index] = 1
+            masks.append(mask)
+
+        per_frame = collision_data["collisionKind"] == 4 and frame_count > 1
+        if not per_frame:
+            composite = bytearray(width * height)
+            for mask in masks:
+                for index, value in enumerate(mask):
+                    composite[index] |= value
+            masks = [composite]
+
+        frame_rectangles: list[list[_MaskRectangle]] = []
+        remaining_rectangles = _MAX_PRECISE_COLLISION_RECTANGLES
+        for mask in masks:
+            rectangles = self._mask_rectangles(
+                mask,
+                width,
+                bbox_left,
+                bbox_right,
+                bbox_top,
+                bbox_bottom,
+                max_rectangles=remaining_rectangles,
+            )
+            frame_rectangles.append(rectangles)
+            remaining_rectangles -= len(rectangles)
+        rectangle_count = sum(len(rectangles) for rectangles in frame_rectangles)
+        if rectangle_count > _MAX_PRECISE_COLLISION_RECTANGLES:
+            raise _PreciseMaskError(
+                "alpha mask requires "
+                f"{rectangle_count} exact rectangles, exceeding the supported limit "
+                f"of {_MAX_PRECISE_COLLISION_RECTANGLES}"
+            )
+
+        origin_x, origin_y = self._compute_origin_offset(collision_data)
+        bbox_width = bbox_right - bbox_left + 1
+        bbox_height = bbox_bottom - bbox_top + 1
+        bbox_center_x = (bbox_left + bbox_right + 1) / 2 - origin_x
+        bbox_center_y = (bbox_top + bbox_bottom + 1) / 2 - origin_y
+
+        sub_resources = [
+            '[sub_resource type="RectangleShape2D" id="RectangleShape2D_Bounds"]\n',
+            f"size = Vector2({bbox_width}, {bbox_height})\n",
+        ]
+        nodes = [
+            '[node name="CollisionBounds2D" type="CollisionShape2D" parent="."]\n',
+            f"position = Vector2({bbox_center_x}, {bbox_center_y})\n",
+            'shape = SubResource("RectangleShape2D_Bounds")\n',
+            "disabled = true\n",
+            "metadata/gamemaker_collision_bounds = true\n",
+        ]
+
+        shape_ids: dict[tuple[int, int], str] = {}
+        for rectangles in frame_rectangles:
+            for rectangle in rectangles:
+                size = (rectangle.width, rectangle.height)
+                if size in shape_ids:
+                    continue
+                shape_id = f"RectangleShape2D_Precise_{len(shape_ids) + 1}"
+                shape_ids[size] = shape_id
+                sub_resources.extend([
+                    f'\n[sub_resource type="RectangleShape2D" id="{shape_id}"]\n',
+                    f"size = Vector2({rectangle.width}, {rectangle.height})\n",
+                ])
+
+        node_index = 0
+        for frame_index, rectangles in enumerate(frame_rectangles):
+            for rectangle in rectangles:
+                node_index += 1
+                center_x = rectangle.x + rectangle.width / 2 - origin_x
+                center_y = rectangle.y + rectangle.height / 2 - origin_y
+                shape_id = shape_ids[(rectangle.width, rectangle.height)]
+                nodes.extend([
+                    f'\n[node name="PreciseMask{node_index}" type="CollisionShape2D" parent="."]\n',
+                    f"position = Vector2({center_x}, {center_y})\n",
+                    f'shape = SubResource("{shape_id}")\n',
+                ])
+                if per_frame:
+                    if frame_index != 0:
+                        nodes.append("disabled = true\n")
+                    nodes.append(
+                        f"metadata/gamemaker_mask_frame = {frame_index}\n"
+                    )
+                nodes.append("metadata/gamemaker_precise_mask = true\n")
+
+        return _CollisionBlock(
+            sub_resources="".join(sub_resources),
+            nodes="".join(nodes),
+            resource_count=1 + len(shape_ids),
+            precise_per_frame=per_frame,
+        )
+
+    def _generated_frame_paths(
+        self,
+        sprite_name: str,
+        frame_count: int,
+        subfolder: str,
+    ) -> list[str]:
+        sprite_stem = self._sprite_output_stem(sprite_name)
+        sprite_directory = self._sprite_output_directory(subfolder, sprite_name)
+        if frame_count == 1:
+            return [os.path.join(sprite_directory, f"{sprite_stem}.png")]
+        return [
+            os.path.join(sprite_directory, f"{sprite_stem}_{index}.png")
+            for index in range(1, frame_count + 1)
+        ]
+
+    @staticmethod
+    def _mask_rectangles(
+        mask: bytearray,
+        width: int,
+        bbox_left: int,
+        bbox_right: int,
+        bbox_top: int,
+        bbox_bottom: int,
+        *,
+        max_rectangles: int = _MAX_PRECISE_COLLISION_RECTANGLES,
+    ) -> list[_MaskRectangle]:
+        rectangles: list[_MaskRectangle] = []
+        active: dict[tuple[int, int], int] = {}
+
+        for y in range(bbox_top, bbox_bottom + 1):
+            spans: list[tuple[int, int]] = []
+            x = bbox_left
+            while x <= bbox_right:
+                if not mask[y * width + x]:
+                    x += 1
+                    continue
+                start = x
+                while x <= bbox_right and mask[y * width + x]:
+                    x += 1
+                spans.append((start, x - 1))
+
+            next_active: dict[tuple[int, int], int] = {}
+            for start, end in spans:
+                key = (start, end)
+                rectangle_index = active.get(key)
+                if rectangle_index is None:
+                    if len(rectangles) >= max_rectangles:
+                        raise _PreciseMaskError(
+                            "alpha mask exceeds the supported exact-geometry "
+                            f"limit of {_MAX_PRECISE_COLLISION_RECTANGLES} rectangles"
+                        )
+                    rectangle_index = len(rectangles)
+                    rectangles.append(
+                        _MaskRectangle(
+                            x=start,
+                            y=y,
+                            width=end - start + 1,
+                            height=1,
+                        )
+                    )
+                else:
+                    rectangle = rectangles[rectangle_index]
+                    rectangles[rectangle_index] = _MaskRectangle(
+                        x=rectangle.x,
+                        y=rectangle.y,
+                        width=rectangle.width,
+                        height=rectangle.height + 1,
+                    )
+                next_active[key] = rectangle_index
+            active = next_active
+
+        return rectangles
+
+    def _report_precise_mask_fallback(
+        self,
+        sprite_name: str,
+        reason: str,
+        *,
+        fallback_emitted: bool,
+    ) -> None:
+        if fallback_emitted:
+            message = get_localized(
+                "Console_Convertor_Sprites_CollisionPreciseWarning"
+            ).format(name=sprite_name, reason=reason)
+        else:
+            message = (
+                f"Warning: {sprite_name}'s precise collision mask could not be "
+                f"represented exactly ({reason}). No collision geometry was "
+                "emitted because its bounding box is also invalid."
+            )
+        source_path = self._diagnostic_source_path(
+            self._sprite_owner_yy_paths.get(sprite_name)
+        )
+        with self._lock:
+            if self.diagnostics is not None:
+                self.diagnostics.add(
+                    "warning",
+                    "GM2GD-SPRITE-PRECISE-MASK-FALLBACK",
+                    message,
+                    source_path=source_path,
+                    resource=sprite_name,
+                    resource_type="sprite",
+                    issue_number=705,
+                    workaround=(
+                        "Use readable RGBA frames with dimensions and collision "
+                        "bounds matching the GameMaker sprite metadata, or author "
+                        "a reviewed custom Godot collision implementation."
+                    ),
+                )
+            self.log_callback(message)
 
     def _sprite_metadata_lines(self, collision_data: CollisionData | None) -> list[str]:
         if collision_data is None:
@@ -734,17 +1075,34 @@ class SpriteConverter(BaseConverter):
             f"metadata/gamemaker_height = {collision_data['height']}\n",
             f"metadata/gamemaker_origin_x = {origin_x}\n",
             f"metadata/gamemaker_origin_y = {origin_y}\n",
+            f"metadata/gamemaker_collision_kind = {collision_data['collisionKind']}\n",
+            f"metadata/gamemaker_collision_tolerance = {collision_data['collisionTolerance']}\n",
+            f"metadata/gamemaker_bbox_left = {collision_data['bbox_left']}\n",
+            f"metadata/gamemaker_bbox_right = {collision_data['bbox_right']}\n",
+            f"metadata/gamemaker_bbox_top = {collision_data['bbox_top']}\n",
+            f"metadata/gamemaker_bbox_bottom = {collision_data['bbox_bottom']}\n",
         ]
 
+    def _sprite_visual_position_line(
+        self,
+        collision_data: CollisionData | None,
+    ) -> str:
+        if collision_data is None:
+            return ""
+        origin_x, origin_y = self._compute_origin_offset(collision_data)
+        position_x = collision_data["width"] / 2 - origin_x
+        position_y = collision_data["height"] / 2 - origin_y
+        return f"position = Vector2({position_x}, {position_y})\n"
+
     def _write_static_scene(self, sprite_name: str, collision_data: CollisionData | None,
-                            collision_sub: str | None, collision_node: str | None,
+                            collision_block: _CollisionBlock,
                             subfolder: str = "") -> None:
         """Generate a Sprite2D .tscn scene file.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
-        has_collision = collision_sub is not None
-        load_steps = 2 if has_collision else 1
+        has_collision = bool(collision_block.nodes)
+        load_steps = 1 + collision_block.resource_count
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
         sprite_stem = self._sprite_output_stem(sprite_name)
 
@@ -752,15 +1110,16 @@ class SpriteConverter(BaseConverter):
         parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_stem}.png" id="1"]\n')
 
         if has_collision:
-            parts.append(f'\n{collision_sub}')
+            parts.append(f'\n{collision_block.sub_resources}')
 
         parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
         parts.extend(self._sprite_metadata_lines(collision_data))
         parts.append(f'\n[node name="Sprite2D" type="Sprite2D" parent="."]\n')
         parts.append(f'texture = ExtResource("1")\n')
+        parts.append(self._sprite_visual_position_line(collision_data))
 
         if has_collision:
-            parts.append(f'\n{collision_node}')
+            parts.append(f'\n{collision_block.nodes}')
 
         tscn_content = ''.join(parts)
 
@@ -771,15 +1130,20 @@ class SpriteConverter(BaseConverter):
             f.write(tscn_content)
 
     def _write_animated_scene(self, sprite_name: str, frame_count: int, animation_data: AnimationData,
-                              collision_data: CollisionData | None, collision_sub: str | None,
-                              collision_node: str | None, subfolder: str = "") -> None:
+                              collision_data: CollisionData | None, collision_block: _CollisionBlock,
+                              mask_script_res_path: str | None, subfolder: str = "") -> None:
         """Generate an AnimatedSprite2D .tscn scene file with embedded SpriteFrames.
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
-        has_collision = collision_sub is not None
+        has_collision = bool(collision_block.nodes)
         # ext_resources (one per frame) + SpriteFrames sub_resource + optional collision sub_resource
-        load_steps = frame_count + 1 + (1 if has_collision else 0)
+        load_steps = (
+            frame_count
+            + 1
+            + collision_block.resource_count
+            + int(mask_script_res_path is not None)
+        )
         res_prefix = self._sprite_res_path(subfolder, sprite_name)
         sprite_stem = self._sprite_output_stem(sprite_name)
 
@@ -788,6 +1152,12 @@ class SpriteConverter(BaseConverter):
         # One ext_resource per frame
         for i in range(1, frame_count + 1):
             parts.append(f'\n[ext_resource type="Texture2D" path="{res_prefix}/{sprite_stem}_{i}.png" id="{i}"]\n')
+
+        if mask_script_res_path is not None:
+            parts.append(
+                '\n[ext_resource type="Script" '
+                f'path="{mask_script_res_path}" id="precise_mask_script"]\n'
+            )
 
         # Build frame entries for the SpriteFrames animation array
         durations = animation_data.get("frame_durations", [])
@@ -806,18 +1176,24 @@ class SpriteConverter(BaseConverter):
         parts.append(f'animations = [{{\n"frames": [{frames_str}],\n"loop": {loop_str},\n"name": &"default",\n"speed": {godot_fps}\n}}]\n')
 
         if has_collision:
-            parts.append(f'\n{collision_sub}')
+            parts.append(f'\n{collision_block.sub_resources}')
 
         parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
+        if mask_script_res_path is not None:
+            parts.append('script = ExtResource("precise_mask_script")\n')
         parts.extend(self._sprite_metadata_lines(collision_data))
+        if collision_block.precise_per_frame:
+            parts.append(f"metadata/gamemaker_mask_frame_count = {frame_count}\n")
+            parts.append("metadata/gamemaker_active_mask_frame = 0\n")
 
         parts.append(f'\n[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]\n')
         parts.append(f'sprite_frames = SubResource("SpriteFrames_1")\n')
         parts.append(f'animation = &"default"\n')
         parts.append(f'autoplay = "default"\n')
+        parts.append(self._sprite_visual_position_line(collision_data))
 
         if has_collision:
-            parts.append(f'\n{collision_node}')
+            parts.append(f'\n{collision_block.nodes}')
 
         tscn_content = ''.join(parts)
 
@@ -826,6 +1202,53 @@ class SpriteConverter(BaseConverter):
         tscn_path = os.path.join(tscn_dir, f"{sprite_stem}.tscn")
         with open(tscn_path, 'w', encoding='utf-8') as f:
             f.write(tscn_content)
+
+    def _write_precise_mask_script(
+        self,
+        sprite_name: str,
+        subfolder: str,
+    ) -> str:
+        sprite_stem = self._sprite_output_stem(sprite_name)
+        script_filename = f"{sprite_stem}_collision_mask.gd"
+        script_directory = self._sprite_output_directory(subfolder, sprite_name)
+        script_path = os.path.join(script_directory, script_filename)
+        script_content = (
+            "extends Area2D\n"
+            "\n"
+            "var _gm_active_mask_frame = -1\n"
+            "\n"
+            "\n"
+            "func _ready():\n"
+            "\tvar visual = get_node_or_null(\"AnimatedSprite2D\")\n"
+            "\tif visual is AnimatedSprite2D:\n"
+            "\t\tvisual.frame_changed.connect(_gm_sync_collision_frame_from_visual)\n"
+            "\t\t_gm_set_collision_frame(visual.frame)\n"
+            "\telse:\n"
+            "\t\t_gm_set_collision_frame(0)\n"
+            "\n"
+            "\n"
+            "func _gm_sync_collision_frame_from_visual():\n"
+            "\tvar visual = get_node_or_null(\"AnimatedSprite2D\")\n"
+            "\tif visual is AnimatedSprite2D:\n"
+            "\t\t_gm_set_collision_frame(visual.frame)\n"
+            "\n"
+            "\n"
+            "func _gm_set_collision_frame(value):\n"
+            "\tvar frame_count = max(int(get_meta(\"gamemaker_mask_frame_count\", 1)), 1)\n"
+            "\tvar resolved_frame = clamp(int(value), 0, frame_count - 1)\n"
+            "\tif _gm_active_mask_frame == resolved_frame:\n"
+            "\t\treturn\n"
+            "\t_gm_active_mask_frame = resolved_frame\n"
+            "\tset_meta(\"gamemaker_active_mask_frame\", resolved_frame)\n"
+            "\tfor child in get_children():\n"
+            "\t\tif child is CollisionShape2D and child.has_meta(\"gamemaker_mask_frame\"):\n"
+            "\t\t\tvar disabled = int(child.get_meta(\"gamemaker_mask_frame\")) != resolved_frame\n"
+            "\t\t\tchild.set_deferred(\"disabled\", disabled)\n"
+        )
+        with open(script_path, "w", encoding="utf-8") as script_file:
+            script_file.write(script_content)
+        res_prefix = self._sprite_res_path(subfolder, sprite_name)
+        return f"{res_prefix}/{script_filename}"
 
     def _generate_sprite_scene(self, sprite_name: str, collision_data: CollisionData | None, frame_count: int,
                                animation_data: AnimationData | None = None, subfolder: str = "") -> None:
@@ -838,7 +1261,12 @@ class SpriteConverter(BaseConverter):
 
         Creates the file at godot_sprites_path/{subfolder}/{sprite_name}/{sprite_name}.tscn.
         """
-        collision_sub, _, collision_node = self._build_collision_block(collision_data)
+        collision_block = self._build_collision_block(
+            sprite_name,
+            collision_data,
+            frame_count,
+            subfolder,
+        )
 
         if frame_count > 1:
             effective_animation = (
@@ -846,9 +1274,27 @@ class SpriteConverter(BaseConverter):
                 if animation_data is not None
                 else self._fallback_animation_data(frame_count)
             )
-            self._write_animated_scene(sprite_name, frame_count, effective_animation, collision_data, collision_sub, collision_node, subfolder)
+            mask_script_res_path = (
+                self._write_precise_mask_script(sprite_name, subfolder)
+                if collision_block.precise_per_frame
+                else None
+            )
+            self._write_animated_scene(
+                sprite_name,
+                frame_count,
+                effective_animation,
+                collision_data,
+                collision_block,
+                mask_script_res_path,
+                subfolder,
+            )
         else:
-            self._write_static_scene(sprite_name, collision_data, collision_sub, collision_node, subfolder)
+            self._write_static_scene(
+                sprite_name,
+                collision_data,
+                collision_block,
+                subfolder,
+            )
 
     def _parse_sprite_yy(self, sprite_name: str) -> SpriteParseResult | None:
         yy_path = self._sprite_yy_path(sprite_name)
@@ -1222,10 +1668,6 @@ class SpriteConverter(BaseConverter):
                         self._safe_log(
                             get_localized("Console_Convertor_Sprites_SpeedTypeWarning").format(name=sprite_name)
                         )
-                if collision_data is not None and collision_data["collisionKind"] in (0, 4):
-                    self._safe_log(
-                        get_localized("Console_Convertor_Sprites_CollisionPreciseWarning").format(name=sprite_name)
-                    )
             except Exception as error:
                 self._resource_failed(sprite_name)
                 if first_error is None:

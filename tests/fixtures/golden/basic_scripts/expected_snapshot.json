@@ -7,7 +7,7 @@
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:baae0d12b1ce5d48f7611515d7b3c491f86d5943c64514940a529ad5838a2ac5",
+    "gm2godot/gml_runtime.gd": "sha256:4f9fc18ca1027c79a8f9f194291d86bd8c7234b5306ec0c116b68cc8fbd6e1e8",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
     "gm2godot/managers/gm_async.gd": "sha256:d0a73997476f0e889892f85a6c343fc5b44fecdf9fa547e943902632aedf9df3",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",
@@ -39,16 +39,19 @@
         "manager": "GMEvents",
         "mode": "generated_bounds_idle",
         "precise_masks": "bounds_compatible",
-        "query_api": "generated bounds and direct runtime queries",
+        "query_api": "generated bounds and active precise-mask polygons",
         "rationale": "No collision API usage was detected; generated bounds remain available for later instance APIs."
       },
       "documentation_sources": {
         "audio_server": "https://docs.godotengine.org/en/stable/classes/class_audioserver.html",
         "autoload": "https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html",
         "canvas_layer": "https://docs.godotengine.org/en/stable/tutorials/2d/canvas_layers.html",
-        "game_maker_event_order": "https://manual.gamemaker.io/monthly/en/The_Asset_Editors/Object_Properties/Event_Order.htm",
+        "collision_shape_2d": "https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html",
+        "game_maker_event_order": "https://manual.gamemaker.io/lts/en/The_Asset_Editors/Object_Properties/Event_Order.htm",
+        "game_maker_sprite_masks": "https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm",
         "http_request": "https://docs.godotengine.org/en/stable/classes/class_httprequest.html",
-        "physics_2d": "https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html"
+        "physics_2d": "https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html",
+        "transform_2d": "https://docs.godotengine.org/en/4.7/classes/class_transform2d.html"
       },
       "enabled_converters": [
         "scripts"

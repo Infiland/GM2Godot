@@ -211,26 +211,26 @@ static func _gml_motion_bounce_instance(instance, advanced, solid_only):
 
 
 static func _gml_motion_first_collision_at(instance, position, solid_only):
-	var subject_rects = _gml_collision_rects_for_instance(instance)
-	if subject_rects.is_empty():
+	var subject_polygons = _gml_collision_polygons_for_instance(instance, true)
+	if subject_polygons.is_empty():
 		return gml_instance_noone()
 	var delta = position - _gml_instance_position(instance)
-	return _gml_motion_first_rect_hit(
-		_gml_collision_translate_rects(subject_rects, delta),
+	return _gml_motion_first_polygon_hit(
+		_gml_collision_translate_polygons(subject_polygons, delta),
 		instance,
 		solid_only
 	)
 
 
-static func _gml_motion_first_rect_hit(query_rects, current_self, solid_only):
+static func _gml_motion_first_polygon_hit(query_polygons, current_self, solid_only):
 	for instance in gml_with_targets(gml_instance_all(), current_self, null):
 		if _gml_collision_same_instance(instance, current_self):
 			continue
 		if solid_only and not gml_bool(_gml_motion_read(instance, "solid", false)):
 			continue
-		for query_rect in query_rects:
-			for target_rect in _gml_collision_rects_for_instance(instance):
-				if query_rect.intersects(target_rect, true):
+		for query_polygon in query_polygons:
+			for target_polygon in _gml_collision_polygons_for_instance(instance, true):
+				if _gml_collision_polygons_intersect(query_polygon, target_polygon):
 					return _gml_collision_handle_for_instance(instance)
 	return gml_instance_noone()
 

@@ -162,7 +162,6 @@ static var _gml_sequence_objects_by_id = {}
 static var _gml_sequence_elements_by_index = {}
 static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
-static var _gml_collision_precise_warning_emitted = false
 static var _gml_static_root = {}
 static var _gml_static_registry = []
 static var _gml_static_named_scopes = {}

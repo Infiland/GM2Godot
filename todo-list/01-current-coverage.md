@@ -23,7 +23,7 @@ This file records what the current codebase appears to support. Partial features
 - [x] Preserve sprite origin metadata.
 - [x] Preserve animation speed, durations, and loop information.
 - [x] Generate basic collision shape data for sprites.
-- [ ] Partial: exact precise mask and pixel-perfect collision behavior.
+- [x] Imported precise and precise-per-frame alpha mask collision behavior.
 - [ ] Partial: full nine-slice, skeletal, broadcast, texture group, and runtime sprite mutation behavior.
 
 - [x] Convert sounds by copying `.wav`, `.mp3`, and `.ogg` assets.

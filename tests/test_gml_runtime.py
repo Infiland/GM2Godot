@@ -2077,7 +2077,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_collision_queries_use_generated_shape_bounds(self):
+    def test_runtime_collision_queries_use_active_precise_polygons(self):
         self.assertIn("static func gml_place_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_position_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_place(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
@@ -2090,13 +2090,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_circle_list(current_self, x, y, radius, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
-        self.assertIn("push_warning(\"GML precise collision masks are approximated with generated collision shape bounds\")", GML_RUNTIME_SCRIPT)
+        self.assertNotIn("precise collision masks are approximated", GML_RUNTIME_SCRIPT)
         self.assertIn("if node is CollisionShape2D:", GML_RUNTIME_SCRIPT)
         self.assertIn("if shape is RectangleShape2D:", GML_RUNTIME_SCRIPT)
         self.assertIn("if shape is CircleShape2D:", GML_RUNTIME_SCRIPT)
-        self.assertIn("if query_rect.intersects(target_rect, true):", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_collision_segments_intersect(start, finish, top_left, top_right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return center.distance_squared_to(Vector2(nearest_x, nearest_y)) <= radius * radius", GML_RUNTIME_SCRIPT)
+        self.assertIn('node.has_meta("gamemaker_precise_mask")', GML_RUNTIME_SCRIPT)
+        self.assertIn('node.has_meta("gamemaker_collision_bounds")', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_polygons_intersect(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_polygon_has_point(polygon, point):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_line_intersects_polygon(start, finish, polygon):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_circle_intersects_polygon(center, radius, polygon):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_converts_and_parses_handle_strings(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)

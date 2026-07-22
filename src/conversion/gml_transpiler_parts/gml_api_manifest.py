@@ -1650,7 +1650,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Implemented as generated-shape bounding-box queries; precise masks emit a warning and use bbox approximation.",
+        "Uses each instance's active imported mask, including transformed static and per-frame precise geometry.",
     ),
     _entry(
         "position_meeting",
@@ -1662,7 +1662,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Implemented as generated-shape bounding-box point queries.",
+        "Uses the target's active imported mask, including transformed static and per-frame precise geometry.",
     ),
     _entry(
         "instance_place",
@@ -1674,7 +1674,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Returns matching registered instance handles using generated collision shape bounds.",
+        "Returns matching registered instance handles using both instances' active imported masks.",
     ),
     _entry(
         "instance_position",
@@ -1686,7 +1686,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Returns matching registered instance handles using generated collision shape bounds.",
+        "Returns matching registered instance handles using the target's active imported mask.",
     ),
     _entry(
         "collision_point",
@@ -1698,7 +1698,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, notme, and bbox approximation for precise masks.",
+        "Supports selectors and notme; prec=true uses imported precise pixels and prec=false uses transformed bounds.",
     ),
     _entry(
         "collision_rectangle",
@@ -1710,7 +1710,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, notme, and bbox approximation for precise masks.",
+        "Supports selectors and notme; prec=true intersects imported precise pixels and prec=false uses transformed bounds.",
     ),
     _entry(
         "collision_line",
@@ -1722,7 +1722,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, notme, and bbox approximation for precise masks.",
+        "Supports selectors and notme; prec=true intersects imported precise pixels and prec=false uses transformed bounds.",
     ),
     _entry(
         "collision_circle",
@@ -1734,7 +1734,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, notme, and bbox approximation for precise masks.",
+        "Supports selectors and notme; prec=true intersects imported precise pixels and prec=false uses transformed bounds.",
     ),
     _entry(
         "collision_point_list",
@@ -1746,7 +1746,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Appends all bbox-approximated point collision matches to a DS list, with optional distance ordering.",
+        "Appends active-mask point matches to a DS list with precise/bounds selection and optional distance ordering.",
     ),
     _entry(
         "collision_rectangle_list",
@@ -1758,7 +1758,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Appends all bbox-approximated rectangle collision matches to a DS list, with optional distance ordering.",
+        "Appends active-mask rectangle matches to a DS list with precise/bounds selection and optional distance ordering.",
     ),
     _entry(
         "collision_line_list",
@@ -1770,7 +1770,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Appends all bbox-approximated line collision matches to a DS list, with optional start-distance ordering.",
+        "Appends active-mask line matches to a DS list with precise/bounds selection and optional start-distance ordering.",
     ),
     _entry(
         "collision_circle_list",
@@ -1782,7 +1782,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Appends all bbox-approximated circle collision matches to a DS list, with optional distance ordering.",
+        "Appends active-mask circle matches to a DS list with precise/bounds selection and optional distance ordering.",
     ),
     _entry(
         "motion_set",
@@ -1830,7 +1830,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Uses generated collision shape bounds and generated object solid metadata.",
+        "Uses active imported masks and generated object solid metadata.",
     ),
     _entry(
         "move_contact_all",
@@ -1842,7 +1842,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Uses generated collision shape bounds for all registered instances.",
+        "Uses active imported masks for all registered instances.",
     ),
     _entry(
         "move_bounce_solid",
@@ -1854,7 +1854,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Reflects hspeed/vspeed against generated solid shape bounds; advanced mode is approximated.",
+        "Reflects hspeed/vspeed against active solid masks; advanced mode is approximated.",
     ),
     _entry(
         "move_bounce_all",
@@ -1866,7 +1866,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Reflects hspeed/vspeed against generated shape bounds; advanced mode is approximated.",
+        "Reflects hspeed/vspeed against active masks; advanced mode is approximated.",
     ),
     _entry(
         "move_random",

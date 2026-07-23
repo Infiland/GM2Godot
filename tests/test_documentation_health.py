@@ -46,7 +46,7 @@ PINNED_EXTERNAL_ACTION_PATTERN = re.compile(
 )
 APPROVED_NODE24_ACTION_MAJORS = {
     "actions/checkout": 7,
-    "actions/setup-python": 6,
+    "actions/setup-python": 7,
     "actions/cache": 5,
     "actions/upload-artifact": 7,
     "actions/download-artifact": 8,

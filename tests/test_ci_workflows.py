@@ -3485,7 +3485,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(release_job.count("actions/checkout@"), 1)
         self.assertIn(
             "      - uses: actions/checkout@"
-            "93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1\n"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
             "        with:\n"
             "          ref: ${{ github.sha }}\n"
             "          fetch-depth: 1\n"

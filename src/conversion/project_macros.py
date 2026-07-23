@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from src.conversion.gml_transpiler_parts.model import GMLTranspileError, _Token
 from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
 from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.gml_transpiler_parts.utils import (
     _macro_configuration_matches,
@@ -25,7 +25,7 @@ def collect_project_macro_values(
     the selected configuration always takes precedence over an unqualified
     declaration, matching GameMaker's configuration override semantics.
     """
-    token_streams: list[list[_Token]] = []
+    token_streams: list[list[Token]] = []
     for source_path in project_gml_source_paths(gm_project_path):
         try:
             with open(source_path.filesystem_path, "r", encoding="utf-8") as source_file:
@@ -45,7 +45,7 @@ def collect_project_macro_values(
         macro_configuration=macro_configuration,
     )
 def _collect_macro_values(
-    token_streams: Iterable[Sequence[_Token]],
+    token_streams: Iterable[Sequence[Token]],
     *,
     macro_configuration: str | None,
 ) -> dict[str, str]:
@@ -74,7 +74,7 @@ def _collect_macro_values(
                 name = tokens[index].value
                 index += 1
 
-            value_tokens: list[_Token] = []
+            value_tokens: list[Token] = []
             while index < len(tokens) and tokens[index].kind not in {"NEWLINE", "EOF"}:
                 value_tokens.append(tokens[index])
                 index += 1

@@ -34,22 +34,24 @@ from .identifiers import (
     _sanitize_gdscript_identifier,
     _validate_gml_identifier,
 )
-from .model import (
+from .expression_models import (
+    ArrayRefAccess as _ArrayRefAccess,
+    Call as _Call,
+    DSGridAccess as _DSGridAccess,
+    DSListAccess as _DSListAccess,
+    DSMapAccess as _DSMapAccess,
+    Expression as _Expression,
+    Index as _Index,
+    Member as _Member,
+    Name as _Name,
+    StructAccess as _StructAccess,
+)
+from .shared_models import (
     GMLTranspileError,
-    _ArrayRefAccess,
-    _Call,
-    _DSGridAccess,
-    _DSMapAccess,
-    _DSListAccess,
-    _Expression,
-    _Index,
-    _IncrementDelta,
-    _IncrementMode,
-    _Member,
-    _Name,
-    _ScopeContext,
-    _StructAccess,
-    _Token,
+    IncrementDelta as _IncrementDelta,
+    IncrementMode as _IncrementMode,
+    ScopeContext as _ScopeContext,
+    Token as _Token,
 )
 from .tokens import _expression_tokens
 from .utils import (

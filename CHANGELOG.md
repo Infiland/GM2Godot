@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.52 - 2026-07-23
+
+- Extracted dependency-only `shared_models`, `expression_models`, and `result_models` owners for cross-phase tokens/context/static metadata, the complete expression AST union, and preprocessing/diagnostic/source-map/transpile results.
+- Migrated phase, converter, and test consumers to non-underscore typed exports while retaining only the frozen top-level facade's private model aliases for #820; the #815 baseline dropped exactly 120 internal private model edges and replaced four production private model imports.
+- Preserved dataclass fields, defaults, frozen/equality behavior, error locations/messages, result serialization, supported facade identities/signatures, transpiled GDScript, source maps, diagnostics, and generated project output while removing four model-only private-usage suppressions.
+
+## 0.7.51 - 2026-07-23
+
+- Added an AST-based GML transpiler boundary inventory covering every private facade/phase imported-name edge and every production import from the facade or phase package, with exact owner, consumer, classification, and staged #816–#820 disposition.
+- Froze the 44 supported non-underscore facade exports and callable signatures separately from 30 legacy private exports, and made new, missing, stale, or unclassified boundary edges fail focused architecture tests.
+- Recorded the transitional private-usage suppressions without broadening them and documented the no-growth baseline and ordered migration non-goals; transpilation, diagnostics, source maps, and generated project output remain unchanged.
+
+## 0.7.50 - 2026-07-23
+
+- Added pinned coverage.py line and branch measurement for `main.py`, `src/`, and maintained `scripts/`, collecting the existing full unittest suite once and publishing JSON and Cobertura XML reports from required pull-request CI.
+- Enforced the measured clean-main overall floor plus separate converter-orchestration, manifest/diagnostic, project-parsing, and GML-transpiler line and branch floors with exact production-source inventory validation and actionable diagnostics.
+- Added controlled below-floor, source-scope, branch-configuration, dependency-lock, workflow, and artifact-publication tests, plus contributor guidance for reproducing and intentionally raising the reviewed floors.
+
 ## 0.7.49 - 2026-07-22
 
 - Expanded the clickable release-notes view from the latest release to the ten newest published GitHub release changelogs, each labeled and linked to its release.

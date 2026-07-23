@@ -6,7 +6,7 @@ from .constants import (
     _GENERATED_IDENTIFIER_PREFIX,
     _GML_IDENTIFIER_MAX_LENGTH,
 )
-from .model import GMLTranspileError, _ScopeContext
+from .shared_models import GMLTranspileError, ScopeContext as _ScopeContext
 
 def _sanitize_gdscript_identifier(name: str) -> str:
     if not _is_plain_identifier(name):

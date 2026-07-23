@@ -11,7 +11,7 @@ from .lexical import (
     _read_ordinary_string,
     _read_verbatim_string,
 )
-from .model import GMLTranspileError, _Token
+from .shared_models import GMLTranspileError, Token as _Token
 
 
 _GML_SIMPLE_ESCAPES = {

@@ -9,10 +9,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
       PIP_CONFIG_FILE: /dev/null
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -41,10 +42,14 @@ jobs:
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.txt \
             -r requirements.txt
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-linux-py312.txt \
+            coverage==7.15.2
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.txt \
             --mode subset \
             --require pip \
+            --require coverage \
             --require Pillow \
             --require markdown2 \
             --require requests \
@@ -61,7 +66,17 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libegl1 libgl1
 
       - name: Run unit tests
-        run: python -m unittest discover tests/ -v
+        run: |
+          python -m coverage erase
+          python -m coverage run -m unittest discover tests/ -v
+
+      - name: Generate Python coverage reports
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p coverage-reports
+          python -m coverage report
+          python -m coverage json
+          python -m coverage xml
 
       - name: Run native Linux bind-mount transaction gate
         env:
@@ -70,13 +85,28 @@ jobs:
           python -m unittest -v
           tests.test_managed_output_crash_recovery.TestManagedOutputCrashRecovery.test_linux_bind_mount_is_rejected_without_reading_external_target
 
+      - name: Enforce Python line and branch coverage floors
+        run: python scripts/check_coverage.py --report coverage-reports/coverage.json
+
+      - name: Upload Python coverage reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage-py3.12.13
+          path: |
+            coverage-reports/coverage.json
+            coverage-reports/coverage.xml
+          if-no-files-found: warn
+          retention-days: 7
+          archive: true
+
   macos-managed-output-transactions:
     runs-on: macos-26
     timeout-minutes: 30
     env:
       PIP_CONFIG_FILE: /dev/null
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -136,7 +166,7 @@ jobs:
     env:
       PIP_CONFIG_FILE: nul
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -210,7 +240,7 @@ jobs:
     env:
       PIP_CONFIG_FILE: nul
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

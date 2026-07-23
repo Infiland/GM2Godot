@@ -5,26 +5,28 @@ from typing import Iterable, Mapping
 
 from .constants import _GML_BUILTIN_CONSTANT_IDENTIFIERS, _READ_ONLY_BUILTIN_VARIABLES
 from .expression_parser import _parse_gml_expression
-from .model import (
+from .expression_models import (
+    ArrayLiteral as _ArrayLiteral,
+    Binary as _Binary,
+    Call as _Call,
+    DSListAccess as _DSListAccess,
+    DSMapAccess as _DSMapAccess,
+    EnumMember as _EnumMember,
+    Expression as _Expression,
+    Grouped as _Grouped,
+    Index as _Index,
+    Member as _Member,
+    Name as _Name,
+    NumberLiteral as _NumberLiteral,
+    StructAccess as _StructAccess,
+    StructLiteral as _StructLiteral,
+    TemplateStringLiteral as _TemplateStringLiteral,
+    Ternary as _Ternary,
+    Unary as _Unary,
+)
+from .shared_models import (
     GMLTranspileError,
-    _ArrayLiteral,
-    _Binary,
-    _Call,
-    _DSMapAccess,
-    _DSListAccess,
-    _EnumMember,
-    _Expression,
-    _Grouped,
-    _Index,
-    _Member,
-    _Name,
-    _NumberLiteral,
-    _StructAccess,
-    _StructLiteral,
-    _Ternary,
-    _TemplateStringLiteral,
-    _Token,
-    _Unary,
+    Token as _Token,
 )
 from .tokens import _expression_tokens
 from .utils import _normalize_local_names, _tokens_to_source, _unwrap_grouped_expression

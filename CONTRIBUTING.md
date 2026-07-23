@@ -165,6 +165,57 @@ Fixture contributions should include:
 
 ## Testing
 
+### Python line and branch coverage
+
+The required Linux `Tests` job runs the full unittest discovery once under pinned
+coverage.py branch instrumentation. The measured production inventory is
+`main.py`, every Python file under `src/`, and every maintained Python file under
+`scripts/`. The explicit source inventory excludes tests and fixtures, virtual
+environments, build/distribution/release output, packaging-only hooks, and
+generated non-Python artifacts. `.coveragerc` adds no project-specific
+`exclude_lines` or `exclude_also` patterns.
+
+Run the same measurement, human-readable summary, machine-readable reports, and
+floor gate locally from the repository root:
+
+```bash
+./venv/bin/python -m coverage erase
+./venv/bin/python -m coverage run -m unittest discover tests/ -v
+mkdir -p coverage-reports
+./venv/bin/python -m coverage report
+./venv/bin/python -m coverage json
+./venv/bin/python -m coverage xml
+./venv/bin/python scripts/check_coverage.py \
+  --report coverage-reports/coverage.json
+```
+
+`coverage-policy.json` defines line coverage as covered executable statements
+divided by executable statements and branch coverage as covered branch
+destinations divided by all branch destinations. The gate checks those two
+percentages independently; it does not use coverage.py's combined `Cover`
+column. Separate scopes protect converter orchestration, manifests/diagnostics,
+project parsing, and the complete GML transpiler package from being hidden by
+unrelated utility coverage.
+
+To raise a floor intentionally, measure a clean `main` checkout with the exact
+command above, review the JSON counts and missing-line/branch summary, and update
+the corresponding baseline counts and floor in `coverage-policy.json` in the
+same test-focused pull request. Floors are the measured percentages truncated
+to two decimal places so the committed threshold never rounds above its own
+baseline. Update the workflow-policy assertions at the same time. Do not lower a
+floor to accommodate untested production paths.
+
+The configuration follows the official coverage.py
+[branch](https://coverage.readthedocs.io/en/latest/branch.html),
+[configuration](https://coverage.readthedocs.io/en/latest/config.html),
+[JSON](https://coverage.readthedocs.io/en/latest/commands/cmd_json.html), and
+[XML](https://coverage.readthedocs.io/en/latest/commands/cmd_xml.html)
+documentation and Python's
+[unittest discovery](https://docs.python.org/3.12/library/unittest.html#test-discovery)
+contract. CI retains both machine-readable reports using GitHub Actions
+[workflow artifacts](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-your-workflow-does/storing-and-sharing-data-from-a-workflow),
+including when a floor fails.
+
 Before submitting a PR:
 - For Python or generated-code logic changes, run `./venv/bin/pyright --warnings` and fix all lint/type-check diagnostics
 - For code behavior changes, run the relevant tests; for broad code changes, run `./venv/bin/python -m unittest`

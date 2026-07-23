@@ -17,12 +17,13 @@ from src.conversion.gml_transpiler_parts.asset_lowering import (
     first_argument_is_script_asset,
 )
 from src.conversion.gml_transpiler_parts.emitter import _emit_expression
+from src.conversion.gml_transpiler_parts.expression_models import Binary
 from src.conversion.gml_transpiler_parts.expression_parser import _parse_gml_expression
 from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
     get_gml_function_descriptor,
     validate_gml_function_arity,
 )
-from src.conversion.gml_transpiler_parts.model import _Binary, _ScopeContext
+from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
 from src.conversion.resource_models import (
     parse_gamemaker_resource_models,
 )
@@ -285,12 +286,12 @@ class TestGMLPipelineBoundaries(unittest.TestCase):
 
     def test_parser_semantic_and_emitter_modules_remain_independent(self) -> None:
         expression = _parse_gml_expression("1 + score")
-        self.assertIsInstance(expression, _Binary)
+        self.assertIsInstance(expression, Binary)
 
         emitted, _precedence = _emit_expression(
             expression,
             {"score"},
-            scope_context=_ScopeContext(),
+            scope_context=ScopeContext(),
         )
         self.assertEqual(emitted, "GMRuntime.gml_add(1, score)")
 

@@ -56,6 +56,12 @@ Version 0.7.48 parses paired GameMaker GLSL ES shader stages before generating o
 
 Version 0.7.49 expands the clickable release-notes view to the ten newest published changelogs. Each entry is labeled and linked to its GitHub release, and **Show more** appends the next ten entries while preserving the history already displayed.
 
+Version 0.7.50 measures the full Python unittest suite once with pinned coverage.py branch instrumentation. Required pull-request CI publishes JSON and Cobertura XML reports and independently enforces the measured overall line/branch floor plus focused floors for converter orchestration, manifests and diagnostics, project parsing, and the GML transpiler.
+
+Version 0.7.51 freezes the current GML transpiler facade and phase-boundary baseline before the ordered typed-interface refactor. An AST-based architecture test inventories every private cross-module phase import and every production consumer, preserves the exact supported non-underscore facade and signatures, and rejects growth in legacy private exports or Pyright exceptions without changing generated behavior.
+
+Version 0.7.52 extracts dependency-only typed owners for shared GML phase data, the complete expression AST union, and preprocessing/source-map/transpile results. Every phase and converter now consumes non-underscore model exports; only the frozen top-level facade retains private model aliases for the later #820 cleanup. Dataclass shape and mutability, errors, serialization, generated output, diagnostics, and supported facade identities/signatures remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -76,7 +82,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.49`.
+Current source version: `0.7.52`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

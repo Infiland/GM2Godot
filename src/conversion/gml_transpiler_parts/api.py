@@ -10,10 +10,10 @@ from .extension_functions import (
     normalize_extension_functions,
 )
 from .function_helpers import _emit_static_initialization_lines
-from .model import _ScopeContext
 from .preprocessor import preprocess_gml_source
+from .result_models import GMLTranspileResult
+from .shared_models import ScopeContext as _ScopeContext
 from .source_map import (
-    GMLTranspileResult,
     build_gml_source_map,
     render_gml_source_header,
 )

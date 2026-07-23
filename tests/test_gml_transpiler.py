@@ -10,20 +10,22 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.gml_transpiler import (
-    _ArrayLiteral,
     _BUILTIN_VARIABLE_REGISTRY,
     GMLTranspileError,
     _ExpressionParser,
-    _NumberLiteral,
-    _StringLiteral,
-    _StructLiteral,
-    _TemplateStringLiteral,
     _expression_tokens,
     _tokenize,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
+)
+from src.conversion.gml_transpiler_parts.expression_models import (
+    ArrayLiteral,
+    NumberLiteral,
+    StringLiteral,
+    StructLiteral,
+    TemplateStringLiteral,
 )
 
 
@@ -98,10 +100,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         integer_literal = _ExpressionParser(_expression_tokens("42")).parse()
         decimal_literal = _ExpressionParser(_expression_tokens("3.5")).parse()
 
-        self.assertIsInstance(integer_literal, _NumberLiteral)
-        self.assertIsInstance(decimal_literal, _NumberLiteral)
-        assert isinstance(integer_literal, _NumberLiteral)
-        assert isinstance(decimal_literal, _NumberLiteral)
+        self.assertIsInstance(integer_literal, NumberLiteral)
+        self.assertIsInstance(decimal_literal, NumberLiteral)
+        assert isinstance(integer_literal, NumberLiteral)
+        assert isinstance(decimal_literal, NumberLiteral)
         self.assertFalse(integer_literal.is_float_like)
         self.assertTrue(decimal_literal.is_float_like)
 
@@ -238,8 +240,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_preserves_string_literal_metadata(self):
         literal = _ExpressionParser(_expression_tokens('"hello"')).parse()
 
-        self.assertIsInstance(literal, _StringLiteral)
-        assert isinstance(literal, _StringLiteral)
+        self.assertIsInstance(literal, StringLiteral)
+        assert isinstance(literal, StringLiteral)
         self.assertEqual(literal.value, '"hello"')
 
     def test_rejects_unterminated_string_literals(self):
@@ -302,8 +304,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(tokens[1].value, "+")
 
         literal = _ExpressionParser(_expression_tokens('$"Hello {name}!"')).parse()
-        self.assertIsInstance(literal, _TemplateStringLiteral)
-        assert isinstance(literal, _TemplateStringLiteral)
+        self.assertIsInstance(literal, TemplateStringLiteral)
+        assert isinstance(literal, TemplateStringLiteral)
         self.assertEqual(literal.parts[0], "Hello ")
         self.assertEqual(literal.parts[2], "!")
 
@@ -1507,8 +1509,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_preserves_array_literal_metadata(self):
         literal = _ExpressionParser(_expression_tokens("[1, [2]]")).parse()
 
-        self.assertIsInstance(literal, _ArrayLiteral)
-        assert isinstance(literal, _ArrayLiteral)
+        self.assertIsInstance(literal, ArrayLiteral)
+        assert isinstance(literal, ArrayLiteral)
         self.assertEqual(len(literal.elements), 2)
 
     def test_parses_struct_literals(self):
@@ -1541,8 +1543,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         literal = _ExpressionParser(
             _expression_tokens(r'{"line\nname": 1, "Unicode 鍵": 2}')
         ).parse()
-        self.assertIsInstance(literal, _StructLiteral)
-        assert isinstance(literal, _StructLiteral)
+        self.assertIsInstance(literal, StructLiteral)
+        assert isinstance(literal, StructLiteral)
         self.assertEqual(
             [field_name for field_name, _field_value in literal.fields],
             ["line\nname", "Unicode 鍵"],
@@ -1584,8 +1586,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_preserves_struct_literal_metadata(self):
         literal = _ExpressionParser(_expression_tokens("{a: 1, child: {b: 2}, shorthand}")).parse()
 
-        self.assertIsInstance(literal, _StructLiteral)
-        assert isinstance(literal, _StructLiteral)
+        self.assertIsInstance(literal, StructLiteral)
+        assert isinstance(literal, StructLiteral)
         self.assertEqual([field_name for field_name, _ in literal.fields], ["a", "child", "shorthand"])
 
     def test_struct_literal_shorthand_uses_enclosing_scope(self):

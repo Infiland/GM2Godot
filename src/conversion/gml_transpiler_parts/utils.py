@@ -4,32 +4,34 @@ from __future__ import annotations
 from typing import Iterable, Mapping
 
 from .constants import _ASSIGNMENT_OPERATORS
+from .expression_models import (
+    ArrayLiteral as _ArrayLiteral,
+    Binary as _Binary,
+    Call as _Call,
+    DSGridAccess as _DSGridAccess,
+    DSListAccess as _DSListAccess,
+    DSMapAccess as _DSMapAccess,
+    Expression as _Expression,
+    FunctionLiteral as _FunctionLiteral,
+    Grouped as _Grouped,
+    Index as _Index,
+    Member as _Member,
+    NewCall as _NewCall,
+    StructAccess as _StructAccess,
+    StructLiteral as _StructLiteral,
+    TemplateStringLiteral as _TemplateStringLiteral,
+    Ternary as _Ternary,
+    Unary as _Unary,
+)
 from .lexical import _is_verbatim_string_start, _read_verbatim_string
-from .model import (
+from .shared_models import (
+    AssignmentOperator as _AssignmentOperator,
+    DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
     GMLTranspileError,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
-    _ArrayLiteral,
-    _AssignmentOperator,
-    _Binary,
-    _Call,
-    _DEFAULT_SCOPE_CONTEXT,
-    _DSGridAccess,
-    _DSMapAccess,
-    _DSListAccess,
-    _Expression,
-    _FunctionLiteral,
-    _Grouped,
-    _Index,
-    _Member,
-    _NewCall,
-    _ScopeContext,
-    _StructAccess,
-    _StructLiteral,
-    _Ternary,
-    _TemplateStringLiteral,
-    _Token,
-    _Unary,
+    ScopeContext as _ScopeContext,
+    Token as _Token,
 )
 from .tokens import _line_column, _read_template_string
 

@@ -126,7 +126,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Make tests import source through package configuration rather than repeated `sys.path` mutation.
 - [ ] Add shared test utility for Godot binary discovery.
 - [ ] Add shared fixture-writing helpers.
-- [ ] Add Python coverage reporting and coverage floor for core modules.
+- [x] Add Python coverage reporting and coverage floor for core modules.
 
 ## P2: Runtime Maintainability
 

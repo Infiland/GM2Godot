@@ -6,7 +6,11 @@ import hashlib
 from typing import Iterable
 
 from .identifiers import _validate_gml_identifier
-from .model import GMLTranspileError, _StaticDeclaration, _Token
+from .shared_models import (
+    GMLTranspileError,
+    StaticDeclaration as _StaticDeclaration,
+    Token as _Token,
+)
 from .utils import _split_assignment, _split_top_level, _tokens_to_source
 
 def _static_scope_id(

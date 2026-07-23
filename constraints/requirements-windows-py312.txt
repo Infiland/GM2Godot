@@ -18,6 +18,8 @@ colorama==0.4.6
     # via
     #   build
     #   click
+coverage==7.15.2
+    # via -r requirements-tooling.txt
 idna==3.18
     # via requests
 markdown2==2.5.5

@@ -48,3 +48,26 @@ The GML transpiler has three explicit phase families:
 Asset-specific lowering metadata lives in `asset_lowering` so the generic
 expression emitter does not own the GameMaker API argument tables.
 
+### Frozen transpiler boundary baseline
+
+`tests/test_gml_transpiler_architecture.py` is the machine-checked migration
+baseline for #794. It records 329 private imported-name edges across 77
+facade/phase module pairs and all 60 production imports from the facade or
+phase package. Every entry records its owner and consumer and is classified as
+the supported public facade, an intended package-internal phase API, or a
+module-private implementation that must move behind its owner.
+
+The same test freezes the 44 supported non-underscore facade exports and their
+signatures separately from the 30 underscore-prefixed legacy exports. It also
+permits exactly the current 20 phase-package `reportPrivateUsage=false`
+directives plus the facade directive. New, missing, or unclassified imports,
+new private facade exports, signature drift, and added or broadened
+private-usage suppressions fail the test.
+
+The baseline is a migration allowlist, not a public-API declaration for private
+names. #816 owns shared models, #817 lexical and language metadata, #818
+expression parsing/lowering/emission, #819 the statement phase, and #820 the
+legacy facade and final zero-private-edge assertion. Until those ordered
+children land, do not add an exception or expose an underscore name merely to
+make the baseline pass.
+

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.51 - 2026-07-23
+
+- Added an AST-based GML transpiler boundary inventory covering every private facade/phase imported-name edge and every production import from the facade or phase package, with exact owner, consumer, classification, and staged #816–#820 disposition.
+- Froze the 44 supported non-underscore facade exports and callable signatures separately from 30 legacy private exports, and made new, missing, stale, or unclassified boundary edges fail focused architecture tests.
+- Recorded the transitional private-usage suppressions without broadening them and documented the no-growth baseline and ordered migration non-goals; transpilation, diagnostics, source maps, and generated project output remain unchanged.
+
 ## 0.7.50 - 2026-07-23
 
 - Added pinned coverage.py line and branch measurement for `main.py`, `src/`, and maintained `scripts/`, collecting the existing full unittest suite once and publishing JSON and Cobertura XML reports from required pull-request CI.

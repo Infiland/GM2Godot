@@ -8,7 +8,7 @@ from src.conversion.gml_transpiler_parts.tokens import (
     _line_column_from_newline_positions,
     _tokenize,
 )
-from src.conversion.gml_transpiler_parts.model import GMLTranspileError
+from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError
 
 
 def _legacy_line_column(source: str, index: int) -> tuple[int, int]:

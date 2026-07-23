@@ -46,9 +46,6 @@ from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
     validate_gml_function_arity,
 )
 from src.conversion.gml_transpiler_parts.model import (
-    GMLExtensionFunction,
-    GMLExtensionFunctionMapping,
-    GMLTranspileError,
     _ArrayLiteral,
     _Binary,
     _BuiltinVariableMetadata,
@@ -75,16 +72,21 @@ from src.conversion.gml_transpiler_parts.model import (
     _Token,
     _Unary,
 )
-from src.conversion.gml_transpiler_parts.preprocessor import (
+from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.result_models import (
     GMLPreprocessResult,
     GMLPreprocessorDiagnostic,
-    preprocess_gml_source,
-)
-from src.conversion.gml_transpiler_parts.source_map import (
     GMLSourceDiagnostic,
     GMLSourceMap,
     GMLSourceMapEntry,
     GMLTranspileResult,
+)
+from src.conversion.gml_transpiler_parts.shared_models import (
+    GMLExtensionFunction,
+    GMLExtensionFunctionMapping,
+    GMLTranspileError,
+)
+from src.conversion.gml_transpiler_parts.source_map import (
     analyze_gml_source_identifiers,
     gml_source_map_path,
     merge_gml_source_maps,

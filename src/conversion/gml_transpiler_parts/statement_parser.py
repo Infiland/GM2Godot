@@ -14,12 +14,12 @@ from .identifiers import (
     _sanitize_gdscript_identifier,
     _validate_gml_identifier,
 )
-from .model import (
+from .shared_models import (
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
-    _ScopeContext,
-    _Token,
+    ScopeContext as _ScopeContext,
+    Token as _Token,
 )
 from .statements import (
     _ControlFlowCapture,

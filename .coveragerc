@@ -1,0 +1,24 @@
+[run]
+branch = True
+relative_files = True
+source =
+    main
+    scripts
+    src
+omit =
+    build/*
+    dist/*
+    release/*
+    tests/*
+    venv/*
+
+[report]
+precision = 2
+show_missing = True
+
+[json]
+output = coverage-reports/coverage.json
+pretty_print = True
+
+[xml]
+output = coverage-reports/coverage.xml

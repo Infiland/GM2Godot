@@ -110,6 +110,7 @@ PIP_TOOLS_VERSION = "7.6.0"
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
 RUFF_VERSION = "0.15.22"
+COVERAGE_VERSION = "7.15.2"
 PILLOW_VERSION = "12.3.0"
 PIP_HARDENED_INSTALL_FRAGMENT = (
     "-m pip --isolated --disable-pip-version-check --no-input install"
@@ -1272,7 +1273,7 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 6, locations)
+        self.assertEqual(len(locations), 7, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             1,
@@ -3769,7 +3770,11 @@ class TestCIWorkflows(unittest.TestCase):
                     verifier,
                 ):
                     self.assertIn(required, script, f"{label}: missing {required!r}")
-                self.assertEqual(script.count(install_command), 2)
+                expected_install_count = 3 if label == "tests.yml:test" else 2
+                self.assertEqual(
+                    script.count(install_command),
+                    expected_install_count,
+                )
                 self.assertLess(script.index(guard), script.index(create))
                 self.assertLess(script.index(create), script.index(export_path))
                 self.assertLess(script.index(export_path), script.index(prefix_probe))
@@ -3899,6 +3904,10 @@ class TestCIWorkflows(unittest.TestCase):
                 {
                     (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
                     (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                    (
+                        LINUX_CONSTRAINT,
+                        (f"coverage=={COVERAGE_VERSION}",),
+                    ): 1,
                     (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
                     (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
                     (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 2,
@@ -4008,7 +4017,7 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
-        self.assertEqual(non_dependency_lock_command_count, 24)
+        self.assertEqual(non_dependency_lock_command_count, 25)
         self.assertEqual(dependency_lock_command_count, 6)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
@@ -4220,6 +4229,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(
             tooling_pins,
             {
+                "coverage": COVERAGE_VERSION,
                 "pip": PIP_VERSION,
                 "pip-tools": PIP_TOOLS_VERSION,
                 "pyinstaller": PYINSTALLER_VERSION,
@@ -4247,6 +4257,10 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(constraint=constraint_name):
                 constraint_pins = _exact_requirement_pins(
                     PROJECT_ROOT / "constraints" / constraint_name
+                )
+                self.assertEqual(
+                    constraint_pins.get("coverage"),
+                    tooling_pins["coverage"],
                 )
                 self.assertEqual(constraint_pins.get("pip"), tooling_pins["pip"])
                 self.assertEqual(
@@ -4765,6 +4779,7 @@ class TestCIWorkflows(unittest.TestCase):
             "  macos-managed-output-transactions:"
         )]
         self.assertIn("runs-on: ubuntu-24.04", linux_job)
+        self.assertIn("timeout-minutes: 30", linux_job)
         self.assertIn("python-version: '3.12.13'", linux_job)
         self.assertIn("architecture: x64", linux_job)
         self.assertIn(
@@ -4773,7 +4788,18 @@ class TestCIWorkflows(unittest.TestCase):
             "            -r requirements.txt",
             linux_job,
         )
-        self.assertIn("python -m unittest discover tests/ -v", linux_job)
+        self.assertIn(
+            f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
+            f"            --constraint {LINUX_CONSTRAINT} \\\n"
+            f"            coverage=={COVERAGE_VERSION}",
+            linux_job,
+        )
+        self.assertIn("--require coverage", linux_job)
+        coverage_test_command = (
+            "python -m coverage run -m unittest discover tests/ -v"
+        )
+        self.assertEqual(linux_job.count(coverage_test_command), 1)
+        self.assertEqual(linux_job.count("unittest discover tests/ -v"), 1)
         self.assertIn(
             "GM2GODOT_REQUIRE_LINUX_BIND_MOUNT: '1'",
             linux_job,
@@ -4790,10 +4816,130 @@ class TestCIWorkflows(unittest.TestCase):
             linux_job.index(
                 "sudo apt-get install --yes --no-install-recommends libegl1 libgl1"
             ),
-            linux_job.index("python -m unittest discover tests/ -v"),
+            linux_job.index(coverage_test_command),
         )
         self.assertTrue((PROJECT_ROOT / "tests" / "test_golden_conversion.py").is_file())
         self.assertTrue((PROJECT_ROOT / "tests" / "test_cli.py").is_file())
+
+    def test_python_coverage_workflow_enforces_measured_branch_and_core_floors(
+        self,
+    ) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        ).read_text(encoding="utf-8")
+        linux_job = workflow[
+            workflow.index("  test:"):
+            workflow.index("  macos-managed-output-transactions:")
+        ]
+        coverage_config = (PROJECT_ROOT / ".coveragerc").read_text(
+            encoding="utf-8"
+        )
+        policy = cast(
+            dict[str, object],
+            json.loads(
+                (PROJECT_ROOT / "coverage-policy.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+        )
+
+        self.assertRegex(coverage_config, r"(?m)^branch = True$")
+        self.assertRegex(
+            coverage_config,
+            r"(?ms)^source =\n    main\n    scripts\n    src$",
+        )
+        self.assertNotIn("exclude_lines", coverage_config)
+        self.assertNotIn("exclude_also", coverage_config)
+        self.assertNotIn("skip_empty = True", coverage_config)
+        self.assertIn(
+            "[json]\noutput = coverage-reports/coverage.json",
+            coverage_config,
+        )
+        self.assertIn(
+            "[xml]\noutput = coverage-reports/coverage.xml",
+            coverage_config,
+        )
+        for omitted_root in (
+            "build/*",
+            "dist/*",
+            "release/*",
+            "tests/*",
+            "venv/*",
+        ):
+            with self.subTest(omitted_root=omitted_root):
+                self.assertIn(f"    {omitted_root}", coverage_config)
+
+        self.assertEqual(
+            policy["baseline"],
+            {
+                "commit": "864f4effa970fe45310212b6b8c7bdd7d15da647",
+                "coverage": COVERAGE_VERSION,
+                "python": "3.12.10",
+                "platform": "macos-arm64",
+                "command": (
+                    "python -m coverage run -m unittest discover tests/ -v"
+                ),
+                "runtime_seconds": 715,
+                "tests": 2386,
+                "skipped": 80,
+            },
+        )
+        self.assertEqual(
+            policy["source"],
+            {
+                "files": ["main.py"],
+                "directories": ["src", "scripts"],
+            },
+        )
+        raw_floors = policy["floors"]
+        self.assertIsInstance(raw_floors, list)
+        floors = {
+            floor["name"]: (floor["line"], floor["branch"])
+            for floor in cast(list[dict[str, object]], raw_floors)
+        }
+        self.assertEqual(
+            floors,
+            {
+                "overall-production": (84.00, 73.93),
+                "converter-orchestration": (92.89, 84.93),
+                "manifests-diagnostics": (92.47, 78.57),
+                "project-parsing": (92.28, 82.00),
+                "gml-transpiler": (89.28, 81.51),
+            },
+        )
+
+        self.assertIn("python -m coverage erase", linux_job)
+        self.assertEqual(
+            linux_job.count(
+                "python -m coverage run -m unittest discover tests/ -v"
+            ),
+            1,
+        )
+        self.assertIn("- name: Generate Python coverage reports", linux_job)
+        self.assertIn("if: ${{ !cancelled() }}", linux_job)
+        self.assertIn("python -m coverage report", linux_job)
+        self.assertIn("python -m coverage json", linux_job)
+        self.assertIn("python -m coverage xml", linux_job)
+        self.assertIn(
+            "python scripts/check_coverage.py "
+            "--report coverage-reports/coverage.json",
+            linux_job,
+        )
+        upload_index = linux_job.index("- name: Upload Python coverage reports")
+        upload_step = linux_job[upload_index:]
+        self.assertIn("if: ${{ always() }}", upload_step)
+        self.assertIn("uses: actions/upload-artifact@", upload_step)
+        self.assertIn("coverage-reports/coverage.json", upload_step)
+        self.assertIn("coverage-reports/coverage.xml", upload_step)
+        self.assertIn("if-no-files-found: warn", upload_step)
+        self.assertIn("retention-days: 7", upload_step)
+        self.assertIn("archive: true", upload_step)
+        self.assertLess(
+            linux_job.index(
+                "- name: Enforce Python line and branch coverage floors"
+            ),
+            upload_index,
+        )
 
     def test_unit_workflow_runs_artifact_transactions_on_windows(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"

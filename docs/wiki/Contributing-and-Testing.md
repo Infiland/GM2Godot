@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.50 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.51 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-23
 
@@ -93,6 +93,32 @@ Fix every Pyright error and warning in changed code. Run the relevant focused te
 GODOT_BIN=/path/to/Godot-4.7.1 \
   ./venv/bin/python -m unittest discover -s tests -p 'test_*_godot.py'
 ```
+
+### Preserve the GML phase-boundary baseline
+
+Before the ordered #794 phase-interface migration is complete, run:
+
+```bash
+./venv/bin/python -m unittest tests.test_gml_transpiler_architecture -v
+```
+
+The baseline inventories 329 cross-module private imported-name edges within
+the facade/phase implementation and all 60 production imports from those
+surfaces. It separately freezes 44 supported non-underscore facade exports and
+their signatures, 30 legacy private facade exports, the 20 phase-package
+`reportPrivateUsage=false` directives, and the facade directive. It is a
+no-growth migration allowlist, not permission to publish another private name.
+Changes under #816 through #820 must remove the entries owned by that stage;
+unrelated changes must not edit the inventory.
+
+The policy follows Python's
+[`__all__` package guidance](https://docs.python.org/3.12/tutorial/modules.html#importing-from-a-package),
+[`ast.ImportFrom`](https://docs.python.org/3.12/library/ast.html#ast.ImportFrom),
+and [`inspect.signature`](https://docs.python.org/3.12/library/inspect.html#inspect.signature)
+contracts, together with Pyright's
+[public/private export rules](https://github.com/microsoft/pyright/blob/main/docs/typed-libraries.md),
+[`reportPrivateUsage` configuration](https://github.com/microsoft/pyright/blob/main/docs/configuration.md#type-check-diagnostics-settings),
+and [diagnostic comment scopes](https://github.com/microsoft/pyright/blob/main/docs/comments.md).
 
 ### Reproduce the Python coverage gate
 

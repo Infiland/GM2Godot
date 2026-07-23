@@ -1,7 +1,11 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
-from .model import _AssignmentOperator, _BuiltinVariableMetadata, _Token
+from .shared_models import (
+    AssignmentOperator as _AssignmentOperator,
+    BuiltinVariableMetadata as _BuiltinVariableMetadata,
+    Token as _Token,
+)
 
 _EOF = _Token("EOF", "")
 

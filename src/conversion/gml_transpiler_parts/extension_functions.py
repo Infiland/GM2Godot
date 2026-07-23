@@ -1,11 +1,10 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import json
 from collections.abc import Iterable as IterableABC, Mapping as MappingABC
 from typing import Any, Iterable, Mapping, cast
 
-from .model import GMLExtensionFunction, GMLExtensionFunctionMapping
+from .shared_models import GMLExtensionFunction, GMLExtensionFunctionMapping
 
 
 EXTENSION_FUNCTION_MAPPING_FILENAME = "gm2godot_extension_functions.json"

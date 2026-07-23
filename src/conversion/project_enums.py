@@ -7,8 +7,8 @@ from typing import Mapping, Sequence
 from src.conversion.gml_transpiler_parts.enum_helpers import (
     _evaluate_enum_value_tokens,
 )
-from src.conversion.gml_transpiler_parts.model import GMLTranspileError, _Token
 from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
 from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_source_paths import project_gml_source_paths
@@ -18,7 +18,7 @@ from src.conversion.type_defs import StrPath
 @dataclass(frozen=True)
 class _ProjectEnumMember:
     name: str
-    value_tokens: tuple[_Token, ...] | None
+    value_tokens: tuple[Token, ...] | None
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def collect_project_enum_values(
     macro_configuration: str | None = None,
 ) -> dict[str, dict[str, int]]:
     """Collect GameMaker's project-global enum constants from GML sources."""
-    token_streams: list[list[_Token]] = []
+    token_streams: list[list[Token]] = []
     for source_path in project_gml_source_paths(gm_project_path):
         try:
             with open(source_path.filesystem_path, "r", encoding="utf-8") as source_file:
@@ -59,7 +59,7 @@ def collect_project_enum_values(
         for declaration in _enum_declarations(tokens)
     ]
     return _evaluate_project_enums(declarations, macro_values)
-def _enum_declarations(tokens: Sequence[_Token]) -> tuple[_ProjectEnumDeclaration, ...]:
+def _enum_declarations(tokens: Sequence[Token]) -> tuple[_ProjectEnumDeclaration, ...]:
     declarations: list[_ProjectEnumDeclaration] = []
     index = 0
     while index < len(tokens):
@@ -77,7 +77,7 @@ def _enum_declarations(tokens: Sequence[_Token]) -> tuple[_ProjectEnumDeclaratio
 
 
 def _parse_enum_declaration(
-    tokens: Sequence[_Token],
+    tokens: Sequence[Token],
     start: int,
 ) -> tuple[_ProjectEnumDeclaration, int] | None:
     index = _skip_newlines(tokens, start + 1)
@@ -104,10 +104,10 @@ def _parse_enum_declaration(
 
         member_name = tokens[index].value
         index += 1
-        value_tokens: tuple[_Token, ...] | None = None
+        value_tokens: tuple[Token, ...] | None = None
         if index < len(tokens) and tokens[index].value == "=":
             index += 1
-            expression_tokens: list[_Token] = []
+            expression_tokens: list[Token] = []
             depth = 0
             while index < len(tokens):
                 current = tokens[index]
@@ -132,7 +132,7 @@ def _parse_enum_declaration(
     return None
 
 
-def _skip_newlines(tokens: Sequence[_Token], index: int) -> int:
+def _skip_newlines(tokens: Sequence[Token], index: int) -> int:
     while index < len(tokens) and tokens[index].kind == "NEWLINE":
         index += 1
     return index

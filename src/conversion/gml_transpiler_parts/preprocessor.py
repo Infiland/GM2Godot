@@ -7,7 +7,8 @@ from typing import Iterable, TypeAlias
 
 from .identifiers import _validate_gml_identifier
 from .lexical import _is_verbatim_string_start, _read_verbatim_string
-from .model import GMLTranspileError
+from .result_models import GMLPreprocessResult, GMLPreprocessorDiagnostic
+from .shared_models import GMLTranspileError
 from .tokens import _read_template_string
 from .utils import _join_macro_continuation_lines, _macro_configuration_matches, _strip_comments
 
@@ -40,23 +41,6 @@ _SUPPORTED_DIRECTIVES = frozenset({
     *_EDITOR_ONLY_DIRECTIVES,
 })
 _PreprocessValue: TypeAlias = bool | float | str
-
-
-@dataclass(frozen=True)
-class GMLPreprocessorDiagnostic:
-    line: int
-    directive: str
-    message: str
-    source: str
-
-    def format(self) -> str:
-        return f"{self.message} at line {self.line}: {self.source.strip()}"
-
-
-@dataclass(frozen=True)
-class GMLPreprocessResult:
-    source: str
-    diagnostics: tuple[GMLPreprocessorDiagnostic, ...]
 
 
 @dataclass

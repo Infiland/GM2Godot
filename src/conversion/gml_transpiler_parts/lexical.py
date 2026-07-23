@@ -1,7 +1,6 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
-from .model import GMLTranspileError
+from .shared_models import GMLTranspileError
 
 
 def _is_verbatim_string_start(source: str, index: int) -> bool:

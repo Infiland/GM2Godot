@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.51 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.52 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-07-23
 
@@ -102,13 +102,16 @@ Before the ordered #794 phase-interface migration is complete, run:
 ./venv/bin/python -m unittest tests.test_gml_transpiler_architecture -v
 ```
 
-The baseline inventories 329 cross-module private imported-name edges within
+The baseline inventories 209 cross-module private imported-name edges within
 the facade/phase implementation and all 60 production imports from those
 surfaces. It separately freezes 44 supported non-underscore facade exports and
-their signatures, 30 legacy private facade exports, the 20 phase-package
+their signatures, 30 legacy private facade exports, the 16 phase-package
 `reportPrivateUsage=false` directives, and the facade directive. It is a
 no-growth migration allowlist, not permission to publish another private name.
-Changes under #816 through #820 must remove the entries owned by that stage;
+The #816 model slice removed 120 internal private edges, replaced four
+production private model imports, and established `shared_models`,
+`expression_models`, and `result_models` as dependency-only typed owners.
+Changes under #817 through #820 must remove the entries owned by that stage;
 unrelated changes must not edit the inventory.
 
 The policy follows Python's

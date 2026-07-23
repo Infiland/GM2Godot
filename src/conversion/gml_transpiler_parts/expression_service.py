@@ -10,7 +10,7 @@ from .extension_functions import (
     normalize_extension_functions,
 )
 from .expression_parser import _parse_gml_expression
-from .model import _ScopeContext
+from .shared_models import ScopeContext as _ScopeContext
 from .utils import _normalize_local_names, _normalize_scope_context, _scope_context_with_global_names
 
 

@@ -54,7 +54,7 @@ from src.conversion.gml_transpiler_parts.expression_parser import (
 from src.conversion.gml_transpiler_parts.function_helpers import (
     _emit_constructor_inheritance_line,
 )
-from src.conversion.gml_transpiler_parts.model import _ScopeContext
+from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
@@ -92,16 +92,16 @@ class _DeclaredScriptResource:
     manifest_field: str | None
 
 
-def _script_scope_context() -> _ScopeContext:
-    return _ScopeContext(
+def _script_scope_context() -> ScopeContext:
+    return ScopeContext(
         self_expression=_SCRIPT_SELF_PARAMETER,
         other_expression=_SCRIPT_OTHER_PARAMETER,
         instance_target=_SCRIPT_SELF_PARAMETER,
     )
 
 
-def _constructor_scope_context() -> _ScopeContext:
-    return _ScopeContext(
+def _constructor_scope_context() -> ScopeContext:
+    return ScopeContext(
         self_expression="_gml_constructor_self",
         other_expression="_gml_constructor_other",
         instance_target="_gml_constructor_self",
@@ -549,7 +549,7 @@ class ScriptConverter(BaseConverter):
                 f"{parameter_name} = {default_value}"
             )
         if declaration.parent_constructor is not None:
-            outer_scope = _ScopeContext(
+            outer_scope = ScopeContext(
                 self_expression="self",
                 other_expression="self",
                 instance_target="self",
@@ -557,7 +557,7 @@ class ScriptConverter(BaseConverter):
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
-            constructor_scope = _ScopeContext(
+            constructor_scope = ScopeContext(
                 self_expression="_gml_constructor_self",
                 other_expression="_gml_constructor_other",
                 instance_target="_gml_constructor_self",

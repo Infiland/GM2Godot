@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.52 - 2026-07-23
+
+- Extracted dependency-only `shared_models`, `expression_models`, and `result_models` owners for cross-phase tokens/context/static metadata, the complete expression AST union, and preprocessing/diagnostic/source-map/transpile results.
+- Migrated phase, converter, and test consumers to non-underscore typed exports while retaining only the frozen top-level facade's private model aliases for #820; the #815 baseline dropped exactly 120 internal private model edges and replaced four production private model imports.
+- Preserved dataclass fields, defaults, frozen/equality behavior, error locations/messages, result serialization, supported facade identities/signatures, transpiled GDScript, source maps, diagnostics, and generated project output while removing four model-only private-usage suppressions.
+
 ## 0.7.51 - 2026-07-23
 
 - Added an AST-based GML transpiler boundary inventory covering every private facade/phase imported-name edge and every production import from the facade or phase package, with exact owner, consumer, classification, and staged #816–#820 disposition.

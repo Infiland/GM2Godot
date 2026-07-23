@@ -39,7 +39,7 @@ from src.conversion.gml_transpiler_parts.constants import (
     _GML_LITERAL_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
-from src.conversion.gml_transpiler_parts.model import _Token
+from src.conversion.gml_transpiler_parts.shared_models import Token
 from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.project_source_paths import (
     is_safe_project_source_component,
@@ -212,7 +212,7 @@ def _script_assigned_instance_variable_names(
     return assigned_names
 
 
-def _script_identifier_is_assigned(previous_token: _Token | None, next_token: _Token | None) -> bool:
+def _script_identifier_is_assigned(previous_token: Token | None, next_token: Token | None) -> bool:
     previous_value = previous_token.value if previous_token is not None else None
     next_value = next_token.value if next_token is not None else None
     return (
@@ -221,7 +221,7 @@ def _script_identifier_is_assigned(previous_token: _Token | None, next_token: _T
     )
 
 
-def _script_var_declaration_names(tokens: Sequence[_Token], start: int) -> set[str]:
+def _script_var_declaration_names(tokens: Sequence[Token], start: int) -> set[str]:
     names: set[str] = set()
     index = start
     depth = 0
@@ -252,7 +252,7 @@ def _script_var_declaration_names(tokens: Sequence[_Token], start: int) -> set[s
     return names
 
 
-def _script_function_parameter_names(tokens: Sequence[_Token]) -> set[str]:
+def _script_function_parameter_names(tokens: Sequence[Token]) -> set[str]:
     names: set[str] = set()
     index = 0
     while index < len(tokens):
@@ -272,7 +272,7 @@ def _script_function_parameter_names(tokens: Sequence[_Token]) -> set[str]:
     return names
 
 
-def _next_token_value_index(tokens: Sequence[_Token], start: int, value: str) -> int | None:
+def _next_token_value_index(tokens: Sequence[Token], start: int, value: str) -> int | None:
     for index in range(start, len(tokens)):
         token = tokens[index]
         if token.kind == "EOF":
@@ -282,7 +282,7 @@ def _next_token_value_index(tokens: Sequence[_Token], start: int, value: str) ->
     return None
 
 
-def _matching_token_index(tokens: Sequence[_Token], open_index: int, open_value: str, close_value: str) -> int:
+def _matching_token_index(tokens: Sequence[Token], open_index: int, open_value: str, close_value: str) -> int:
     depth = 0
     for index in range(open_index, len(tokens)):
         value = tokens[index].value

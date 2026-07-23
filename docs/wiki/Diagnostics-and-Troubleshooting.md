@@ -1,8 +1,8 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.49 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.50 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-22
+> **Last reviewed:** 2026-07-23
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Compatibility and Limitations](Compatibility-and-Limitations)
 

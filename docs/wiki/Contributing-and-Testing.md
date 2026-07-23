@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.49 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.50 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-07-22
+> **Last reviewed:** 2026-07-23
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -93,6 +93,37 @@ Fix every Pyright error and warning in changed code. Run the relevant focused te
 GODOT_BIN=/path/to/Godot-4.7.1 \
   ./venv/bin/python -m unittest discover -s tests -p 'test_*_godot.py'
 ```
+
+### Reproduce the Python coverage gate
+
+Required pull-request CI measures `main.py`, all Python under `src/`, and the
+maintained Python tools under `scripts/`. Tests and fixtures, virtual
+environments, build/distribution/release output, packaging-only hooks, and
+generated non-Python artifacts are outside that explicit production inventory.
+There are no project-specific coverage exclusion expressions.
+
+Run the same full-suite measurement and independent line/branch floors locally:
+
+```bash
+./venv/bin/python -m coverage erase
+./venv/bin/python -m coverage run -m unittest discover tests/ -v
+mkdir -p coverage-reports
+./venv/bin/python -m coverage report
+./venv/bin/python -m coverage json
+./venv/bin/python -m coverage xml
+./venv/bin/python scripts/check_coverage.py \
+  --report coverage-reports/coverage.json
+```
+
+Line coverage is covered executable statements divided by statements; branch
+coverage is covered branch destinations divided by branch destinations. The two
+floors are enforced separately. `coverage-policy.json` also defines focused
+floors for converter orchestration, manifests/diagnostics, project parsing, and
+the GML transpiler. To raise a floor, measure clean `main`, review the JSON and
+missing-line/branch summary, then commit the new baseline counts and the measured
+percentage truncated to two decimals together with the workflow-policy test.
+Do not lower a floor to bypass an untested path. The repository contributor
+guide links the official coverage.py and Python unittest references.
 
 Documentation-only changes do not require Pyright or the Python suite unless the change also touches tests/code or verification was explicitly requested. Link and page-source checks should still pass.
 

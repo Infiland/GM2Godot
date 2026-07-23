@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "commit": "864f4effa970fe45310212b6b8c7bdd7d15da647",
+    "coverage": "7.15.2",
+    "python": "3.12.10",
+    "platform": "macos-arm64",
+    "command": "python -m coverage run -m unittest discover tests/ -v",
+    "runtime_seconds": 715,
+    "tests": 2386,
+    "skipped": 80
+  },
+  "source": {
+    "files": [
+      "main.py"
+    ],
+    "directories": [
+      "src",
+      "scripts"
+    ]
+  },
+  "floors": [
+    {
+      "name": "overall-production",
+      "include": [
+        "main.py",
+        "src/*",
+        "scripts/*"
+      ],
+      "line": 84.00,
+      "branch": 73.93,
+      "baseline": {
+        "covered_lines": 29837,
+        "statements": 35518,
+        "covered_branches": 9617,
+        "branches": 13008
+      }
+    },
+    {
+      "name": "converter-orchestration",
+      "include": [
+        "src/conversion/converter.py",
+        "src/conversion/conversion_context.py",
+        "src/conversion/conversion_plan.py"
+      ],
+      "line": 92.89,
+      "branch": 84.93,
+      "baseline": {
+        "covered_lines": 536,
+        "statements": 577,
+        "covered_branches": 124,
+        "branches": 146
+      }
+    },
+    {
+      "name": "manifests-diagnostics",
+      "include": [
+        "src/conversion/conversion_manifest.py",
+        "src/conversion/diagnostics.py"
+      ],
+      "line": 92.47,
+      "branch": 78.57,
+      "baseline": {
+        "covered_lines": 516,
+        "statements": 558,
+        "covered_branches": 132,
+        "branches": 168
+      }
+    },
+    {
+      "name": "project-parsing",
+      "include": [
+        "src/conversion/project_manifest.py",
+        "src/conversion/project_source_paths.py",
+        "src/conversion/resource_models.py"
+      ],
+      "line": 92.28,
+      "branch": 82.00,
+      "baseline": {
+        "covered_lines": 1052,
+        "statements": 1140,
+        "covered_branches": 351,
+        "branches": 428
+      }
+    },
+    {
+      "name": "gml-transpiler",
+      "include": [
+        "src/conversion/gml_transpiler.py",
+        "src/conversion/gml_transpiler_parts/*"
+      ],
+      "line": 89.28,
+      "branch": 81.51,
+      "baseline": {
+        "covered_lines": 4976,
+        "statements": 5573,
+        "covered_branches": 2103,
+        "branches": 2580
+      }
+    }
+  ]
+}

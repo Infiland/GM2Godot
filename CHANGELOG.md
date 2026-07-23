@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.50 - 2026-07-23
+
+- Added pinned coverage.py line and branch measurement for `main.py`, `src/`, and maintained `scripts/`, collecting the existing full unittest suite once and publishing JSON and Cobertura XML reports from required pull-request CI.
+- Enforced the measured clean-main overall floor plus separate converter-orchestration, manifest/diagnostic, project-parsing, and GML-transpiler line and branch floors with exact production-source inventory validation and actionable diagnostics.
+- Added controlled below-floor, source-scope, branch-configuration, dependency-lock, workflow, and artifact-publication tests, plus contributor guidance for reproducing and intentionally raising the reviewed floors.
+
 ## 0.7.49 - 2026-07-22
 
 - Expanded the clickable release-notes view from the latest release to the ten newest published GitHub release changelogs, each labeled and linked to its release.

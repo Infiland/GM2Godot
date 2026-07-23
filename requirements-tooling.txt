@@ -1,3 +1,4 @@
+coverage==7.15.2
 pip==26.1.2
 pip-tools==7.6.0
 PyInstaller==6.21.0

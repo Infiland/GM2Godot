@@ -16,6 +16,8 @@ charset-normalizer==3.4.9
     # via requests
 click==8.4.2
     # via pip-tools
+coverage==7.15.2
+    # via -r requirements-tooling.txt
 idna==3.18
     # via requests
 macholib==1.16.4

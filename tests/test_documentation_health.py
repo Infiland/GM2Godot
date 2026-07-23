@@ -45,7 +45,7 @@ PINNED_EXTERNAL_ACTION_PATTERN = re.compile(
     r"\s*$"
 )
 APPROVED_NODE24_ACTION_MAJORS = {
-    "actions/checkout": 5,
+    "actions/checkout": 7,
     "actions/setup-python": 6,
     "actions/cache": 5,
     "actions/upload-artifact": 7,

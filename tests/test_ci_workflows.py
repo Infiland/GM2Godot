@@ -3495,7 +3495,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(release_job.count("actions/setup-python@"), 1)
         self.assertIn(
             "      - uses: actions/setup-python@"
-            "ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0\n"
+            "5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n"
             "        with:\n"
             "          python-version: '3.12'\n",
             release_job,

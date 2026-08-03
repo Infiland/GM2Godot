@@ -733,6 +733,10 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
         *,
         expected_source: PathIdentity,
         expected_destination: PathIdentity | None,
+        prepare_source: Callable[[], None] | None = None,
+        prepare_destination: Callable[[], None] | None = None,
+        verify_source: Callable[[], None] | None = None,
+        verify_destination: Callable[[], None] | None = None,
     ) -> BaseException | None:
         source_leaf = _safe_leaf(source)
         destination_leaf = _safe_leaf(destination)
@@ -750,6 +754,14 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
                 )
         else:
             self.verify_regular_identity(destination_leaf, expected_destination)
+        if prepare_source is not None:
+            prepare_source()
+        if prepare_destination is not None:
+            prepare_destination()
+        if verify_source is not None:
+            verify_source()
+        if verify_destination is not None:
+            verify_destination()
         if self.strategy == "posix_dir_fd":
             os.rename(
                 source_leaf,
@@ -793,10 +805,16 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
         name: str,
         *,
         expected_identity: PathIdentity,
+        prepare_target: Callable[[], None] | None = None,
+        verify_target: Callable[[], None] | None = None,
     ) -> BaseException | None:
         leaf = _safe_leaf(name)
         _before_anchored_artifact_phase("before_unlink", self.path, leaf)
         self.verify_regular_identity(leaf, expected_identity)
+        if prepare_target is not None:
+            prepare_target()
+        if verify_target is not None:
+            verify_target()
         if self.strategy == "posix_dir_fd":
             os.unlink(leaf, dir_fd=self.descriptor)
         else:
@@ -817,6 +835,7 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
         mode: int,
         *,
         require_single_link: bool = False,
+        expected_current_mode: int | None = None,
     ) -> int:
         leaf = _safe_leaf(name)
         current = self.stat(leaf)
@@ -829,6 +848,14 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
         current_mode = stat.S_IMODE(current.st_mode)
         if modes_match(current_mode, mode):
             return current_mode
+        if expected_current_mode is not None and not modes_match(
+            current_mode,
+            expected_current_mode,
+        ):
+            raise OSError(
+                "Artifact transaction file mode changed: "
+                f"{self.child_path(leaf)}"
+            )
         descriptor = self.open_file(leaf, os.O_RDONLY)
         try:
             opened = os.fstat(descriptor)
@@ -840,25 +867,83 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
                 raise OSError(
                     f"Artifact transaction file changed: {self.child_path(leaf)}"
                 )
+            opened_mode = stat.S_IMODE(opened.st_mode)
+            if expected_current_mode is not None and not modes_match(
+                opened_mode,
+                expected_current_mode,
+            ):
+                raise OSError(
+                    "Artifact transaction file mode changed: "
+                    f"{self.child_path(leaf)}"
+                )
             fchmod_candidate: object = getattr(os, "fchmod", None)
+            descriptor_chmod: Callable[[int], None] | None = None
             if callable(fchmod_candidate):
                 fchmod = cast(Callable[[int, int], None], fchmod_candidate)
-                fchmod(descriptor, mode)
+                descriptor_chmod = lambda exact_mode: fchmod(
+                    descriptor,
+                    exact_mode,
+                )
+                descriptor_chmod(mode)
             elif os.chmod in os.supports_fd:
-                os.chmod(descriptor, mode)
+                descriptor_chmod = lambda exact_mode: os.chmod(
+                    descriptor,
+                    exact_mode,
+                )
+                descriptor_chmod(mode)
             else:
                 self.verify_regular_identity(leaf, identity)
                 os.chmod(self.child_path(leaf), mode)
                 self.verify_regular_identity(leaf, identity)
+            changed = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(changed.st_mode)
+                or (changed.st_dev, changed.st_ino) != identity
+                or (require_single_link and changed.st_nlink != 1)
+            ):
+                error = OSError(
+                    f"Artifact transaction file changed: {self.child_path(leaf)}"
+                )
+                if modes_match(stat.S_IMODE(changed.st_mode), mode):
+                    try:
+                        if descriptor_chmod is not None:
+                            descriptor_chmod(opened_mode)
+                        else:
+                            self.verify_regular_identity(leaf, identity)
+                            os.chmod(self.child_path(leaf), opened_mode)
+                    except Exception as restore_error:
+                        error.add_note(
+                            "Failed to restore artifact mode after a boundary "
+                            f"change: {restore_error}"
+                        )
+                raise error
         finally:
             os.close(descriptor)
         self.verify_regular_identity(leaf, identity)
-        current_mode = stat.S_IMODE(self.stat(leaf).st_mode)
-        if not modes_match(current_mode, mode):
+        final_stat = self.stat(leaf)
+        final_mode = stat.S_IMODE(final_stat.st_mode)
+        if not modes_match(final_mode, mode):
             raise OSError(
                 f"Artifact transaction file mode did not update: {self.child_path(leaf)}"
             )
-        return current_mode
+        if require_single_link and final_stat.st_nlink != 1:
+            error = OSError(
+                f"Artifact transaction file changed: {self.child_path(leaf)}"
+            )
+            try:
+                self.chmod_exact(
+                    leaf,
+                    identity,
+                    current_mode,
+                    expected_current_mode=mode,
+                )
+            except Exception as restore_error:
+                error.add_note(
+                    "Failed to restore artifact mode after a late hard-link "
+                    f"change: {restore_error}"
+                )
+            raise error
+        return final_mode
 
     def verify_regular_identity(self, name: str, identity: PathIdentity) -> None:
         leaf = _safe_leaf(name)
@@ -1121,6 +1206,9 @@ class ArtifactSnapshot:
     @property
     def present(self) -> bool:
         return self.fingerprint is not None
+
+
+_ArtifactExpectation: TypeAlias = ArtifactSnapshot | StagedArtifact | None
 
 
 @dataclass(frozen=True)
@@ -1440,11 +1528,15 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         *,
         name: str | None = None,
         verify_mode: bool = True,
+        expected_mode: int | None = None,
     ) -> bytes:
         selected_name = staged.name if name is None else _safe_leaf(name)
-        expected_mode = (
-            staged.mode if selected_name == staged.name else staged.target_mode
-        )
+        if expected_mode is not None:
+            selected_mode = expected_mode
+        elif selected_name == staged.name:
+            selected_mode = staged.mode
+        else:
+            selected_mode = staged.target_mode
         descriptor = self.directory.open_file(selected_name, os.O_RDONLY)
         try:
             opened_before = os.fstat(descriptor)
@@ -1457,7 +1549,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     verify_mode
                     and not modes_match(
                         stat.S_IMODE(opened_before.st_mode),
-                        expected_mode,
+                        selected_mode,
                     )
                 )
             ):
@@ -1479,14 +1571,14 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     verify_mode
                     and not modes_match(
                         stat.S_IMODE(opened_after.st_mode),
-                        expected_mode,
+                        selected_mode,
                     )
                 )
                 or (
                     verify_mode
                     and not modes_match(
                         stat.S_IMODE(path_after.st_mode),
-                        expected_mode,
+                        selected_mode,
                     )
                 )
                 or not fingerprints_match(
@@ -1515,8 +1607,15 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         staged: StagedArtifact,
         *,
         name: str | None = None,
+        verify_mode: bool = True,
+        expected_mode: int | None = None,
     ) -> None:
-        self.read_staged(staged, name=name)
+        self.read_staged(
+            staged,
+            name=name,
+            verify_mode=verify_mode,
+            expected_mode=expected_mode,
+        )
 
     def path_matches_stage(self, name: str, staged: StagedArtifact) -> bool:
         try:
@@ -1525,12 +1624,138 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             return False
         return True
 
-    def _make_target_replaceable(self, name: str) -> _ReplaceTarget | None:
+    @staticmethod
+    def _expectation_identity(
+        expected: _ArtifactExpectation,
+    ) -> PathIdentity | None:
+        if expected is None:
+            return None
+        if isinstance(expected, StagedArtifact):
+            return expected.identity
+        if expected.fingerprint is None:
+            return None
+        return expected.fingerprint[0], expected.fingerprint[1]
+
+    @staticmethod
+    def _expectation_mode(expected: _ArtifactExpectation) -> int | None:
+        if expected is None:
+            return None
+        if isinstance(expected, StagedArtifact):
+            return expected.target_mode
+        return expected.mode
+
+    def _verify_artifact_expectation(
+        self,
+        name: str,
+        expected: _ArtifactExpectation,
+        *,
+        replaceable_mode: bool,
+        require_single_link: bool = False,
+    ) -> None:
         leaf = _safe_leaf(name)
+        if expected is None:
+            self.verify_target_state(
+                leaf,
+                ArtifactTargetState(fingerprint=None, mode=None),
+            )
+            return
+        if isinstance(expected, StagedArtifact):
+            expected_mode = (
+                _replaceable_mode(expected.target_mode)
+                if replaceable_mode
+                else expected.target_mode
+            )
+            self.verify_staged(
+                expected,
+                name=leaf,
+                expected_mode=expected_mode,
+            )
+            return
+        self._validate_snapshot(expected)
+        if expected.name != leaf:
+            raise ValueError("Artifact expectation belongs to another target.")
+        state = self._snapshot_state(expected)
+        if not expected.present:
+            self.verify_target_state(leaf, state)
+            return
+        assert expected.mode is not None
+        assert expected.content is not None
+        assert expected.sha256 is not None
+        boundary_mode = (
+            _replaceable_mode(expected.mode) if replaceable_mode else expected.mode
+        )
+        boundary_state = ArtifactTargetState(
+            fingerprint=state.fingerprint,
+            mode=boundary_mode,
+        )
+        if replaceable_mode:
+            prepared_state = self.target_state(leaf)
+            if (
+                prepared_state.fingerprint is None
+                or state.fingerprint is None
+                or prepared_state.fingerprint[:4] != state.fingerprint[:4]
+                or prepared_state.mode is None
+                or not modes_match(prepared_state.mode, boundary_mode)
+            ):
+                raise OSError(
+                    "Artifact changed during replaceable-mode preparation: "
+                    f"{self.directory.child_path(leaf)}"
+                )
+            boundary_state = prepared_state
+        if require_single_link:
+            boundary_stat = self.directory.stat(leaf)
+            expected_identity = self._expectation_identity(expected)
+            if (
+                not stat.S_ISREG(boundary_stat.st_mode)
+                or expected_identity is None
+                or (boundary_stat.st_dev, boundary_stat.st_ino) != expected_identity
+                or boundary_stat.st_nlink != 1
+            ):
+                raise OSError(
+                    "Refusing a multiply-linked artifact at the mutation "
+                    f"boundary: {self.directory.child_path(leaf)}"
+                )
+        self.verify_target_state(leaf, boundary_state)
+        content = self.read_target_bytes(leaf, boundary_state)
+        if content != expected.content or _sha256_bytes(content) != expected.sha256:
+            raise OSError(
+                f"Artifact content changed: {self.directory.child_path(leaf)}"
+            )
+        if require_single_link:
+            boundary_stat = self.directory.stat(leaf)
+            expected_identity = self._expectation_identity(expected)
+            if (
+                not stat.S_ISREG(boundary_stat.st_mode)
+                or expected_identity is None
+                or (boundary_stat.st_dev, boundary_stat.st_ino) != expected_identity
+                or boundary_stat.st_nlink != 1
+            ):
+                raise OSError(
+                    "Refusing a multiply-linked artifact at the mutation "
+                    f"boundary: {self.directory.child_path(leaf)}"
+                )
+
+    def _inspect_replace_target(
+        self,
+        name: str,
+        expected: _ArtifactExpectation,
+    ) -> _ReplaceTarget | None:
+        leaf = _safe_leaf(name)
+        self._verify_artifact_expectation(
+            leaf,
+            expected,
+            replaceable_mode=False,
+        )
+        expected_identity = self._expectation_identity(expected)
+        expected_mode = self._expectation_mode(expected)
+        if expected_identity is None:
+            return None
         try:
             path_stat = self.directory.stat(leaf)
         except FileNotFoundError:
-            return None
+            raise OSError(
+                f"Artifact disappeared before replacement: {self.directory.child_path(leaf)}"
+            )
         path = self.directory.child_path(leaf)
         if _path_is_redirected(path, path_stat) or not stat.S_ISREG(
             path_stat.st_mode
@@ -1538,20 +1763,37 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             raise OSError(f"Refusing redirected or non-regular artifact: {path}")
         identity = (path_stat.st_dev, path_stat.st_ino)
         mode = stat.S_IMODE(path_stat.st_mode)
+        if (
+            identity != expected_identity
+            or expected_mode is None
+            or not modes_match(mode, expected_mode)
+        ):
+            raise OSError(f"Artifact changed before replacement: {path}")
         mode_changed = _is_windows_platform() and not mode & stat.S_IWUSR
-        if mode_changed:
-            if path_stat.st_nlink != 1:
-                raise OSError(
-                    "Refusing to change a read-only multiply-linked artifact: "
-                    f"{path}"
-                )
-            self.directory.chmod_exact(
-                leaf,
-                identity,
-                _replaceable_mode(mode),
-                require_single_link=True,
+        target = _ReplaceTarget(
+            identity=identity,
+            mode=mode,
+            mode_changed=mode_changed,
+        )
+        if mode_changed and path_stat.st_nlink != 1:
+            raise OSError(
+                f"Refusing to change a read-only multiply-linked artifact: {path}"
             )
-        return _ReplaceTarget(identity=identity, mode=mode, mode_changed=mode_changed)
+        return target
+
+    def _prepare_replace_target_mode(
+        self,
+        name: str,
+        target: _ReplaceTarget | None,
+    ) -> None:
+        if target is None or not target.mode_changed:
+            return
+        self.directory.chmod_exact(
+            name,
+            target.identity,
+            _replaceable_mode(target.mode),
+            require_single_link=True,
+        )
 
     def _restore_replace_target_mode(
         self,
@@ -1562,7 +1804,12 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         if target is None or not target.mode_changed:
             return
         try:
-            self.directory.chmod_exact(name, target.identity, target.mode)
+            self.directory.chmod_exact(
+                name,
+                target.identity,
+                target.mode,
+                expected_current_mode=_replaceable_mode(target.mode),
+            )
         except Exception as mode_error:
             error.add_note(
                 f"Failed to restore replaced artifact target mode: {mode_error}"
@@ -1574,22 +1821,70 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         target_name: str,
     ) -> BaseException | None:
         target_leaf = _safe_leaf(target_name)
+        expected_target = self.capture_snapshot(target_leaf)
+        return self._replace_staged_exact(
+            staged,
+            target_leaf,
+            expected_target,
+        )
+
+    def _replace_staged_exact(
+        self,
+        staged: StagedArtifact,
+        target_name: str,
+        expected_target: _ArtifactExpectation,
+    ) -> BaseException | None:
+        target_leaf = _safe_leaf(target_name)
         self.phase("before_commit", target_leaf)
         self.verify_staged(staged)
-        target_state = self._make_target_replaceable(target_leaf)
-        try:
+        self._verify_artifact_expectation(
+            target_leaf,
+            expected_target,
+            replaceable_mode=False,
+        )
+        expected_identity = self._expectation_identity(expected_target)
+        target_state: _ReplaceTarget | None = None
+
+        def prepare_target() -> None:
+            nonlocal target_state
+            target_state = self._inspect_replace_target(
+                target_leaf,
+                expected_target,
+            )
+            self._prepare_replace_target_mode(target_leaf, target_state)
+
+        def prepare_stage() -> None:
             self.directory.chmod_exact(
                 staged.name,
                 staged.identity,
                 staged.target_mode,
+                require_single_link=True,
             )
+
+        def verify_target() -> None:
+            target_mode_changed = (
+                target_state is not None and target_state.mode_changed
+            )
+            self._verify_artifact_expectation(
+                target_leaf,
+                expected_target,
+                replaceable_mode=target_mode_changed,
+                require_single_link=target_mode_changed,
+            )
+
+        try:
             completion_error = self.directory.replace(
                 staged.name,
                 target_leaf,
                 expected_source=staged.identity,
-                expected_destination=(
-                    None if target_state is None else target_state.identity
+                expected_destination=expected_identity,
+                prepare_source=prepare_stage,
+                prepare_destination=prepare_target,
+                verify_source=lambda: self.verify_staged(
+                    staged,
+                    expected_mode=staged.target_mode,
                 ),
+                verify_destination=verify_target,
             )
         except BaseException as error:
             if self.path_matches_stage(target_leaf, staged):
@@ -1599,6 +1894,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     staged.name,
                     staged.identity,
                     staged.mode,
+                    expected_current_mode=staged.target_mode,
                 )
             except Exception as mode_error:
                 error.add_note(
@@ -1623,18 +1919,52 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
     ) -> BaseException | None:
         target_leaf = _safe_leaf(target_name)
         self.verify_staged(staged_copy)
-        target_state = self._make_target_replaceable(target_leaf)
-        if target_state is None:
-            raise OSError(
-                f"Artifact disappeared before displacement: "
-                f"{self.directory.child_path(target_leaf)}"
+        self._verify_artifact_expectation(
+            target_leaf,
+            displaced_target,
+            replaceable_mode=False,
+        )
+        target_state: _ReplaceTarget | None = None
+
+        def prepare_target() -> None:
+            nonlocal target_state
+            prepared = self._inspect_replace_target(
+                target_leaf,
+                displaced_target,
             )
+            if prepared is None:
+                raise OSError(
+                    "Artifact disappeared before displacement: "
+                    f"{self.directory.child_path(target_leaf)}"
+                )
+            target_state = prepared
+            self._prepare_replace_target_mode(target_leaf, target_state)
+
+        def verify_target() -> None:
+            if target_state is None:
+                raise OSError(
+                    "Artifact was not prepared for displacement: "
+                    f"{self.directory.child_path(target_leaf)}"
+                )
+            self.verify_staged(
+                displaced_target,
+                name=target_leaf,
+                expected_mode=(
+                    _replaceable_mode(displaced_target.target_mode)
+                    if target_state.mode_changed
+                    else displaced_target.target_mode
+                ),
+            )
+
         try:
             completion_error = self.directory.replace(
                 target_leaf,
                 staged_copy.name,
-                expected_source=target_state.identity,
+                expected_source=displaced_target.identity,
                 expected_destination=staged_copy.identity,
+                prepare_source=prepare_target,
+                verify_source=verify_target,
+                verify_destination=lambda: self.verify_staged(staged_copy),
             )
         except BaseException as error:
             if self.path_matches_stage(staged_copy.name, displaced_target):
@@ -1695,13 +2025,34 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     )
                 raise
             return displaced, completion_error
-        target_state = self._make_target_replaceable(leaf)
-        if target_state is None:
-            return None, None
+        target_state: _ReplaceTarget | None = None
+
+        def prepare_target() -> None:
+            nonlocal target_state
+            target_state = self._inspect_replace_target(leaf, staged)
+            self._prepare_replace_target_mode(leaf, target_state)
+
+        def verify_target() -> None:
+            if target_state is None:
+                raise OSError(
+                    f"Artifact was not prepared for unlink: {self.directory.child_path(leaf)}"
+                )
+            self.verify_staged(
+                staged,
+                name=leaf,
+                expected_mode=(
+                    _replaceable_mode(staged.target_mode)
+                    if target_state.mode_changed
+                    else staged.target_mode
+                ),
+            )
+
         try:
             completion_error = self.directory.unlink(
                 leaf,
-                expected_identity=target_state.identity,
+                expected_identity=staged.identity,
+                prepare_target=prepare_target,
+                verify_target=verify_target,
             )
         except BaseException as error:
             if not self.directory.lexists(leaf):
@@ -1723,6 +2074,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             completion_error = self.directory.unlink(
                 staged.name,
                 expected_identity=staged.identity,
+                verify_target=lambda: self.verify_staged(staged),
             )
             if completion_error is not None:
                 raise completion_error
@@ -1765,6 +2117,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 completion_error = self.directory.unlink(
                     temporary_name,
                     expected_identity=staged.identity,
+                    verify_target=lambda staged=staged: self.verify_staged(staged),
                 )
                 temporary_files.pop(temporary_name, None)
                 removed = True
@@ -1976,7 +2329,11 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     self._verify_snapshot_current(snapshot)
                     verify_guards()
                 if desired is not None:
-                    completion_error = self.replace_staged(desired, spec.name)
+                    completion_error = self._replace_staged_exact(
+                        desired,
+                        spec.name,
+                        snapshot,
+                    )
                     mutation_started = True
                     temporary_files.pop(desired.name, None)
                 elif snapshot.present:
@@ -2146,7 +2503,11 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     if completion_error is not None:
                         raise completion_error
                 if restored is not None:
-                    completion_error = self.replace_staged(restored, snapshot.name)
+                    completion_error = self._replace_staged_exact(
+                        restored,
+                        snapshot.name,
+                        None,
+                    )
                     mutation_started = True
                     temporary_files.pop(restored.name, None)
                     if recorded_mutation is None:
@@ -2232,7 +2593,11 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         phase_name="recovery_stage",
                     )
                     temporary_files[recovery.name] = recovery
-                    completion_error = self.replace_staged(backup, name)
+                    completion_error = self._replace_staged_exact(
+                        backup,
+                        name,
+                        desired,
+                    )
                     temporary_files.pop(backup.name, None)
                     if completion_error is not None:
                         raise completion_error
@@ -2305,7 +2670,11 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         suffix=".recovery.backup",
                     )
                     temporary_files[recovery.name] = recovery
-                    completion_error = self.replace_staged(receipt_backup, name)
+                    completion_error = self._replace_staged_exact(
+                        receipt_backup,
+                        name,
+                        mutation.restored if mutation.restored_committed else None,
+                    )
                     temporary_files.pop(receipt_backup.name, None)
                     if completion_error is not None:
                         raise completion_error

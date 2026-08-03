@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.55 - 2026-09-02
+
+- Revalidated the immutable staged source and expected destination identity, mode, bytes, and SHA-256 after the observable replace/unlink hook and immediately before each namespace mutation.
+- Made publish, absent publish, restore displacement, and both rollback directions preserve same-inode external changes while retaining exact recovery material when a safe rollback cannot proceed.
+- Preserved deliberate native-Windows writable-mode preparation and restored the original mode through hard-link races, with deterministic equal-size, restored-mtime, constant-ctime, and native Windows transaction coverage.
+
 ## 0.7.54 - 2026-08-10
 
 - Skipped recorded file cleanup below a directory that was already identity-verified absent after Included Files generation publication.

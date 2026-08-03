@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.54 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.55 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-08-10
+> **Last reviewed:** 2026-09-02
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -191,6 +191,8 @@ The publication tests stop the child process at every forward transaction phase 
 Native Windows CI keeps the broad `windows-artifact-transactions` suite separate from `windows-included-files-scale`. The broad job may set `GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE=1` only under GitHub Actions; the dedicated job sets `GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE=1` and invokes `python -m scripts.run_windows_included_files_scale_gate` from the repository root. That fail-closed runner loads only `test_ten_thousand_entry_compact_records_publish_and_recover_below_cap`, requires exactly one collected and executed passing test, and rejects skips, failures, errors, expected failures, unexpected successes, and fixture exits. Workflow policy locks the dedicated step inventory and forbids conditional or continue-on-error execution. Simultaneous require/skip flags fail closed. Both jobs keep the pinned Windows 2025, CPython 3.12.10, dependency constraints, and 20-minute timeout. Never copy the skip flag into local commands or the dedicated scale job.
 
 Recorded-tree cleanup verifies directory state top-down. Once a recorded directory is proven absent under its expected identity-bound parent, cleanup skips every recorded file descendant below it instead of repeating missing-parent fallback probes. Retain `test_cleanup_skips_file_probes_below_proven_absent_directory` and its constant operation-count comparison across different entry counts. Also retain `test_cleanup_preserves_directory_that_reappears_after_absence_proof`: a directory or file that reappears after the proof is unknown external state and must be preserved by the later bottom-up directory/root cleanup.
+
+Artifact writable-mode preparation must remain fail-closed when a hard link appears before, during, or immediately after the mode syscall. Retain the modeled Windows target and stage hard-link tests: the transaction must restore only the exact temporary mode it set, through the retained descriptor where available, and must preserve a different external mode rather than overwriting it during abort cleanup. Native Windows hard-link and read-only tests remain authoritative for Win32 metadata behavior.
 
 Worker-scheduling changes must also retain the deterministic 10,000-source submission bound, changed/unchanged failure and cancellation admission checks, and cross-worker output equivalence:
 

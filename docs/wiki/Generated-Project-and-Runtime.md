@@ -1,8 +1,8 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.54 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.55 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-08-10
+> **Last reviewed:** 2026-09-02
 
 [Home](Home) · [Installation](Installation) · [Quick start](Quick-Start-Conversion) · [Compatibility](Compatibility-and-Limitations) · [Diagnostics](Diagnostics-and-Troubleshooting) · [Contributing](Contributing-and-Testing)
 
@@ -339,7 +339,7 @@ On Windows, GM2Godot opens both the report root and the exact captured `gm2godot
 
 If a non-Windows host lacks descriptor-relative open, stat, mkdir, rename or unlink, `O_NOFOLLOW`, `O_DIRECTORY`, or descriptor chmod, the transaction selects a `verified_path` fallback before staging. That fallback verifies the root and destination identities before and after each full-path operation. It rejects links and changed directories but narrows rather than eliminates the final non-cooperating path-resolution race. The backend is fixed for the transaction and never downgrades after a stage exists.
 
-The retained directory binding does not lock individual artifact names against a non-cooperating writer. Exact inode, mode, byte and digest checks run after staging, before every ordered mutation, and again at the native replace/unlink boundary. A process that races the final system call can still win the remaining leaf-entry interval on platforms without a suitable handle-relative primitive. Close editors, games and other writers while conversion or recovery is running; unexpected exact-state changes fail the transaction and preserve verified recovery material instead of authorizing an overwrite.
+The retained directory binding does not lock individual artifact names against a non-cooperating writer. Exact identity, allowed-mode, byte, and SHA-256 checks run after staging, before every ordered mutation, and again after the observable `before_replace` / `before_unlink` hook and any deliberate Windows writable-mode preparation, immediately before the native namespace mutation. Replace revalidates both its immutable source stage and expected destination; unlink revalidates its exact target. Same-inode equal-size changes remain detectable even when their timestamps are restored. If a hard link appears while Windows writable-mode preparation is in progress, the transaction restores the original mode through the retained descriptor and aborts; later abort cleanup restores only the exact temporary mode it set, so an unrelated external mode change is not overwritten. A process that races the final system call can still win the remaining leaf-entry interval on platforms without a suitable handle-relative primitive. Close editors, games and other writers while conversion or recovery is running; unexpected exact-state changes fail the transaction and preserve verified recovery material instead of authorizing an overwrite.
 
 The two diagnostic files retain stable public paths and ordinary-exception rollback, but they are still separate ordered replacements. A hard process or machine crash between their durability barriers can therefore expose one old file and one new file. Treat the pair as belonging to one successful invocation only when their outcome and surrounding attempt evidence agree; a future generation protocol is required for old-or-new crash atomicity across the pair.
 

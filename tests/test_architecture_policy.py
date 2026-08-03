@@ -445,6 +445,7 @@ class TestArchitecturePolicy(unittest.TestCase):
                     ):
                         verify_receipt(receipt, transaction)
 
+    @unittest.skipIf(os.name == "nt", "POSIX-modeled Windows semantics required")
     def test_mocked_windows_readonly_report_publishes_restores_and_cleans(
         self,
     ) -> None:
@@ -499,6 +500,10 @@ class TestArchitecturePolicy(unittest.TestCase):
                 return_value=True,
             ),
             patch(
+                "src.conversion.anchored_artifacts._descriptor_relative_supported",
+                return_value=True,
+            ),
+            patch(
                 "src.conversion.anchored_artifacts.os.rename",
                 side_effect=windows_replace,
             ),
@@ -528,6 +533,7 @@ class TestArchitecturePolicy(unittest.TestCase):
         self.assertEqual(list(report_path.parent.iterdir()), [report_path])
         report_path.chmod(0o600)
 
+    @unittest.skipIf(os.name == "nt", "POSIX-modeled Windows semantics required")
     def test_mocked_windows_failed_replace_restores_readonly_and_cleans(
         self,
     ) -> None:
@@ -537,24 +543,31 @@ class TestArchitecturePolicy(unittest.TestCase):
         report_path.parent.mkdir(parents=True)
         report_path.write_bytes(previous_content)
         report_path.chmod(0o444)
+        real_rename = os.rename
         real_unlink = os.unlink
 
         def fail_report_replace(
-            phase: str,
-            directory_path: str,
-            name: str | None,
+            source: str,
+            destination: str,
+            *,
+            src_dir_fd: int | None = None,
+            dst_dir_fd: int | None = None,
         ) -> None:
-            if phase == "before_replace" and name == report_path.name:
-                assert name is not None
-                destination = os.path.join(directory_path, name)
+            if destination == report_path.name:
                 destination_mode = stat.S_IMODE(
-                    os.lstat(destination).st_mode
+                    _lstat_at(destination, dir_fd=dst_dir_fd).st_mode
                 )
                 if not destination_mode & stat.S_IWUSR:
                     raise PermissionError(
                         "mock Windows refuses to replace a read-only destination"
                     )
                 raise OSError("injected Windows replacement failure")
+            real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
 
         def windows_unlink(
             path: str | bytes,
@@ -575,7 +588,11 @@ class TestArchitecturePolicy(unittest.TestCase):
                 return_value=True,
             ),
             patch(
-                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                "src.conversion.anchored_artifacts._descriptor_relative_supported",
+                return_value=True,
+            ),
+            patch(
+                "src.conversion.anchored_artifacts.os.rename",
                 side_effect=fail_report_replace,
             ),
             patch(
@@ -596,6 +613,7 @@ class TestArchitecturePolicy(unittest.TestCase):
         self.assertEqual(list(report_path.parent.iterdir()), [report_path])
         report_path.chmod(0o600)
 
+    @unittest.skipIf(os.name == "nt", "POSIX-modeled Windows semantics required")
     def test_mocked_windows_readonly_rollback_restores_replaceable_backup(
         self,
     ) -> None:
@@ -659,6 +677,10 @@ class TestArchitecturePolicy(unittest.TestCase):
         with (
             patch(
                 "src.conversion.anchored_artifacts._is_windows_platform",
+                return_value=True,
+            ),
+            patch(
+                "src.conversion.anchored_artifacts._descriptor_relative_supported",
                 return_value=True,
             ),
             patch(

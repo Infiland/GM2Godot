@@ -264,6 +264,647 @@ class TestAnchoredArtifacts(unittest.TestCase):
         finally:
             target.chmod(0o600)
 
+    def test_modeled_windows_rejects_late_readonly_target_hardlink(self) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        linked = False
+
+        def link_target_at_replace(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal linked
+            if phase != "before_replace" or name != "report.json" or linked:
+                return
+            os.link(target, alias)
+            linked = True
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts._file_fingerprint",
+                        side_effect=self._stable_ctime_fingerprint,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=link_target_at_replace,
+                    ),
+                    self.assertRaisesRegex(
+                        OSError,
+                        "read-only multiply-linked artifact",
+                    ),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(linked)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertEqual(
+                (target.stat().st_dev, target.stat().st_ino),
+                (alias.stat().st_dev, alias.stat().st_ino),
+            )
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(stat.S_IMODE(alias.stat().st_mode) & stat.S_IWUSR)
+            self.assertEqual(
+                sorted(path.name for path in self.artifact_directory.iterdir()),
+                ["report.json"],
+            )
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_late_stage_hardlink_keeps_original_mode(self) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "stage-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        staged_path: Path | None = None
+        alias_mode_at_hook: int | None = None
+
+        def link_stage_at_replace(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal alias_mode_at_hook, staged_path
+            if phase != "before_replace" or name != "report.json":
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.tmp"))
+            self.assertEqual(len(candidates), 1)
+            staged_path = candidates[0]
+            os.link(staged_path, alias)
+            alias_mode_at_hook = stat.S_IMODE(alias.stat().st_mode)
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                        side_effect=link_stage_at_replace,
+                    ),
+                    self.assertRaisesRegex(OSError, "transaction file changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertIsNotNone(staged_path)
+            assert staged_path is not None
+            self.assertTrue(staged_path.is_file())
+            self.assertEqual(staged_path.read_bytes(), b"new\n")
+            self.assertEqual(alias.read_bytes(), b"new\n")
+            self.assertEqual(
+                (staged_path.stat().st_dev, staged_path.stat().st_ino),
+                (alias.stat().st_dev, alias.stat().st_ino),
+            )
+            self.assertIsNotNone(alias_mode_at_hook)
+            self.assertArtifactModeEqual(
+                stat.S_IMODE(alias.stat().st_mode),
+                cast(int, alias_mode_at_hook),
+            )
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_post_stage_chmod_hardlink_restores_alias_mode(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "stage-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        staged_path: Path | None = None
+        linked = False
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                real_chmod = transaction.directory.chmod_exact
+
+                def link_after_stage_chmod(
+                    name: str,
+                    identity: tuple[int, int],
+                    mode: int,
+                    **kwargs: Any,
+                ) -> int:
+                    nonlocal linked, staged_path
+                    result = real_chmod(name, identity, mode, **kwargs)
+                    if (
+                        not linked
+                        and name.startswith(".report.json.")
+                        and not mode & stat.S_IWUSR
+                    ):
+                        staged_path = self.artifact_directory / name
+                        os.link(staged_path, alias)
+                        linked = True
+                    return result
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        transaction.directory,
+                        "chmod_exact",
+                        side_effect=link_after_stage_chmod,
+                    ),
+                    self.assertRaisesRegex(OSError, "Staged artifact changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(linked)
+            self.assertIsNotNone(staged_path)
+            assert staged_path is not None
+            self.assertEqual(staged_path.read_bytes(), b"new\n")
+            self.assertEqual(alias.read_bytes(), b"new\n")
+            self.assertTrue(stat.S_IMODE(staged_path.stat().st_mode) & stat.S_IWUSR)
+            self.assertTrue(stat.S_IMODE(alias.stat().st_mode) & stat.S_IWUSR)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_post_preparation_failure_restores_target_mode(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        failed_after_preparation = False
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                real_prepare = cast(
+                    Callable[[str, Any], None],
+                    getattr(transaction, "_prepare_replace_target_mode"),
+                )
+
+                def fail_after_target_preparation(
+                    name: str,
+                    prepared: Any,
+                ) -> None:
+                    nonlocal failed_after_preparation
+                    real_prepare(name, prepared)
+                    if name == "report.json" and not failed_after_preparation:
+                        failed_after_preparation = True
+                        raise OSError("injected post-preparation failure")
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        transaction,
+                        "_prepare_replace_target_mode",
+                        side_effect=fail_after_target_preparation,
+                    ),
+                    self.assertRaisesRegex(OSError, "post-preparation failure"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(failed_after_preparation)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertEqual(
+                sorted(path.name for path in self.artifact_directory.iterdir()),
+                ["report.json"],
+            )
+        finally:
+            target.chmod(0o600)
+
+    @unittest.skipUnless(
+        callable(getattr(os, "fchmod", None)),
+        "descriptor chmod is unavailable",
+    )
+    def test_modeled_windows_hardlink_during_fchmod_restores_alias_mode(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        target_identity = (target.stat().st_dev, target.stat().st_ino)
+        real_fchmod = os.fchmod
+        linked = False
+
+        def link_before_fchmod(descriptor: int, mode: int) -> None:
+            nonlocal linked
+            opened = os.fstat(descriptor)
+            if (
+                not linked
+                and (opened.st_dev, opened.st_ino) == target_identity
+                and mode & stat.S_IWUSR
+            ):
+                os.link(target, alias)
+                linked = True
+            real_fchmod(descriptor, mode)
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.fchmod",
+                        side_effect=link_before_fchmod,
+                    ),
+                    self.assertRaisesRegex(OSError, "transaction file changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(linked)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertEqual(
+                (target.stat().st_dev, target.stat().st_ino),
+                (alias.stat().st_dev, alias.stat().st_ino),
+            )
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(stat.S_IMODE(alias.stat().st_mode) & stat.S_IWUSR)
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_hardlink_during_path_chmod_restores_alias_mode(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        target_identity = (target.stat().st_dev, target.stat().st_ino)
+        real_chmod = os.chmod
+        linked = False
+
+        def link_before_path_chmod(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes] | int,
+            mode: int,
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
+            nonlocal linked
+            if not isinstance(path, int):
+                candidate = Path(os.fsdecode(path))
+                candidate_stat = os.lstat(candidate)
+                if (
+                    not linked
+                    and (candidate_stat.st_dev, candidate_stat.st_ino)
+                    == target_identity
+                    and mode & stat.S_IWUSR
+                ):
+                    os.link(target, alias)
+                    linked = True
+            real_chmod(path, mode, *args, **kwargs)
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.fchmod",
+                        None,
+                        create=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.chmod",
+                        side_effect=link_before_path_chmod,
+                    ),
+                    self.assertRaisesRegex(OSError, "transaction file changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(linked)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertEqual(
+                (target.stat().st_dev, target.stat().st_ino),
+                (alias.stat().st_dev, alias.stat().st_ino),
+            )
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(stat.S_IMODE(alias.stat().st_mode) & stat.S_IWUSR)
+        finally:
+            target.chmod(0o600)
+
+    @unittest.skipUnless(
+        callable(getattr(os, "fchmod", None)),
+        "descriptor chmod is unavailable",
+    )
+    def test_modeled_windows_fchmod_race_preserves_external_mode(self) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        target_identity = (target.stat().st_dev, target.stat().st_ino)
+        real_fchmod = os.fchmod
+        changed = False
+
+        def change_mode_and_link(descriptor: int, mode: int) -> None:
+            nonlocal changed
+            opened = os.fstat(descriptor)
+            real_fchmod(descriptor, mode)
+            if (
+                not changed
+                and (opened.st_dev, opened.st_ino) == target_identity
+                and mode & stat.S_IWUSR
+            ):
+                target.chmod(0o400)
+                os.link(target, alias)
+                changed = True
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.fchmod",
+                        side_effect=change_mode_and_link,
+                    ),
+                    self.assertRaisesRegex(OSError, "transaction file changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(changed)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o400)
+            self.assertArtifactModeEqual(stat.S_IMODE(alias.stat().st_mode), 0o400)
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_path_chmod_race_preserves_external_mode(self) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        target_identity = (target.stat().st_dev, target.stat().st_ino)
+        real_chmod = os.chmod
+        changed = False
+
+        def change_mode_and_link(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes] | int,
+            mode: int,
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
+            nonlocal changed
+            candidate_stat: os.stat_result | None = None
+            if not isinstance(path, int):
+                candidate_stat = os.lstat(Path(os.fsdecode(path)))
+            real_chmod(path, mode, *args, **kwargs)
+            if (
+                not changed
+                and candidate_stat is not None
+                and (candidate_stat.st_dev, candidate_stat.st_ino)
+                == target_identity
+                and mode & stat.S_IWUSR
+            ):
+                real_chmod(target, 0o400)
+                os.link(target, alias)
+                changed = True
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.fchmod",
+                        None,
+                        create=True,
+                    ),
+                    patch(
+                        "src.conversion.anchored_artifacts.os.chmod",
+                        side_effect=change_mode_and_link,
+                    ),
+                    self.assertRaisesRegex(OSError, "transaction file changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(changed)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o400)
+            self.assertArtifactModeEqual(stat.S_IMODE(alias.stat().st_mode), 0o400)
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_late_hardlink_restores_prepared_target_mode(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        linked = False
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                real_prepare = cast(
+                    Callable[[str, Any], None],
+                    getattr(transaction, "_prepare_replace_target_mode"),
+                )
+
+                def link_after_target_preparation(
+                    name: str,
+                    prepared: Any,
+                ) -> None:
+                    nonlocal linked
+                    real_prepare(name, prepared)
+                    if name == "report.json" and not linked:
+                        os.link(target, alias)
+                        linked = True
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        transaction,
+                        "_prepare_replace_target_mode",
+                        side_effect=link_after_target_preparation,
+                    ),
+                    self.assertRaisesRegex(
+                        OSError,
+                        "multiply-linked artifact at the mutation boundary",
+                    ),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(linked)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertEqual(alias.read_bytes(), b"old\n")
+            self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWUSR)
+            self.assertFalse(stat.S_IMODE(alias.stat().st_mode) & stat.S_IWUSR)
+        finally:
+            target.chmod(0o600)
+
+    def test_modeled_windows_external_mode_change_is_not_overwritten_on_abort(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o444)
+        externally_changed = False
+
+        try:
+            with ByteArtifactTransaction.open(
+                str(self.root),
+                "gm2godot",
+                create=False,
+                description="test artifact directory",
+            ) as transaction:
+                real_prepare = cast(
+                    Callable[[str, Any], None],
+                    getattr(transaction, "_prepare_replace_target_mode"),
+                )
+
+                def change_mode_after_target_preparation(
+                    name: str,
+                    prepared: Any,
+                ) -> None:
+                    nonlocal externally_changed
+                    real_prepare(name, prepared)
+                    if name == "report.json" and not externally_changed:
+                        target.chmod(0o400)
+                        externally_changed = True
+
+                with (
+                    patch(
+                        "src.conversion.anchored_artifacts._is_windows_platform",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        transaction,
+                        "_prepare_replace_target_mode",
+                        side_effect=change_mode_after_target_preparation,
+                    ),
+                    self.assertRaisesRegex(OSError, "Artifact changed"),
+                ):
+                    transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+            self.assertTrue(externally_changed)
+            self.assertEqual(target.read_bytes(), b"old\n")
+            self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o400)
+        finally:
+            target.chmod(0o600)
+
+    def test_writable_hardlink_change_at_replace_boundary_is_preserved(self) -> None:
+        target = self.artifact_directory / "report.json"
+        alias = self.root / "report-alias.json"
+        target.write_bytes(b"old\n")
+        os.link(target, alias)
+        original_identity = (target.stat().st_dev, target.stat().st_ino)
+        changed = False
+
+        def change_through_alias(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal changed
+            if phase != "before_replace" or name != "report.json" or changed:
+                return
+            self._overwrite_same_inode(alias, b"EXT\n")
+            changed = True
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=change_through_alias,
+                ),
+                self.assertRaisesRegex(OSError, "Artifact content changed"),
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        self.assertEqual(alias.read_bytes(), b"EXT\n")
+        self.assertEqual(
+            (target.stat().st_dev, target.stat().st_ino), original_identity
+        )
+        self.assertEqual((alias.stat().st_dev, alias.stat().st_ino), original_identity)
+        self.assertGreaterEqual(target.stat().st_nlink, 2)
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
     def test_ordered_present_absent_publish_and_restore_share_one_core(self) -> None:
         first = self.artifact_directory / "first.json"
         second = self.artifact_directory / "second.json"
@@ -388,6 +1029,217 @@ class TestAnchoredArtifacts(unittest.TestCase):
             ["first.json", "second.json"],
         )
 
+    def test_publish_rejects_same_inode_change_at_replace_boundary(self) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        original_identity = (target.stat().st_dev, target.stat().st_ino)
+        changed = False
+
+        def change_target_at_replace(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal changed
+            if phase != "before_replace" or name != "report.json" or changed:
+                return
+            self._overwrite_same_inode(target, b"EXT\n")
+            changed = True
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=change_target_at_replace,
+                ),
+                self.assertRaisesRegex(OSError, "Artifact content changed"),
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        self.assertEqual(
+            (target.stat().st_dev, target.stat().st_ino), original_identity
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_publish_rejects_same_inode_stage_change_at_replace_boundary(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        changed_stage: Path | None = None
+
+        def change_stage_at_replace(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal changed_stage
+            if phase != "before_replace" or name != "report.json":
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.tmp"))
+            self.assertEqual(len(candidates), 1)
+            changed_stage = candidates[0]
+            self._overwrite_same_inode(changed_stage, b"BAD\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=change_stage_at_replace,
+                ),
+                self.assertRaisesRegex(OSError, "Staged artifact content changed"),
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertIsNotNone(changed_stage)
+        assert changed_stage is not None
+        self.assertTrue(changed_stage.is_file())
+        self.assertEqual(changed_stage.read_bytes(), b"BAD\n")
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            sorted(("report.json", changed_stage.name)),
+        )
+
+    def test_absent_publish_rejects_same_inode_change_at_unlink_boundary(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        original_identity = (target.stat().st_dev, target.stat().st_ino)
+        changed = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            windows_tombstone = transaction.strategy == "windows_handle"
+
+            def change_target_at_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal changed
+                posix_boundary = phase == "before_unlink" and name == "report.json"
+                windows_boundary = (
+                    windows_tombstone
+                    and phase == "before_replace"
+                    and name is not None
+                    and name.endswith(".tombstone")
+                )
+                if changed or not (posix_boundary or windows_boundary):
+                    return
+                self._overwrite_same_inode(target, b"EXT\n")
+                changed = True
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=change_target_at_unlink,
+                ),
+                self.assertRaisesRegex(OSError, "content changed"),
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", None),))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        self.assertEqual(
+            (target.stat().st_dev, target.stat().st_ino), original_identity
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_restore_rejects_same_inode_receipt_change_at_replace_boundary(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshot = transaction.capture_snapshot("report.json")
+            receipt = transaction.publish_specs(
+                (ArtifactSpec("report.json", b"new\n"),)
+            )[0]
+            assert receipt is not None
+            published_identity = (target.stat().st_dev, target.stat().st_ino)
+            changed = False
+
+            def change_receipt_at_displacement(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal changed
+                if (
+                    phase != "before_replace"
+                    or name is None
+                    or not name.endswith(".restore.backup")
+                    or changed
+                ):
+                    return
+                self._overwrite_same_inode(target, b"EXT\n")
+                changed = True
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=change_receipt_at_displacement,
+                ),
+                self.assertRaisesRegex(OSError, "content changed"),
+            ):
+                transaction.restore_snapshots((snapshot,), (receipt,))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        self.assertEqual(
+            (target.stat().st_dev, target.stat().st_ino), published_identity
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
     def test_publish_rollback_continues_after_one_target_fails(self) -> None:
         first = self.artifact_directory / "first.json"
         second = self.artifact_directory / "second.json"
@@ -454,6 +1306,77 @@ class TestAnchoredArtifacts(unittest.TestCase):
         self.assertTrue(
             any("injected second rollback failure" in note for note in notes)
         )
+        self.assertTrue(
+            any("verified recovery artifact preserved" in note for note in notes)
+        )
+
+    def test_publish_rollback_preserves_same_inode_external_change(self) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        original_mode = stat.S_IMODE(target.stat().st_mode)
+        rolling_back = False
+        changed = False
+
+        def fail_then_change_rollback_target(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal changed, rolling_back
+            if phase == "before_commit_report.json_durability":
+                rolling_back = True
+                raise OSError("injected publication durability failure")
+            if (
+                rolling_back
+                and phase == "before_replace"
+                and name == "report.json"
+                and not changed
+            ):
+                self._overwrite_same_inode(target, b"EXT\n")
+                changed = True
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_then_change_rollback_target,
+                ),
+                self.assertRaisesRegex(
+                    OSError,
+                    "publication durability failure",
+                ) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        retained = [
+            path
+            for path in self.artifact_directory.iterdir()
+            if path.name != "report.json"
+        ]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), b"old\n")
+        retained_stat = retained[0].stat()
+        self.assertEqual(retained_stat.st_nlink, 1)
+        self.assertNotEqual(
+            (retained_stat.st_dev, retained_stat.st_ino),
+            (target.stat().st_dev, target.stat().st_ino),
+        )
+        self.assertArtifactModeEqual(
+            stat.S_IMODE(retained_stat.st_mode),
+            original_mode,
+        )
+        notes = getattr(raised.exception, "__notes__", ())
         self.assertTrue(
             any("verified recovery artifact preserved" in note for note in notes)
         )
@@ -754,6 +1677,82 @@ class TestAnchoredArtifacts(unittest.TestCase):
         self.assertTrue(
             any("injected receipt rollback failure" in note for note in notes)
         )
+        self.assertTrue(
+            any("verified recovery artifact preserved" in note for note in notes)
+        )
+
+    def test_restore_rollback_preserves_same_inode_external_change(self) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshot = transaction.capture_snapshot("report.json")
+            receipt = transaction.publish_specs(
+                (ArtifactSpec("report.json", b"new\n"),)
+            )[0]
+            assert receipt is not None
+            rolling_back = False
+            changed = False
+
+            def fail_then_change_rollback_target(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal changed, rolling_back
+                if phase == "before_restore_report.json_durability":
+                    rolling_back = True
+                    raise OSError("injected restore durability failure")
+                if (
+                    rolling_back
+                    and phase == "before_replace"
+                    and name == "report.json"
+                    and not changed
+                ):
+                    self._overwrite_same_inode(target, b"EXT\n")
+                    changed = True
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_then_change_rollback_target,
+                ),
+                self.assertRaisesRegex(
+                    OSError,
+                    "restore durability failure",
+                ) as raised,
+            ):
+                transaction.restore_snapshots((snapshot,), (receipt,))
+
+        self.assertTrue(changed)
+        self.assertEqual(target.read_bytes(), b"EXT\n")
+        retained = [
+            path
+            for path in self.artifact_directory.iterdir()
+            if path.name != "report.json"
+        ]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), receipt.content)
+        retained_stat = retained[0].stat()
+        self.assertEqual(retained_stat.st_nlink, 1)
+        self.assertNotEqual(
+            (retained_stat.st_dev, retained_stat.st_ino),
+            (target.stat().st_dev, target.stat().st_ino),
+        )
+        self.assertArtifactModeEqual(
+            stat.S_IMODE(retained_stat.st_mode),
+            receipt.mode,
+        )
+        notes = getattr(raised.exception, "__notes__", ())
         self.assertTrue(
             any("verified recovery artifact preserved" in note for note in notes)
         )
@@ -1106,6 +2105,35 @@ class TestAnchoredArtifacts(unittest.TestCase):
                 child.read_bytes(),
             )
         return snapshot
+
+    def _overwrite_same_inode(self, path: Path, content: bytes) -> None:
+        before = path.stat()
+        self.assertEqual(len(content), before.st_size)
+        with path.open("r+b", buffering=0) as artifact_file:
+            artifact_file.write(content)
+            artifact_file.truncate()
+            os.fsync(artifact_file.fileno())
+        os.utime(
+            path,
+            ns=(before.st_atime_ns, before.st_mtime_ns),
+        )
+        after = path.stat()
+        self.assertEqual(
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns),
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns),
+        )
+
+    @staticmethod
+    def _stable_ctime_fingerprint(
+        path_stat: os.stat_result,
+    ) -> tuple[int, int, int, int, int]:
+        return (
+            path_stat.st_dev,
+            path_stat.st_ino,
+            path_stat.st_size,
+            path_stat.st_mtime_ns,
+            0,
+        )
 
 
 if __name__ == "__main__":

@@ -1076,6 +1076,168 @@ IncludedFilesConverter(
             self.assertEqual(sentinel_file.read(), b"late mount sentinel")
         self.assertTrue(os.path.isdir(root_path))
 
+    def test_cleanup_skips_file_probes_below_proven_absent_directory(
+        self,
+    ) -> None:
+        fallback_ancestor_counts: list[int] = []
+
+        for entry_count in (16, 256):
+            with self.subTest(entry_count=entry_count):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"absent-stage-{entry_count}",
+                )
+                nested_path = os.path.join(root_path, "included_files")
+                os.makedirs(nested_path)
+                for index in range(entry_count):
+                    with open(
+                        os.path.join(nested_path, f"entry-{index:04d}.txt"),
+                        "wb",
+                    ) as entry_file:
+                        entry_file.write(b"x")
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = (project_stat.st_dev, project_stat.st_ino)
+                snapshot = included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=project_identity,
+                )
+                published_path = os.path.join(
+                    self.godot_dir,
+                    f"published-{entry_count}",
+                )
+                os.rename(nested_path, published_path)
+                cleanup_file_state = (
+                    included_files_module._included_cleanup_file_state
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+
+                with (
+                    patch.object(
+                        included_files_module,
+                        "_included_descriptor_paths_supported",
+                        return_value=False,
+                    ),
+                    patch.object(included_files_module.os, "name", "nt"),
+                    patch.object(
+                        included_files_module,
+                        "_included_cleanup_file_state",
+                        wraps=cleanup_file_state,
+                    ) as file_state_mock,
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_mock,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "a" * 32,
+                            "stage",
+                        )
+                    )
+
+                self.assertEqual(warnings, ())
+                self.assertEqual(file_state_mock.call_count, 0)
+                fallback_ancestor_counts.append(ancestor_mock.call_count)
+                self.assertFalse(os.path.lexists(root_path))
+                self.assertEqual(len(os.listdir(published_path)), entry_count)
+
+        self.assertEqual(
+            fallback_ancestor_counts,
+            [fallback_ancestor_counts[0]] * len(fallback_ancestor_counts),
+        )
+        self.assertLessEqual(fallback_ancestor_counts[0], 64)
+
+    def test_cleanup_preserves_directory_that_reappears_after_absence_proof(
+        self,
+    ) -> None:
+        root_path = os.path.join(self.godot_dir, "reappearing-stage")
+        nested_path = os.path.join(root_path, "included_files")
+        os.makedirs(nested_path)
+        owned_path = os.path.join(nested_path, "payload.txt")
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(b"owned payload")
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = (project_stat.st_dev, project_stat.st_ino)
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        published_path = os.path.join(self.godot_dir, "published-owned")
+        os.rename(nested_path, published_path)
+        replacement_path = os.path.join(nested_path, "payload.txt")
+        nested_normalized = os.path.normcase(os.path.abspath(nested_path))
+        cleanup_directory_state = (
+            included_files_module._included_cleanup_directory_state
+        )
+        replacement_created = False
+
+        def create_replacement_after_absence(
+            path: str,
+            expected_identity: tuple[int, int],
+            expected_parent_identity: tuple[int, int],
+        ) -> bool | None:
+            nonlocal replacement_created
+            state = cleanup_directory_state(
+                path,
+                expected_identity,
+                expected_parent_identity,
+            )
+            if (
+                not replacement_created
+                and state is None
+                and os.path.normcase(os.path.abspath(path)) == nested_normalized
+            ):
+                os.mkdir(nested_path)
+                with open(replacement_path, "wb") as replacement_file:
+                    replacement_file.write(b"external replacement")
+                replacement_created = True
+            return state
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_included_cleanup_directory_state",
+                side_effect=create_replacement_after_absence,
+            ),
+        ):
+            warnings = included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "b" * 32,
+                "stage",
+            )
+
+        self.assertTrue(replacement_created)
+        self.assertTrue(
+            any(
+                "unknown Included Files cleanup directory" in warning
+                for warning in warnings
+            ),
+            warnings,
+        )
+        with open(replacement_path, "rb") as replacement_file:
+            self.assertEqual(replacement_file.read(), b"external replacement")
+        with open(
+            os.path.join(published_path, "payload.txt"),
+            "rb",
+        ) as published_file:
+            self.assertEqual(published_file.read(), b"owned payload")
+        self.assertTrue(os.path.isdir(root_path))
+
     def test_owned_tree_cleanup_preserves_modeled_nested_mount(self) -> None:
         variants = [("fallback", False)]
         if (

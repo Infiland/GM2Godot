@@ -7366,6 +7366,10 @@ def _cleanup_recorded_included_tree(
         reverse=True,
     ):
         parent_relative = posixpath.dirname(entry.relative_path)
+        if parent_relative in absent_directories:
+            # Bottom-up directory cleanup rechecks and preserves anything that
+            # reappears; probing every known-absent descendant is redundant.
+            continue
         parent_identity = directory_identities[parent_relative]
         if entry.content_sha256 is None:
             warnings.append(

@@ -291,9 +291,7 @@ jobs:
             --output "$RUNNER_TEMP/included-files-scale-windows-dependencies.json"
 
       - name: Run native Windows Included Files scale gate
-        run: >-
-          python -m unittest -v
-          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_ten_thousand_entry_compact_records_publish_and_recover_below_cap
+        run: python -m scripts.run_windows_included_files_scale_gate
 
   windows-managed-output-crash-recovery:
     runs-on: windows-2025

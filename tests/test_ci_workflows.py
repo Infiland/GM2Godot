@@ -124,6 +124,57 @@ PIP_HARDENED_INSTALL_ARGUMENT_PREFIX = (
     "--no-cache-dir",
     "--only-binary=:all:",
 )
+WINDOWS_INCLUDED_FILES_SCALE_GATE_RUNNER = (
+    "python -m scripts.run_windows_included_files_scale_gate"
+)
+WINDOWS_INCLUDED_FILES_SCALE_GATE_STEP = (
+    "      - name: Run native Windows Included Files scale gate\n"
+    f"        run: {WINDOWS_INCLUDED_FILES_SCALE_GATE_RUNNER}"
+)
+_WINDOWS_SCALE_FORBIDDEN_YAML_KEY = re.compile(
+    r"(?m)^[ \t]*(?:if|continue-on-error|defaults|"
+    r"['\"]if['\"]|['\"]continue-on-error['\"]|"
+    r"['\"]defaults['\"])[ \t]*:"
+)
+_WORKFLOW_DEFAULTS_KEY = re.compile(
+    r"(?m)^(?:defaults|['\"]defaults['\"])[ \t]*:"
+)
+
+
+def _windows_scale_gate_command_policy_errors(
+    scale_job: str,
+    workflow_content: str,
+) -> tuple[str, ...]:
+    errors: list[str] = []
+    runner = WINDOWS_INCLUDED_FILES_SCALE_GATE_RUNNER
+    runner_module = "run_windows_included_files_scale_gate"
+    lowered_job = scale_job.lower()
+
+    if scale_job.count(runner) != 1 or workflow_content.count(runner) != 1:
+        errors.append("the exact runner command must occur once")
+    if scale_job.count(runner_module) != 1:
+        errors.append("the runner module must occur once")
+    if "unittest" in lowered_job or "test_included_files" in lowered_job:
+        errors.append("broader unittest selectors are forbidden")
+    if _WINDOWS_SCALE_FORBIDDEN_YAML_KEY.search(scale_job):
+        errors.append("conditional, non-fatal, or custom default execution is forbidden")
+    if _WORKFLOW_DEFAULTS_KEY.search(workflow_content):
+        errors.append("workflow-wide run defaults are forbidden")
+    if scale_job.count("\n        run:") != 2:
+        errors.append("the scale job must contain exactly two run steps")
+    if scale_job.count("\n      - uses:") != 1:
+        errors.append("the scale job must contain exactly one unnamed action step")
+    if scale_job.count("\n      - name:") != 3:
+        errors.append("the scale job must contain exactly three named steps")
+
+    runner_marker = "      - name: Run native Windows Included Files scale gate"
+    if runner_marker not in scale_job:
+        errors.append("the dedicated runner step is missing")
+    elif scale_job[scale_job.index(runner_marker):].rstrip() != (
+        WINDOWS_INCLUDED_FILES_SCALE_GATE_STEP
+    ):
+        errors.append("the dedicated runner step must retain its exact shape")
+    return tuple(errors)
 
 
 def _logical_commands(path: Path) -> tuple[tuple[int, str], ...]:
@@ -5003,10 +5054,7 @@ class TestCIWorkflows(unittest.TestCase):
         require_variable = (
             "GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE"
         )
-        exact_test = (
-            "tests.test_included_files.TestIncludedFilesManagedRootTransaction."
-            "test_ten_thousand_entry_compact_records_publish_and_recover_below_cap"
-        )
+        exact_runner = WINDOWS_INCLUDED_FILES_SCALE_GATE_RUNNER
 
         self.assertEqual(normal_job.count(skip_variable), 1)
         self.assertEqual(content.count(skip_variable), 1)
@@ -5015,8 +5063,11 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(scale_job.count(require_variable), 1)
         self.assertEqual(content.count(require_variable), 1)
         self.assertIn(f"{require_variable}: '1'", scale_job)
-        self.assertNotIn(exact_test, normal_job)
-        self.assertEqual(scale_job.count(exact_test), 1)
+        self.assertNotIn(exact_runner, normal_job)
+        self.assertEqual(
+            _windows_scale_gate_command_policy_errors(scale_job, content),
+            (),
+        )
         self.assertIn("runs-on: windows-2025", scale_job)
         self.assertIn("timeout-minutes: 20", scale_job)
         self.assertIn("PIP_CONFIG_FILE: nul", scale_job)
@@ -5037,6 +5088,61 @@ class TestCIWorkflows(unittest.TestCase):
             "$RUNNER_TEMP/included-files-scale-windows-dependencies.json",
             scale_job,
         )
+
+    def test_unit_workflow_scale_gate_policy_rejects_bypass_mutations(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        content = workflow.read_text(encoding="utf-8")
+        scale_job = content[
+            content.index("  windows-included-files-scale:"):
+            content.index("  windows-managed-output-crash-recovery:")
+        ]
+        runner_line = (
+            f"        run: {WINDOWS_INCLUDED_FILES_SCALE_GATE_RUNNER}\n"
+        )
+        dependency_command = (
+            "          python scripts/verify_dependency_environment.py \\\n"
+        )
+        mutations = {
+            "quoted-if": scale_job.replace(
+                runner_line,
+                runner_line + '        "if": ${{ false }}\n',
+            ),
+            "quoted-continue-on-error": scale_job.replace(
+                runner_line,
+                runner_line + '        "continue-on-error": true\n',
+            ),
+            "custom-shell": scale_job.replace(
+                runner_line,
+                runner_line + "        shell: cmd\n",
+            ),
+            "ignored-exit": scale_job.replace(
+                runner_line,
+                runner_line.rstrip("\n") + " || true\n",
+            ),
+            "slash-module-selector": scale_job.replace(
+                dependency_command,
+                "          PYTHONPATH=. python tests/test_included_files.py\n"
+                + dependency_command,
+            ),
+            "duplicate-runner-module": scale_job.replace(
+                dependency_command,
+                "          python -m scripts.run_windows_included_files_scale_gate\n"
+                + dependency_command,
+            ),
+        }
+
+        for case, mutated_job in mutations.items():
+            with self.subTest(case=case):
+                self.assertNotEqual(mutated_job, scale_job)
+                mutated_content = content.replace(scale_job, mutated_job)
+                self.assertTrue(
+                    _windows_scale_gate_command_policy_errors(
+                        mutated_job,
+                        mutated_content,
+                    )
+                )
 
     def test_unit_workflow_runs_native_windows_crash_matrix_separately(
         self,

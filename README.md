@@ -62,7 +62,7 @@ Version 0.7.51 freezes the current GML transpiler facade and phase-boundary base
 
 Version 0.7.52 extracts dependency-only typed owners for shared GML phase data, the complete expression AST union, and preprocessing/source-map/transpile results. Every phase and converter now consumes non-underscore model exports; only the frozen top-level facade retains private model aliases for the later #820 cleanup. Dataclass shape and mutability, errors, serialization, generated output, diagnostics, and supported facade identities/signatures remain unchanged.
 
-Version 0.7.53 keeps the native Windows artifact-transaction suite and the 10,000-entry Included Files publish/recovery stress gate in separate jobs under the same 20-minute timeout. The scale test remains part of ordinary local and full-suite discovery; only the paired broader Windows job may skip it while the dedicated Windows job executes the exact case.
+Version 0.7.53 keeps the native Windows artifact-transaction suite and the 10,000-entry Included Files publish/recovery stress gate in separate jobs under the same 20-minute timeout. The scale test remains part of ordinary local and full-suite discovery; only the paired broader Windows job may skip it, while a fail-closed dedicated runner requires the exact case to be the sole collected test and to execute successfully without a skip.
 
 ## What GM2Godot Is and Isn't
 

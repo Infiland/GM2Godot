@@ -4,7 +4,7 @@
 
 - Split the native Windows 10,000-entry Included Files stress test from the broader artifact-transaction suite so both retain substantial margin under the unchanged 20-minute timeout.
 - Kept ordinary and local unittest discovery running the scale test while allowing only its paired GitHub Actions job to skip that exact case.
-- Added workflow-policy coverage for the pinned Windows runner, Python, dependency constraints, timeout, skip flag, and dedicated test invocation.
+- Added a fail-closed dedicated runner that requires exactly one executed passing scale test with zero skips, plus workflow-policy coverage for the pinned Windows runner, Python, dependency constraints, timeout, flags, and locked invocation.
 
 ## 0.7.52 - 2026-07-23
 

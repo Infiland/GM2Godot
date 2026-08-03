@@ -3699,6 +3699,14 @@ class TestCIWorkflows(unittest.TestCase):
             ),
             (
                 "tests.yml",
+                "windows-included-files-scale",
+                "Install and verify test dependencies",
+                "windows",
+                "gm2godot-included-files-scale-windows-venv",
+                "nul",
+            ),
+            (
+                "tests.yml",
                 "windows-managed-output-crash-recovery",
                 "Install and verify test dependencies",
                 "windows",
@@ -3721,7 +3729,7 @@ class TestCIWorkflows(unittest.TestCase):
             "pathlib.Path(os.environ[\"VIRTUAL_ENV\"]).resolve() else 1)'"
         )
 
-        self.assertEqual(len(install_jobs), 10)
+        self.assertEqual(len(install_jobs), 11)
         for (
             workflow_name,
             job_name,
@@ -3910,8 +3918,8 @@ class TestCIWorkflows(unittest.TestCase):
                     ): 1,
                     (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
                     (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
-                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 2,
-                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 2,
+                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 3,
+                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 3,
                 }
             ),
             "build_macos.sh": Counter(
@@ -4017,7 +4025,7 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
-        self.assertEqual(non_dependency_lock_command_count, 25)
+        self.assertEqual(non_dependency_lock_command_count, 27)
         self.assertEqual(dependency_lock_command_count, 6)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
@@ -4946,13 +4954,18 @@ class TestCIWorkflows(unittest.TestCase):
         content = workflow.read_text(encoding="utf-8")
         windows_job = content[
             content.index("  windows-artifact-transactions:"):
-            content.index("  windows-managed-output-crash-recovery:")
+            content.index("  windows-included-files-scale:")
         ]
 
         self.assertIn("runs-on: windows-2025", windows_job)
+        self.assertIn("timeout-minutes: 20", windows_job)
         self.assertIn("python-version: '3.12.10'", windows_job)
         self.assertIn("architecture: x64", windows_job)
         self.assertIn("shell: bash", windows_job)
+        self.assertIn(
+            "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE: '1'",
+            windows_job,
+        )
         self.assertIn(
             f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
             f"            --constraint {WINDOWS_CONSTRAINT} \\\n"
@@ -4972,6 +4985,58 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(module=module):
                 self.assertIn(module, windows_job)
+
+    def test_unit_workflow_shards_native_windows_included_files_scale_gate(
+        self,
+    ) -> None:
+        workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        content = workflow.read_text(encoding="utf-8")
+        normal_job = content[
+            content.index("  windows-artifact-transactions:"):
+            content.index("  windows-included-files-scale:")
+        ]
+        scale_job = content[
+            content.index("  windows-included-files-scale:"):
+            content.index("  windows-managed-output-crash-recovery:")
+        ]
+        skip_variable = "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE"
+        require_variable = (
+            "GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE"
+        )
+        exact_test = (
+            "tests.test_included_files.TestIncludedFilesManagedRootTransaction."
+            "test_ten_thousand_entry_compact_records_publish_and_recover_below_cap"
+        )
+
+        self.assertEqual(normal_job.count(skip_variable), 1)
+        self.assertEqual(content.count(skip_variable), 1)
+        self.assertNotIn(skip_variable, scale_job)
+        self.assertNotIn(require_variable, normal_job)
+        self.assertEqual(scale_job.count(require_variable), 1)
+        self.assertEqual(content.count(require_variable), 1)
+        self.assertIn(f"{require_variable}: '1'", scale_job)
+        self.assertNotIn(exact_test, normal_job)
+        self.assertEqual(scale_job.count(exact_test), 1)
+        self.assertIn("runs-on: windows-2025", scale_job)
+        self.assertIn("timeout-minutes: 20", scale_job)
+        self.assertIn("PIP_CONFIG_FILE: nul", scale_job)
+        self.assertIn("python-version: '3.12.10'", scale_job)
+        self.assertIn("architecture: x64", scale_job)
+        self.assertIn("shell: bash", scale_job)
+        self.assertIn(
+            f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
+            f"            --constraint {WINDOWS_CONSTRAINT} \\\n"
+            "            -r requirements.txt",
+            scale_job,
+        )
+        self.assertIn(
+            "gm2godot-included-files-scale-windows-venv",
+            scale_job,
+        )
+        self.assertIn(
+            "$RUNNER_TEMP/included-files-scale-windows-dependencies.json",
+            scale_job,
+        )
 
     def test_unit_workflow_runs_native_windows_crash_matrix_separately(
         self,

@@ -2563,9 +2563,112 @@ included_files_module._acquire_included_project_lock(
             included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
         )
 
+    @staticmethod
+    def _enforce_windows_included_files_scale_gate_environment() -> None:
+        require_gate = (
+            os.environ.get(
+                "GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE"
+            )
+            == "1"
+        )
+        skip_gate = (
+            os.environ.get(
+                "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE"
+            )
+            == "1"
+        )
+        if require_gate:
+            if os.environ.get("GITHUB_ACTIONS") != "true":
+                raise AssertionError(
+                    "The Included Files scale gate may only be required by "
+                    "GitHub Actions"
+                )
+            if skip_gate:
+                raise AssertionError(
+                    "The required Included Files scale gate cannot be skipped"
+                )
+        if skip_gate:
+            if os.environ.get("GITHUB_ACTIONS") != "true":
+                raise AssertionError(
+                    "The Included Files scale gate may only be skipped by its "
+                    "paired GitHub Actions job"
+                )
+            raise unittest.SkipTest(
+                "covered by the dedicated native Windows Included Files "
+                "scale job"
+            )
+
+    def test_scale_gate_skip_flag_fails_outside_github_actions(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE": "1",
+                    "GITHUB_ACTIONS": "",
+                },
+            ),
+            self.assertRaisesRegex(
+                AssertionError,
+                "may only be skipped by its paired GitHub Actions job",
+            ),
+        ):
+            self._enforce_windows_included_files_scale_gate_environment()
+
+    def test_scale_gate_skip_flag_skips_inside_github_actions(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE": "1",
+                    "GITHUB_ACTIONS": "true",
+                },
+            ),
+            self.assertRaisesRegex(
+                unittest.SkipTest,
+                "dedicated native Windows Included Files scale job",
+            ),
+        ):
+            self._enforce_windows_included_files_scale_gate_environment()
+
+    def test_scale_gate_require_flag_rejects_skip(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE": "1",
+                    "GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE": "1",
+                    "GITHUB_ACTIONS": "true",
+                },
+            ),
+            self.assertRaisesRegex(
+                AssertionError,
+                "required Included Files scale gate cannot be skipped",
+            ),
+        ):
+            self._enforce_windows_included_files_scale_gate_environment()
+
+    def test_scale_gate_require_flag_fails_outside_github_actions(
+        self,
+    ) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE": "1",
+                    "GITHUB_ACTIONS": "",
+                },
+            ),
+            self.assertRaisesRegex(
+                AssertionError,
+                "may only be required by GitHub Actions",
+            ),
+        ):
+            self._enforce_windows_included_files_scale_gate_environment()
+
     def test_ten_thousand_entry_compact_records_publish_and_recover_below_cap(
         self,
     ) -> None:
+        self._enforce_windows_included_files_scale_gate_environment()
         entry_count = 10_000
         for index in range(entry_count):
             with open(

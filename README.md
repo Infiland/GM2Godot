@@ -62,6 +62,8 @@ Version 0.7.51 freezes the current GML transpiler facade and phase-boundary base
 
 Version 0.7.52 extracts dependency-only typed owners for shared GML phase data, the complete expression AST union, and preprocessing/source-map/transpile results. Every phase and converter now consumes non-underscore model exports; only the frozen top-level facade retains private model aliases for the later #820 cleanup. Dataclass shape and mutability, errors, serialization, generated output, diagnostics, and supported facade identities/signatures remain unchanged.
 
+Version 0.7.53 keeps the native Windows artifact-transaction suite and the 10,000-entry Included Files publish/recovery stress gate in separate jobs under the same 20-minute timeout. The scale test remains part of ordinary local and full-suite discovery; only the paired broader Windows job may skip it, while a fail-closed dedicated runner requires the exact case to be the sole collected test and to execute successfully without a skip.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -82,7 +84,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.52`.
+Current source version: `0.7.53`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

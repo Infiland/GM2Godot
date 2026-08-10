@@ -165,6 +165,7 @@ jobs:
     timeout-minutes: 20
     env:
       PIP_CONFIG_FILE: nul
+      GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -233,6 +234,64 @@ jobs:
           tests.test_managed_output_publisher
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
+
+  windows-included-files-scale:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PIP_CONFIG_FILE: nul
+      GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+
+      - name: Install and verify test dependencies
+        shell: bash
+        run: |
+          venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-included-files-scale-windows-venv"
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python -m venv "$venv_dir"
+          venv_bin="$venv_dir/Scripts"
+          venv_native="$(cygpath -w "$venv_dir")"
+          venv_path_native="$(cygpath -w "$venv_bin")"
+          github_env_file="$(cygpath -u "$GITHUB_ENV")"
+          github_path_file="$(cygpath -u "$GITHUB_PATH")"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
+          printf '%s\n' "$venv_path_native" >> "$github_path_file"
+          export VIRTUAL_ENV="$venv_native"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            pip==26.1.2
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-windows-py312.txt \
+            -r requirements.txt
+          python scripts/verify_dependency_environment.py \
+            --constraint constraints/requirements-windows-py312.txt \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --expected-python 3.12.10 \
+            --expected-platform win32 \
+            --expected-machine AMD64 \
+            --expected-pip 26.1.2 \
+            --output "$RUNNER_TEMP/included-files-scale-windows-dependencies.json"
+
+      - name: Run native Windows Included Files scale gate
+        run: python -m scripts.run_windows_included_files_scale_gate
 
   windows-managed-output-crash-recovery:
     runs-on: windows-2025

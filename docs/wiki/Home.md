@@ -1,8 +1,8 @@
 # GM2Godot Documentation
 
-> **Applies to:** GM2Godot 0.7.53 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.54 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-08-03
+> **Last reviewed:** 2026-08-10
 
 GM2Godot converts supported GameMaker source projects and GML into editable Godot projects. It combines asset conversion, a GML-to-GDScript transpiler, generated runtime helpers, compatibility diagnostics, and headless Godot validation. It is a migration aid, not a promise of automatic one-to-one gameplay parity.
 
@@ -21,7 +21,7 @@ Maintainers should also read [Release and Wiki Maintenance](Maintainer-Release-a
 
 This documentation set describes:
 
-- GM2Godot 0.7.53;
+- GM2Godot 0.7.54;
 - GameMaker LTS 2026 source projects in the GMS2 runtime family; and
 - Godot 4.7.1 output and validation, pinned in CI as `4.7.1.stable.official.a13da4feb`.
 

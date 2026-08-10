@@ -64,6 +64,8 @@ Version 0.7.52 extracts dependency-only typed owners for shared GML phase data, 
 
 Version 0.7.53 keeps the native Windows artifact-transaction suite and the 10,000-entry Included Files publish/recovery stress gate in separate jobs under the same 20-minute timeout. The scale test remains part of ordinary local and full-suite discovery; only the paired broader Windows job may skip it, while a fail-closed dedicated runner requires the exact case to be the sole collected test and to execute successfully without a skip.
 
+Version 0.7.54 keeps Included Files recovery cleanup bounded after a staged generation directory has already been proven absent. Recorded file descendants below that directory are skipped instead of repeating Windows fallback ancestor probes, while a directory that reappears after the absence proof is treated as unknown external state and preserved.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -84,7 +86,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.53`.
+Current source version: `0.7.54`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

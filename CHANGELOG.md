@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.54 - 2026-08-10
+
+- Skipped recorded file cleanup below a directory that was already identity-verified absent after Included Files generation publication.
+- Kept modeled Windows fallback ancestor work constant across flat absent subtrees instead of repeating missing-parent state probes for every recorded descendant.
+- Added deterministic operation-count coverage across different entry counts and preserved any directory that reappears after the absence proof as unknown external state.
+
 ## 0.7.53 - 2026-08-03
 
 - Split the native Windows 10,000-entry Included Files stress test from the broader artifact-transaction suite so both retain substantial margin under the unchanged 20-minute timeout.

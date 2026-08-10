@@ -1,8 +1,8 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.53 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.54 · GameMaker LTS 2026 · Godot 4.7.1
 >
-> **Last reviewed:** 2026-08-03
+> **Last reviewed:** 2026-08-10
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting)
 

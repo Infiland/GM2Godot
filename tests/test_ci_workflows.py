@@ -127,6 +127,7 @@ PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
 RUFF_VERSION = "0.15.22"
 COVERAGE_VERSION = "7.15.2"
+PACKAGING_VERSION = "26.2"
 PILLOW_VERSION = "12.3.0"
 PIP_HARDENED_INSTALL_FRAGMENT = (
     "-m pip --isolated --disable-pip-version-check --no-input install"
@@ -4151,7 +4152,10 @@ class TestCIWorkflows(unittest.TestCase):
                     (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
                     (
                         LINUX_CONSTRAINT,
-                        (f"coverage=={COVERAGE_VERSION}",),
+                        (
+                            f"coverage=={COVERAGE_VERSION}",
+                            f"packaging=={PACKAGING_VERSION}",
+                        ),
                     ): 1,
                     (MACOS_CONSTRAINT, ("pip",)): 1,
                     (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
@@ -4188,6 +4192,7 @@ class TestCIWorkflows(unittest.TestCase):
         }
         exact_direct_pins = {
             "Pillow": PILLOW_VERSION,
+            "packaging": PACKAGING_VERSION,
             "PyInstaller": PYINSTALLER_VERSION,
             "pyright": PYRIGHT_VERSION,
             "ruff": RUFF_VERSION,
@@ -4648,6 +4653,7 @@ class TestCIWorkflows(unittest.TestCase):
             tooling_pins,
             {
                 "coverage": COVERAGE_VERSION,
+                "packaging": PACKAGING_VERSION,
                 "pyinstaller": PYINSTALLER_VERSION,
                 "pyright": PYRIGHT_VERSION,
                 "ruff": RUFF_VERSION,
@@ -5979,10 +5985,12 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertIn(
             f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
             f"            --constraint {LINUX_CONSTRAINT} \\\n"
-            f"            coverage=={COVERAGE_VERSION}",
+            f"            coverage=={COVERAGE_VERSION} \\\n"
+            f"            packaging=={PACKAGING_VERSION}",
             linux_job,
         )
         self.assertIn("--require coverage", linux_job)
+        self.assertIn("--require packaging", linux_job)
         coverage_test_command = (
             "python -m coverage run -m unittest discover tests/ -v"
         )

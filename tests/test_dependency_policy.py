@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 from typing import Callable, IO, cast
@@ -123,6 +124,22 @@ def _write_native_constraints(
 
 def _completed(stdout: str, returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def _stat_with_overrides(
+    source: os.stat_result,
+    **overrides: int,
+) -> os.stat_result:
+    fields = {
+        "st_dev": source.st_dev,
+        "st_ino": source.st_ino,
+        "st_mode": source.st_mode,
+        "st_size": source.st_size,
+        "st_mtime_ns": source.st_mtime_ns,
+        "st_ctime_ns": source.st_ctime_ns,
+    }
+    fields.update(overrides)
+    return cast(os.stat_result, SimpleNamespace(**fields))
 
 
 @dataclass(frozen=True)
@@ -1321,6 +1338,63 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
             ):
                 verifier.load_constraint(trusted)
             self.assertEqual(constraint_swap.exception.code, "constraint-binding-changed")
+
+    def test_windows_policy_reader_accepts_cross_interface_ctime_difference(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            path = Path(raw_directory).resolve() / "constraint.lock"
+            path.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            real_fstat = os.fstat
+
+            def windows_fstat(descriptor: int) -> os.stat_result:
+                observed = real_fstat(descriptor)
+                return _stat_with_overrides(
+                    observed,
+                    st_ctime_ns=observed.st_ctime_ns + 1,
+                )
+
+            with (
+                mock.patch.object(
+                    verifier,
+                    "WINDOWS_STAT_INTERFACES_DIVERGE",
+                    True,
+                ),
+                mock.patch.object(verifier.os, "fstat", side_effect=windows_fstat),
+            ):
+                policy = verifier.load_constraint(path)
+
+            self.assertEqual(policy.pins, BASE_PINS)
+
+    def test_windows_policy_reader_rejects_cross_interface_content_change(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            path = Path(raw_directory).resolve() / "constraint.lock"
+            path.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            real_fstat = os.fstat
+
+            for field in ("st_size", "st_mtime_ns"):
+                with self.subTest(field=field):
+                    def changed_fstat(descriptor: int) -> os.stat_result:
+                        observed = real_fstat(descriptor)
+                        return _stat_with_overrides(
+                            observed,
+                            **{field: cast(int, getattr(observed, field)) + 1},
+                        )
+
+                    with (
+                        mock.patch.object(
+                            verifier,
+                            "WINDOWS_STAT_INTERFACES_DIVERGE",
+                            True,
+                        ),
+                        mock.patch.object(
+                            verifier.os,
+                            "fstat",
+                            side_effect=changed_fstat,
+                        ),
+                        self.assertRaises(verifier.PolicyError) as raised,
+                    ):
+                        verifier.load_constraint(path)
+
+                    self.assertEqual(raised.exception.code, "constraint-binding-changed")
 
     def test_policy_reader_close_failure_does_not_mask_primary_base_exception(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:

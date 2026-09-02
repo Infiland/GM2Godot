@@ -28,6 +28,7 @@ COMMAND_OUTPUT_POLL_SECONDS = 0.05
 MAX_CONSTRAINT_BYTES = 1024 * 1024
 MAX_INSPECT_BYTES = 16 * 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 64 * 1024
+WINDOWS_STAT_INTERFACES_DIVERGE = os.name == "nt"
 NAME_PATTERN = re.compile(
     r"(?:[A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])\Z",
     re.ASCII | re.IGNORECASE,
@@ -225,6 +226,24 @@ def _stat_binding(file_stat: os.stat_result) -> tuple[int, int, int, int, int, i
     )
 
 
+def _cross_interface_stat_binding(file_stat: os.stat_result) -> tuple[int, ...]:
+    """Return metadata that is comparable between path and descriptor stats."""
+
+    if not WINDOWS_STAT_INTERFACES_DIVERGE:
+        return _stat_binding(file_stat)
+    # On CPython 3.12 for Windows, path stat calls expose the deprecated
+    # creation-time meaning of st_ctime while fstat exposes metadata change
+    # time. Path stats can also synthesize execute bits from the extension.
+    # Descriptor-to-descriptor checks below retain the full metadata binding.
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        stat.S_IFMT(file_stat.st_mode),
+        file_stat.st_size,
+        file_stat.st_mtime_ns,
+    )
+
+
 @dataclass(frozen=True)
 class _RegularFileRequest:
     label: str
@@ -324,7 +343,8 @@ def _open_bound_regular_file(
         if (
             not stat.S_ISREG(opened_stat_before.st_mode)
             or not os.path.samestat(path_stat_before, opened_stat_before)
-            or _stat_binding(path_stat_before) != _stat_binding(opened_stat_before)
+            or _cross_interface_stat_binding(path_stat_before)
+            != _cross_interface_stat_binding(opened_stat_before)
         ):
             _raise_contextual_file_error(
                 request,
@@ -386,7 +406,8 @@ def _verify_bound_regular_file(binding: _BoundRegularFile) -> None:
         or not physical_path_after
         or not os.path.samestat(opened_stat_after, path_stat_after)
         or _stat_binding(binding.opened_stat) != _stat_binding(opened_stat_after)
-        or _stat_binding(opened_stat_after) != _stat_binding(path_stat_after)
+        or _cross_interface_stat_binding(opened_stat_after)
+        != _cross_interface_stat_binding(path_stat_after)
     ):
         _raise_contextual_file_error(
             request,

@@ -5027,6 +5027,7 @@ class TestCIWorkflows(unittest.TestCase):
             "tests.test_conversion_outcome",
             "tests.test_conversion_manifest",
             "tests.test_diagnostics",
+            "tests.test_anchored_artifacts",
             "tests.test_architecture_policy",
             "tests.test_converter",
             "tests.test_cli",

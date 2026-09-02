@@ -66,6 +66,8 @@ Version 0.7.53 keeps the native Windows artifact-transaction suite and the 10,00
 
 Version 0.7.54 keeps Included Files recovery cleanup bounded after a staged generation directory has already been proven absent. Recorded file descendants below that directory are skipped instead of repeating Windows fallback ancestor probes, while a directory that reappears after the absence proof is treated as unknown external state and preserved.
 
+Version 0.7.55 closes the observable-hook gap in the shared byte-artifact transaction. Replace and unlink now revalidate the immutable staged source and expected destination identity, allowed mode, bytes, and SHA-256 after the `before_replace` / `before_unlink` hook and any deliberate Windows writable-mode preparation, immediately before the namespace syscall. Same-inode equal-size writes with restored timestamps therefore abort publication, absence, restore displacement, and rollback without overwriting or unlinking external bytes; verified recovery material remains retained when rollback cannot safely proceed.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -86,7 +88,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.54`.
+Current source version: `0.7.55`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

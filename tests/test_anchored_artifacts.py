@@ -229,6 +229,121 @@ class TestAnchoredArtifacts(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "must be unique"):
                     transaction.capture_snapshots(("Report.json", "report.json"))
 
+    @unittest.skipUnless(os.name == "posix", "POSIX mode semantics required")
+    def test_post_write_stage_mode_change_is_preserved_on_rejection(self) -> None:
+        staged_path: Path | None = None
+        mode_changed = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            real_stat = transaction.directory.stat
+
+            def change_mode_before_first_stage_stat(name: str) -> os.stat_result:
+                nonlocal mode_changed, staged_path
+                if not mode_changed:
+                    staged_path = self.artifact_directory / name
+                    staged_path.chmod(0o600)
+                    mode_changed = True
+                return real_stat(name)
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "stat",
+                    side_effect=change_mode_before_first_stage_stat,
+                ),
+                self.assertRaisesRegex(OSError, "Staged artifact changed") as raised,
+            ):
+                transaction.stage_bytes(
+                    "report.json",
+                    b"stage\n",
+                    mode=0o640,
+                    suffix=".tmp",
+                )
+
+        self.assertTrue(mode_changed)
+        self.assertIsNotNone(staged_path)
+        assert staged_path is not None
+        self.assertTrue(staged_path.is_file())
+        self.assertEqual(staged_path.read_bytes(), b"stage\n")
+        self.assertEqual(stat.S_IMODE(staged_path.stat().st_mode), 0o600)
+        self.assertTrue(
+            any(
+                staged_path.name in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            [staged_path.name],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX hard links required")
+    def test_post_write_stage_hardlink_is_preserved_on_rejection(self) -> None:
+        alias = self.root / "stage-alias.json"
+        staged_path: Path | None = None
+        linked = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            real_stat = transaction.directory.stat
+
+            def link_before_first_stage_stat(name: str) -> os.stat_result:
+                nonlocal linked, staged_path
+                if not linked:
+                    staged_path = self.artifact_directory / name
+                    os.link(staged_path, alias)
+                    linked = True
+                return real_stat(name)
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "stat",
+                    side_effect=link_before_first_stage_stat,
+                ),
+                self.assertRaisesRegex(OSError, "Staged artifact changed") as raised,
+            ):
+                transaction.stage_bytes(
+                    "report.json",
+                    b"stage\n",
+                    mode=0o600,
+                    suffix=".tmp",
+                )
+
+        self.assertTrue(linked)
+        self.assertIsNotNone(staged_path)
+        assert staged_path is not None
+        self.assertTrue(staged_path.is_file())
+        self.assertTrue(alias.is_file())
+        self.assertEqual(staged_path.read_bytes(), b"stage\n")
+        self.assertEqual(alias.read_bytes(), b"stage\n")
+        staged_stat = staged_path.stat()
+        alias_stat = alias.stat()
+        self.assertEqual(
+            (staged_stat.st_dev, staged_stat.st_ino),
+            (alias_stat.st_dev, alias_stat.st_ino),
+        )
+        self.assertGreaterEqual(staged_stat.st_nlink, 2)
+        self.assertTrue(
+            any(
+                staged_path.name in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            [staged_path.name],
+        )
+
     def test_modeled_windows_rejects_readonly_hardlink_before_chmod(self) -> None:
         target = self.artifact_directory / "report.json"
         alias = self.root / "report-alias.json"
@@ -1031,6 +1146,205 @@ class TestAnchoredArtifacts(unittest.TestCase):
         self.assertEqual(
             sorted(path.name for path in self.artifact_directory.iterdir()),
             ["first.json", "second.json"],
+        )
+
+    def test_after_backup_ordinary_error_exactly_cleans_owned_stage(self) -> None:
+        self._assert_after_backup_failure_cleans_owned_stage(
+            OSError("injected after-backup failure")
+        )
+
+    def test_after_backup_keyboard_interrupt_exactly_cleans_owned_stage(self) -> None:
+        self._assert_after_backup_failure_cleans_owned_stage(
+            KeyboardInterrupt("injected after-backup interrupt")
+        )
+
+    def test_after_backup_system_exit_exactly_cleans_owned_stage(self) -> None:
+        signal = SystemExit(211)
+
+        self._assert_after_backup_failure_cleans_owned_stage(signal)
+
+        self.assertEqual(signal.code, 211)
+
+    def test_after_backup_in_place_tamper_aborts_and_preserves_stage(self) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        tampered_backup: Path | None = None
+
+        def tamper_after_backup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal tampered_backup
+            if phase != "after_backup" or name != "report.json":
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.backup"))
+            self.assertEqual(len(candidates), 1)
+            tampered_backup = candidates[0]
+            self._overwrite_same_inode(tampered_backup, b"BAD\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=tamper_after_backup,
+                ),
+                self.assertRaisesRegex(OSError, "changed") as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertIsNotNone(tampered_backup)
+        assert tampered_backup is not None
+        self.assertTrue(tampered_backup.is_file())
+        self.assertEqual(tampered_backup.read_bytes(), b"BAD\n")
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertTrue(
+            any(
+                tampered_backup.name in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            sorted(("report.json", tampered_backup.name)),
+        )
+
+    def test_after_backup_identity_replacement_aborts_and_preserves_collision(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        replacement = self.root / "replacement-backup"
+        replacement.write_bytes(b"old\n")
+        replacement.chmod(0o640)
+        replacement_identity = (replacement.stat().st_dev, replacement.stat().st_ino)
+        replaced_backup: Path | None = None
+
+        def replace_after_backup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal replaced_backup
+            if phase != "after_backup" or name != "report.json":
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.backup"))
+            self.assertEqual(len(candidates), 1)
+            replaced_backup = candidates[0]
+            os.replace(replacement, replaced_backup)
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=replace_after_backup,
+                ),
+                self.assertRaisesRegex(OSError, "changed") as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertIsNotNone(replaced_backup)
+        assert replaced_backup is not None
+        self.assertTrue(replaced_backup.is_file())
+        self.assertEqual(replaced_backup.read_bytes(), b"old\n")
+        self.assertEqual(
+            (replaced_backup.stat().st_dev, replaced_backup.stat().st_ino),
+            replacement_identity,
+        )
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertTrue(
+            any(
+                replaced_backup.name in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            sorted(("report.json", replaced_backup.name)),
+        )
+
+    def test_cross_entry_backup_tamper_aborts_before_public_mutation(self) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"one\n")
+        second.write_bytes(b"two\n")
+        first_backup: Path | None = None
+        phases: list[str] = []
+
+        def tamper_first_backup_from_second_hook(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal first_backup
+            phases.append(phase)
+            if phase != "after_backup":
+                return
+            if name == "first.json":
+                candidates = tuple(
+                    self.artifact_directory.glob(".first.json.*.backup")
+                )
+                self.assertEqual(len(candidates), 1)
+                first_backup = candidates[0]
+                return
+            if name == "second.json":
+                self.assertIsNotNone(first_backup)
+                assert first_backup is not None
+                self._overwrite_same_inode(first_backup, b"BAD\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._file_fingerprint",
+                    side_effect=self._stable_ctime_fingerprint,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=tamper_first_backup_from_second_hook,
+                ),
+                self.assertRaisesRegex(OSError, "changed"),
+            ):
+                transaction.publish_specs(
+                    (
+                        ArtifactSpec("first.json", b"ONE\n"),
+                        ArtifactSpec("second.json", b"TWO\n"),
+                    )
+                )
+
+        self.assertIsNotNone(first_backup)
+        assert first_backup is not None
+        self.assertTrue(first_backup.is_file())
+        self.assertEqual(first_backup.read_bytes(), b"BAD\n")
+        self.assertEqual(first.read_bytes(), b"one\n")
+        self.assertEqual(second.read_bytes(), b"two\n")
+        self.assertNotIn("before_commit", phases)
+        self.assertNotIn("before_replace", phases)
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            sorted(("first.json", "second.json", first_backup.name)),
         )
 
     def test_publish_rejects_same_inode_change_at_replace_boundary(self) -> None:
@@ -3410,6 +3724,281 @@ class TestAnchoredArtifacts(unittest.TestCase):
             ["persistent-unlink.json"],
         )
 
+    def test_successful_publish_surfaces_backup_cleanup_failure(self) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        cleanup_error = OSError("injected publication backup cleanup failure")
+        retained_backup: Path | None = None
+
+        def fail_backup_unlink(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal retained_backup
+            if (
+                phase != "before_unlink"
+                or name is None
+                or not name.endswith(".backup")
+                or ".restore." in name
+            ):
+                return
+            retained_backup = self.artifact_directory / name
+            raise cleanup_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_backup_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertIs(raised.exception, cleanup_error)
+        self.assertEqual(target.read_bytes(), b"new\n")
+        self.assertIsNotNone(retained_backup)
+        assert retained_backup is not None
+        self.assertTrue(retained_backup.is_file())
+        self.assertEqual(retained_backup.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(
+            stat.S_IMODE(retained_backup.stat().st_mode),
+            0o640,
+        )
+
+    def test_successful_publish_preserves_cleanup_control_signal(self) -> None:
+        for cleanup_signal in (
+            KeyboardInterrupt("injected successful cleanup interrupt"),
+            SystemExit(223),
+        ):
+            with self.subTest(signal_type=type(cleanup_signal).__name__):
+                case_root = self.temp_dir / type(cleanup_signal).__name__
+                case_artifacts = case_root / "gm2godot"
+                case_root.mkdir()
+                case_artifacts.mkdir()
+                target = case_artifacts / "report.json"
+                target.write_bytes(b"old\n")
+                retained_backup: Path | None = None
+
+                def interrupt_backup_unlink(
+                    phase: str,
+                    directory_path: str,
+                    name: str | None,
+                ) -> None:
+                    nonlocal retained_backup
+                    if (
+                        phase != "before_unlink"
+                        or name is None
+                        or not name.endswith(".backup")
+                    ):
+                        return
+                    retained_backup = Path(directory_path) / name
+                    raise cleanup_signal
+
+                with ByteArtifactTransaction.open(
+                    str(case_root),
+                    "gm2godot",
+                    create=False,
+                    description="test artifact directory",
+                ) as transaction:
+                    with (
+                        patch(
+                            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                            side_effect=interrupt_backup_unlink,
+                        ),
+                        self.assertRaises(BaseException) as raised,
+                    ):
+                        transaction.publish_specs(
+                            (ArtifactSpec("report.json", b"new\n"),)
+                        )
+
+                self.assertIs(raised.exception, cleanup_signal)
+                if isinstance(cleanup_signal, SystemExit):
+                    self.assertEqual(cleanup_signal.code, 223)
+                self.assertEqual(target.read_bytes(), b"new\n")
+                self.assertIsNotNone(retained_backup)
+                assert retained_backup is not None
+                self.assertTrue(retained_backup.is_file())
+                self.assertEqual(retained_backup.read_bytes(), b"old\n")
+
+    def test_successful_restore_surfaces_receipt_backup_cleanup_failure(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        cleanup_error = OSError("injected restore receipt cleanup failure")
+        retained_backup: Path | None = None
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshot = transaction.capture_snapshot("report.json")
+            receipt = transaction.publish_specs(
+                (ArtifactSpec("report.json", b"new\n"),)
+            )[0]
+            assert receipt is not None
+
+            def fail_receipt_backup_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal retained_backup
+                if (
+                    phase != "before_unlink"
+                    or name is None
+                    or not name.endswith(".restore.backup")
+                ):
+                    return
+                retained_backup = self.artifact_directory / name
+                raise cleanup_error
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_receipt_backup_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots((snapshot,), (receipt,))
+
+        self.assertIs(raised.exception, cleanup_error)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertIsNotNone(retained_backup)
+        assert retained_backup is not None
+        self.assertTrue(retained_backup.is_file())
+        self.assertEqual(retained_backup.read_bytes(), b"new\n")
+
+    def test_publish_forward_error_survives_ordinary_cleanup_phase_errors(
+        self,
+    ) -> None:
+        for cleanup_phase in ("before_cleanup", "after_cleanup"):
+            with self.subTest(cleanup_phase=cleanup_phase):
+                case_root = self.temp_dir / cleanup_phase
+                case_artifacts = case_root / "gm2godot"
+                case_root.mkdir()
+                case_artifacts.mkdir()
+                target = case_artifacts / "report.json"
+                target.write_bytes(b"old\n")
+                forward_error = OSError(
+                    f"injected forward failure before {cleanup_phase}"
+                )
+                cleanup_error = OSError(
+                    f"injected ordinary {cleanup_phase} failure"
+                )
+                cleanup_injected = False
+
+                def fail_cleanup_phase(
+                    phase: str,
+                    _directory_path: str,
+                    _name: str | None,
+                ) -> None:
+                    nonlocal cleanup_injected
+                    if phase != cleanup_phase or cleanup_injected:
+                        return
+                    cleanup_injected = True
+                    raise cleanup_error
+
+                def fail_before_commit(_name: str) -> None:
+                    raise forward_error
+
+                with ByteArtifactTransaction.open(
+                    str(case_root),
+                    "gm2godot",
+                    create=False,
+                    description="test artifact directory",
+                ) as transaction:
+                    with (
+                        patch(
+                            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                            side_effect=fail_cleanup_phase,
+                        ),
+                        self.assertRaises(BaseException) as raised,
+                    ):
+                        transaction.publish_specs(
+                            (ArtifactSpec("report.json", b"new\n"),),
+                            before_commit=fail_before_commit,
+                        )
+
+                self.assertTrue(cleanup_injected)
+                self.assertIs(raised.exception, forward_error)
+                self.assertEqual(target.read_bytes(), b"old\n")
+                self.assertTrue(
+                    any(
+                        str(cleanup_error) in note
+                        for note in getattr(raised.exception, "__notes__", ())
+                    )
+                )
+
+    def test_publish_cleanup_preserves_same_name_replacement_and_fails(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        replacement = self.root / "replacement-backup"
+        replacement.write_bytes(b"external collision\n")
+        replacement.chmod(0o600)
+        replacement_identity = (replacement.stat().st_dev, replacement.stat().st_ino)
+        collision: Path | None = None
+
+        def replace_backup_before_cleanup(
+            phase: str,
+            _directory_path: str,
+            _name: str | None,
+        ) -> None:
+            nonlocal collision
+            if phase != "before_cleanup":
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.backup"))
+            self.assertEqual(len(candidates), 1)
+            collision = candidates[0]
+            os.replace(replacement, collision)
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=replace_backup_before_cleanup,
+                ),
+                self.assertRaises(OSError) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertEqual(target.read_bytes(), b"new\n")
+        self.assertIsNotNone(collision)
+        assert collision is not None
+        self.assertTrue(collision.is_file())
+        self.assertEqual(collision.read_bytes(), b"external collision\n")
+        self.assertEqual(
+            (collision.stat().st_dev, collision.stat().st_ino),
+            replacement_identity,
+        )
+        self.assertFalse(replacement.exists())
+        self.assertTrue(
+            collision.name in str(raised.exception)
+            or any(
+                collision.name in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+
     def test_publish_cleanup_system_exit_preempts_forward_error_with_note(
         self,
     ) -> None:
@@ -3842,6 +4431,61 @@ class TestAnchoredArtifacts(unittest.TestCase):
 
         self.assertFalse(target.exists())
         self.assertEqual(list((long_root / child_name).iterdir()), [])
+
+    def _assert_after_backup_failure_cleans_owned_stage(
+        self,
+        hook_error: BaseException,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        backup_path: Path | None = None
+        error_injected = False
+
+        def fail_after_backup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal backup_path, error_injected
+            if (
+                phase != "after_backup"
+                or name != "report.json"
+                or error_injected
+            ):
+                return
+            candidates = tuple(self.artifact_directory.glob(".report.json.*.backup"))
+            self.assertEqual(len(candidates), 1)
+            backup_path = candidates[0]
+            error_injected = True
+            raise hook_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_after_backup,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(error_injected)
+        self.assertIs(raised.exception, hook_error)
+        self.assertIsNotNone(backup_path)
+        assert backup_path is not None
+        self.assertFalse(backup_path.exists())
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
 
     @staticmethod
     def _directory_snapshot(path: Path) -> dict[str, tuple[int, int, int, bytes]]:

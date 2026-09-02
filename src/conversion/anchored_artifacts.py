@@ -1411,7 +1411,19 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             suffix=suffix,
             phase_name="backup_stage",
         )
-        self.phase("after_backup", leaf)
+        try:
+            self.phase("after_backup", leaf)
+            self.verify_staged(staged)
+        except BaseException as error:
+            selected_error = self._cleanup_staged_after_failure(
+                staged,
+                error,
+                operation="Artifact backup",
+                durability_phase="backup_cleanup_durability",
+            )
+            if selected_error is not error:
+                raise selected_error
+            raise
         return staged
 
     def stage_bytes(
@@ -1429,6 +1441,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         descriptor = -1
         staged_leaf = ""
         identity: PathIdentity | None = None
+        staged: StagedArtifact | None = None
         candidates = (
             (_safe_leaf(staged_name),)
             if staged_name is not None
@@ -1488,6 +1501,15 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                             staging_mode,
                         )
                 os.fsync(staged_file.fileno())
+            staged = StagedArtifact(
+                directory_path=self.path,
+                name=staged_leaf,
+                identity=identity,
+                content=content,
+                mode=staging_mode,
+                target_mode=target_mode,
+                sha256=_sha256_bytes(content),
+            )
             staged_stat = self.directory.stat(staged_leaf)
             staged_mode = stat.S_IMODE(staged_stat.st_mode)
             if (
@@ -1499,21 +1521,23 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 raise OSError(
                     f"Staged artifact changed: {self.directory.child_path(staged_leaf)}"
                 )
-            staged = StagedArtifact(
-                directory_path=self.path,
-                name=staged_leaf,
-                identity=identity,
-                content=content,
-                mode=staged_mode,
-                target_mode=target_mode,
-                sha256=_sha256_bytes(content),
-            )
             self.verify_staged(staged)
             self.phase(f"after_{phase_name}", target_leaf)
+            self.verify_staged(staged)
             return staged
         except BaseException as error:
             if descriptor >= 0:
                 os.close(descriptor)
+            if staged is not None:
+                selected_error = self._cleanup_staged_after_failure(
+                    staged,
+                    error,
+                    operation="Artifact stage",
+                    durability_phase=f"{phase_name}_cleanup_durability",
+                )
+                if selected_error is not error:
+                    raise selected_error
+                raise
             cleanup_error = self.unlink_if_identity(staged_leaf, identity)
             if cleanup_error is not None:
                 error.add_note(
@@ -2294,8 +2318,158 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 detail_prefix=primary_detail,
             )
             return secondary_error
-        primary_error.add_note(secondary_summary + str(secondary_error))
+        cls._add_secondary_error_context(
+            primary_error,
+            secondary_error,
+            summary_prefix=secondary_summary,
+            detail_prefix=secondary_detail,
+        )
         return primary_error
+
+    def _cleanup_staged_after_failure(
+        self,
+        staged: StagedArtifact,
+        primary_error: BaseException,
+        *,
+        operation: str,
+        durability_phase: str,
+    ) -> BaseException:
+        """Clean one fully described private stage without weakening ownership."""
+        completed, cleanup_error = self._unlink_staged_exact(staged)
+        selected_error = primary_error
+        if cleanup_error is not None:
+            selected_error = self._select_transaction_error(
+                selected_error,
+                cleanup_error,
+                secondary_summary=f"{operation} cleanup also failed: ",
+                secondary_detail=f"{operation} cleanup failure note: ",
+                primary_summary=f"{operation} first failed: ",
+                primary_detail=f"{operation} failure note: ",
+            )
+        if completed is not False:
+            try:
+                self.sync(durability_phase)
+            except BaseException as durability_error:
+                selected_error = self._select_transaction_error(
+                    selected_error,
+                    durability_error,
+                    secondary_summary=f"{operation} cleanup durability also failed: ",
+                    secondary_detail=(
+                        f"{operation} cleanup durability failure note: "
+                    ),
+                    primary_summary=f"{operation} first failed: ",
+                    primary_detail=f"{operation} failure note: ",
+                )
+        if completed is False:
+            selected_error.add_note(
+                f"{operation} cleanup preserved an unverified path at: {staged.path}"
+            )
+        elif completed is None:
+            selected_error.add_note(
+                f"{operation} cleanup could not determine whether a private "
+                f"stage remains at: {staged.path}"
+            )
+        return selected_error
+
+    @staticmethod
+    def _note_unconfirmed_cleanup_paths(
+        error: BaseException,
+        temporary_files: dict[str, StagedArtifact],
+        *,
+        operation: str,
+    ) -> None:
+        for temporary_name in sorted(temporary_files):
+            staged = temporary_files[temporary_name]
+            error.add_note(
+                f"{operation} could not confirm safe removal at: {staged.path}"
+            )
+
+    @classmethod
+    def _combine_cleanup_errors(
+        cls,
+        errors: list[Exception],
+        *,
+        operation: str,
+    ) -> Exception | None:
+        if not errors:
+            return None
+        selected_error = errors[0]
+        for cleanup_error in errors[1:]:
+            cls._add_secondary_error_context(
+                selected_error,
+                cleanup_error,
+                summary_prefix=f"Additional {operation.lower()} failure: ",
+                detail_prefix=f"Additional {operation.lower()} failure note: ",
+            )
+        return selected_error
+
+    def _finalize_transaction_cleanup(
+        self,
+        temporary_files: dict[str, StagedArtifact],
+        active_error: BaseException | None,
+        *,
+        operation: str,
+        primary_operation: str,
+    ) -> None:
+        try:
+            cleanup_errors = self.cleanup(temporary_files)
+        except BaseException as cleanup_error:
+            self._note_unconfirmed_cleanup_paths(
+                cleanup_error,
+                temporary_files,
+                operation=operation,
+            )
+            if active_error is None:
+                raise
+            selected_error = self._select_transaction_error(
+                active_error,
+                cleanup_error,
+                secondary_summary=f"{operation} failed: ",
+                secondary_detail=f"{operation} failure note: ",
+                primary_summary=f"{primary_operation} first failed: ",
+                primary_detail=f"{primary_operation} failure note: ",
+            )
+            if selected_error is not active_error:
+                raise selected_error
+            return
+
+        cleanup_error = self._combine_cleanup_errors(
+            cleanup_errors,
+            operation=operation,
+        )
+        if cleanup_error is None:
+            return
+        self._note_unconfirmed_cleanup_paths(
+            cleanup_error,
+            temporary_files,
+            operation=operation,
+        )
+        if active_error is None:
+            raise cleanup_error
+        selected_error = self._select_transaction_error(
+            active_error,
+            cleanup_error,
+            secondary_summary=f"{operation} failed: ",
+            secondary_detail=f"{operation} failure note: ",
+            primary_summary=f"{primary_operation} first failed: ",
+            primary_detail=f"{primary_operation} failure note: ",
+        )
+        if selected_error is not active_error:
+            raise selected_error
+
+    def cleanup_or_raise(
+        self,
+        temporary_files: dict[str, StagedArtifact],
+        *,
+        operation: str = "Artifact cleanup",
+    ) -> None:
+        """Remove exact private stages and fail if safe cleanup is incomplete."""
+        self._finalize_transaction_cleanup(
+            temporary_files,
+            None,
+            operation=operation,
+            primary_operation=operation,
+        )
 
     @classmethod
     def _probe_completion_after_error(
@@ -2425,8 +2599,6 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             try:
                 self.phase("after_cleanup", None)
             except BaseException as error:
-                if isinstance(error, Exception) and not control_signals:
-                    raise
                 record_failure(error)
         if control_signals:
             selected_signal = control_signals[0]
@@ -2547,6 +2719,33 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 f"{self.directory.child_path(snapshot.name)}"
             )
 
+    def _verify_backup_matches_snapshot(
+        self,
+        snapshot: ArtifactSnapshot,
+        backup: StagedArtifact | None,
+    ) -> None:
+        if not snapshot.present:
+            if backup is not None:
+                raise OSError(
+                    "Unexpected artifact backup for an absent snapshot: "
+                    f"{self.directory.child_path(snapshot.name)}"
+                )
+            return
+        if (
+            backup is None
+            or snapshot.content is None
+            or snapshot.sha256 is None
+            or snapshot.mode is None
+            or backup.content != snapshot.content
+            or backup.sha256 != snapshot.sha256
+            or not modes_match(backup.target_mode, snapshot.mode)
+        ):
+            raise OSError(
+                "Artifact backup no longer matches its snapshot: "
+                f"{self.directory.child_path(snapshot.name)}"
+            )
+        self.verify_staged(backup)
+
     def publish_specs(
         self,
         specs: tuple[ArtifactSpec, ...],
@@ -2607,20 +2806,16 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 backups[spec.name] = backup
                 if backup is not None:
                     temporary_files[backup.name] = backup
-                if snapshot.present and (
-                    backup is None
-                    or backup.content != snapshot.content
-                    or backup.sha256 != snapshot.sha256
-                ):
-                    raise OSError(
-                        "Artifact backup no longer matches its snapshot: "
-                        f"{self.directory.child_path(snapshot.name)}"
-                    )
+                self._verify_backup_matches_snapshot(snapshot, backup)
                 self._verify_snapshot_current(snapshot)
                 verify_guards()
 
             verify_guards()
             for snapshot in snapshots:
+                self._verify_backup_matches_snapshot(
+                    snapshot,
+                    backups[snapshot.name],
+                )
                 self._verify_snapshot_current(snapshot)
 
             for spec, snapshot in zip(normalized_specs, snapshots, strict=True):
@@ -2629,12 +2824,14 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 # Earlier ordered commits and their durability barriers can
                 # give another writer time to change a later target. Never
                 # overwrite that external state from the stale preflight.
+                self._verify_backup_matches_snapshot(snapshot, backup)
                 self._verify_snapshot_current(snapshot)
                 verify_guards()
                 mutation_started = False
                 completion_error: BaseException | None = None
                 if before_commit is not None:
                     before_commit(spec.name)
+                    self._verify_backup_matches_snapshot(snapshot, backup)
                     self._verify_snapshot_current(snapshot)
                     verify_guards()
                 if desired is not None:
@@ -2698,30 +2895,12 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         raise selected_error
             raise
         finally:
-            try:
-                cleanup_errors = self.cleanup(temporary_files)
-            except BaseException as cleanup_error:
-                if active_error is None or (
-                    isinstance(active_error, Exception) and isinstance(cleanup_error, Exception)
-                ):
-                    raise
-                selected_error = self._select_transaction_error(
-                    active_error,
-                    cleanup_error,
-                    secondary_summary="Artifact publication cleanup failed: ",
-                    secondary_detail=("Artifact publication cleanup failure note: "),
-                    primary_summary="Artifact publication first failed: ",
-                    primary_detail="Artifact publication failure note: ",
-                )
-                active_error = selected_error
-                if selected_error is cleanup_error:
-                    raise
-                raise selected_error
-            if active_error is not None and cleanup_errors:
-                active_error.add_note(
-                    "Artifact publication cleanup failed: "
-                    + "; ".join(str(error) for error in cleanup_errors)
-                )
+            self._finalize_transaction_cleanup(
+                temporary_files,
+                active_error,
+                operation="Artifact publication cleanup",
+                primary_operation="Artifact publication",
+            )
 
         verify_guards()
         for spec, receipt in zip(normalized_specs, receipts, strict=True):
@@ -2901,30 +3080,12 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         raise selected_error
             raise
         finally:
-            try:
-                cleanup_errors = self.cleanup(temporary_files)
-            except BaseException as cleanup_error:
-                if active_error is None or (
-                    isinstance(active_error, Exception) and isinstance(cleanup_error, Exception)
-                ):
-                    raise
-                selected_error = self._select_transaction_error(
-                    active_error,
-                    cleanup_error,
-                    secondary_summary="Artifact restore cleanup failed: ",
-                    secondary_detail="Artifact restore cleanup failure note: ",
-                    primary_summary="Artifact snapshot restore first failed: ",
-                    primary_detail="Artifact snapshot restore failure note: ",
-                )
-                active_error = selected_error
-                if selected_error is cleanup_error:
-                    raise
-                raise selected_error
-            if active_error is not None and cleanup_errors:
-                active_error.add_note(
-                    "Artifact restore cleanup failed: "
-                    + "; ".join(str(error) for error in cleanup_errors)
-                )
+            self._finalize_transaction_cleanup(
+                temporary_files,
+                active_error,
+                operation="Artifact restore cleanup",
+                primary_operation="Artifact snapshot restore",
+            )
 
         self.verify_directory()
         for snapshot in snapshots:

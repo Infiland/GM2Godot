@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.58 - 2026-09-02
+
+- Revalidated every staged artifact backup after its observable hook, across the complete set before the first public mutation, and again at each commit boundary so in-place or identity-replacement tampering fails closed without changing public output.
+- Made backup-hook failures durably remove only the exact owned private stage, preserve changed or same-name replacement paths for inspection, and surface incomplete publication, restoration, or stale-artifact cleanup instead of returning success.
+- Preserved established operation-versus-control-flow precedence while retaining later cleanup context, with focused ordinary-exception, `KeyboardInterrupt`, `SystemExit`, multi-entry, durability, recovery, and native Windows coverage; GameMaker LTS 2026 conversion and exact Godot 4.7.1 output remain unchanged.
+
 ## 0.7.57 - 2026-09-02
 
 - Upgraded the reviewed bootstrap toolchain atomically to `pip==26.2.1` and `pip-tools==7.6.1`, covering the pip 26.2 security fixes and the matching pip-tools compatibility release across every live build, CI, policy, and documentation surface.

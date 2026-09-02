@@ -6087,6 +6087,328 @@ os._exit(88)
         fdopen.assert_called_once_with(5678, "rb")
         kernel32.CloseHandle.assert_not_called()
 
+    def test_modeled_windows_cleanup_parent_binding_omits_delete_sharing(
+        self,
+    ) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-binding")
+        os.mkdir(parent_path)
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 1
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_api",
+                return_value=kernel32,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_identity",
+                return_value=parent_identity,
+            ) as identify,
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_attributes",
+                return_value=(
+                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                ),
+            ) as inspect_attributes,
+        ):
+            binding = (
+                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    parent_path,
+                    parent_identity,
+                )
+            )
+            binding.verify()
+            binding.close()
+            binding.close()
+
+        kernel32.CreateFileW.assert_called_once_with(
+            included_files_module._windows_extended_included_path(parent_path),
+            included_files_module._WINDOWS_FILE_TRAVERSE
+            | included_files_module._WINDOWS_FILE_READ_ATTRIBUTES,
+            included_files_module._WINDOWS_FILE_SHARE_READ
+            | included_files_module._WINDOWS_FILE_SHARE_WRITE,
+            None,
+            included_files_module._WINDOWS_OPEN_EXISTING,
+            included_files_module._WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        share_mode = kernel32.CreateFileW.call_args.args[2]
+        self.assertEqual(
+            share_mode & included_files_module._WINDOWS_FILE_SHARE_DELETE,
+            0,
+        )
+        self.assertEqual(identify.call_count, 2)
+        self.assertEqual(inspect_attributes.call_count, 2)
+        kernel32.CloseHandle.assert_called_once_with(1234)
+
+    def test_modeled_windows_cleanup_parent_revalidation_rejects_new_identity(
+        self,
+    ) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-identity")
+        os.mkdir(parent_path)
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        changed_identity = parent_identity[0], parent_identity[1] + 1
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 1
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_api",
+                return_value=kernel32,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_identity",
+                side_effect=(parent_identity, changed_identity),
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_attributes",
+                return_value=(
+                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                ),
+            ),
+        ):
+            binding = (
+                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    parent_path,
+                    parent_identity,
+                )
+            )
+            try:
+                with self.assertRaisesRegex(OSError, "cleanup parent changed"):
+                    binding.verify()
+            finally:
+                binding.close()
+
+        kernel32.CloseHandle.assert_called_once_with(1234)
+
+    def test_modeled_windows_cleanup_parent_rejects_reparse_handle(self) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-reparse")
+        os.mkdir(parent_path)
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 1
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_api",
+                return_value=kernel32,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_identity",
+                return_value=parent_identity,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_attributes",
+                return_value=(
+                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    | included_files_module._WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+                ),
+            ),
+            self.assertRaisesRegex(OSError, "cleanup parent changed"),
+        ):
+            included_files_module._WindowsIncludedCleanupParentBinding.open(
+                parent_path,
+                parent_identity,
+            )
+
+        kernel32.CloseHandle.assert_called_once_with(1234)
+
+    def test_modeled_windows_cleanup_parent_close_failure_is_one_shot(
+        self,
+    ) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-close")
+        os.mkdir(parent_path)
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 1
+
+        with (
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_api",
+                return_value=kernel32,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_identity",
+                return_value=parent_identity,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_attributes",
+                return_value=(
+                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                ),
+            ),
+        ):
+            binding = (
+                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    parent_path,
+                    parent_identity,
+                )
+            )
+            kernel32.CloseHandle.return_value = 0
+            close_error = OSError("injected cleanup handle close failure")
+            with (
+                patch.object(
+                    included_files_module,
+                    "_windows_included_transaction_error",
+                    return_value=close_error,
+                ),
+                self.assertRaises(OSError) as raised,
+            ):
+                binding.close()
+            self.assertIs(raised.exception, close_error)
+            binding.close()
+
+        kernel32.CloseHandle.assert_called_once_with(1234)
+
+    def test_modeled_windows_cleanup_parent_rejects_path_replacement(self) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-path")
+        parked_path = os.path.join(self.godot_dir, "cleanup-parent-parked")
+        os.mkdir(parent_path)
+        original_file = os.path.join(parent_path, "owned.txt")
+        with open(original_file, "wb") as output_file:
+            output_file.write(b"original parent content\n")
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        kernel32 = MagicMock()
+        kernel32.CreateFileW.return_value = 1234
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 1
+        binding: (
+            included_files_module._WindowsIncludedCleanupParentBinding | None
+        ) = None
+
+        try:
+            with (
+                patch.object(included_files_module.os, "name", "nt"),
+                patch.object(
+                    included_files_module,
+                    "_windows_included_cleanup_parent_api",
+                    return_value=kernel32,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_windows_included_cleanup_parent_identity",
+                    return_value=parent_identity,
+                ),
+                patch.object(
+                    included_files_module,
+                    "_windows_included_cleanup_parent_attributes",
+                    return_value=(
+                        included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    ),
+                ),
+            ):
+                binding = (
+                    included_files_module._WindowsIncludedCleanupParentBinding.open(
+                        parent_path,
+                        parent_identity,
+                    )
+                )
+                os.rename(parent_path, parked_path)
+                os.mkdir(parent_path)
+                with self.assertRaisesRegex(
+                    OSError,
+                    "cleanup parent changed",
+                ):
+                    binding.verify()
+        finally:
+            if binding is not None:
+                binding.close()
+            if os.path.isdir(parent_path):
+                os.rmdir(parent_path)
+            if os.path.isdir(parked_path):
+                os.rename(parked_path, parent_path)
+
+        with open(original_file, "rb") as input_file:
+            self.assertEqual(input_file.read(), b"original parent content\n")
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_cleanup_parent_binding_blocks_relocation(self) -> None:
+        parent_path = os.path.join(self.godot_dir, "cleanup-parent-native")
+        parked_path = os.path.join(self.godot_dir, "cleanup-parent-moved")
+        os.mkdir(parent_path)
+        parent_stat = os.lstat(parent_path)
+        parent_identity = parent_stat.st_dev, parent_stat.st_ino
+        binding = (
+            included_files_module._WindowsIncludedCleanupParentBinding.open(
+                parent_path,
+                parent_identity,
+            )
+        )
+        try:
+            with self.assertRaises(OSError):
+                os.rename(parent_path, parked_path)
+            binding.verify()
+        finally:
+            binding.close()
+            if os.path.isdir(parked_path):
+                os.rename(parked_path, parent_path)
+
+        os.rename(parent_path, parked_path)
+        self.assertFalse(os.path.lexists(parent_path))
+        os.rename(parked_path, parent_path)
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows semantics")
+    def test_native_windows_cleanup_parent_binding_rejects_junction(self) -> None:
+        junction_path = os.path.join(
+            self.godot_dir,
+            "cleanup-parent-junction",
+        )
+        target_path = self._make_native_windows_junction_target(
+            "cleanup-parent-binding"
+        )
+        self._make_native_windows_junction(junction_path, target_path)
+        try:
+            junction_stat = os.lstat(junction_path)
+            with self.assertRaisesRegex(OSError, "cleanup parent changed"):
+                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    junction_path,
+                    (junction_stat.st_dev, junction_stat.st_ino),
+                )
+            self._assert_native_windows_junction_sentinel(target_path)
+        finally:
+            self._remove_native_windows_junction(junction_path)
+
     def test_windows_native_paths_use_extended_length_namespace(self) -> None:
         cases = {
             r"C:\projects\game": r"\\?\C:\projects\game",

@@ -380,12 +380,43 @@ _DIRECTORY_OPEN_FLAGS = (
 )
 
 _WINDOWS_GENERIC_READ = 0x80000000
+_WINDOWS_FILE_TRAVERSE = 0x00000020
+_WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
 _WINDOWS_FILE_SHARE_READ = 0x00000001
+_WINDOWS_FILE_SHARE_WRITE = 0x00000002
+_WINDOWS_FILE_SHARE_DELETE = 0x00000004
 _WINDOWS_OPEN_EXISTING = 3
+_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 _WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
+_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
+_WINDOWS_FILE_TYPE_DISK = 1
+_WINDOWS_FILE_BASIC_INFO_CLASS = 0
+_WINDOWS_FILE_ID_INFO_CLASS = 18
 _WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
+
+
+class _WindowsIncludedFileId128(ctypes.Structure):
+    _fields_ = (("Identifier", ctypes.c_uint8 * 16),)
+
+
+class _WindowsIncludedFileIdInfo(ctypes.Structure):
+    _fields_ = (
+        ("VolumeSerialNumber", ctypes.c_uint64),
+        ("FileId", _WindowsIncludedFileId128),
+    )
+
+
+class _WindowsIncludedFileBasicInfo(ctypes.Structure):
+    _fields_ = (
+        ("CreationTime", ctypes.c_int64),
+        ("LastAccessTime", ctypes.c_int64),
+        ("LastWriteTime", ctypes.c_int64),
+        ("ChangeTime", ctypes.c_int64),
+        ("FileAttributes", ctypes.c_uint32),
+    )
 
 
 def _included_descriptor_paths_supported() -> bool:
@@ -853,6 +884,48 @@ def _windows_included_file_read_api() -> Any:
 
 
 @lru_cache(maxsize=1)
+def _windows_included_cleanup_parent_api() -> Any:
+    """Return the Win32 calls used to pin one cleanup directory parent."""
+
+    if os.name != "nt":
+        raise OSError(
+            "Windows Included Files cleanup parent handles are unavailable"
+        )
+    if (
+        ctypes.sizeof(_WindowsIncludedFileId128) != 16
+        or ctypes.sizeof(_WindowsIncludedFileIdInfo) != 24
+        or _WindowsIncludedFileIdInfo.FileId.offset != 8
+        or ctypes.sizeof(_WindowsIncludedFileBasicInfo) != 40
+        or _WindowsIncludedFileBasicInfo.FileAttributes.offset != 32
+    ):
+        raise OSError("Unsupported Windows Included Files cleanup ABI layout")
+    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    )
+    kernel32.CreateFileW.restype = ctypes.c_void_p
+    kernel32.GetFileInformationByHandleEx.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    )
+    kernel32.GetFileInformationByHandleEx.restype = ctypes.c_int
+    kernel32.GetFileType.argtypes = (ctypes.c_void_p,)
+    kernel32.GetFileType.restype = ctypes.c_uint32
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    kernel32.CloseHandle.restype = ctypes.c_int
+    return kernel32
+
+
+@lru_cache(maxsize=1)
 def _windows_included_transaction_api() -> Any:
     if os.name != "nt":
         raise OSError("Windows Included Files transaction APIs are unavailable")
@@ -890,6 +963,193 @@ def _windows_extended_included_path(path: str) -> str:
     if absolute_path.startswith("\\\\"):
         return "\\\\?\\UNC\\" + absolute_path[2:]
     return "\\\\?\\" + absolute_path
+
+
+def _windows_included_cleanup_parent_identity(
+    kernel32: Any,
+    handle: int,
+    path: str,
+) -> _PathIdentity:
+    identity_info = _WindowsIncludedFileIdInfo()
+    if not kernel32.GetFileInformationByHandleEx(
+        handle,
+        _WINDOWS_FILE_ID_INFO_CLASS,
+        ctypes.byref(identity_info),
+        ctypes.sizeof(identity_info),
+    ):
+        raise _windows_included_transaction_error(
+            "Could not identify Included Files cleanup parent handle",
+            path,
+        )
+    return (
+        int(identity_info.VolumeSerialNumber),
+        int.from_bytes(bytes(identity_info.FileId.Identifier), "little"),
+    )
+
+
+def _windows_included_cleanup_parent_attributes(
+    kernel32: Any,
+    handle: int,
+    path: str,
+) -> int:
+    basic_info = _WindowsIncludedFileBasicInfo()
+    if not kernel32.GetFileInformationByHandleEx(
+        handle,
+        _WINDOWS_FILE_BASIC_INFO_CLASS,
+        ctypes.byref(basic_info),
+        ctypes.sizeof(basic_info),
+    ):
+        raise _windows_included_transaction_error(
+            "Could not inspect Included Files cleanup parent handle",
+            path,
+        )
+    return int(basic_info.FileAttributes)
+
+
+@dataclass
+class _WindowsIncludedCleanupParentBinding:
+    """Keep one verified cleanup parent immovable for path-based operations.
+
+    Windows has no Python ``dir_fd`` equivalent for the cleanup operations in
+    this module.  The retained directory handle deliberately omits
+    ``FILE_SHARE_DELETE`` so its directory cannot be renamed or deleted while
+    the binding is live.  Callers still revalidate the native file ID and path
+    before every group of path-based child operations.
+    """
+
+    path: str
+    identity: _PathIdentity
+    kernel32: Any
+    handle: int | None
+
+    @classmethod
+    def open(
+        cls,
+        path: str,
+        expected_identity: _PathIdentity,
+    ) -> "_WindowsIncludedCleanupParentBinding":
+        if os.name != "nt":
+            raise OSError(
+                "Windows Included Files cleanup parent bindings are unavailable"
+            )
+        absolute_path = os.path.abspath(path)
+        try:
+            path_stat = os.lstat(absolute_path)
+        except OSError as error:
+            raise OSError(
+                f"Included Files cleanup parent changed: {absolute_path}"
+            ) from error
+        if (
+            _included_output_path_is_redirected(absolute_path, path_stat)
+            or not stat.S_ISDIR(path_stat.st_mode)
+            or (path_stat.st_dev, path_stat.st_ino) != expected_identity
+        ):
+            raise OSError(
+                f"Included Files cleanup parent changed: {absolute_path}"
+            )
+
+        kernel32 = _windows_included_cleanup_parent_api()
+        handle = kernel32.CreateFileW(
+            _windows_extended_included_path(absolute_path),
+            _WINDOWS_FILE_TRAVERSE | _WINDOWS_FILE_READ_ATTRIBUTES,
+            _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE,
+            None,
+            _WINDOWS_OPEN_EXISTING,
+            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+            | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle is None or handle == invalid_handle:
+            raise _windows_included_transaction_error(
+                "Could not bind Included Files cleanup parent",
+                absolute_path,
+            )
+        binding = cls(
+            path=absolute_path,
+            identity=expected_identity,
+            kernel32=kernel32,
+            handle=cast(int, handle),
+        )
+        try:
+            binding.verify()
+        except BaseException as error:
+            try:
+                binding.close()
+            except BaseException as close_error:
+                error.add_note(
+                    "Could not close rejected Included Files cleanup parent "
+                    f"binding: {close_error}"
+                )
+            raise
+        return binding
+
+    def __enter__(self) -> "_WindowsIncludedCleanupParentBinding":
+        self.verify()
+        return self
+
+    def __exit__(
+        self,
+        _exception_type: object,
+        active_error: BaseException | None,
+        _traceback: object,
+    ) -> bool | None:
+        try:
+            self.close()
+        except BaseException as close_error:
+            if active_error is None:
+                raise
+            active_error.add_note(
+                "Could not close Included Files cleanup parent binding: "
+                + str(close_error)
+            )
+        return None
+
+    def verify(self) -> None:
+        handle = self.handle
+        if handle is None:
+            raise OSError(
+                f"Included Files cleanup parent binding is closed: {self.path}"
+            )
+        try:
+            path_stat = os.lstat(self.path)
+        except OSError as error:
+            raise OSError(
+                f"Included Files cleanup parent changed: {self.path}"
+            ) from error
+        attributes = _windows_included_cleanup_parent_attributes(
+            self.kernel32,
+            handle,
+            self.path,
+        )
+        if (
+            self.kernel32.GetFileType(handle) != _WINDOWS_FILE_TYPE_DISK
+            or _included_output_path_is_redirected(self.path, path_stat)
+            or not stat.S_ISDIR(path_stat.st_mode)
+            or (path_stat.st_dev, path_stat.st_ino) != self.identity
+            or _windows_included_cleanup_parent_identity(
+                self.kernel32,
+                handle,
+                self.path,
+            )
+            != self.identity
+            or not attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+            or attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise OSError(
+                f"Included Files cleanup parent changed: {self.path}"
+            )
+
+    def close(self) -> None:
+        handle = self.handle
+        if handle is None:
+            return
+        self.handle = None
+        if not self.kernel32.CloseHandle(handle):
+            raise _windows_included_transaction_error(
+                "Could not close Included Files cleanup parent handle",
+                self.path,
+            )
 
 
 def _open_included_file_validation_stream(

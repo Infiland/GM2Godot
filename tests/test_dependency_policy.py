@@ -18,7 +18,7 @@ from scripts import verify_dependency_environment as verifier
 
 
 PYTHON_VERSION = "3.12.13"
-PIP_VERSION = "26.1.2"
+PIP_VERSION = "26.2.1"
 BASE_PINS = {
     "pip": PIP_VERSION,
     "root-package": "1.0.0",

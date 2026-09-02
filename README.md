@@ -70,6 +70,8 @@ Version 0.7.55 closes the observable-hook gap in the shared byte-artifact transa
 
 Version 0.7.56 preserves the exact first `KeyboardInterrupt` or `SystemExit` object through artifact publication, restoration, rollback, and cleanup. Later ordinary failures and control signals are retained as notes without changing chronological precedence, while a namespace mutation that completed before the signal still records its ownership and reaches the required durability barrier before the exact signal is re-raised. Ordinary-exception aggregation and rollback behavior remain compatible across present and absent publication, both rollback directions, recovery cleanup, and native Windows paths.
 
+Version 0.7.57 upgrades the dependency bootstrap and lock generator as the reviewed pair `pip==26.2.1` and `pip-tools==7.6.1`. Every live build, CI, policy, and documentation surface uses the same pins, while independently regenerated Linux x64, macOS arm64, and Windows x64 constraints reproduce through their candidate generator and two clean complete-graph installs. The current trusted-index, isolated, no-cache, wheel-only policy remains unchanged, as do GameMaker LTS 2026 conversion behavior and the exact Godot 4.7.1 target.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -90,7 +92,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.56`.
+Current source version: `0.7.57`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
@@ -176,7 +178,7 @@ Linux x64:
 export PIP_CONFIG_FILE=/dev/null
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+  --constraint constraints/requirements-linux-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
   --constraint constraints/requirements-linux-py312.txt -r requirements.txt
@@ -188,7 +190,7 @@ macOS arm64:
 export PIP_CONFIG_FILE=/dev/null
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-macos-py312.txt pip==26.1.2
+  --constraint constraints/requirements-macos-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
   --constraint constraints/requirements-macos-py312.txt -r requirements.txt
@@ -200,13 +202,13 @@ Windows x64 (PowerShell):
 $env:PIP_CONFIG_FILE = "nul"
 python -m pip --isolated --disable-pip-version-check --no-input install `
   --no-cache-dir --only-binary=:all: `
-  --constraint constraints/requirements-windows-py312.txt pip==26.1.2
+  --constraint constraints/requirements-windows-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install `
   --no-cache-dir --only-binary=:all: `
   --constraint constraints/requirements-windows-py312.txt -r requirements.txt
 ```
 
-`PIP_CONFIG_FILE` points at the platform null device and `--isolated` ignores user settings, so local pip configuration cannot weaken the reviewed install policy. The committed constraints are compiled from `requirements-lock.in` on their matching native hosts by [`.github/workflows/dependency-locks.yml`](.github/workflows/dependency-locks.yml); the current generator pin is `pip-tools==7.6.0`. Pull requests and pushes use preference-seeded `refresh=locked` generation. A manual run can use `refresh=locked`, `refresh=all`, or `refresh=package`; package refreshes also require the normalized `refresh_package` name. Each native job self-hosts its candidate and compares two clean-install receipts before uploading evidence. When a refresh changes a constraint, the final committed-equality gate intentionally fails until the reviewed native result is committed and the workflow is rerun. A generator upgrade may first require committing the uploaded self-hosted result. Do not generate one platform's constraint from another platform.
+`PIP_CONFIG_FILE` points at the platform null device and `--isolated` ignores user settings, so local pip configuration cannot weaken the reviewed install policy. The committed constraints are compiled from `requirements-lock.in` on their matching native hosts by [`.github/workflows/dependency-locks.yml`](.github/workflows/dependency-locks.yml); the current generator pin is `pip-tools==7.6.1`. Pull requests and pushes use preference-seeded `refresh=locked` generation. A manual run can use `refresh=locked`, `refresh=all`, or `refresh=package`; package refreshes also require the normalized `refresh_package` name. Each native job self-hosts its candidate and compares two clean-install receipts before uploading evidence. When a refresh changes a constraint, the final committed-equality gate intentionally fails until the reviewed native result is committed and the workflow is rerun. A generator upgrade may first require committing the uploaded self-hosted result. Do not generate one platform's constraint from another platform. Treat `pip` and `pip-tools` as one compatibility unit. Current installs reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
 
 ## Usage
 
@@ -346,12 +348,12 @@ Create and activate a virtual environment with that exact interpreter. Confirm t
 active environment with python --version before installing anything.
 
 Set PIP_CONFIG_FILE to /dev/null on Linux or macOS, or lowercase nul in Windows
-PowerShell. Bootstrap pip==26.1.2 and install requirements.txt with python -m pip,
+PowerShell. Bootstrap pip==26.2.1 and install requirements.txt with python -m pip,
 --isolated, --disable-pip-version-check, --no-input, --no-cache-dir,
 --only-binary=:all:, and the matching --constraint file. For example, on Linux
 x64:
 export PIP_CONFIG_FILE=/dev/null
-python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: --constraint constraints/requirements-linux-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: --constraint constraints/requirements-linux-py312.txt -r requirements.txt
 
 The null config file and isolated mode prevent machine-local pip settings from
@@ -361,10 +363,16 @@ Never generate a constraint for one platform on another platform. Pull requests
 and pushes use preference-seeded refresh=locked generation. Manual workflow runs
 accept refresh=locked, refresh=all, or refresh=package with a normalized
 refresh_package. Candidates are compiled from requirements-lock.in; the current
-generator pin is pip-tools==7.6.0. The native workflow self-hosts each candidate,
+generator pin is pip-tools==7.6.1. The native workflow self-hosts each candidate,
 compares two clean installs, and uploads evidence before intentionally failing
 when a changed result has not yet been committed. A generator upgrade may require
 committing the self-hosted result and rerunning.
+
+Treat pip and pip-tools as one compatibility unit. Current install and compile
+commands reject source distributions with --only-binary=:all: and disable pip's
+cache with --no-cache-dir, so pip 26.2's isolated-build and index-cache changes
+do not alter the locked graph. Any future source-build path must pass a
+separately reviewed --build-constraint for its isolated build environment.
 
 The project uses PySide6 (not Tkinter). Required packages are:
 - Pillow

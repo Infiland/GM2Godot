@@ -851,7 +851,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint "${{ matrix.constraint }}" \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint "${{ matrix.constraint }}" \
             -r requirements.txt PyInstaller==6.21.0
@@ -867,7 +867,7 @@ jobs:
             --expected-python "${{ matrix.python_version }}" \
             --expected-platform "${{ matrix.expected_platform }}" \
             --expected-machine "${{ matrix.expected_machine }}" \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
 
       - name: Build executable

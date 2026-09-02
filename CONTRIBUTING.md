@@ -30,7 +30,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
      export PIP_CONFIG_FILE=/dev/null
      python -m pip --isolated --disable-pip-version-check --no-input install \
        --no-cache-dir --only-binary=:all: \
-       --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+       --constraint constraints/requirements-linux-py312.txt pip==26.2.1
      python -m pip --isolated --disable-pip-version-check --no-input install \
        --no-cache-dir --only-binary=:all: \
        --constraint constraints/requirements-linux-py312.txt -r requirements.txt
@@ -49,7 +49,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
 
 `requirements.txt` and `requirements-tooling.txt` declare the reviewed direct dependencies; `requirements-lock.in` is the single compile input for their combined graph. Constraint changes must be intentional and reviewed with the input change that caused them.
 
-Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml), which runs the committed `pip-tools` pin—currently `pip-tools==7.6.0`—on the exact Linux x64, macOS arm64, and Windows x64 baselines. Pull-request and push runs always use `refresh=locked`: each committed constraint preference-seeds a candidate without requesting upgrades. Manual `workflow_dispatch` runs expose these policies:
+Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml), which runs the committed `pip-tools` pin—currently `pip-tools==7.6.1`—on the exact Linux x64, macOS arm64, and Windows x64 baselines. Pull-request and push runs always use `refresh=locked`: each committed constraint preference-seeds a candidate without requesting upgrades. Manual `workflow_dispatch` runs expose these policies:
 
 | Selection | Behavior |
 | --- | --- |
@@ -62,6 +62,8 @@ Leave `refresh_package` empty for `refresh=locked` and `refresh=all`. It is requ
 Every native job uses the candidate's own pip and pip-tools pins to regenerate a self-hosted constraint, then performs two clean complete-graph installs and compares their normalized receipts. Candidate, self-hosted output, receipts, and a manifest are uploaded before the final gates run. When an intentional refresh changes pins, the committed-equality gate is expected to fail: review all three native artifacts, commit the approved constraints, and rerun until `locked` generation is clean.
 
 If pip or pip-tools is upgraded, the current generator's candidate can differ from the candidate generator's self-hosted result. Review and commit the uploaded self-hosted constraint, then rerun so the new committed generator proves its own stable output. Do not compile a Linux or Windows constraint on macOS, or any other cross-platform combination: environment markers and native transitive dependencies are part of the graph.
+
+Treat `pip` and `pip-tools` as one compatibility unit: update their source pins, every bootstrap and verifier expectation, and all three native constraints in the same pull request. Current install and compile commands reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. If a future path permits a source distribution, it must also pass an explicit reviewed `--build-constraint` for the isolated build environment; do not assume the runtime constraint governs build dependencies under pip 26.2 or later.
 
 Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.1 validation.
 

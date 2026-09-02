@@ -38,7 +38,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.txt \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.txt \
             -r requirements.txt
@@ -57,7 +57,7 @@ jobs:
             --expected-python 3.12.13 \
             --expected-platform linux \
             --expected-machine x86_64 \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/tests-linux-dependencies.json"
 
       - name: Install Qt system dependencies
@@ -131,7 +131,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-macos-py312.txt \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-macos-py312.txt \
             -r requirements.txt
@@ -146,7 +146,7 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform darwin \
             --expected-machine arm64 \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/tests-macos-dependencies.json"
 
       - name: Run native macOS managed-output transaction tests
@@ -197,7 +197,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
             -r requirements.txt
@@ -212,7 +212,7 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/tests-windows-dependencies.json"
 
       - name: Run Windows outcome and artifact transaction tests
@@ -272,7 +272,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
             -r requirements.txt
@@ -287,7 +287,7 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/included-files-scale-windows-dependencies.json"
 
       - name: Run native Windows Included Files scale gate
@@ -329,7 +329,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
-            pip==26.1.2
+            pip==26.2.1
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-windows-py312.txt \
             -r requirements.txt
@@ -344,7 +344,7 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.1.2 \
+            --expected-pip 26.2.1 \
             --output "$RUNNER_TEMP/windows-crash-recovery-dependencies.json"
 
       - name: Run native Windows crash recovery matrix

@@ -116,7 +116,7 @@ fi
 echo "Installing dependencies..."
 "$VENV_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
   --constraint "$DEPENDENCY_CONSTRAINT" \
-  pip==26.1.2
+  pip==26.2.1
 "$VENV_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
   --constraint "$DEPENDENCY_CONSTRAINT" \
   -r requirements.txt PyInstaller==6.21.0
@@ -134,7 +134,7 @@ echo "Verifying dependency environment..."
   --expected-python 3.12.10 \
   --expected-platform darwin \
   --expected-machine arm64 \
-  --expected-pip 26.1.2 \
+  --expected-pip 26.2.1 \
   --output "$BUILD_RECEIPT"
 
 echo "Cleaning old build artifacts..."

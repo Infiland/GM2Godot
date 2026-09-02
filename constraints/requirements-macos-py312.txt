@@ -36,7 +36,7 @@ packaging==26.2
     #   wheel
 pillow==12.3.0
     # via -r requirements.txt
-pip-tools==7.6.0
+pip-tools==7.6.1
     # via -r requirements-tooling.txt
 pyinstaller==6.21.0
     # via -r requirements-tooling.txt
@@ -73,7 +73,7 @@ wheel==0.47.0
     # via pip-tools
 
 # The following packages are considered to be unsafe in a requirements file:
-pip==26.1.2
+pip==26.2.1
     # via
     #   -r requirements-tooling.txt
     #   pip-tools

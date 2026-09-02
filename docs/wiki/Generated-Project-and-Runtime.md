@@ -1,6 +1,6 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.7.58 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.59 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -400,6 +400,8 @@ python main.py validate \
 ```
 
 Validation imports supported asset types, loads every `.gd`, `.tscn`, `.tres`, and `.gdshader` resource under the destination project except `.godot/`, and can boot the configured main scene for the requested frame count. Read the first warning/error in `gm2godot/godot_validation_report.json`, then correlate it with conversion diagnostics and any `.gmlmap.json` source map.
+
+Headless import, resource, and boot validation captures bounded combined stdout/stderr. At reader shutdown it makes one final nonblocking read attempt, preserving buffered diagnostics without waiting indefinitely for inherited stdout descriptors.
 
 For report interpretation and failure recovery, continue to [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting). For implementation changes, use [Contributing and Testing](Contributing-and-Testing) and preserve the runtime/architecture contracts covered by the Godot-backed tests.
 

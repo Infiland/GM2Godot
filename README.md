@@ -74,6 +74,8 @@ Version 0.7.57 upgrades the dependency bootstrap and lock generator as the revie
 
 Version 0.7.58 makes staged artifact backups and successful cleanup fail closed. Each backup is revalidated after its observable hook, across the full set before public mutation, and again at its commit boundary; changed or replaced paths are preserved instead of trusted or deleted. Backup-hook failures durably remove only the exact owned stage, while publication, restoration, and stale conversion-artifact cleanup now report incomplete cleanup rather than returning success. Earlier operation and control-flow failures retain their established precedence with later cleanup context attached. GameMaker LTS 2026 conversion behavior and the exact Godot 4.7.1 target are unchanged.
 
+Version 0.7.59 performs one final nonblocking Godot-output read attempt when validation shutdown begins, so buffered warning/error diagnostics cannot be mistaken for clean import-only timeouts. Shutdown remains bounded for inherited or continuously writing stdout descendants, and timeout-path reader errors surface as capture failures with their original cause. GameMaker LTS 2026 conversion behavior and the exact Godot 4.7.1 target are unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -94,7 +96,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.58`.
+Current source version: `0.7.59`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

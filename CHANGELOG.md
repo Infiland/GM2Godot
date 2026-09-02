@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.59 - 2026-09-02
+
+- Performed one final nonblocking Godot-output read attempt when validation shutdown begins, so buffered warning/error diagnostics cannot be mistaken for clean import-only timeouts.
+- Kept shutdown bounded for inherited or continuously writing stdout descendants, and surfaced timeout-path reader errors as capture failures with their original cause.
+- Added deterministic deferred-reader, error-injection, timeout-diagnostic, and continuous-writer coverage while preserving GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output.
+
 ## 0.7.58 - 2026-09-02
 
 - Revalidated every staged artifact backup after its observable hook, across the complete set before the first public mutation, and again at each commit boundary so in-place or identity-replacement tampering fails closed without changing public output.

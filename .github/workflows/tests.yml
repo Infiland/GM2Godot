@@ -235,6 +235,15 @@ jobs:
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
 
+      - name: Run native Windows Godot output-reader scheduling tests
+        run: >-
+          python -m unittest -v
+          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_deferred_until_after_stop_retains_buffered_diagnostic
+          tests.test_godot_validation.TestGodotValidation.test_reader_retries_after_output_arrives_during_stop_wait
+          tests.test_godot_validation.TestGodotValidation.test_normal_completion_reader_oserror_is_capture_failure
+          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_oserror_is_capture_failure
+          tests.test_godot_validation.TestGodotValidation.test_stop_deadline_leaves_stdout_owned_by_live_reader
+
   windows-included-files-scale:
     runs-on: windows-2025
     timeout-minutes: 20

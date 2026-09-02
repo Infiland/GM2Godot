@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.58 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.59 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -95,6 +95,8 @@ Fix every Pyright error and warning in changed code. Run the relevant focused te
 GODOT_BIN=/path/to/Godot-4.7.1 \
   ./venv/bin/python -m unittest discover -s tests -p 'test_*_godot.py'
 ```
+
+Godot validation gives the output reader a bounded drain window, then requests shutdown and permits exactly one deliberate final nonblocking read attempt. Reader I/O failures fail validation capture, and inherited or continuously writing stdout descendants cannot extend the stop deadline.
 
 ### Preserve the GML phase-boundary baseline
 

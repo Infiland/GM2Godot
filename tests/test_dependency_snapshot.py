@@ -733,6 +733,39 @@ class DependencySnapshotTests(unittest.TestCase):
                     label="authored requirements",
                 )
 
+    def test_authored_fingerprint_normalizes_only_ascii_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            source = root / "requirements.txt"
+            source_policy: tuple[tuple[Path, snapshotter.Scope], ...] = ((source, "runtime"),)
+
+            fingerprints: list[str] = []
+            raw_hashes: list[str] = []
+            for content in (
+                b"# roots\nthing==1\n",
+                b"# roots\r\nthing==1\r\n",
+                b"# roots\rthing==1\r",
+            ):
+                source.write_bytes(content)
+                policy = snapshotter.load_authored_policy(ENVIRONMENT, source_policy)
+                fingerprints.append(policy.fingerprint)
+                raw_hashes.append(policy.files[0].sha256)
+
+            self.assertEqual(len(set(fingerprints)), 1)
+            self.assertEqual(len(set(raw_hashes)), 3)
+
+            source.write_bytes(b"# substantively changed roots\nthing==1\n")
+            changed_content = snapshotter.load_authored_policy(ENVIRONMENT, source_policy)
+            self.assertNotEqual(changed_content.fingerprint, fingerprints[0])
+
+            renamed_source = root / "renamed-requirements.txt"
+            renamed_source.write_bytes(b"# roots\nthing==1\n")
+            changed_path = snapshotter.load_authored_policy(
+                ENVIRONMENT,
+                ((renamed_source, "runtime"),),
+            )
+            self.assertNotEqual(changed_path.fingerprint, fingerprints[0])
+
     def test_authored_source_duplicates_are_merged_after_marker_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
             root = Path(raw_directory)

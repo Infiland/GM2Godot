@@ -358,6 +358,14 @@ def _decode_utf8(source: RegularFile, *, label: str) -> str:
         raise SnapshotError("input-not-utf8", f"{label.capitalize()} is not valid UTF-8: {source.path}.") from error
 
 
+def _authored_source_fingerprint(source: RegularFile) -> str:
+    """Hash authored text independent of the checkout's ASCII line endings."""
+
+    text = _decode_utf8(source, label="authored requirements")
+    canonical_text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
+
+
 def load_constraint(path: Path) -> ConstraintPolicy:
     source = read_regular_file(path, MAX_CONSTRAINT_BYTES, label="constraint")
     pins: dict[str, str] = {}
@@ -616,7 +624,7 @@ def load_authored_policy(
     for source in files:
         digest.update(source.path.as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(source.sha256.encode("ascii"))
+        digest.update(_authored_source_fingerprint(source).encode("ascii"))
         digest.update(b"\n")
     return AuthoredPolicy(files=tuple(files), roots=merged, fingerprint=digest.hexdigest())
 

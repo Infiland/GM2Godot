@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.58 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.59 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -131,6 +131,8 @@ An explicit or environment path that is not a file is skipped and discovery cont
 If no Godot binary is found, validation records `status: "skipped"` and an informational diagnostic. It does **not** prove the project is valid and is not a hard failure by itself. Set `GODOT_BIN` or pass `--godot-bin` to get real parser/resource validation.
 
 With a binary available, validation asks Godot to import supported asset types and loads every `.gd`, `.gdshader`, `.tscn`, and `.tres` resource under the destination project (excluding `.godot/`), not only GM2Godot-managed files. It records Godot warning/error output as validation issues. `--godot-boot-frames N` additionally boots the configured main scene headlessly for `N` frames after resource validation; it is disabled by default. Use `--skip-godot-validation` only when intentionally limiting `validate` to existing reports and project-presence checks.
+
+An import-only timeout is treated as clean only when output capture succeeded and contains no Godot warning/error. Shutdown performs one final nonblocking read attempt for already-buffered diagnostics; an output-reader error is reported as a capture failure instead of empty output.
 
 ## Common failures
 

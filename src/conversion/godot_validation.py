@@ -610,18 +610,34 @@ def _run_godot_command(
     os.set_blocking(output_fd, False)
 
     def read_output() -> None:
-        while not reader_stop.is_set():
+        try:
+            while True:
+                # Once shutdown is observed, make one last nonblocking read.
+                # This retains bytes that arrived during the preceding poll
+                # without draining a continuously writable pipe indefinitely.
+                final_attempt = reader_stop.is_set()
+                try:
+                    chunk = os.read(output_fd, _GODOT_OUTPUT_READ_CHUNK_BYTES)
+                except BlockingIOError:
+                    if final_attempt:
+                        return
+                    reader_stop.wait(_GODOT_OUTPUT_READER_POLL_SECONDS)
+                    continue
+                except OSError as exc:
+                    reader_errors.append(exc)
+                    return
+                if not chunk:
+                    return
+                output.append(chunk)
+                if final_attempt:
+                    return
+        finally:
+            # Keep the descriptor owned by the reader until no later read can
+            # run, including when the caller reports a missed stop deadline.
             try:
-                chunk = os.read(output_fd, _GODOT_OUTPUT_READ_CHUNK_BYTES)
-            except BlockingIOError:
-                reader_stop.wait(_GODOT_OUTPUT_READER_POLL_SECONDS)
-                continue
+                output_stream.close()
             except OSError as exc:
                 reader_errors.append(exc)
-                return
-            if not chunk:
-                return
-            output.append(chunk)
 
     output_reader = threading.Thread(
         target=read_output,
@@ -635,23 +651,19 @@ def _run_godot_command(
     except subprocess.TimeoutExpired:
         _kill_godot_process(process)
         process.wait()
-        _finish_godot_output_reader(output_reader, reader_stop)
-        output_stream.close()
+        _finish_godot_output_reader(output_reader, reader_stop, reader_errors)
         raise subprocess.TimeoutExpired(
             command,
             timeout,
             output=output.text(),
         ) from None
 
-    if output_reader.is_alive():
+    if output_reader.is_alive() or reader_errors:
         # The direct process has exited, so an open pipe now belongs to a
-        # descendant. Clean up the validation process group instead of waiting
-        # indefinitely for that inherited descriptor to close.
+        # descendant, or output capture failed before proving otherwise. Clean
+        # up the validation process group instead of leaving either case alive.
         _kill_godot_process(process)
-    _finish_godot_output_reader(output_reader, reader_stop)
-    output_stream.close()
-    if reader_errors:
-        raise RuntimeError("Failed while capturing Godot output.") from reader_errors[0]
+    _finish_godot_output_reader(output_reader, reader_stop, reader_errors)
     return subprocess.CompletedProcess(
         command,
         returncode,
@@ -663,14 +675,16 @@ def _run_godot_command(
 def _finish_godot_output_reader(
     output_reader: threading.Thread,
     reader_stop: threading.Event,
+    reader_errors: list[OSError],
 ) -> None:
     output_reader.join(timeout=_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS)
-    if not output_reader.is_alive():
-        return
-    reader_stop.set()
-    output_reader.join(timeout=_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS)
     if output_reader.is_alive():
-        raise RuntimeError("Godot output reader did not stop after pipe cleanup.")
+        reader_stop.set()
+        output_reader.join(timeout=_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS)
+        if output_reader.is_alive():
+            raise RuntimeError("Godot output reader did not stop after pipe cleanup.")
+    if reader_errors:
+        raise RuntimeError("Failed while capturing Godot output.") from reader_errors[0]
 
 
 def _kill_godot_process(process: subprocess.Popen[bytes]) -> None:

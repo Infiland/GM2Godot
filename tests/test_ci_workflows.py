@@ -34,6 +34,18 @@ LIVE_GODOT_MODULES_OUTSIDE_DISCOVERY = (
     "tests.test_golden_conversion",
     "tests.test_project_settings",
 )
+WINDOWS_GODOT_OUTPUT_READER_TESTS = (
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_timeout_reader_deferred_until_after_stop_retains_buffered_diagnostic",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_reader_retries_after_output_arrives_during_stop_wait",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_normal_completion_reader_oserror_is_capture_failure",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_timeout_reader_oserror_is_capture_failure",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_stop_deadline_leaves_stdout_owned_by_live_reader",
+)
 EXTERNAL_CONVERSION_MODULES = (
     "tests.test_simple_topdown_conversion",
     "tests.test_tcc_conversion",
@@ -5037,6 +5049,33 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(module=module):
                 self.assertIn(module, windows_job)
+
+        output_reader_step_name = (
+            "- name: Run native Windows Godot output-reader scheduling tests"
+        )
+        self.assertEqual(windows_job.count(output_reader_step_name), 1)
+        output_reader_step_index = windows_job.index(output_reader_step_name)
+        artifact_step = windows_job[
+            windows_job.index(
+                "- name: Run Windows outcome and artifact transaction tests"
+            ):output_reader_step_index
+        ]
+        output_reader_step = windows_job[output_reader_step_index:]
+        self.assertNotIn("tests.test_godot_validation", artifact_step)
+        self.assertEqual(output_reader_step.count("python -m unittest -v"), 1)
+        self.assertEqual(
+            tuple(
+                re.findall(
+                    r"(?m)^          (tests\.test_godot_validation\."
+                    r"TestGodotValidation\.test_[a-z0-9_]+)$",
+                    output_reader_step,
+                )
+            ),
+            WINDOWS_GODOT_OUTPUT_READER_TESTS,
+        )
+        for selector in WINDOWS_GODOT_OUTPUT_READER_TESTS:
+            with self.subTest(output_reader_selector=selector):
+                self.assertEqual(windows_job.count(selector), 1)
 
     def test_unit_workflow_shards_native_windows_included_files_scale_gate(
         self,

@@ -7,15 +7,20 @@ import json
 import os
 import signal
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 from unittest.mock import patch
 
 from src import cli
+from src.conversion import godot_validation as godot_validation_module
 from src.conversion.godot_validation import (
     GODOT_VALIDATION_REPORT_RELATIVE_PATH,
     detect_godot_output_issues,
@@ -31,6 +36,246 @@ _PNG_1X1_WHITE = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4"
     "////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
 )
+
+
+class _ModuleBindingProxy:
+    def __init__(self, original: ModuleType, **overrides: object) -> None:
+        self._original = original
+        self._overrides = overrides
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._original, name)
+
+
+class _PipeBackedProcess:
+    def __init__(
+        self,
+        output: bytes,
+        *,
+        timeout_on_first_wait: bool = False,
+        keep_writer_open: bool = False,
+    ) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            self._write_all(write_fd, output)
+        except BaseException:
+            os.close(read_fd)
+            os.close(write_fd)
+            raise
+
+        self._write_fd = write_fd if keep_writer_open else None
+        if not keep_writer_open:
+            os.close(write_fd)
+
+        self.stdout = os.fdopen(read_fd, "rb", buffering=0)
+        self.pid = 1
+        self.returncode: int | None = None
+        self._timeout_on_first_wait = timeout_on_first_wait
+        self._wait_calls = 0
+        self.kill_calls = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        self._wait_calls += 1
+        if self._timeout_on_first_wait and self._wait_calls == 1:
+            if timeout is None:
+                raise AssertionError("the first fake wait must be bounded")
+            raise subprocess.TimeoutExpired(["fake-godot"], timeout)
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        if self.returncode is None:
+            self.returncode = -9
+
+    @staticmethod
+    def _write_all(write_fd: int, output: bytes) -> None:
+        remaining = memoryview(output)
+        while remaining:
+            written = os.write(write_fd, remaining)
+            remaining = remaining[written:]
+
+    def write_output(self, output: bytes) -> None:
+        if self._write_fd is None:
+            raise AssertionError("the fake output writer is closed")
+        self._write_all(self._write_fd, output)
+
+    def close_stdout(self) -> None:
+        if self._write_fd is not None:
+            os.close(self._write_fd)
+            self._write_fd = None
+        if not self.stdout.closed:
+            self.stdout.close()
+
+
+def _ignore_killpg(_pid: int, _signal: int) -> None:
+    pass
+
+
+def _popen_returning(
+    process: _PipeBackedProcess,
+) -> Callable[..., _PipeBackedProcess]:
+    def fake_popen(*_args: object, **_kwargs: object) -> _PipeBackedProcess:
+        return process
+
+    return fake_popen
+
+
+class _DeferredTargetThread:
+    def __init__(
+        self,
+        *,
+        target: Callable[[], None],
+        name: str,
+        daemon: bool,
+    ) -> None:
+        self._target = target
+        self._gate = threading.Event()
+        self._join_calls = 0
+        self._thread = threading.Thread(
+            target=self._run_after_release,
+            name=name,
+            daemon=daemon,
+        )
+
+    def _run_after_release(self) -> None:
+        self._gate.wait()
+        self._target()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._join_calls += 1
+        if self._join_calls == 1:
+            return
+        self._gate.set()
+        self._thread.join(timeout)
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def release(self) -> None:
+        self._gate.set()
+        self._thread.join(timeout=1.0)
+
+
+class _SynchronousTargetThread:
+    def __init__(
+        self,
+        *,
+        target: Callable[[], None],
+        name: str,
+        daemon: bool,
+    ) -> None:
+        del name, daemon
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+    def is_alive(self) -> bool:
+        return False
+
+
+class _DeadlineBlockedTargetThread:
+    def __init__(
+        self,
+        *,
+        target: Callable[[], None],
+        name: str,
+        daemon: bool,
+    ) -> None:
+        self._target = target
+        self._gate = threading.Event()
+        self._join_calls = 0
+        self._thread = threading.Thread(
+            target=self._run_after_release,
+            name=name,
+            daemon=daemon,
+        )
+
+    def _run_after_release(self) -> None:
+        self._gate.wait()
+        self._target()
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+        self._join_calls += 1
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    @property
+    def join_calls(self) -> int:
+        return self._join_calls
+
+    def release(self) -> None:
+        self._gate.set()
+        self._thread.join(timeout=1.0)
+
+
+class _WaitArrivalStopEvent:
+    def __init__(self) -> None:
+        self.wait_entered = threading.Event()
+        self._event = threading.Event()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def wait(self, _timeout: float | None = None) -> bool:
+        self.wait_entered.set()
+        return self._event.wait(timeout=1.0)
+
+    def set(self) -> None:
+        self._event.set()
+
+
+class _WriteDuringWaitThread:
+    def __init__(
+        self,
+        *,
+        target: Callable[[], None],
+        name: str,
+        daemon: bool,
+        stop_event: _WaitArrivalStopEvent,
+        buffer_output: Callable[[], None],
+    ) -> None:
+        self._stop_event = stop_event
+        self._buffer_output = buffer_output
+        self._join_calls = 0
+        self._thread = threading.Thread(target=target, name=name, daemon=daemon)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._join_calls += 1
+        if self._join_calls == 1:
+            if not self._stop_event.wait_entered.wait(timeout=1.0):
+                raise AssertionError("the output reader did not enter its poll wait")
+            self._buffer_output()
+            return
+        self._thread.join(timeout)
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def release(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
 
 
 class TestGodotValidation(unittest.TestCase):
@@ -138,6 +383,258 @@ class TestGodotValidation(unittest.TestCase):
         self.assertEqual(resolved_binary, macos_app_binary)
         is_file.assert_called_once_with(macos_app_binary)
 
+    def test_timeout_reader_deferred_until_after_stop_retains_buffered_diagnostic(
+        self,
+    ) -> None:
+        diagnostic = b"SCRIPT ERROR: buffered before timeout shutdown\n"
+        process = _PipeBackedProcess(diagnostic, timeout_on_first_wait=True)
+        self.addCleanup(process.close_stdout)
+        deferred_threads: list[_DeferredTargetThread] = []
+        read_calls = 0
+
+        def make_deferred_thread(
+            *,
+            target: Callable[[], None],
+            name: str,
+            daemon: bool,
+        ) -> _DeferredTargetThread:
+            output_reader = _DeferredTargetThread(
+                target=target,
+                name=name,
+                daemon=daemon,
+            )
+            deferred_threads.append(output_reader)
+            return output_reader
+
+        def counted_read(fd: int, size: int) -> bytes:
+            nonlocal read_calls
+            read_calls += 1
+            return os.read(fd, size)
+
+        os_proxy = _ModuleBindingProxy(
+            os,
+            killpg=_ignore_killpg,
+            read=counted_read,
+        )
+        subprocess_proxy = _ModuleBindingProxy(
+            subprocess,
+            Popen=_popen_returning(process),
+        )
+        threading_proxy = _ModuleBindingProxy(
+            threading,
+            Thread=make_deferred_thread,
+        )
+
+        try:
+            with (
+                patch.object(godot_validation_module, "os", os_proxy),
+                patch.object(godot_validation_module, "subprocess", subprocess_proxy),
+                patch.object(godot_validation_module, "threading", threading_proxy),
+                self.assertRaises(subprocess.TimeoutExpired) as raised,
+            ):
+                _run_godot_command(["fake-godot"], timeout=1)
+        finally:
+            for output_reader in deferred_threads:
+                output_reader.release()
+
+        self.assertEqual(read_calls, 1)
+        self.assertIn(diagnostic.decode("utf-8").strip(), raised.exception.output)
+
+    def test_reader_retries_after_output_arrives_during_stop_wait(self) -> None:
+        diagnostic = b"WARNING: buffered while the reader waited for shutdown\n"
+        process = _PipeBackedProcess(b"", keep_writer_open=True)
+        self.addCleanup(process.close_stdout)
+        stop_event = _WaitArrivalStopEvent()
+        race_threads: list[_WriteDuringWaitThread] = []
+        read_calls = 0
+
+        def make_stop_event() -> _WaitArrivalStopEvent:
+            return stop_event
+
+        def make_race_thread(
+            *,
+            target: Callable[[], None],
+            name: str,
+            daemon: bool,
+        ) -> _WriteDuringWaitThread:
+            output_reader = _WriteDuringWaitThread(
+                target=target,
+                name=name,
+                daemon=daemon,
+                stop_event=stop_event,
+                buffer_output=lambda: process.write_output(diagnostic),
+            )
+            race_threads.append(output_reader)
+            return output_reader
+
+        def counted_read(fd: int, size: int) -> bytes:
+            nonlocal read_calls
+            read_calls += 1
+            return os.read(fd, size)
+
+        os_proxy = _ModuleBindingProxy(
+            os,
+            killpg=_ignore_killpg,
+            read=counted_read,
+        )
+        subprocess_proxy = _ModuleBindingProxy(
+            subprocess,
+            Popen=_popen_returning(process),
+        )
+        threading_proxy = _ModuleBindingProxy(
+            threading,
+            Event=make_stop_event,
+            Thread=make_race_thread,
+        )
+
+        try:
+            with (
+                patch.object(godot_validation_module, "os", os_proxy),
+                patch.object(godot_validation_module, "subprocess", subprocess_proxy),
+                patch.object(godot_validation_module, "threading", threading_proxy),
+            ):
+                result = _run_godot_command(["fake-godot"], timeout=1)
+        finally:
+            for output_reader in race_threads:
+                output_reader.release()
+
+        self.assertEqual(read_calls, 2)
+        self.assertIn(diagnostic.decode("utf-8").strip(), result.stdout)
+
+    def test_normal_completion_reader_oserror_is_capture_failure(self) -> None:
+        process = _PipeBackedProcess(b"")
+        self.addCleanup(process.close_stdout)
+        capture_error = OSError("injected normal read failure")
+
+        def fail_read(_fd: int, _size: int) -> bytes:
+            raise capture_error
+
+        os_proxy = _ModuleBindingProxy(
+            os,
+            name="not-posix",
+            read=fail_read,
+        )
+        subprocess_proxy = _ModuleBindingProxy(
+            subprocess,
+            Popen=_popen_returning(process),
+        )
+        threading_proxy = _ModuleBindingProxy(
+            threading,
+            Thread=_SynchronousTargetThread,
+        )
+
+        with (
+            patch.object(godot_validation_module, "os", os_proxy),
+            patch.object(godot_validation_module, "subprocess", subprocess_proxy),
+            patch.object(godot_validation_module, "threading", threading_proxy),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Failed while capturing Godot output",
+            ) as raised,
+        ):
+            _run_godot_command(["fake-godot"], timeout=1)
+
+        self.assertEqual(process.kill_calls, 1)
+        self.assertIs(raised.exception.__cause__, capture_error)
+
+    def test_timeout_reader_oserror_is_capture_failure(self) -> None:
+        process = _PipeBackedProcess(b"", timeout_on_first_wait=True)
+        self.addCleanup(process.close_stdout)
+        capture_error = OSError("injected timeout read failure")
+
+        def fail_read(_fd: int, _size: int) -> bytes:
+            raise capture_error
+
+        os_proxy = _ModuleBindingProxy(
+            os,
+            killpg=_ignore_killpg,
+            read=fail_read,
+        )
+        subprocess_proxy = _ModuleBindingProxy(
+            subprocess,
+            Popen=_popen_returning(process),
+        )
+
+        with (
+            patch.object(godot_validation_module, "os", os_proxy),
+            patch.object(godot_validation_module, "subprocess", subprocess_proxy),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Failed while capturing Godot output",
+            ) as raised,
+        ):
+            _run_godot_command(["fake-godot"], timeout=1)
+
+        self.assertIs(raised.exception.__cause__, capture_error)
+
+    def test_stop_deadline_leaves_stdout_owned_by_live_reader(self) -> None:
+        process = _PipeBackedProcess(b"")
+        self.addCleanup(process.close_stdout)
+        blocked_readers: list[_DeadlineBlockedTargetThread] = []
+        existing_readers = {
+            thread.ident
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+        }
+
+        def make_blocked_reader(
+            *,
+            target: Callable[[], None],
+            name: str,
+            daemon: bool,
+        ) -> _DeadlineBlockedTargetThread:
+            output_reader = _DeadlineBlockedTargetThread(
+                target=target,
+                name=name,
+                daemon=daemon,
+            )
+            blocked_readers.append(output_reader)
+            return output_reader
+
+        os_proxy = _ModuleBindingProxy(
+            os,
+            killpg=_ignore_killpg,
+            name="posix",
+        )
+        subprocess_proxy = _ModuleBindingProxy(
+            subprocess,
+            Popen=_popen_returning(process),
+        )
+        threading_proxy = _ModuleBindingProxy(
+            threading,
+            Thread=make_blocked_reader,
+        )
+
+        try:
+            with (
+                patch.object(godot_validation_module, "os", os_proxy),
+                patch.object(godot_validation_module, "subprocess", subprocess_proxy),
+                patch.object(godot_validation_module, "threading", threading_proxy),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Godot output reader did not stop after pipe cleanup",
+                ),
+            ):
+                _run_godot_command(["fake-godot"], timeout=1)
+
+            self.assertEqual(len(blocked_readers), 1)
+            self.assertEqual(blocked_readers[0].join_calls, 2)
+            self.assertTrue(blocked_readers[0].is_alive())
+            self.assertFalse(process.stdout.closed)
+        finally:
+            for output_reader in blocked_readers:
+                output_reader.release()
+
+        lingering_readers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+            and thread.ident not in existing_readers
+        ]
+        self.assertTrue(process.stdout.closed)
+        self.assertFalse(blocked_readers[0].is_alive())
+        self.assertEqual(lingering_readers, [])
+
     @unittest.skipUnless(os.name == "posix", "requires POSIX process groups")
     def test_command_exit_with_inherited_stdout_remains_bounded(self) -> None:
         project_dir = self._write_project()
@@ -224,6 +721,75 @@ class TestGodotValidation(unittest.TestCase):
         ]
         self.assertEqual(result.returncode, 0)
         self.assertLess(elapsed, 1.5)
+        self.assertIsNotNone(child_pid)
+        self.assertEqual(lingering_readers, [])
+
+    @unittest.skipUnless(os.name == "posix", "requires fork and POSIX sessions")
+    def test_continuously_writing_detached_stdout_stops_at_reader_deadline(
+        self,
+    ) -> None:
+        child_pid_path = self.temp_dir / "continuous-detached-child.pid"
+        fake_godot = self.temp_dir / "continuous-detached-stdout.py"
+        fake_godot.write_text(
+            "\n".join(
+                (
+                    "import os",
+                    "import time",
+                    "from pathlib import Path",
+                    "",
+                    f"child_pid_path = Path({os.fspath(child_pid_path)!r})",
+                    "child_pid_temporary_path = child_pid_path.with_suffix('.tmp')",
+                    "child_pid = os.fork()",
+                    "if child_pid == 0:",
+                    "    os.setsid()",
+                    "    child_pid_temporary_path.write_text(str(os.getpid()))",
+                    "    os.replace(child_pid_temporary_path, child_pid_path)",
+                    "    payload = b'continuous-detached-output\\n' * 128",
+                    "    while True:",
+                    "        try:",
+                    "            os.write(1, payload)",
+                    "        except OSError:",
+                    "            os._exit(0)",
+                    "while not child_pid_path.is_file():",
+                    "    time.sleep(0.001)",
+                    "os._exit(0)",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        existing_readers = {
+            thread.ident
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+        }
+        child_pid: int | None = None
+        started = time.monotonic()
+
+        try:
+            result = _run_godot_command(
+                [sys.executable, os.fspath(fake_godot)],
+                timeout=3,
+            )
+            elapsed = time.monotonic() - started
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        finally:
+            if child_pid is None and child_pid_path.is_file():
+                child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            if child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        lingering_readers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "gm2godot-godot-output-reader"
+            and thread.ident not in existing_readers
+        ]
+        self.assertEqual(result.returncode, 0)
+        self.assertLess(elapsed, 2.0)
         self.assertIsNotNone(child_pid)
         self.assertEqual(lingering_readers, [])
 

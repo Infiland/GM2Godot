@@ -78,6 +78,8 @@ Version 0.7.59 performs one final nonblocking Godot-output read attempt when val
 
 Version 0.7.60 gives only the native Windows managed-output crash-recovery job 30 minutes for its exhaustive subprocess matrix, while the Windows artifact-transaction and Included Files scale jobs retain their 20-minute limits. Workflow policy tests lock each shard to exactly one top-level timeout. This CI scheduling change leaves GameMaker LTS 2026 conversion behavior and the exact Godot 4.7.1 target unchanged.
 
+Version 0.7.61 makes the Linux packaged-GUI verifier tests distinguish child startup readiness from intentional runtime timeouts. Timeout, process-group cleanup, and bounded-output cases wait for a bounded test-only PID receipt before exercising their exact failure phase; pure receipt and loader-diagnostic policy is checked directly. The release verifier still launches the exact packaged GUI under Xvfb with its unchanged fail-closed 60-second production timeout. GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output are unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -98,7 +100,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.60`.
+Current source version: `0.7.61`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

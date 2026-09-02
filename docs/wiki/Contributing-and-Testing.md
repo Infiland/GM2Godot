@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.60 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.61 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -97,6 +97,8 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
 ```
 
 Godot validation gives the output reader a bounded drain window, then requests shutdown and permits exactly one deliberate final nonblocking read attempt. Reader I/O failures fail validation capture, and inherited or continuously writing stdout descendants cannot extend the stop deadline.
+
+Linux packaged-GUI verifier tests use a named 15-second budget for ordinary subprocess integration. Intentional timeout and cleanup cases first require a bounded test-only PID readiness receipt, then exercise a 0.25-second runtime deadline; missing readiness is a distinct startup-test failure. Receipt and loader-diagnostic policy is tested directly where a real process is not part of the behavior. The production release verifier remains fail-closed at 60 seconds and still launches the exact packaged GUI through real Xvfb.
 
 ### Preserve the GML phase-boundary baseline
 

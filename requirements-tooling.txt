@@ -1,6 +1,5 @@
 coverage==7.15.2
-pip==26.2.1
-pip-tools==7.6.1
+packaging==26.2
 PyInstaller==6.21.0
 pyright[nodejs]==1.1.411
 ruff==0.15.22

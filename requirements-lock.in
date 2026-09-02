@@ -1,2 +1,3 @@
+-r requirements-bootstrap.txt
 -r requirements.txt
 -r requirements-tooling.txt

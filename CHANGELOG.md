@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.62 - 2026-09-02
+
+- Made `requirements-bootstrap.txt` the single reviewed source for the exact pip/pip-tools pair, moved generated native constraints to Dependabot-invisible `.lock` paths, and limited bot bootstrap proposals to that authored source.
+- Added fail-closed stable and source-transition preflights plus a native compatibility probe that installs, verifies, and self-hosts the proposed pair before generating complete Linux, macOS, or Windows dependency graphs.
+- Preserved transitive vulnerability coverage with verified per-platform dependency snapshots submitted only from successful main-branch native-lock runs, while retaining mandatory candidate, self-host, two-clean-install, receipt, GameMaker LTS 2026, and exact Godot 4.7.1 gates.
+
 ## 0.7.61 - 2026-09-02
 
 - Made intentional Linux packaged-GUI timeout and cleanup tests wait for a bounded child PID readiness receipt before starting their short runtime deadline.

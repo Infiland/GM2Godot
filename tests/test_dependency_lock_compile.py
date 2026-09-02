@@ -15,9 +15,9 @@ from scripts import compile_dependency_lock as compiler
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
 CONSTRAINT_PATHS = (
-    PROJECT_ROOT / "constraints" / "requirements-linux-py312.txt",
-    PROJECT_ROOT / "constraints" / "requirements-macos-py312.txt",
-    PROJECT_ROOT / "constraints" / "requirements-windows-py312.txt",
+    PROJECT_ROOT / "constraints" / "requirements-linux-py312.lock",
+    PROJECT_ROOT / "constraints" / "requirements-macos-py312.lock",
+    PROJECT_ROOT / "constraints" / "requirements-windows-py312.lock",
 )
 PIP_ARGUMENTS = "--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:"
 
@@ -159,20 +159,26 @@ class DependencyLockWorkflowIsolationTests(unittest.TestCase):
         ):
             self.assertNotIn(inherited_setting, self.workflow)
 
-    def test_all_six_install_sites_use_isolated_noninteractive_pip(self) -> None:
+    def test_all_eight_install_sites_use_isolated_noninteractive_pip(self) -> None:
         install_marker = "-m pip --isolated --disable-pip-version-check --no-input install"
-        self.assertEqual(self.workflow.count(install_marker), 6)
+        self.assertEqual(self.workflow.count(install_marker), 8)
         self.assertNotIn("-m pip install", self.workflow)
 
-    def test_both_compiles_use_wrapper_exact_pip_arguments_and_distinct_caches(self) -> None:
+    def test_all_compiles_use_wrapper_exact_pip_arguments_and_scoped_caches(self) -> None:
         invocation = '-I scripts/compile_dependency_lock.py \\\n'
-        self.assertEqual(self.workflow.count(invocation), 2)
+        self.assertEqual(self.workflow.count(invocation), 4)
         self.assertNotIn("-m piptools compile", self.workflow)
-        self.assertEqual(self.workflow.count("--no-config \\\n"), 2)
-        self.assertEqual(self.workflow.count(f'"--pip-args={PIP_ARGUMENTS}" \\\n'), 2)
-        self.assertEqual(self.workflow.count('--cache-dir="$CURRENT_COMPILE_CACHE"'), 1)
+        self.assertEqual(self.workflow.count("--no-config \\\n"), 4)
+        self.assertEqual(self.workflow.count(f'"--pip-args={PIP_ARGUMENTS}" \\\n'), 4)
+        self.assertEqual(self.workflow.count("--no-header \\\n"), 2)
+        self.assertEqual(self.workflow.count('--cache-dir="$CURRENT_COMPILE_CACHE"'), 2)
+        self.assertEqual(self.workflow.count('--cache-dir="$BOOTSTRAP_COMPILE_CACHE"'), 1)
         self.assertEqual(self.workflow.count('--cache-dir="$CANDIDATE_COMPILE_CACHE"'), 1)
         self.assertIn("CURRENT_COMPILE_CACHE: dependency-locks/work/current-pip-tools-cache", self.workflow)
+        self.assertIn(
+            "BOOTSTRAP_COMPILE_CACHE: dependency-locks/work/bootstrap-probe-pip-tools-cache",
+            self.workflow,
+        )
         self.assertIn("CANDIDATE_COMPILE_CACHE: dependency-locks/work/candidate-pip-tools-cache", self.workflow)
 
     def test_custom_command_and_generated_headers_record_canonical_wrapper(self) -> None:

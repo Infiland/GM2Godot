@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import base64
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import copy
 import hashlib
 import json
@@ -19,6 +20,9 @@ import zipfile
 import zlib
 from pathlib import Path
 from typing import cast
+from urllib.parse import quote
+
+from scripts import build_dependency_snapshot as dependency_snapshot
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -114,15 +118,16 @@ EXISTING_RELEASE_BASE_PAYLOADS = {
     "GM2Godot-macos.zip": b"existing macOS ZIP payload\n",
     "GM2Godot-windows.zip": b"existing Windows payload\n",
 }
-LINUX_CONSTRAINT = "constraints/requirements-linux-py312.txt"
-MACOS_CONSTRAINT = "constraints/requirements-macos-py312.txt"
-WINDOWS_CONSTRAINT = "constraints/requirements-windows-py312.txt"
+LINUX_CONSTRAINT = "constraints/requirements-linux-py312.lock"
+MACOS_CONSTRAINT = "constraints/requirements-macos-py312.lock"
+WINDOWS_CONSTRAINT = "constraints/requirements-windows-py312.lock"
 PIP_VERSION = "26.2.1"
 PIP_TOOLS_VERSION = "7.6.1"
 PYINSTALLER_VERSION = "6.21.0"
 PYRIGHT_VERSION = "1.1.411"
 RUFF_VERSION = "0.15.22"
 COVERAGE_VERSION = "7.15.2"
+PACKAGING_VERSION = "26.2"
 PILLOW_VERSION = "12.3.0"
 PIP_HARDENED_INSTALL_FRAGMENT = (
     "-m pip --isolated --disable-pip-version-check --no-input install"
@@ -329,6 +334,22 @@ def _pip_install_commands(
             if index in module_pip_indexes or not _is_pip_executable_token(token):
                 continue
             if index > 0 and tokens[index - 1] == "--require":
+                continue
+            segment_start = max(
+                (
+                    operator_index
+                    for operator_index, value in enumerate(tokens[:index])
+                    if value in _SHELL_OPERATORS
+                ),
+                default=-1,
+            )
+            if any(
+                segment_start < module_index < index
+                for module_index in module_pip_indexes
+            ):
+                # A package named ``pip`` in the payload of ``python -m pip``
+                # is not a second executable invocation. Shell operators start
+                # a new command segment, where a later bare pip remains visible.
                 continue
             invocations.append((index + 1, False))
 
@@ -1336,10 +1357,10 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 7, locations)
+        self.assertEqual(len(locations), 8, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
-            1,
+            2,
             locations,
         )
 
@@ -3668,7 +3689,7 @@ class TestCIWorkflows(unittest.TestCase):
             "            runner: ubuntu-24.04\n"
             "            architecture: x64\n"
             "            python_version: '3.12.13'\n"
-            "            constraint: requirements-linux-py312.txt\n"
+            "            constraint: requirements-linux-py312.lock\n"
             "            expected_platform: linux\n"
             "            expected_machine: x86_64\n"
             "            venv_python: bin/python\n",
@@ -3676,7 +3697,7 @@ class TestCIWorkflows(unittest.TestCase):
             "            runner: macos-26\n"
             "            architecture: arm64\n"
             "            python_version: '3.12.10'\n"
-            "            constraint: requirements-macos-py312.txt\n"
+            "            constraint: requirements-macos-py312.lock\n"
             "            expected_platform: darwin\n"
             "            expected_machine: arm64\n"
             "            venv_python: bin/python\n",
@@ -3684,7 +3705,7 @@ class TestCIWorkflows(unittest.TestCase):
             "            runner: windows-2025\n"
             "            architecture: x64\n"
             "            python_version: '3.12.10'\n"
-            "            constraint: requirements-windows-py312.txt\n"
+            "            constraint: requirements-windows-py312.lock\n"
             "            expected_platform: win32\n"
             "            expected_machine: AMD64\n"
             "            venv_python: Scripts/python.exe\n",
@@ -3703,6 +3724,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-ruff-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "pyright.yml",
@@ -3711,6 +3736,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-pyright-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "godot-smoke.yml",
@@ -3719,6 +3748,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-godot-smoke-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "tcc-conversion-test.yml",
@@ -3727,6 +3760,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-tcc-conversion-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "tcc-conversion-test.yml",
@@ -3735,6 +3772,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-lts-2026-conversion-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "tests.yml",
@@ -3743,6 +3784,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-tests-linux-venv",
                 "/dev/null",
+                LINUX_CONSTRAINT,
+                "3.12.13",
+                "linux",
+                "x86_64",
             ),
             (
                 "tests.yml",
@@ -3751,6 +3796,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "posix",
                 "gm2godot-tests-macos-venv",
                 "/dev/null",
+                MACOS_CONSTRAINT,
+                "3.12.10",
+                "darwin",
+                "arm64",
             ),
             (
                 "tests.yml",
@@ -3759,6 +3808,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "windows",
                 "gm2godot-tests-windows-venv",
                 "nul",
+                WINDOWS_CONSTRAINT,
+                "3.12.10",
+                "win32",
+                "AMD64",
             ),
             (
                 "tests.yml",
@@ -3767,6 +3820,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "windows",
                 "gm2godot-included-files-scale-windows-venv",
                 "nul",
+                WINDOWS_CONSTRAINT,
+                "3.12.10",
+                "win32",
+                "AMD64",
             ),
             (
                 "tests.yml",
@@ -3775,6 +3832,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "windows",
                 "gm2godot-crash-windows-venv",
                 "nul",
+                WINDOWS_CONSTRAINT,
+                "3.12.10",
+                "win32",
+                "AMD64",
             ),
             (
                 "release.yml",
@@ -3783,6 +3844,10 @@ class TestCIWorkflows(unittest.TestCase):
                 "matrix",
                 "gm2godot-release-${{ matrix.name }}-venv",
                 "${{ matrix.pip_config_file }}",
+                "${{ matrix.constraint }}",
+                "${{ matrix.python_version }}",
+                "${{ matrix.expected_platform }}",
+                "${{ matrix.expected_machine }}",
             ),
         )
         workflow_dir = PROJECT_ROOT / ".github" / "workflows"
@@ -3792,6 +3857,48 @@ class TestCIWorkflows(unittest.TestCase):
             "pathlib.Path(os.environ[\"VIRTUAL_ENV\"]).resolve() else 1)'"
         )
 
+        def command_tokens(script: str, command_prefix: str, label: str) -> tuple[str, ...]:
+            lines = script.splitlines()
+            matching_indexes = [
+                index
+                for index, line in enumerate(lines)
+                if line == command_prefix or line.startswith(command_prefix + " ")
+            ]
+            self.assertEqual(
+                len(matching_indexes),
+                1,
+                f"{label}: expected exactly one {command_prefix!r} command",
+            )
+            command_parts: list[str] = []
+            index = matching_indexes[0]
+            while True:
+                part = lines[index].strip()
+                continued = part.endswith("\\")
+                command_parts.append(part[:-1].rstrip() if continued else part)
+                if not continued:
+                    break
+                index += 1
+                self.assertLess(
+                    index,
+                    len(lines),
+                    f"{label}: unterminated command continuation",
+                )
+            return tuple(shlex.split(" ".join(command_parts), comments=True, posix=True))
+
+        def option_value(tokens: tuple[str, ...], option: str, label: str) -> str:
+            self.assertEqual(
+                tokens.count(option),
+                1,
+                f"{label}: expected exactly one {option}",
+            )
+            option_index = tokens.index(option)
+            self.assertLess(
+                option_index + 1,
+                len(tokens),
+                f"{label}: {option} is missing its value",
+            )
+            return tokens[option_index + 1]
+
         self.assertEqual(len(install_jobs), 11)
         for (
             workflow_name,
@@ -3800,6 +3907,10 @@ class TestCIWorkflows(unittest.TestCase):
             platform_kind,
             venv_name,
             pip_config_file,
+            expected_constraint,
+            expected_python,
+            expected_platform,
+            expected_machine,
         ) in install_jobs:
             label = f"{workflow_name}:{job_name}"
             with self.subTest(job=label):
@@ -3827,6 +3938,7 @@ class TestCIWorkflows(unittest.TestCase):
                 )
 
                 guard = 'if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then'
+                bootstrap_preflight = "python scripts/verify_dependency_bootstrap.py"
                 create = 'python -m venv "$venv_dir"'
                 export_path = 'export PATH="$venv_bin:$PATH"'
                 verifier = "python scripts/verify_dependency_environment.py"
@@ -3834,6 +3946,7 @@ class TestCIWorkflows(unittest.TestCase):
                 for required in (
                     guard,
                     "Refusing to reuse dependency environment: $venv_dir",
+                    bootstrap_preflight,
                     create,
                     export_path,
                     "hash -r",
@@ -3841,12 +3954,67 @@ class TestCIWorkflows(unittest.TestCase):
                     verifier,
                 ):
                     self.assertIn(required, script, f"{label}: missing {required!r}")
+
+                preflight_tokens = command_tokens(script, bootstrap_preflight, label)
+                self.assertEqual(
+                    preflight_tokens[:-1],
+                    (
+                        "python",
+                        "scripts/verify_dependency_bootstrap.py",
+                        "--source",
+                        "requirements-bootstrap.txt",
+                        "--policy",
+                        "stable",
+                        "--constraint",
+                        expected_constraint,
+                        "--output",
+                    ),
+                )
+                self.assertTrue(preflight_tokens[-1].startswith("$RUNNER_TEMP/"))
+                self.assertTrue(preflight_tokens[-1].endswith("-bootstrap.json"))
+
+                verifier_tokens = command_tokens(script, verifier, label)
+                self.assertEqual(
+                    verifier_tokens[:2],
+                    ("python", "scripts/verify_dependency_environment.py"),
+                )
+                verifier_expectations = {
+                    "--constraint": expected_constraint,
+                    "--mode": "subset",
+                    "--expected-python": expected_python,
+                    "--expected-platform": expected_platform,
+                    "--expected-machine": expected_machine,
+                    "--bootstrap": "requirements-bootstrap.txt",
+                    "--bootstrap-policy": "stable",
+                }
+                for option, expected_value in verifier_expectations.items():
+                    with self.subTest(job=label, verifier_option=option):
+                        self.assertEqual(
+                            option_value(verifier_tokens, option, label),
+                            expected_value,
+                        )
+                self.assertEqual(verifier_tokens[-2], "--output")
+                self.assertTrue(verifier_tokens[-1].startswith("$RUNNER_TEMP/"))
+                self.assertTrue(verifier_tokens[-1].endswith("-dependencies.json"))
+                verifier_options = verifier_tokens[2::2]
+                self.assertEqual(
+                    len(verifier_tokens[2:]) % 2,
+                    0,
+                    f"{label}: verifier arguments must remain option/value pairs",
+                )
+                self.assertFalse(
+                    set(verifier_options)
+                    - {*verifier_expectations, "--require", "--output"},
+                    f"{label}: verifier has an unexpected option",
+                )
+                self.assertNotIn("--expected-pip", verifier_tokens)
                 expected_install_count = 3 if label == "tests.yml:test" else 2
                 self.assertEqual(
                     script.count(install_command),
                     expected_install_count,
                 )
                 self.assertLess(script.index(guard), script.index(create))
+                self.assertLess(script.index(bootstrap_preflight), script.index(create))
                 self.assertLess(script.index(create), script.index(export_path))
                 self.assertLess(script.index(export_path), script.index(prefix_probe))
                 self.assertLess(
@@ -3889,6 +4057,17 @@ class TestCIWorkflows(unittest.TestCase):
                         "printf '%s\\n' \"$venv_path_native\" >> \"$github_path_file\"",
                         script,
                     )
+                if platform_kind == "windows":
+                    install_step = job[step_start:next_step]
+                    metadata, separator, _ = install_step.partition("        run: |\n")
+                    self.assertTrue(separator, f"{label}: install step run block is missing")
+                    self.assertIn("        shell: bash\n", metadata)
+                    self.assertNotIn("\\", expected_constraint)
+                if platform_kind == "matrix":
+                    self.assertIn(
+                        "    defaults:\n      run:\n        shell: bash\n",
+                        job_metadata,
+                    )
 
     def test_pip_install_inventory_is_constrained_and_uses_module_entrypoints(
         self,
@@ -3914,31 +4093,27 @@ class TestCIWorkflows(unittest.TestCase):
         ] = {
             ".github/workflows/code-health.yml": Counter(
                 {
-                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, ("pip",)): 1,
                     (LINUX_CONSTRAINT, (f"ruff=={RUFF_VERSION}",)): 1,
                 }
             ),
             ".github/workflows/dependency-locks.yml": Counter(
                 {
-                    ("$CONSTRAINT", ("pip==$CURRENT_PIP",)): 1,
-                    ("$CONSTRAINT", ("pip-tools==$CURRENT_PIP_TOOLS",)): 1,
-                    ("$CONSTRAINT", ("pip==$CANDIDATE_PIP",)): 2,
-                    (
-                        "$CONSTRAINT",
-                        ("pip-tools==$CANDIDATE_PIP_TOOLS",),
-                    ): 1,
+                    ("$CONSTRAINT", ("pip",)): 4,
+                    ("$CONSTRAINT", ("pip-tools",)): 1,
+                    ("$CONSTRAINT", ("-r", "$BOOTSTRAP_SOURCE")): 2,
                     ("$CONSTRAINT", ("-r", "requirements-lock.in")): 1,
                 }
             ),
             ".github/workflows/godot-smoke.yml": Counter(
                 {
-                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, ("pip",)): 1,
                     (LINUX_CONSTRAINT, (f"Pillow=={PILLOW_VERSION}",)): 1,
                 }
             ),
             ".github/workflows/pyright.yml": Counter(
                 {
-                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, ("pip",)): 1,
                     (
                         LINUX_CONSTRAINT,
                         (
@@ -3953,7 +4128,7 @@ class TestCIWorkflows(unittest.TestCase):
                 {
                     (
                         "${{ matrix.constraint }}",
-                        (f"pip=={PIP_VERSION}",),
+                        ("pip",),
                     ): 1,
                     (
                         "${{ matrix.constraint }}",
@@ -3967,27 +4142,30 @@ class TestCIWorkflows(unittest.TestCase):
             ),
             ".github/workflows/tcc-conversion-test.yml": Counter(
                 {
-                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 2,
+                    (LINUX_CONSTRAINT, ("pip",)): 2,
                     (LINUX_CONSTRAINT, (f"Pillow=={PILLOW_VERSION}",)): 2,
                 }
             ),
             ".github/workflows/tests.yml": Counter(
                 {
-                    (LINUX_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (LINUX_CONSTRAINT, ("pip",)): 1,
                     (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
                     (
                         LINUX_CONSTRAINT,
-                        (f"coverage=={COVERAGE_VERSION}",),
+                        (
+                            f"coverage=={COVERAGE_VERSION}",
+                            f"packaging=={PACKAGING_VERSION}",
+                        ),
                     ): 1,
-                    (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (MACOS_CONSTRAINT, ("pip",)): 1,
                     (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
-                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 3,
+                    (WINDOWS_CONSTRAINT, ("pip",)): 3,
                     (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 3,
                 }
             ),
             "build_macos.sh": Counter(
                 {
-                    (MACOS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (MACOS_CONSTRAINT, ("pip",)): 1,
                     (
                         MACOS_CONSTRAINT,
                         (
@@ -4000,7 +4178,7 @@ class TestCIWorkflows(unittest.TestCase):
             ),
             "build.bat": Counter(
                 {
-                    (WINDOWS_CONSTRAINT, (f"pip=={PIP_VERSION}",)): 1,
+                    (WINDOWS_CONSTRAINT, ("pip",)): 1,
                     (
                         WINDOWS_CONSTRAINT,
                         (
@@ -4013,9 +4191,8 @@ class TestCIWorkflows(unittest.TestCase):
             ),
         }
         exact_direct_pins = {
-            "pip": PIP_VERSION,
-            "pip-tools": PIP_TOOLS_VERSION,
             "Pillow": PILLOW_VERSION,
+            "packaging": PACKAGING_VERSION,
             "PyInstaller": PYINSTALLER_VERSION,
             "pyright": PYRIGHT_VERSION,
             "ruff": RUFF_VERSION,
@@ -4089,7 +4266,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
         self.assertEqual(non_dependency_lock_command_count, 27)
-        self.assertEqual(dependency_lock_command_count, 6)
+        self.assertEqual(dependency_lock_command_count, 8)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
         self,
@@ -4104,7 +4281,7 @@ class TestCIWorkflows(unittest.TestCase):
                 "  --no-input \\\n"
                 "  install \\\n"
                 "  --no-cache-dir --only-binary=:all: \\\n"
-                "  --constraint constraints/requirements-linux-py312.txt \\\n"
+                "  --constraint constraints/requirements-linux-py312.lock \\\n"
                 "  Pillow==12.3.0\n",
                 encoding="utf-8",
             )
@@ -4285,8 +4462,176 @@ class TestCIWorkflows(unittest.TestCase):
                     ):
                         _pip_install_commands(path)
 
+    def test_dependabot_boundary_uses_commit_diff_and_rejects_lock_edits(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "code-health.yml"
+        ).read_text(encoding="utf-8")
+        boundary = _workflow_run_script(
+            workflow,
+            "Enforce Dependabot authored-input boundary",
+        )
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            repository = Path(raw_directory)
+
+            def git(*arguments: str) -> str:
+                result = _run_git(repository, *arguments, check=False)
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"git {' '.join(arguments)} failed: {result.stderr}",
+                )
+                return result.stdout.strip()
+
+            git("init", "--quiet", "--object-format=sha1")
+            git("config", "user.name", "GM2Godot CI")
+            git("config", "user.email", "ci@example.invalid")
+            (repository / "constraints").mkdir()
+            (repository / "requirements-bootstrap.txt").write_text(
+                "pip==1\npip-tools==1\n",
+                encoding="utf-8",
+            )
+            (repository / "constraints" / "requirements-linux-py312.lock").write_text(
+                "pip==1\n",
+                encoding="utf-8",
+            )
+            (repository / "README.md").write_text("base\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "--quiet", "-m", "base")
+            base_sha = git("rev-parse", "HEAD")
+
+            (repository / "requirements-bootstrap.txt").write_text(
+                "pip==2\npip-tools==2\n",
+                encoding="utf-8",
+            )
+            git("add", "requirements-bootstrap.txt")
+            git("commit", "--quiet", "-m", "bootstrap only")
+            bootstrap_sha = git("rev-parse", "HEAD")
+
+            (repository / "README.md").write_text("mixed\n", encoding="utf-8")
+            git("add", "README.md")
+            git("commit", "--quiet", "-m", "mixed")
+            mixed_sha = git("rev-parse", "HEAD")
+
+            git("switch", "--quiet", "--detach", base_sha)
+            lock_path = repository / "constraints" / "requirements-linux-py312.lock"
+            lock_path.write_text("pip==2\n", encoding="utf-8")
+            git("add", lock_path.relative_to(repository).as_posix())
+            git("commit", "--quiet", "-m", "lock only")
+            lock_sha = git("rev-parse", "HEAD")
+
+            git("switch", "--quiet", "--detach", base_sha)
+            (repository / "README.md").write_text("other\n", encoding="utf-8")
+            git("add", "README.md")
+            git("commit", "--quiet", "-m", "other only")
+            other_sha = git("rev-parse", "HEAD")
+
+            git("switch", "--quiet", "--detach", base_sha)
+            # A blob-to-gitlink change has Git status T. The boundary must not
+            # hide unusual path-type changes through a restrictive diff filter.
+            git(
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                f"160000,{base_sha},constraints/requirements-linux-py312.lock",
+            )
+            git("commit", "--quiet", "-m", "lock type change")
+            lock_type_change_sha = git("rev-parse", "HEAD")
+
+            for label, case_base_sha, head_sha, expected_status in (
+                ("bootstrap-only", base_sha, bootstrap_sha, 0),
+                ("bootstrap-mixed", base_sha, mixed_sha, 1),
+                ("native-lock", base_sha, lock_sha, 1),
+                ("native-lock-type-change", base_sha, lock_type_change_sha, 1),
+                ("unrelated-dependabot", base_sha, other_sha, 0),
+                # The PR base branch may advance after Dependabot creates its
+                # proposal. Only changes from the commits' merge base through
+                # the PR head belong to the proposal in that case.
+                ("diverged-base-bootstrap-only", other_sha, bootstrap_sha, 0),
+            ):
+                environment = _isolated_git_environment()
+                environment.update(
+                    {
+                        "PR_BASE_SHA": case_base_sha,
+                        "PR_HEAD_SHA": head_sha,
+                    }
+                )
+                result = subprocess.run(
+                    ["bash", "-c", boundary],
+                    cwd=repository,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                with self.subTest(case=label):
+                    self.assertEqual(result.returncode, expected_status, result.stderr)
+
+            real_git = shutil.which("git")
+            self.assertIsNotNone(real_git)
+            fake_binary_directory = repository / "fake-bin"
+            fake_binary_directory.mkdir()
+            fake_git = fake_binary_directory / "git"
+            fake_git.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "if [[ ${1:-} == diff ]]; then\n"
+                "  printf 'requirements-bootstrap.txt\\0'\n"
+                "  printf 'fatal: incomplete tree\\n' >&2\n"
+                "  exit 128\n"
+                "fi\n"
+                f"exec {shlex.quote(cast(str, real_git))} \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o700)
+            failed_diff_environment = _isolated_git_environment()
+            failed_diff_environment.update(
+                {
+                    "PATH": os.pathsep.join(
+                        (
+                            str(fake_binary_directory),
+                            failed_diff_environment.get("PATH", ""),
+                        )
+                    ),
+                    "PR_BASE_SHA": base_sha,
+                    "PR_HEAD_SHA": bootstrap_sha,
+                }
+            )
+            failed_diff = subprocess.run(
+                ["bash", "-c", boundary],
+                cwd=repository,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=failed_diff_environment,
+            )
+            self.assertNotEqual(failed_diff.returncode, 0)
+            self.assertIn(
+                "could not enumerate the complete PR diff",
+                failed_diff.stderr,
+            )
+
+    def test_dependabot_pip_updates_are_security_only_and_pair_grouped(self) -> None:
+        configuration = (PROJECT_ROOT / ".github" / "dependabot.yml").read_text(
+            encoding="utf-8"
+        )
+        pip_block_start = configuration.index('  - package-ecosystem: "pip"')
+        pip_block = configuration[pip_block_start:]
+        self.assertIn('    directory: "/"\n', pip_block)
+        self.assertIn("    open-pull-requests-limit: 0\n", pip_block)
+        self.assertIn("      pip-bootstrap-security:\n", pip_block)
+        self.assertIn("        applies-to: security-updates\n", pip_block)
+        self.assertRegex(
+            pip_block,
+            r"(?m)^        patterns:\n          - \"pip\"\n          - \"pip-tools\"$",
+        )
+        self.assertEqual(configuration.count('package-ecosystem: "pip"'), 1)
+
     def test_dependency_lock_inputs_and_workflow_pins_stay_synchronized(self) -> None:
         runtime_pins = _exact_requirement_pins(PROJECT_ROOT / "requirements.txt")
+        bootstrap_pins = _exact_requirement_pins(
+            PROJECT_ROOT / "requirements-bootstrap.txt"
+        )
         tooling_pins = _exact_requirement_pins(PROJECT_ROOT / "requirements-tooling.txt")
         self.assertEqual(
             runtime_pins,
@@ -4298,11 +4643,17 @@ class TestCIWorkflows(unittest.TestCase):
             },
         )
         self.assertEqual(
+            bootstrap_pins,
+            {
+                "pip": PIP_VERSION,
+                "pip-tools": PIP_TOOLS_VERSION,
+            },
+        )
+        self.assertEqual(
             tooling_pins,
             {
                 "coverage": COVERAGE_VERSION,
-                "pip": PIP_VERSION,
-                "pip-tools": PIP_TOOLS_VERSION,
+                "packaging": PACKAGING_VERSION,
                 "pyinstaller": PYINSTALLER_VERSION,
                 "pyright": PYRIGHT_VERSION,
                 "ruff": RUFF_VERSION,
@@ -4317,13 +4668,29 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertEqual(
             lock_input_lines,
-            ("-r requirements.txt", "-r requirements-tooling.txt"),
+            (
+                "-r requirements-bootstrap.txt",
+                "-r requirements.txt",
+                "-r requirements-tooling.txt",
+            ),
         )
 
+        constraints_directory = PROJECT_ROOT / "constraints"
+        self.assertEqual(
+            tuple(sorted(path.name for path in constraints_directory.glob("*.lock"))),
+            (
+                "requirements-linux-py312.lock",
+                "requirements-macos-py312.lock",
+                "requirements-windows-py312.lock",
+            ),
+        )
+        self.assertFalse(tuple(constraints_directory.glob("*.txt")))
+        self.assertFalse(tuple(constraints_directory.glob("*.in")))
+
         for constraint_name in (
-            "requirements-linux-py312.txt",
-            "requirements-macos-py312.txt",
-            "requirements-windows-py312.txt",
+            "requirements-linux-py312.lock",
+            "requirements-macos-py312.lock",
+            "requirements-windows-py312.lock",
         ):
             with self.subTest(constraint=constraint_name):
                 constraint_pins = _exact_requirement_pins(
@@ -4333,10 +4700,13 @@ class TestCIWorkflows(unittest.TestCase):
                     constraint_pins.get("coverage"),
                     tooling_pins["coverage"],
                 )
-                self.assertEqual(constraint_pins.get("pip"), tooling_pins["pip"])
+                self.assertEqual(
+                    constraint_pins.get("pip"),
+                    bootstrap_pins["pip"],
+                )
                 self.assertEqual(
                     constraint_pins.get("pip-tools"),
-                    tooling_pins["pip-tools"],
+                    bootstrap_pins["pip-tools"],
                 )
 
         workflow = (
@@ -4373,13 +4743,18 @@ class TestCIWorkflows(unittest.TestCase):
             content,
         )
         self.assertIn("RECEIPT_DIR: dependency-locks/artifact/receipts", content)
-        self.assertIn(
-            "path: ${{ env.ARTIFACT_DIR }}",
-            content,
+        upload_marker = "      - name: Upload dependency lock evidence\n"
+        enforcement_marker = (
+            "      - name: Enforce self-hosting and committed repeatability\n"
         )
-        self.assertIn("if: ${{ always() }}", content)
-        self.assertIn("if-no-files-found: warn", content)
-        self.assertIn("archive: true", content)
+        upload_start = content.index(upload_marker)
+        enforcement_start = content.index(enforcement_marker)
+        self.assertLess(upload_start, enforcement_start)
+        upload_step = content[upload_start:enforcement_start]
+        self.assertEqual(upload_step.count("        if: ${{ always() }}\n"), 1)
+        self.assertIn("          path: ${{ env.ARTIFACT_DIR }}\n", upload_step)
+        self.assertIn("          if-no-files-found: warn\n", upload_step)
+        self.assertIn("          archive: true\n", upload_step)
         work_root_guard = 'if [[ -e "$WORK_ROOT" || -L "$WORK_ROOT" ]]; then'
         self.assertIn(work_root_guard, content)
         self.assertIn(
@@ -4402,10 +4777,740 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(receipt=receipt_name):
                 self.assertEqual(content.count(f'              "{receipt_name}",'), 1)
+        submission_job = _workflow_job_section(content, "submit-dependency-graphs")
+        self.assertIn("      actions: read\n      contents: write\n", submission_job)
+        self.assertNotIn("actions/checkout@", submission_job)
+        self.assertIn("pattern: dependency-lock-*-py*", submission_job)
+        self.assertIn("digest-mismatch: error", submission_job)
+        self.assertIn("github.sha == github.event.after", submission_job)
         self.assertLess(
-            content.index("- name: Upload dependency lock evidence"),
-            content.index("- name: Enforce self-hosting and committed repeatability"),
+            submission_job.index("Fetch authoritative native locks at exact push"),
+            submission_job.index("Validate every snapshot before submission"),
         )
+        validator = _workflow_run_script(
+            content=content,
+            step_name="Validate every snapshot before submission",
+        )
+        self.assertNotIn("GH_TOKEN", validator)
+        self.assertIn("candidate_bytes != authoritative_bytes", validator)
+
+    def test_dependency_lock_stale_candidate_fails_after_evidence_upload_step(self) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        upload_marker = "      - name: Upload dependency lock evidence\n"
+        enforcement_marker = (
+            "      - name: Enforce self-hosting and committed repeatability\n"
+        )
+        self.assertLess(content.index(upload_marker), content.index(enforcement_marker))
+        enforcement = _workflow_run_script(
+            content,
+            "Enforce self-hosting and committed repeatability",
+        )
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory)
+            receipt_directory = directory / "receipts"
+            receipt_directory.mkdir()
+            committed = directory / "committed.lock"
+            candidate = directory / "candidate.lock"
+            selfhost = directory / "selfhost.lock"
+            committed.write_text("pip==1\n", encoding="utf-8")
+            candidate.write_text("pip==2\n", encoding="utf-8")
+            selfhost.write_bytes(candidate.read_bytes())
+            for receipt_name in ("fresh-1.json", "fresh-2.json"):
+                (receipt_directory / receipt_name).write_text("{}\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "COMMITTED_CONSTRAINT": str(committed),
+                    "CANDIDATE_CONSTRAINT": str(candidate),
+                    "SELFHOST_CONSTRAINT": str(selfhost),
+                    "RECEIPT_DIR": str(receipt_directory),
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", "-c", enforcement],
+                cwd=directory,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "Committed native constraint is stale; review the uploaded candidate artifact.",
+            result.stderr,
+        )
+
+    def test_authoritative_dependency_lock_fetch_contract(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        fetcher = _workflow_run_script(
+            workflow,
+            "Fetch authoritative native locks at exact push",
+        )
+        repository_name = "Infiland/GM2Godot"
+        repository_sha = "0123456789abcdef0123456789abcdef01234567"
+        lock_paths = {
+            "linux-x64": "constraints/requirements-linux-py312.lock",
+            "macos-arm64": "constraints/requirements-macos-py312.lock",
+            "windows-x64": "constraints/requirements-windows-py312.lock",
+        }
+        expected_endpoints = {
+            platform: (
+                f"/repos/{quote(repository_name, safe='/')}/contents/"
+                f"{quote(path, safe='/')}?ref={quote(repository_sha, safe='')}"
+            )
+            for platform, path in lock_paths.items()
+        }
+        lock_bytes = {
+            platform: (PROJECT_ROOT / path).read_bytes()
+            for platform, path in lock_paths.items()
+        }
+
+        def response_bytes(platform: str) -> bytes:
+            path = lock_paths[platform]
+            content = lock_bytes[platform]
+            blob_header = f"blob {len(content)}\0".encode("ascii")
+            return (
+                json.dumps(
+                    {
+                        "content": base64.encodebytes(content).decode("ascii"),
+                        "encoding": "base64",
+                        "name": Path(path).name,
+                        "path": path,
+                        "sha": hashlib.sha1(blob_header + content).hexdigest(),
+                        "size": len(content),
+                        "type": "file",
+                    },
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode("utf-8")
+
+        def run_fetcher(
+            root: Path,
+            mutate: Callable[[str, dict[str, bytes]], None] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            response_root = root / "fake-responses"
+            response_root.mkdir()
+            responses = {
+                platform: response_bytes(platform) for platform in lock_paths
+            }
+            if mutate is not None:
+                mutate("linux-x64", responses)
+            for platform, payload in responses.items():
+                (response_root / f"{platform}.json").write_bytes(payload)
+
+            binary_root = root / "bin"
+            binary_root.mkdir()
+            fake_gh = binary_root / "gh"
+            fake_gh.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "if [[ \" $* \" != *\" --method GET \"* ]]; then\n"
+                "  exit 64\n"
+                "fi\n"
+                "endpoint=\"${!#}\"\n"
+                "printf '%s\\n' \"$endpoint\" >> \"$FAKE_GH_LOG\"\n"
+                "case \"$endpoint\" in\n"
+                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                'requirements-linux-py312.lock?ref=$FAKE_EXPECTED_SHA") '
+                "cat \"$FAKE_RESPONSE_ROOT/linux-x64.json\" ;;\n"
+                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                'requirements-macos-py312.lock?ref=$FAKE_EXPECTED_SHA") '
+                "cat \"$FAKE_RESPONSE_ROOT/macos-arm64.json\" ;;\n"
+                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                'requirements-windows-py312.lock?ref=$FAKE_EXPECTED_SHA") '
+                "cat \"$FAKE_RESPONSE_ROOT/windows-x64.json\" ;;\n"
+                "  *) exit 65 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            fake_gh.chmod(0o700)
+            fetch_root = root / "authoritative-fetch"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "AUTHORITATIVE_FETCH_ROOT": str(fetch_root),
+                    "AUTHORITATIVE_LOCK_ROOT": str(fetch_root / "locks"),
+                    "EXPECTED_REPOSITORY": repository_name,
+                    "EXPECTED_SHA": repository_sha,
+                    "FAKE_EXPECTED_REPOSITORY": repository_name,
+                    "FAKE_EXPECTED_SHA": repository_sha,
+                    "FAKE_GH_LOG": str(root / "gh.log"),
+                    "FAKE_RESPONSE_ROOT": str(response_root),
+                    "GH_TOKEN": "test-token",
+                    "PATH": f"{binary_root}{os.pathsep}{os.defpath}",
+                }
+            )
+            return subprocess.run(
+                ["bash", "-c", fetcher],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (root / "gh.log").read_text(encoding="utf-8").splitlines(),
+                list(expected_endpoints.values()),
+            )
+            for platform, path in lock_paths.items():
+                self.assertEqual(
+                    (root / "authoritative-fetch" / "locks" / Path(path).name).read_bytes(),
+                    lock_bytes[platform],
+                )
+
+        def duplicate_response_key(
+            _platform: str,
+            responses: dict[str, bytes],
+        ) -> None:
+            platform = "macos-arm64"
+            payload = responses[platform]
+            responses[platform] = b'{"sha":"' + (b"0" * 40) + b'",' + payload[1:]
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root, mutate=duplicate_response_key)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not strict UTF-8 JSON", result.stderr)
+            self.assertEqual(
+                tuple((root / "authoritative-fetch" / "locks").iterdir()),
+                (),
+            )
+
+        def truncate_response_json(
+            _platform: str,
+            responses: dict[str, bytes],
+        ) -> None:
+            platform = "linux-x64"
+            responses[platform] = responses[platform].removesuffix(b"}\n")
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root, mutate=truncate_response_json)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not strict UTF-8 JSON", result.stderr)
+            self.assertEqual(
+                tuple((root / "authoritative-fetch" / "locks").iterdir()),
+                (),
+            )
+
+        def shorten_base64_content(
+            _platform: str,
+            responses: dict[str, bytes],
+        ) -> None:
+            platform = "windows-x64"
+            response = cast(dict[str, object], json.loads(responses[platform]))
+            response["content"] = base64.encodebytes(lock_bytes[platform][:-1]).decode(
+                "ascii"
+            )
+            responses[platform] = json.dumps(response).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root, mutate=shorten_base64_content)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("authoritative lock size does not match its response", result.stderr)
+            self.assertEqual(
+                tuple((root / "authoritative-fetch" / "locks").iterdir()),
+                (),
+            )
+
+        def declare_oversized_lock(
+            _platform: str,
+            responses: dict[str, bytes],
+        ) -> None:
+            platform = "windows-x64"
+            response = cast(dict[str, object], json.loads(responses[platform]))
+            response["size"] = 1024 * 1024 + 1
+            responses[platform] = json.dumps(response).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root, mutate=declare_oversized_lock)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("authoritative lock size is outside policy", result.stderr)
+            self.assertEqual(
+                tuple((root / "authoritative-fetch" / "locks").iterdir()),
+                (),
+            )
+
+        def omit_native_response(
+            _platform: str,
+            responses: dict[str, bytes],
+        ) -> None:
+            del responses["macos-arm64"]
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            result = run_fetcher(root, mutate=omit_native_response)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                tuple((root / "authoritative-fetch" / "locks").iterdir()),
+                (),
+            )
+
+    def test_privileged_dependency_snapshot_validator_matches_producer_contract(
+        self,
+    ) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        validator = _workflow_run_script(
+            workflow,
+            "Validate every snapshot before submission",
+        )
+        repository_name = "Infiland/GM2Godot"
+        repository_sha = "0123456789abcdef0123456789abcdef01234567"
+        repository_ref = "refs/heads/main"
+        run_id = "12345"
+        expected_attempt = "2"
+        source_fingerprint = hashlib.sha256(b"authored dependency inputs").hexdigest()
+        platforms = {
+            "linux-x64": (
+                "dependency-lock-linux-x64-py3.12.13",
+                "constraints/requirements-linux-py312.lock",
+                "3.12.13",
+                "linux",
+                "x86_64",
+            ),
+            "macos-arm64": (
+                "dependency-lock-macos-arm64-py3.12.10",
+                "constraints/requirements-macos-py312.lock",
+                "3.12.10",
+                "darwin",
+                "arm64",
+            ),
+            "windows-x64": (
+                "dependency-lock-windows-x64-py3.12.10",
+                "constraints/requirements-windows-py312.lock",
+                "3.12.10",
+                "win32",
+                "AMD64",
+            ),
+        }
+        authoritative = {
+            platform: dependency_snapshot.load_constraint(PROJECT_ROOT / constraint_path)
+            for platform, (_, constraint_path, _, _, _) in platforms.items()
+        }
+
+        def build_artifacts(
+            root: Path,
+            *,
+            snapshot_attempt: str,
+            candidate_kind: str = "authoritative",
+            mutate: Callable[[str, dict[str, bytes]], None] | None = None,
+        ) -> tuple[Path, Path]:
+            raw_root = root / "raw"
+            raw_root.mkdir()
+            output_root = root / "validated"
+            for platform, (
+                artifact_name,
+                constraint_path,
+                python_version,
+                sys_platform,
+                machine,
+            ) in platforms.items():
+                artifact_directory = raw_root / artifact_name
+                artifact_directory.mkdir()
+                constraint_name = Path(constraint_path).name
+                candidate_member = f"candidate/{constraint_name}"
+                policy = authoritative[platform]
+                candidate_bytes = policy.file.content
+                candidate_pins = dict(policy.pins)
+                if candidate_kind == "tiny-forgery":
+                    pip_version = candidate_pins["pip"]
+                    candidate_bytes = f"pip=={pip_version}\n".encode("ascii")
+                    candidate_pins = {"pip": pip_version}
+                elif candidate_kind == "mutated-candidate":
+                    if platform == "linux-x64":
+                        candidate_bytes += b"\n# coherent artifact-only mutation\n"
+                elif candidate_kind != "authoritative":
+                    raise AssertionError(f"Unsupported candidate kind: {candidate_kind}")
+
+                candidate_sha = hashlib.sha256(candidate_bytes).hexdigest()
+                candidate_fingerprint = dependency_snapshot.pin_fingerprint(candidate_pins)
+                pip_version = candidate_pins["pip"]
+                receipt = {
+                    "schema_version": 2,
+                    "status": "verified",
+                    "constraint": {
+                        "sha256": candidate_sha,
+                        "fingerprint": candidate_fingerprint,
+                    },
+                    "observation": {
+                        "installed_fingerprint": candidate_fingerprint,
+                    },
+                    "expected_environment": {
+                        "python_full_version": python_version,
+                        "sys_platform": sys_platform,
+                        "platform_machine": machine,
+                        "pip_version": pip_version,
+                    },
+                }
+                receipt_bytes = (
+                    json.dumps(receipt, ensure_ascii=True, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                constraint = dependency_snapshot.ConstraintPolicy(
+                    file=dependency_snapshot.RegularFile(
+                        path=Path(candidate_member),
+                        content=candidate_bytes,
+                        sha256=candidate_sha,
+                    ),
+                    pins=candidate_pins,
+                )
+                receipt_file = dependency_snapshot.RegularFile(
+                    path=Path("receipts/fresh-2.json"),
+                    content=receipt_bytes,
+                    sha256=hashlib.sha256(receipt_bytes).hexdigest(),
+                )
+                authored = dependency_snapshot.AuthoredPolicy(
+                    files=(),
+                    roots={
+                        name: dependency_snapshot.AuthoredRoot(
+                            name=name,
+                            version=version,
+                            extras=frozenset(),
+                            scope="development",
+                            sources=(constraint_path,),
+                        )
+                        for name, version in candidate_pins.items()
+                    },
+                    fingerprint=source_fingerprint,
+                )
+                installed = {
+                    name: dependency_snapshot.InstalledDistribution(
+                        name=name,
+                        version=version,
+                        requirements=(),
+                        provided_extras=frozenset(),
+                    )
+                    for name, version in candidate_pins.items()
+                }
+                inspect = dependency_snapshot.InspectReport(
+                    pip_version=pip_version,
+                    environment={"python_full_version": python_version},
+                    installed=installed,
+                )
+                graph = dependency_snapshot.DependencyGraph(
+                    scopes={name: "development" for name in candidate_pins},
+                    direct=frozenset(candidate_pins),
+                    edges={name: frozenset() for name in candidate_pins},
+                )
+                snapshot = dependency_snapshot.build_snapshot(
+                    constraint=constraint,
+                    receipt_file=receipt_file,
+                    authored=authored,
+                    inspect=inspect,
+                    graph=graph,
+                    platform_label=platform,
+                    repository=repository_name,
+                    sha=repository_sha,
+                    ref=repository_ref,
+                    run_id=run_id,
+                    run_attempt=snapshot_attempt,
+                    scanned="2026-09-02T12:34:56Z",
+                )
+                snapshot_bytes = (
+                    json.dumps(
+                        snapshot,
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+                members = {
+                    candidate_member: candidate_bytes,
+                    "dependency-submission.json": snapshot_bytes,
+                    "receipts/fresh-2.json": receipt_bytes,
+                }
+                if mutate is not None:
+                    mutate(platform, members)
+
+                archive_path = artifact_directory / f"{artifact_name}.zip"
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    for member_name, payload in members.items():
+                        information = zipfile.ZipInfo(member_name)
+                        information.create_system = 3
+                        information.external_attr = (stat.S_IFREG | 0o600) << 16
+                        archive.writestr(information, payload)
+            return raw_root, output_root
+
+        def run_validator(
+            root: Path,
+            *,
+            snapshot_attempt: str,
+            candidate_kind: str = "authoritative",
+            mutate: Callable[[str, dict[str, bytes]], None] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            raw_root, output_root = build_artifacts(
+                root,
+                snapshot_attempt=snapshot_attempt,
+                candidate_kind=candidate_kind,
+                mutate=mutate,
+            )
+            authoritative_root = root / "authoritative"
+            authoritative_root.mkdir()
+            for platform, policy in authoritative.items():
+                constraint_path = platforms[platform][1]
+                (authoritative_root / Path(constraint_path).name).write_bytes(
+                    policy.file.content
+                )
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "AUTHORITATIVE_LOCK_ROOT": str(authoritative_root),
+                    "RAW_ARTIFACT_ROOT": str(raw_root),
+                    "SUBMISSION_ROOT": str(output_root),
+                    "EXPECTED_REPOSITORY": repository_name,
+                    "EXPECTED_SHA": repository_sha,
+                    "EXPECTED_REF": repository_ref,
+                    "EXPECTED_RUN_ID": run_id,
+                    "EXPECTED_RUN_ATTEMPT": expected_attempt,
+                }
+            )
+            return subprocess.run(
+                ["bash", "-c", validator],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+        for label, snapshot_attempt in (("current", "2"), ("prior-rerun", "1")):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as raw_directory:
+                root = Path(raw_directory)
+                result = run_validator(root, snapshot_attempt=snapshot_attempt)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    tuple(sorted(path.name for path in (root / "validated").iterdir())),
+                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                )
+
+        def drift_html_url(platform: str, members: dict[str, bytes]) -> None:
+            if platform != "linux-x64":
+                return
+            snapshot = cast(
+                dict[str, object],
+                json.loads(members["dependency-submission.json"]),
+            )
+            job = cast(dict[str, object], snapshot["job"])
+            job["html_url"] = f"{job['html_url']}/attempts/2"
+            members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def duplicate_sha(platform: str, members: dict[str, bytes]) -> None:
+            if platform != "linux-x64":
+                return
+            payload = members["dependency-submission.json"]
+            members["dependency-submission.json"] = (
+                b'{"sha":"' + repository_sha.encode("ascii") + b'",' + payload[1:]
+            )
+
+        def drift_pip_attestation(platform: str, members: dict[str, bytes]) -> None:
+            if platform != "linux-x64":
+                return
+            receipt = cast(
+                dict[str, object],
+                json.loads(members["receipts/fresh-2.json"]),
+            )
+            expected_environment = cast(
+                dict[str, object],
+                receipt["expected_environment"],
+            )
+            expected_environment["pip_version"] = "999.0"
+            receipt_bytes = json.dumps(receipt).encode("utf-8")
+            members["receipts/fresh-2.json"] = receipt_bytes
+
+            snapshot = cast(
+                dict[str, object],
+                json.loads(members["dependency-submission.json"]),
+            )
+            metadata = cast(dict[str, object], snapshot["metadata"])
+            metadata["pip_version"] = "999.0"
+            metadata["verification_receipt_sha256"] = hashlib.sha256(
+                receipt_bytes
+            ).hexdigest()
+            members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        for label, snapshot_attempt, candidate_kind, mutate, expected_error in (
+            (
+                "tiny-artifact-forgery",
+                "2",
+                "tiny-forgery",
+                None,
+                "candidate lock does not match authoritative",
+            ),
+            (
+                "coherent-mutated-candidate",
+                "2",
+                "mutated-candidate",
+                None,
+                "candidate lock does not match authoritative",
+            ),
+            (
+                "future-attempt",
+                "3",
+                "authoritative",
+                None,
+                "snapshot job binding is wrong",
+            ),
+            (
+                "producer-contract-drift",
+                "2",
+                "authoritative",
+                drift_html_url,
+                "job binding is wrong",
+            ),
+            (
+                "duplicate-json",
+                "2",
+                "authoritative",
+                duplicate_sha,
+                "not strict UTF-8 JSON",
+            ),
+            (
+                "pip-attestation",
+                "2",
+                "authoritative",
+                drift_pip_attestation,
+                "native tuple is wrong",
+            ),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as raw_directory:
+                result = run_validator(
+                    Path(raw_directory),
+                    snapshot_attempt=snapshot_attempt,
+                    candidate_kind=candidate_kind,
+                    mutate=mutate,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+
+    def test_dependency_submission_rechecks_authoritative_main_before_post(
+        self,
+    ) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        submit = _workflow_run_script(
+            workflow,
+            "Submit validated native dependency graphs",
+        )
+        repository_sha = "0123456789abcdef0123456789abcdef01234567"
+
+        def run_submit(
+            root: Path,
+            current_main_sha: str,
+            *,
+            stale_after_first_post: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            submission_root = root / "validated"
+            submission_root.mkdir()
+            for platform in ("linux-x64", "macos-arm64", "windows-x64"):
+                (submission_root / f"{platform}.json").write_text(
+                    "{}\n",
+                    encoding="utf-8",
+                )
+            fake_binary_directory = root / "bin"
+            fake_binary_directory.mkdir()
+            fake_gh = fake_binary_directory / "gh"
+            fake_gh.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "printf '%s\\n' \"$*\" >> \"$FAKE_GH_LOG\"\n"
+                "if [[ \" $* \" == *\" --method GET \"* ]]; then\n"
+                "  main_sha=\"$FAKE_MAIN_SHA\"\n"
+                "  if [[ \"$FAKE_STALE_AFTER_FIRST_POST\" == 1 "
+                "&& -f \"$FAKE_POST_MARKER\" ]]; then\n"
+                "    main_sha=\"$FAKE_STALE_MAIN_SHA\"\n"
+                "  fi\n"
+                "  printf '{\"ref\":\"refs/heads/main\",\"object\":'\n"
+                "  printf '{\"type\":\"commit\",\"sha\":\"%s\"}}\\n' \"$main_sha\"\n"
+                "elif [[ \" $* \" == *\" --method POST \"* ]]; then\n"
+                "  : > \"$FAKE_POST_MARKER\"\n"
+                "  printf '{\"id\":1,\"result\":\"SUCCESS\"}\\n'\n"
+                "else\n"
+                "  exit 64\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake_gh.chmod(0o700)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "FAKE_GH_LOG": str(root / "gh.log"),
+                    "FAKE_MAIN_SHA": current_main_sha,
+                    "FAKE_POST_MARKER": str(root / "first-post-complete"),
+                    "FAKE_STALE_AFTER_FIRST_POST": "1" if stale_after_first_post else "0",
+                    "FAKE_STALE_MAIN_SHA": "f" * 40,
+                    "GITHUB_REPOSITORY": "Infiland/GM2Godot",
+                    "GITHUB_SHA": repository_sha,
+                    "GH_TOKEN": "test-token",
+                    "PATH": os.pathsep.join(
+                        (str(fake_binary_directory), environment.get("PATH", ""))
+                    ),
+                    "SUBMISSION_ROOT": str(submission_root),
+                    "SUBMISSION_RECEIPT_ROOT": str(root / "responses"),
+                }
+            )
+            return subprocess.run(
+                ["bash", "-c", submit],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+        def method_sequence(root: Path) -> list[str]:
+            return [
+                "GET" if "--method GET" in line else "POST"
+                for line in (root / "gh.log").read_text(encoding="utf-8").splitlines()
+            ]
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            current = run_submit(root, repository_sha)
+            self.assertEqual(current.returncode, 0, current.stderr)
+            self.assertEqual(
+                method_sequence(root),
+                ["GET", "POST", "GET", "POST", "GET", "POST"],
+            )
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            stale = run_submit(root, "f" * 40)
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn("Refusing stale dependency submission", stale.stderr)
+            self.assertEqual(method_sequence(root), ["GET"])
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            stale_after_post = run_submit(
+                root,
+                repository_sha,
+                stale_after_first_post=True,
+            )
+            self.assertNotEqual(stale_after_post.returncode, 0)
+            self.assertIn("Refusing stale dependency submission", stale_after_post.stderr)
+            sequence = method_sequence(root)
+            self.assertEqual(sequence, ["GET", "POST", "GET"])
+            self.assertEqual(sequence.count("POST"), 1)
 
     def test_dependency_lock_refresh_package_requires_native_graph_membership(
         self,
@@ -4462,13 +5567,18 @@ class TestCIWorkflows(unittest.TestCase):
             'SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"',
             'expected = ("CPython", "3.12.10", "darwin", "Darwin", "arm64")',
             f"readonly DEPENDENCY_CONSTRAINT={MACOS_CONSTRAINT}",
+            "readonly DEPENDENCY_BOOTSTRAP=requirements-bootstrap.txt",
+            "readonly DEPENDENCY_BOOTSTRAP_VERIFIER="
+            "scripts/verify_dependency_bootstrap.py",
             "export PIP_CONFIG_FILE=/dev/null",
             'BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-XXXXXX")"',
             'readonly VENV_PYTHON="${BUILD_VENV}/bin/python"',
             '"$PYTHON_BIN" -m venv "$BUILD_VENV"',
             '--constraint "$DEPENDENCY_CONSTRAINT"',
-            f"pip=={PIP_VERSION}",
+            "\n  pip\n",
             f"PyInstaller=={PYINSTALLER_VERSION}",
+            '--bootstrap "$DEPENDENCY_BOOTSTRAP"',
+            "--bootstrap-policy stable",
             "readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec",
             "readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py",
             "readonly MACOS_METADATA_VERIFIER=scripts/verify_macos_bundle_metadata.py",
@@ -4493,6 +5603,10 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertNotRegex(macos, r"(?m)^\s*pyinstaller\b")
         self.assertLess(
+            macos.index('"$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER"'),
+            macos.index('"$PYTHON_BIN" -m venv "$BUILD_VENV"'),
+        )
+        self.assertLess(
             macos.index('"$VENV_PYTHON" "$DEPENDENCY_VERIFIER"'),
             macos.index('echo "Cleaning old build artifacts..."'),
         )
@@ -4510,13 +5624,18 @@ class TestCIWorkflows(unittest.TestCase):
             "expected = ('CPython', '3.12.10', 'win32', 'Windows', 'AMD64')",
             "set \"DEPENDENCY_CONSTRAINT="
             f"{WINDOWS_CONSTRAINT.replace('/', chr(92))}\"",
+            'set "DEPENDENCY_BOOTSTRAP=requirements-bootstrap.txt"',
+            'set "DEPENDENCY_BOOTSTRAP_VERIFIER='
+            'scripts\\verify_dependency_bootstrap.py"',
             'set "PIP_CONFIG_FILE=nul"',
             'set "BUILD_VENV=%BUILD_TEMP_ROOT%\\venv"',
             'set "VENV_PYTHON=%BUILD_VENV%\\Scripts\\python.exe"',
             '"%PYTHON_BIN%" -m venv "%BUILD_VENV%"',
             '--constraint "%DEPENDENCY_CONSTRAINT%"',
-            f"pip=={PIP_VERSION}",
+            "\n    pip\n",
             f"PyInstaller=={PYINSTALLER_VERSION}",
+            '--bootstrap "%DEPENDENCY_BOOTSTRAP%"',
+            "--bootstrap-policy stable",
             '"%VENV_PYTHON%" -m PyInstaller --onefile',
             "if errorlevel 1 goto :fail",
             "call :cleanup_temp",
@@ -4541,6 +5660,10 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertNotIn("shutil.rmtree(original.resolve())", windows)
         self.assertNotRegex(windows, r"(?im)^\s*pyinstaller\b")
+        self.assertLess(
+            windows.index('"%PYTHON_BIN%" "%DEPENDENCY_BOOTSTRAP_VERIFIER%"'),
+            windows.index('"%PYTHON_BIN%" -m venv "%BUILD_VENV%"'),
+        )
         self.assertLess(
             windows.index('"%VENV_PYTHON%" "%DEPENDENCY_VERIFIER%"'),
             windows.index("echo Cleaning up old build files..."),
@@ -4862,10 +5985,12 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertIn(
             f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
             f"            --constraint {LINUX_CONSTRAINT} \\\n"
-            f"            coverage=={COVERAGE_VERSION}",
+            f"            coverage=={COVERAGE_VERSION} \\\n"
+            f"            packaging=={PACKAGING_VERSION}",
             linux_job,
         )
         self.assertIn("--require coverage", linux_job)
+        self.assertIn("--require packaging", linux_job)
         coverage_test_command = (
             "python -m coverage run -m unittest discover tests/ -v"
         )

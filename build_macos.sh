@@ -6,7 +6,9 @@ cd -- "$SCRIPT_DIRECTORY"
 readonly SCRIPT_DIRECTORY
 
 readonly PYTHON_BIN=python3
-readonly DEPENDENCY_CONSTRAINT=constraints/requirements-macos-py312.txt
+readonly DEPENDENCY_CONSTRAINT=constraints/requirements-macos-py312.lock
+readonly DEPENDENCY_BOOTSTRAP=requirements-bootstrap.txt
+readonly DEPENDENCY_BOOTSTRAP_VERIFIER=scripts/verify_dependency_bootstrap.py
 readonly DEPENDENCY_VERIFIER=scripts/verify_dependency_environment.py
 readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec
 readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py
@@ -16,7 +18,9 @@ readonly -a REPOSITORY_SENTINELS=(
   build_macos.sh
   main.py
   requirements.txt
+  "$DEPENDENCY_BOOTSTRAP"
   "$DEPENDENCY_CONSTRAINT"
+  "$DEPENDENCY_BOOTSTRAP_VERIFIER"
   "$DEPENDENCY_VERIFIER"
   "$MACOS_BUNDLE_SPEC"
   "$MACOS_METADATA_POLICY"
@@ -103,8 +107,15 @@ trap 'exit 143' TERM
 
 BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-XXXXXX")"
 readonly BUILD_VENV="${BUILD_TEMP_ROOT}/venv"
+readonly BOOTSTRAP_RECEIPT="${BUILD_TEMP_ROOT}/dependency-bootstrap-macos.json"
 readonly BUILD_RECEIPT="${BUILD_TEMP_ROOT}/dependency-environment-macos.json"
 readonly VENV_PYTHON="${BUILD_VENV}/bin/python"
+
+"$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER" \
+  --source "$DEPENDENCY_BOOTSTRAP" \
+  --policy stable \
+  --constraint "$DEPENDENCY_CONSTRAINT" \
+  --output "$BOOTSTRAP_RECEIPT"
 
 echo "Creating isolated build environment..."
 "$PYTHON_BIN" -m venv "$BUILD_VENV"
@@ -116,7 +127,7 @@ fi
 echo "Installing dependencies..."
 "$VENV_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
   --constraint "$DEPENDENCY_CONSTRAINT" \
-  pip==26.2.1
+  pip
 "$VENV_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
   --constraint "$DEPENDENCY_CONSTRAINT" \
   -r requirements.txt PyInstaller==6.21.0
@@ -134,7 +145,8 @@ echo "Verifying dependency environment..."
   --expected-python 3.12.10 \
   --expected-platform darwin \
   --expected-machine arm64 \
-  --expected-pip 26.2.1 \
+  --bootstrap "$DEPENDENCY_BOOTSTRAP" \
+  --bootstrap-policy stable \
   --output "$BUILD_RECEIPT"
 
 echo "Cleaning old build artifacts..."

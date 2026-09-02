@@ -760,7 +760,7 @@ jobs:
             pyinstaller_mode: --onefile
             python_version: '3.12.10'
             python_architecture: x64
-            constraint: constraints/requirements-windows-py312.txt
+            constraint: constraints/requirements-windows-py312.lock
             pip_config_file: nul
             expected_platform: win32
             expected_machine: AMD64
@@ -770,7 +770,7 @@ jobs:
             pyinstaller_mode: --onedir
             python_version: '3.12.10'
             python_architecture: arm64
-            constraint: constraints/requirements-macos-py312.txt
+            constraint: constraints/requirements-macos-py312.lock
             pip_config_file: /dev/null
             expected_platform: darwin
             expected_machine: arm64
@@ -780,7 +780,7 @@ jobs:
             pyinstaller_mode: --onefile
             python_version: '3.12.13'
             python_architecture: x64
-            constraint: constraints/requirements-linux-py312.txt
+            constraint: constraints/requirements-linux-py312.lock
             pip_config_file: /dev/null
             expected_platform: linux
             expected_machine: x86_64
@@ -842,6 +842,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint "${{ matrix.constraint }}" \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-bootstrap.json"
           python -m venv "$venv_dir"
           printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
           printf '%s\n' "$venv_path_native" >> "$github_path_file"
@@ -851,7 +856,7 @@ jobs:
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint "${{ matrix.constraint }}" \
-            pip==26.2.1
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint "${{ matrix.constraint }}" \
             -r requirements.txt PyInstaller==6.21.0
@@ -867,7 +872,8 @@ jobs:
             --expected-python "${{ matrix.python_version }}" \
             --expected-platform "${{ matrix.expected_platform }}" \
             --expected-machine "${{ matrix.expected_machine }}" \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
 
       - name: Build executable

@@ -40,6 +40,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-linux-py312.lock \
+            --output "$RUNNER_TEMP/tcc-conversion-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/bin"
           printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
@@ -49,20 +54,21 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-linux-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             Pillow==12.3.0
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
             --expected-python 3.12.13 \
             --expected-platform linux \
             --expected-machine x86_64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tcc-conversion-dependencies.json"
 
       - name: Cache pinned Godot
@@ -155,6 +161,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-linux-py312.lock \
+            --output "$RUNNER_TEMP/lts-2026-conversion-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/bin"
           printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
@@ -164,20 +175,21 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-linux-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             Pillow==12.3.0
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
             --expected-python 3.12.13 \
             --expected-platform linux \
             --expected-machine x86_64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/lts-2026-conversion-dependencies.json"
 
       - name: Cache pinned Godot

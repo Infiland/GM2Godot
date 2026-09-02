@@ -2,7 +2,9 @@
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "PYTHON_BIN=python"
-set "DEPENDENCY_CONSTRAINT=constraints\requirements-windows-py312.txt"
+set "DEPENDENCY_CONSTRAINT=constraints\requirements-windows-py312.lock"
+set "DEPENDENCY_BOOTSTRAP=requirements-bootstrap.txt"
+set "DEPENDENCY_BOOTSTRAP_VERIFIER=scripts\verify_dependency_bootstrap.py"
 set "DEPENDENCY_VERIFIER=scripts\verify_dependency_environment.py"
 set "PIP_CONFIG_FILE=nul"
 set "BUILD_TEMP_ROOT="
@@ -18,7 +20,9 @@ for %%F in (
     "build.bat"
     "main.py"
     "requirements.txt"
+    "%DEPENDENCY_BOOTSTRAP%"
     "%DEPENDENCY_CONSTRAINT%"
+    "%DEPENDENCY_BOOTSTRAP_VERIFIER%"
     "%DEPENDENCY_VERIFIER%"
 ) do (
     if not exist "%%~F" (
@@ -50,8 +54,16 @@ if not defined BUILD_TEMP_ROOT (
 )
 
 set "BUILD_VENV=%BUILD_TEMP_ROOT%\venv"
+set "BOOTSTRAP_RECEIPT=%BUILD_TEMP_ROOT%\dependency-bootstrap-windows.json"
 set "BUILD_RECEIPT=%BUILD_TEMP_ROOT%\dependency-environment-windows.json"
 set "VENV_PYTHON=%BUILD_VENV%\Scripts\python.exe"
+
+"%PYTHON_BIN%" "%DEPENDENCY_BOOTSTRAP_VERIFIER%" ^
+    --source "%DEPENDENCY_BOOTSTRAP%" ^
+    --policy stable ^
+    --constraint "%DEPENDENCY_CONSTRAINT%" ^
+    --output "%BOOTSTRAP_RECEIPT%"
+if errorlevel 1 goto :fail
 
 echo Creating isolated build environment...
 "%PYTHON_BIN%" -m venv "%BUILD_VENV%"
@@ -64,7 +76,7 @@ if not exist "%VENV_PYTHON%" (
 echo Installing required packages...
 "%VENV_PYTHON%" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: ^
     --constraint "%DEPENDENCY_CONSTRAINT%" ^
-    pip==26.2.1
+    pip
 if errorlevel 1 goto :fail
 "%VENV_PYTHON%" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: ^
     --constraint "%DEPENDENCY_CONSTRAINT%" ^
@@ -84,7 +96,8 @@ echo Verifying dependency environment...
     --expected-python 3.12.10 ^
     --expected-platform win32 ^
     --expected-machine AMD64 ^
-    --expected-pip 26.2.1 ^
+    --bootstrap "%DEPENDENCY_BOOTSTRAP%" ^
+    --bootstrap-policy stable ^
     --output "%BUILD_RECEIPT%"
 if errorlevel 1 goto :fail
 

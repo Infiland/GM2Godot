@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.61 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.62 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -15,26 +15,32 @@ For example, the Linux x64 baseline is:
 ```bash
 git clone https://github.com/YOUR_USERNAME/GM2Godot.git
 cd GM2Godot
+python3.12 scripts/verify_dependency_bootstrap.py \
+  --source requirements-bootstrap.txt \
+  --policy stable \
+  --constraint constraints/requirements-linux-py312.lock \
+  --output "${TMPDIR:-/tmp}/gm2godot-bootstrap.json"
 python3.12 -m venv venv
 source venv/bin/activate
 python --version  # Python 3.12.13
 export PIP_CONFIG_FILE=/dev/null
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-linux-py312.txt pip==26.2.1
+  --constraint constraints/requirements-linux-py312.lock pip
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-linux-py312.txt -r requirements.txt
+  --constraint constraints/requirements-linux-py312.lock -r requirements.txt
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-linux-py312.txt -r requirements-tooling.txt
+  --constraint constraints/requirements-linux-py312.lock \
+  -r requirements-bootstrap.txt -r requirements-tooling.txt
 ```
 
-On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.txt`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.txt`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.1 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
+On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.lock`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.lock`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.1 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
 
 ### Refresh dependency constraints
 
-`requirements.txt` and `requirements-tooling.txt` contain the reviewed direct dependencies, while `requirements-lock.in` is the combined compile input. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, macOS, and Windows baselines with the committed generator pin, currently `pip-tools==7.6.1`.
+`requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools compatibility pair. `requirements.txt` and `requirements-tooling.txt` contain the other reviewed runtime and development roots, while `requirements-lock.in` includes all three sources as the combined compile input. Generated native graphs use `.lock` paths so Dependabot cannot present unverified cross-platform output as an editable manifest. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, macOS, and Windows baselines.
 
 Pull requests and pushes use `refresh=locked`, which preference-seeds generation with the committed constraint and requests no upgrades. A manual `workflow_dispatch` run accepts:
 
@@ -44,13 +50,13 @@ Pull requests and pushes use `refresh=locked`, which preference-seeds generation
 | `refresh=all` | Request upgrades for the complete graph. |
 | `refresh=package` | Upgrade only the normalized distribution supplied as `refresh_package`. |
 
-`refresh_package` must be empty for `refresh=locked` and `refresh=all`; for `refresh=package`, it is required and must already be normalized, such as `pip-tools` or `pyside6`.
+`refresh_package` must be empty for `refresh=locked` and `refresh=all`; for `refresh=package`, it is required and must already be normalized, such as `pyside6`. The workflow rejects `pip` and `pip-tools` package refreshes because their pair is reviewed through `requirements-bootstrap.txt`.
 
-Each native job installs the candidate's own pip and pip-tools pins, regenerates a self-hosted constraint, and compares it with the candidate. It also performs two clean complete-graph installs and compares their normalized receipts. The candidate, self-hosted output, receipts, and evidence manifest are uploaded before the final equality gates.
+Each native job accepts either a stable source/lock pair or one explicit source transition where all three committed locks agree. Before full graph generation, the old committed generator creates a bootstrap-only probe and the proposed pair must install, pass environment verification and `pip check`, and reproduce the same parsed probe graph. The candidate then regenerates a self-hosted complete constraint and performs two clean complete-graph installs with identical normalized receipts. Probe, candidate, self-hosted output, receipts, dependency snapshot, and evidence manifest are uploaded before the final equality gates.
 
-An intentional refresh that changes pins is expected to fail the committed-equality gate. Review the artifacts for all three platforms, commit the approved native constraints, and rerun until `refresh=locked` is clean. If a pip or pip-tools upgrade makes the candidate differ from its self-hosted output, review and commit the self-hosted result first, then rerun with the new generator pins. Do not generate a constraint for a different platform locally; native environment markers and platform-specific transitive dependencies must be resolved on the platform they describe.
+An intentional refresh that changes pins is expected to fail the committed-equality gate. Review the artifacts for all three platforms, commit the approved native locks, and rerun until `refresh=locked` is clean. A pip-family Dependabot pull request is only a source proposal: continue it on a maintainer branch, never merge bot-generated native output, and do not auto-merge dependency changes. Security proposals for other direct dependencies may update their own authored requirements file, but they use the same native artifact review and never supply generated locks. If a proposed generator makes the full candidate differ from its self-hosted output, review and commit the self-hosted result first, then rerun. Do not generate a lock for a different platform locally; native environment markers and platform-specific transitive dependencies must be resolved on the platform they describe.
 
-Upgrade `pip` and `pip-tools` as one compatibility unit, including every bootstrap and verifier expectation plus all three native constraints. The current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. A future path that admits a source distribution must pass a separately reviewed `--build-constraint` for the isolated build environment under pip 26.2 or later.
+Upgrade `pip` and `pip-tools` as one compatibility unit by reviewing the two source pins and all three native locks together. Live consumers derive the expected pip version after preflight instead of carrying numeric copies. Successful main-branch native runs submit the verified platform graphs under stable correlators, preserving transitive Dependabot alerts even though `.lock` outputs are hidden from its manifest updater. The current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. A future path that admits a source distribution must pass a separately reviewed `--build-constraint` for the isolated build environment under pip 26.2 or later.
 
 ## Choose the right extension point
 

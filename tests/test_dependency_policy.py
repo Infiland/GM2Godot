@@ -19,8 +19,10 @@ from scripts import verify_dependency_environment as verifier
 
 PYTHON_VERSION = "3.12.13"
 PIP_VERSION = "26.2.1"
+PIP_TOOLS_VERSION = "7.6.1"
 BASE_PINS = {
     "pip": PIP_VERSION,
+    "pip-tools": PIP_TOOLS_VERSION,
     "root-package": "1.0.0",
     "transitive-package": "2.0.0",
 }
@@ -71,6 +73,7 @@ def _inspect_report(
     if items is None:
         items = [
             _installed_item("pip", PIP_VERSION),
+            _installed_item("pip-tools", PIP_TOOLS_VERSION),
             _installed_item("root-package", "1.0.0"),
             _installed_item("transitive-package", "2.0.0"),
         ]
@@ -84,6 +87,38 @@ def _inspect_report(
 
 def _constraint_text(pins: dict[str, str]) -> str:
     return "# generated test constraint\n" + "".join(f"{name}=={pins[name]}\n" for name in sorted(pins))
+
+
+def _bootstrap_text(
+    pip_version: str = PIP_VERSION,
+    pip_tools_version: str = PIP_TOOLS_VERSION,
+) -> str:
+    return (
+        "# Review these exact pins as one compatibility unit.\n"
+        f"pip=={pip_version}\n"
+        f"pip-tools=={pip_tools_version}\n"
+    )
+
+
+def _write_native_constraints(
+    directory: Path,
+    *,
+    pip_version: str,
+    pip_tools_version: str,
+    per_platform_pins: tuple[dict[str, str], ...] | None = None,
+) -> tuple[Path, ...]:
+    paths = tuple(directory / path for path in verifier.NATIVE_CONSTRAINT_PATHS)
+    if per_platform_pins is None:
+        per_platform_pins = ({"linux-only": "1"}, {"macos-only": "2"}, {"windows-only": "3"})
+    for path, platform_pins in zip(paths, per_platform_pins, strict=True):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pins = {
+            "pip": pip_version,
+            "pip-tools": pip_tools_version,
+            **platform_pins,
+        }
+        path.write_text(_constraint_text(pins), encoding="utf-8")
+    return paths
 
 
 def _completed(stdout: str, returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -214,18 +249,24 @@ class DependencyVerifierHarness:
         inspect_stderr: str = "",
         check_stdout: str = "No broken requirements found.\n",
         constraint_text: str | None = None,
+        bootstrap_text: str | None = None,
         run_side_effect: list[object] | None = None,
     ) -> tuple[int, dict[str, object], bytes, list[tuple[list[str], dict[str, object]]]]:
         selected_pins = dict(BASE_PINS if pins is None else pins)
         selected_report = copy.deepcopy(_inspect_report() if report is None else report)
         with tempfile.TemporaryDirectory() as raw_directory:
-            directory = Path(raw_directory)
+            directory = Path(raw_directory).resolve()
             prefix = directory / "isolated"
             prefix.mkdir()
             _materialize_default_metadata_locations(selected_report, prefix)
             constraint = directory / "constraints-linux.txt"
             constraint.write_text(
                 _constraint_text(selected_pins) if constraint_text is None else constraint_text,
+                encoding="utf-8",
+            )
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(
+                _bootstrap_text() if bootstrap_text is None else bootstrap_text,
                 encoding="utf-8",
             )
             output = directory / "nested" / "receipt.json"
@@ -250,8 +291,10 @@ class DependencyVerifierHarness:
                 "linux",
                 "--expected-machine",
                 "x86_64",
-                "--expected-pip",
-                PIP_VERSION,
+                "--bootstrap",
+                str(bootstrap),
+                "--bootstrap-policy",
+                "stable",
                 "--output",
                 str(output),
             ]
@@ -306,8 +349,10 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
 
         self.assertEqual(result, 0)
         self.assertEqual(receipt["status"], "verified")
-        self.assertEqual(receipt["schema_version"], 1)
+        self.assertEqual(receipt["schema_version"], 2)
         self.assertEqual(receipt["errors"], [])
+        bootstrap = cast(dict[str, object], receipt["bootstrap"])
+        self.assertEqual((bootstrap["policy"], bootstrap["state"]), ("stable", "stable"))
         self.assertTrue(receipt_bytes.endswith(b"\n"))
         observation = cast(dict[str, object], receipt["observation"])
         self.assertRegex(cast(str, observation["installed_fingerprint"]), r"[0-9a-f]{64}\Z")
@@ -376,13 +421,19 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         forged_report = json.dumps(baseline_report, ensure_ascii=True, sort_keys=True)
 
         with tempfile.TemporaryDirectory() as raw_directory:
-            directory = Path(raw_directory)
+            directory = Path(raw_directory).resolve()
             checkout_shadow = directory / "checkout-shadow"
             pythonpath_shadow = directory / "pythonpath-shadow"
             safe_directory = directory / "safe"
             safe_directory.mkdir()
             constraint = directory / "constraints.txt"
+            pins["pip-tools"] = PIP_TOOLS_VERSION
             constraint.write_text(_constraint_text(pins), encoding="utf-8")
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(
+                f"pip=={baseline_report['pip_version']}\npip-tools=={PIP_TOOLS_VERSION}\n",
+                encoding="utf-8",
+            )
 
             cases = (
                 ("checkout", checkout_shadow, checkout_shadow, safe_directory),
@@ -420,15 +471,17 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
                                 "--constraint",
                                 str(constraint),
                                 "--mode",
-                                "complete",
+                                "subset",
                                 "--expected-python",
                                 cast(str, environment["python_full_version"]),
                                 "--expected-platform",
                                 cast(str, environment["sys_platform"]),
                                 "--expected-machine",
                                 cast(str, environment["platform_machine"]),
-                                "--expected-pip",
-                                cast(str, baseline_report["pip_version"]),
+                                "--bootstrap",
+                                str(bootstrap),
+                                "--bootstrap-policy",
+                                "stable",
                                 "--output",
                                 str(output),
                             ]
@@ -458,7 +511,11 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         self.assertIn("complete-distribution-missing", self._error_codes(failure_receipt))
 
     def test_removed_transitive_pin_is_rejected(self) -> None:
-        pins = {"pip": PIP_VERSION, "root-package": "1.0.0"}
+        pins = {
+            "pip": PIP_VERSION,
+            "pip-tools": PIP_TOOLS_VERSION,
+            "root-package": "1.0.0",
+        }
         result, receipt, _, _ = self.invoke(pins=pins)
 
         self.assertEqual(result, 1)
@@ -485,7 +542,11 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
 
     def test_required_root_must_be_pinned_and_installed(self) -> None:
         report = _inspect_report([_installed_item("pip", PIP_VERSION)])
-        pins = {"pip": PIP_VERSION, "transitive-package": "2.0.0"}
+        pins = {
+            "pip": PIP_VERSION,
+            "pip-tools": PIP_TOOLS_VERSION,
+            "transitive-package": "2.0.0",
+        }
         result, receipt, _, _ = self.invoke(pins=pins, report=report)
 
         self.assertEqual(result, 1)
@@ -504,6 +565,11 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         self.assertEqual(first_observation["installed_fingerprint"], second_observation["installed_fingerprint"])
         cast(dict[str, object], first_receipt["constraint"])["path"] = "<constraint>"
         cast(dict[str, object], second_receipt["constraint"])["path"] = "<constraint>"
+        for receipt in (first_receipt, second_receipt):
+            bootstrap = cast(dict[str, object], receipt["bootstrap"])
+            cast(dict[str, object], bootstrap["source"])["path"] = "<bootstrap>"
+            constraints = cast(list[dict[str, object]], bootstrap["constraints"])
+            constraints[0]["path"] = "<constraint>"
         self.assertEqual(first_receipt, second_receipt)
 
     def test_duplicate_normalized_installed_names_are_rejected(self) -> None:
@@ -565,7 +631,7 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
 
     def test_metadata_location_resolves_real_directory_link_targets(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
-            directory = Path(raw_directory)
+            directory = Path(raw_directory).resolve()
             prefix = directory / "isolated"
             site_packages = prefix / "site-packages"
             outside = directory / "outside"
@@ -663,8 +729,13 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         setuptools_report = _inspect_report()
         cast(list[dict[str, object]], setuptools_report["installed"]).append(_installed_item("setuptools", "80.9.0"))
         cases = (
-            ("missing-pin", missing_pin, _inspect_report(), "pip-pin-missing"),
-            ("wrong-pin", wrong_pin, _inspect_report(), "pip-constraint-mismatch"),
+            ("missing-pin", missing_pin, _inspect_report(), "bootstrap-pair-missing"),
+            (
+                "wrong-pin",
+                wrong_pin,
+                _inspect_report(),
+                "bootstrap-source-lock-mismatch",
+            ),
             (
                 "wrong-metadata",
                 dict(BASE_PINS),
@@ -850,10 +921,15 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
 
     def test_constraint_output_aliases_are_rejected_before_pip_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
-            directory = Path(raw_directory)
+            directory = Path(raw_directory).resolve()
             constraint = directory / "constraints.txt"
             original_constraint = _constraint_text(BASE_PINS).encode("utf-8")
             constraint.write_bytes(original_constraint)
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(
+                f"pip=={PIP_VERSION}\npip-tools=={PIP_TOOLS_VERSION}\n",
+                encoding="utf-8",
+            )
             normalized_parent = directory / "normalized-parent"
             normalized_parent.mkdir()
             same_file_alias = directory / "same-file-constraints.txt"
@@ -883,8 +959,10 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
                                 "linux",
                                 "--expected-machine",
                                 "x86_64",
-                                "--expected-pip",
-                                PIP_VERSION,
+                                "--bootstrap",
+                                str(bootstrap),
+                                "--bootstrap-policy",
+                                "stable",
                                 "--output",
                                 str(output),
                             ]
@@ -971,6 +1049,970 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
                 )
                 self.assertEqual(result, 1)
                 self.assertIn(expected_code, self._error_codes(receipt))
+
+    def test_expected_pip_is_derived_and_literal_override_is_removed(self) -> None:
+        result, receipt, _, _ = self.invoke()
+
+        self.assertEqual(result, 0)
+        expected = cast(dict[str, object], receipt["expected_environment"])
+        self.assertEqual(expected["pip_version"], PIP_VERSION)
+        arguments = [
+            "--constraint",
+            "constraints.lock",
+            "--mode",
+            "subset",
+            "--expected-python",
+            PYTHON_VERSION,
+            "--expected-platform",
+            "linux",
+            "--expected-machine",
+            "x86_64",
+            "--bootstrap",
+            "requirements-bootstrap.txt",
+            "--bootstrap-policy",
+            "stable",
+            "--output",
+            "receipt.json",
+            "--expected-pip",
+            "0",
+        ]
+        parse_arguments = cast(Callable[[list[str]], object], getattr(verifier, "_parse_arguments"))
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as raised:
+            parse_arguments(arguments)
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_stable_bootstrap_mismatch_stops_before_pip(self) -> None:
+        result, receipt, _, calls = self.invoke(
+            bootstrap_text=_bootstrap_text(pip_version="26.3")
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(calls, [])
+        self.assertIn("bootstrap-source-lock-mismatch", self._error_codes(receipt))
+
+    def test_subset_environment_does_not_need_pip_tools_installed(self) -> None:
+        report = _inspect_report(
+            [
+                _installed_item("pip", PIP_VERSION),
+                _installed_item("root-package", "1.0.0"),
+                _installed_item("transitive-package", "2.0.0"),
+            ]
+        )
+
+        result, receipt, _, _ = self.invoke(report=report)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(receipt["status"], "verified")
+
+    def test_native_transition_derives_current_generator_pip_from_all_locks(self) -> None:
+        old_pip = "26.1.1"
+        old_pip_tools = "7.5.2"
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            _write_native_constraints(
+                directory,
+                pip_version=old_pip,
+                pip_tools_version=old_pip_tools,
+            )
+            (directory / "requirements-bootstrap.txt").write_text(_bootstrap_text(), encoding="utf-8")
+            prefix = directory / "isolated"
+            prefix.mkdir()
+            report = _inspect_report(
+                [
+                    _installed_item("pip", old_pip),
+                    _installed_item("pip-tools", old_pip_tools),
+                ],
+                pip_version=old_pip,
+            )
+            _materialize_default_metadata_locations(report, prefix)
+            output = directory / "receipt.json"
+            factory = _PopenFactory(
+                [
+                    _completed(json.dumps(report, ensure_ascii=True, sort_keys=True)),
+                    _completed("No broken requirements found.\n"),
+                ]
+            )
+            with (
+                chdir(directory),
+                mock.patch.object(verifier.sys, "prefix", str(prefix)),
+                mock.patch.object(verifier.subprocess, "Popen", side_effect=factory) as popen_mock,
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                result = verifier.main(
+                    [
+                        "--constraint",
+                        "constraints/requirements-linux-py312.lock",
+                        "--mode",
+                        "subset",
+                        "--require",
+                        "pip",
+                        "--require",
+                        "pip-tools",
+                        "--expected-python",
+                        PYTHON_VERSION,
+                        "--expected-platform",
+                        "linux",
+                        "--expected-machine",
+                        "x86_64",
+                        "--bootstrap",
+                        "requirements-bootstrap.txt",
+                        "--bootstrap-policy",
+                        "native-lock-workflow",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(popen_mock.call_count, 2)
+            receipt = cast(dict[str, object], json.loads(output.read_bytes()))
+            expected = cast(dict[str, object], receipt["expected_environment"])
+            self.assertEqual(expected["pip_version"], old_pip)
+            bootstrap = cast(dict[str, object], receipt["bootstrap"])
+            self.assertEqual(bootstrap["state"], "source-transition")
+
+    def test_native_transition_policy_cannot_verify_an_ordinary_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            _write_native_constraints(
+                directory,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+            (directory / "requirements-bootstrap.txt").write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt.json"
+            with (
+                chdir(directory),
+                mock.patch.object(verifier.subprocess, "Popen") as popen_mock,
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                result = verifier.main(
+                    [
+                        "--constraint",
+                        "constraints/requirements-linux-py312.lock",
+                        "--mode",
+                        "subset",
+                        "--require",
+                        "pip",
+                        "--expected-python",
+                        PYTHON_VERSION,
+                        "--expected-platform",
+                        "linux",
+                        "--expected-machine",
+                        "x86_64",
+                        "--bootstrap",
+                        "requirements-bootstrap.txt",
+                        "--bootstrap-policy",
+                        "native-lock-workflow",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            popen_mock.assert_not_called()
+            receipt = cast(dict[str, object], json.loads(output.read_bytes()))
+            self.assertIn("bootstrap-native-policy-misuse", self._error_codes(receipt))
+
+
+class TestDependencyBootstrapPolicy(unittest.TestCase):
+    def test_exact_source_is_loaded_with_stable_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            source = Path(raw_directory).resolve() / "requirements-bootstrap.txt"
+            source.write_text("\n# compatibility pair\n" + _bootstrap_text(), encoding="utf-8")
+
+            policy = verifier.load_bootstrap_requirements(source)
+
+            self.assertEqual(policy.pair.as_pins(), {"pip": PIP_VERSION, "pip-tools": PIP_TOOLS_VERSION})
+            self.assertEqual(policy.sha256, verifier.hashlib.sha256(source.read_bytes()).hexdigest())
+
+    def test_source_rejects_every_non_pair_requirement_form(self) -> None:
+        invalid_sources = (
+            ("missing", f"pip=={PIP_VERSION}\n"),
+            ("extra", _bootstrap_text() + "wheel==1\n"),
+            ("duplicate", f"pip=={PIP_VERSION}\npip=={PIP_VERSION}\n"),
+            ("reordered", f"pip-tools=={PIP_TOOLS_VERSION}\npip=={PIP_VERSION}\n"),
+            ("normalized-alias", f"pip=={PIP_VERSION}\npip_tools=={PIP_TOOLS_VERSION}\n"),
+            ("uppercase", f"PIP=={PIP_VERSION}\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("spaced-operator", f"pip == {PIP_VERSION}\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("marker", f"pip=={PIP_VERSION}; python_version == '3.12'\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("range", f"pip>={PIP_VERSION}\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("url", f"pip @ https://example.invalid/pip.whl\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("include", f"-r other.txt\npip=={PIP_VERSION}\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("hash", f"pip=={PIP_VERSION} --hash=sha256:00\npip-tools=={PIP_TOOLS_VERSION}\n"),
+            ("continuation", f"pip=={PIP_VERSION} \\\npip-tools=={PIP_TOOLS_VERSION}\n"),
+        )
+        with tempfile.TemporaryDirectory() as raw_directory:
+            source = Path(raw_directory).resolve() / "requirements-bootstrap.txt"
+            for label, text_value in invalid_sources:
+                with self.subTest(label=label):
+                    source.write_text(text_value, encoding="utf-8")
+                    with self.assertRaises(verifier.PolicyError) as raised:
+                        verifier.load_bootstrap_requirements(source)
+                    self.assertEqual(raised.exception.code, "bootstrap-source-invalid")
+
+    def test_source_rejects_non_utf8_oversized_symlink_and_nonregular_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_bytes(b"pip==\xff\n")
+            with self.assertRaises(verifier.PolicyError) as non_utf8:
+                verifier.load_bootstrap_requirements(source)
+            self.assertEqual(non_utf8.exception.code, "bootstrap-source-invalid")
+
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            with (
+                mock.patch.object(verifier, "MAX_CONSTRAINT_BYTES", 8),
+                self.assertRaises(verifier.PolicyError) as oversized,
+            ):
+                verifier.load_bootstrap_requirements(source)
+            self.assertEqual(oversized.exception.code, "bootstrap-source-invalid")
+
+            target = directory / "target.txt"
+            target.write_text(_bootstrap_text(), encoding="utf-8")
+            source.unlink()
+            source.symlink_to(target)
+            with self.assertRaises(verifier.PolicyError) as symlink:
+                verifier.load_bootstrap_requirements(source)
+            self.assertEqual(symlink.exception.code, "bootstrap-source-invalid")
+
+            with self.assertRaises(verifier.PolicyError) as nonregular:
+                verifier.load_bootstrap_requirements(directory)
+            self.assertEqual(nonregular.exception.code, "bootstrap-source-invalid")
+
+    def test_policy_readers_reject_a_path_swapped_after_open(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            trusted = directory / "trusted.txt"
+            replacement = directory / "replacement.txt"
+            replacement.write_text(_bootstrap_text("9", "8"), encoding="utf-8")
+            real_open = verifier.os.open
+            swapped = False
+
+            def swapping_open(path: str | os.PathLike[str], flags: int) -> int:
+                nonlocal swapped
+                descriptor = real_open(path, flags)
+                if not swapped and os.path.normcase(os.fspath(path)) == os.path.normcase(os.fspath(trusted)):
+                    swapped = True
+                    trusted.unlink()
+                    trusted.symlink_to(replacement)
+                return descriptor
+
+            trusted.write_text(_bootstrap_text(), encoding="utf-8")
+            with (
+                mock.patch.object(verifier.os, "open", side_effect=swapping_open),
+                self.assertRaises(verifier.PolicyError) as source_swap,
+            ):
+                verifier.load_bootstrap_requirements(trusted)
+            self.assertEqual(source_swap.exception.code, "bootstrap-source-invalid")
+
+            trusted.unlink()
+            trusted.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            replacement.write_text(
+                _constraint_text({**BASE_PINS, "pip": "9", "pip-tools": "8"}),
+                encoding="utf-8",
+            )
+            swapped = False
+            with (
+                mock.patch.object(verifier.os, "open", side_effect=swapping_open),
+                self.assertRaises(verifier.PolicyError) as constraint_swap,
+            ):
+                verifier.load_constraint(trusted)
+            self.assertEqual(constraint_swap.exception.code, "constraint-binding-changed")
+
+    def test_policy_reader_close_failure_does_not_mask_primary_base_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            path = Path(raw_directory).resolve() / "constraint.lock"
+            path.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            real_close = os.close
+            primary_errors = (KeyboardInterrupt("interrupt"), SystemExit(23))
+
+            for primary_error in primary_errors:
+                with self.subTest(primary=type(primary_error).__name__):
+                    def close_then_fail(descriptor: int) -> None:
+                        real_close(descriptor)
+                        raise OSError("injected close failure")
+
+                    with (
+                        mock.patch.object(verifier.os, "read", side_effect=primary_error),
+                        mock.patch.object(verifier.os, "close", side_effect=close_then_fail),
+                        self.assertRaises(type(primary_error)) as raised,
+                    ):
+                        verifier.load_constraint(path)
+
+                    self.assertIs(raised.exception, primary_error)
+                    self.assertIn(
+                        "Could not close constraint descriptor: injected close failure",
+                        "\n".join(getattr(raised.exception, "__notes__", ())),
+                    )
+
+    def test_successful_policy_read_translates_descriptor_close_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            path = Path(raw_directory).resolve() / "constraint.lock"
+            path.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            real_close = os.close
+
+            def close_then_fail(descriptor: int) -> None:
+                real_close(descriptor)
+                raise OSError("injected close failure")
+
+            with (
+                mock.patch.object(verifier.os, "close", side_effect=close_then_fail),
+                self.assertRaises(verifier.PolicyError) as raised,
+            ):
+                verifier.load_constraint(path)
+
+            self.assertEqual(raised.exception.code, "constraint-unreadable")
+            self.assertIn(
+                "Cannot close constraint descriptor after a successful read",
+                str(raised.exception),
+            )
+
+    def test_successful_policy_read_preserves_control_flow_close_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            path = Path(raw_directory).resolve() / "constraint.lock"
+            path.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            real_close = os.close
+            primary_error = KeyboardInterrupt("injected close interrupt")
+
+            def close_then_interrupt(descriptor: int) -> None:
+                real_close(descriptor)
+                raise primary_error
+
+            with (
+                mock.patch.object(
+                    verifier.os,
+                    "close",
+                    side_effect=close_then_interrupt,
+                ),
+                self.assertRaises(KeyboardInterrupt) as raised,
+            ):
+                verifier.load_constraint(path)
+
+            self.assertIs(raised.exception, primary_error)
+
+    def test_native_cohort_does_not_synthesize_sequential_file_generations(self) -> None:
+        current_pair = (PIP_VERSION, PIP_TOOLS_VERSION)
+        other_pair = ("26.1.1", "7.5.2")
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(*current_pair), encoding="utf-8")
+            paths = tuple(directory / path for path in verifier.NATIVE_CONSTRAINT_PATHS)
+            for path, pair in zip(
+                paths,
+                (current_pair, other_pair, other_pair),
+                strict=True,
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    _constraint_text({"pip": pair[0], "pip-tools": pair[1]}),
+                    encoding="utf-8",
+                )
+
+            replacements: list[Path] = []
+            for index, (path, pair) in enumerate(
+                zip(paths, (other_pair, current_pair, current_pair), strict=True)
+            ):
+                replacement = path.with_name(f".replacement-{index}.lock")
+                replacement.write_text(
+                    _constraint_text({"pip": pair[0], "pip-tools": pair[1]}),
+                    encoding="utf-8",
+                )
+                replacements.append(replacement)
+
+            real_open = os.open
+            real_close = os.close
+            first_constraint_descriptor: int | None = None
+            switched = False
+
+            def recording_open(
+                path: str | os.PathLike[str],
+                flags: int,
+            ) -> int:
+                nonlocal first_constraint_descriptor
+                descriptor = real_open(path, flags)
+                if Path(path).name == paths[0].name:
+                    first_constraint_descriptor = descriptor
+                return descriptor
+
+            def switching_close(descriptor: int) -> None:
+                nonlocal switched
+                real_close(descriptor)
+                if descriptor == first_constraint_descriptor and not switched:
+                    switched = True
+                    for replacement, path in zip(replacements, paths, strict=True):
+                        os.replace(replacement, path)
+
+            with (
+                chdir(directory),
+                mock.patch.object(verifier.os, "open", side_effect=recording_open),
+                mock.patch.object(verifier.os, "close", side_effect=switching_close),
+                self.assertRaises(verifier.PolicyError) as raised,
+            ):
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertTrue(switched)
+            self.assertEqual(raised.exception.code, "bootstrap-native-pair-mismatch")
+
+    @unittest.skipIf(os.name == "nt", "Windows can deny replacing an open source file.")
+    def test_native_cohort_revalidates_source_after_all_files_are_open(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            paths = _write_native_constraints(
+                directory,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+            replacement = directory / ".replacement-bootstrap.txt"
+            replacement.write_text(_bootstrap_text("9", "8"), encoding="utf-8")
+            real_open = os.open
+            swapped = False
+
+            def swapping_open(
+                path: str | os.PathLike[str],
+                flags: int,
+            ) -> int:
+                nonlocal swapped
+                descriptor = real_open(path, flags)
+                if Path(path).name == paths[-1].name and not swapped:
+                    swapped = True
+                    os.replace(replacement, source)
+                return descriptor
+
+            with (
+                chdir(directory),
+                mock.patch.object(verifier.os, "open", side_effect=swapping_open),
+                self.assertRaises(verifier.PolicyError) as raised,
+            ):
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertTrue(swapped)
+            self.assertEqual(raised.exception.code, "bootstrap-source-invalid")
+            self.assertIn("changed while it was being read", str(raised.exception))
+
+    def test_native_cohort_closes_every_descriptor_in_reverse_on_interrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            _write_native_constraints(
+                directory,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+            real_open = os.open
+            real_close = os.close
+            opened: list[int] = []
+            closed: list[int] = []
+            primary_error = KeyboardInterrupt("injected read interrupt")
+
+            def recording_open(
+                path: str | os.PathLike[str],
+                flags: int,
+            ) -> int:
+                descriptor = real_open(path, flags)
+                opened.append(descriptor)
+                return descriptor
+
+            def close_then_fail(descriptor: int) -> None:
+                closed.append(descriptor)
+                real_close(descriptor)
+                raise OSError(f"injected close failure for {descriptor}")
+
+            with (
+                chdir(directory),
+                mock.patch.object(verifier.os, "open", side_effect=recording_open),
+                mock.patch.object(verifier.os, "read", side_effect=primary_error),
+                mock.patch.object(verifier.os, "close", side_effect=close_then_fail),
+                self.assertRaises(KeyboardInterrupt) as raised,
+            ):
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertIs(raised.exception, primary_error)
+            self.assertEqual(len(opened), 4)
+            self.assertEqual(closed, list(reversed(opened)))
+            notes = getattr(raised.exception, "__notes__", ())
+            self.assertEqual(len(notes), 4)
+            self.assertTrue(
+                all("Could not close constraint descriptor" in note for note in notes)
+            )
+
+    def test_held_cohort_rejects_duplicate_file_identities(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint = directory / "constraint.lock"
+            os.link(source, constraint)
+
+            with (
+                mock.patch.object(verifier, "paths_alias", return_value=False),
+                self.assertRaises(verifier.PolicyError) as raised,
+            ):
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=constraint,
+                    policy="stable",
+                )
+
+            self.assertEqual(raised.exception.code, "bootstrap-path-alias")
+
+    def test_policy_reader_rejects_redirected_external_grandparent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            physical = directory / "physical"
+            nested = physical / "nested"
+            nested.mkdir(parents=True)
+            constraint = nested / "constraint.lock"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            redirected_parent = directory / "redirected"
+            _create_directory_link(redirected_parent, physical)
+            redirected_constraint = redirected_parent / "nested" / constraint.name
+
+            with self.assertRaises(verifier.PolicyError) as raised:
+                verifier.load_constraint(redirected_constraint)
+
+            self.assertEqual(raised.exception.code, "constraint-not-physical")
+
+    def test_policy_reader_rejects_parent_traversal_after_linked_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            trusted = directory / "trusted"
+            external = directory / "external"
+            linked_child = external / "child"
+            trusted.mkdir()
+            linked_child.mkdir(parents=True)
+            (external / "constraint.lock").write_text(
+                _constraint_text({**BASE_PINS, "root-package": "external"}),
+                encoding="utf-8",
+            )
+            _create_directory_link(trusted / "linked-child", linked_child)
+            redirected_constraint = (
+                trusted / "linked-child" / ".." / "constraint.lock"
+            )
+
+            with self.assertRaises(verifier.PolicyError) as raised:
+                verifier.load_constraint(redirected_constraint)
+
+            self.assertEqual(raised.exception.code, "constraint-not-physical")
+
+    def test_policy_readers_translate_embedded_null_paths(self) -> None:
+        invalid_path = Path(f"constraint{chr(0)}.lock")
+        cases = (
+            (verifier.load_constraint, "constraint-unreadable"),
+            (verifier.load_bootstrap_requirements, "bootstrap-source-invalid"),
+        )
+
+        for loader, expected_code in cases:
+            with self.subTest(loader=loader.__name__):
+                with self.assertRaises(verifier.PolicyError) as raised:
+                    loader(invalid_path)
+                self.assertEqual(raised.exception.code, expected_code)
+
+        with self.assertRaises(verifier.PolicyError) as cohort_error:
+            verifier.load_bootstrap_state(
+                source_path=invalid_path,
+                selected_constraint_path=Path("constraint.lock"),
+                policy="stable",
+            )
+        self.assertEqual(cohort_error.exception.code, "path-alias-check-failed")
+
+    def test_native_policy_rejects_constraints_reached_through_linked_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            checkout = directory / "checkout"
+            external = directory / "external"
+            checkout.mkdir()
+            _write_native_constraints(
+                external,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+            (checkout / "requirements-bootstrap.txt").write_text(_bootstrap_text(), encoding="utf-8")
+            _create_directory_link(checkout / "constraints", external / "constraints")
+
+            with chdir(checkout), self.assertRaises(verifier.PolicyError) as redirected:
+                verifier.load_bootstrap_state(
+                    source_path=Path("requirements-bootstrap.txt"),
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertEqual(redirected.exception.code, "constraint-not-physical")
+
+    def test_stable_state_requires_source_and_selected_lock_equality(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint = directory / "constraint.lock"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+
+            state = verifier.load_bootstrap_state(
+                source_path=source,
+                selected_constraint_path=constraint,
+                policy="stable",
+            )
+
+            self.assertEqual(state.state, "stable")
+            constraint.write_text(
+                _constraint_text({**BASE_PINS, "pip-tools": "7.5.2"}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(verifier.PolicyError) as mismatch:
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=constraint,
+                    policy="stable",
+                )
+            self.assertEqual(mismatch.exception.code, "bootstrap-source-lock-mismatch")
+            self.assertIn("commit all three reviewed lock artifacts", str(mismatch.exception))
+
+    def test_native_state_allows_platform_graph_differences_and_one_source_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            _write_native_constraints(
+                directory,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+
+            with chdir(directory):
+                stable_state = verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertEqual(stable_state.state, "stable")
+            self.assertEqual(stable_state.current_pair, stable_state.proposed_pair)
+            _write_native_constraints(
+                directory,
+                pip_version="26.1.1",
+                pip_tools_version="7.5.2",
+            )
+
+            with chdir(directory):
+                state = verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+
+            self.assertEqual(state.state, "source-transition")
+            self.assertEqual(state.current_pair.as_pins(), {"pip": "26.1.1", "pip-tools": "7.5.2"})
+            self.assertEqual(state.proposed_pair.as_pins(), {"pip": PIP_VERSION, "pip-tools": PIP_TOOLS_VERSION})
+
+    def test_native_state_rejects_mixed_or_incomplete_platform_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            paths = _write_native_constraints(
+                directory,
+                pip_version="26.1.1",
+                pip_tools_version="7.5.2",
+            )
+            paths[1].write_text(
+                _constraint_text({"pip": PIP_VERSION, "pip-tools": PIP_TOOLS_VERSION}),
+                encoding="utf-8",
+            )
+            with chdir(directory), self.assertRaises(verifier.PolicyError) as mixed:
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+            self.assertEqual(mixed.exception.code, "bootstrap-native-pair-mismatch")
+
+            paths[1].write_text(_constraint_text({"pip": "26.1.1"}), encoding="utf-8")
+            with chdir(directory), self.assertRaises(verifier.PolicyError) as missing:
+                verifier.load_bootstrap_state(
+                    source_path=source,
+                    selected_constraint_path=None,
+                    policy="native-lock-workflow",
+                )
+            self.assertEqual(missing.exception.code, "bootstrap-pair-missing")
+
+    def test_preflight_receipt_is_atomic_deterministic_and_records_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            _write_native_constraints(
+                directory,
+                pip_version="26.1.1",
+                pip_tools_version="7.5.2",
+            )
+            (directory / "requirements-bootstrap.txt").write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt.json"
+            output.write_text("stale", encoding="utf-8")
+            with chdir(directory), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        "requirements-bootstrap.txt",
+                        "--policy",
+                        "native-lock-workflow",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            payload = output.read_bytes()
+            self.assertTrue(payload.endswith(b"\n"))
+            receipt = cast(dict[str, object], json.loads(payload))
+            self.assertEqual(receipt["status"], "verified")
+            self.assertEqual(receipt["state"], "source-transition")
+            constraints = cast(list[dict[str, object]], receipt["constraints"])
+            self.assertEqual(
+                [item["path"] for item in constraints],
+                [str(path) for path in verifier.NATIVE_CONSTRAINT_PATHS],
+            )
+            for item in constraints:
+                self.assertRegex(cast(str, item["sha256"]), r"[0-9a-f]{64}\Z")
+                self.assertRegex(cast(str, item["pin_fingerprint"]), r"[0-9a-f]{64}\Z")
+            transition = cast(dict[str, object], receipt["source_transition"])
+            self.assertEqual(transition["active"], True)
+            with chdir(directory), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                repeated_result = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        "requirements-bootstrap.txt",
+                        "--policy",
+                        "native-lock-workflow",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(repeated_result, 0)
+            self.assertEqual(output.read_bytes(), payload)
+
+    def test_atomic_receipt_closes_raw_descriptor_when_fdopen_fails(self) -> None:
+        for close_fails in (False, True):
+            with self.subTest(close_fails=close_fails):
+                with tempfile.TemporaryDirectory() as raw_directory:
+                    directory = Path(raw_directory).resolve()
+                    output = directory / "receipt.json"
+                    real_mkstemp = tempfile.mkstemp
+                    real_close = os.close
+                    created_descriptor = -1
+                    primary_error = RuntimeError("injected fdopen failure")
+
+                    def recording_mkstemp(
+                        suffix: str | None = None,
+                        prefix: str | None = None,
+                        directory: str | os.PathLike[str] | None = None,
+                        text: bool = False,
+                        **kwargs: str | os.PathLike[str] | bool | None,
+                    ) -> tuple[int, str]:
+                        nonlocal created_descriptor
+                        selected_directory = cast(
+                            str | os.PathLike[str] | None,
+                            kwargs.get("dir", directory),
+                        )
+                        created_descriptor, temporary_name = real_mkstemp(
+                            suffix=suffix,
+                            prefix=prefix,
+                            dir=selected_directory,
+                            text=text,
+                        )
+                        return created_descriptor, temporary_name
+
+                    def close_descriptor(descriptor: int) -> None:
+                        real_close(descriptor)
+                        if close_fails:
+                            raise OSError("injected descriptor close failure")
+
+                    with (
+                        mock.patch.object(
+                            verifier.tempfile,
+                            "mkstemp",
+                            side_effect=recording_mkstemp,
+                        ),
+                        mock.patch.object(verifier.os, "fdopen", side_effect=primary_error),
+                        mock.patch.object(verifier.os, "close", side_effect=close_descriptor),
+                        self.assertRaises(RuntimeError) as raised,
+                    ):
+                        verifier.atomic_write_receipt(output, {"status": "verified"})
+
+                    self.assertIs(raised.exception, primary_error)
+                    self.assertGreaterEqual(created_descriptor, 0)
+                    with self.assertRaises(OSError):
+                        os.fstat(created_descriptor)
+                    notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+                    if close_fails:
+                        self.assertIn(
+                            "Could not close receipt temporary descriptor: "
+                            "injected descriptor close failure",
+                            notes,
+                        )
+                    else:
+                        self.assertEqual(notes, "")
+                    self.assertEqual(list(directory.glob(".receipt.json.*.tmp")), [])
+
+    def test_atomic_receipt_cleanup_does_not_mask_primary_base_exception(self) -> None:
+        primary_errors = (
+            RuntimeError("injected replace failure"),
+            KeyboardInterrupt("interrupt"),
+            SystemExit(23),
+        )
+        for primary_error in primary_errors:
+            with self.subTest(primary=type(primary_error).__name__):
+                with tempfile.TemporaryDirectory() as raw_directory:
+                    directory = Path(raw_directory).resolve()
+                    output = directory / "receipt.json"
+                    with (
+                        mock.patch.object(verifier.os, "replace", side_effect=primary_error),
+                        mock.patch.object(
+                            verifier.Path,
+                            "unlink",
+                            side_effect=OSError("injected cleanup failure"),
+                        ),
+                        self.assertRaises(type(primary_error)) as raised,
+                    ):
+                        verifier.atomic_write_receipt(output, {"status": "verified"})
+
+                    self.assertIs(raised.exception, primary_error)
+                    self.assertIn(
+                        "Could not remove receipt temporary file: injected cleanup failure",
+                        "\n".join(getattr(raised.exception, "__notes__", ())),
+                    )
+                    temporary_files = list(directory.glob(".receipt.json.*.tmp"))
+                    self.assertEqual(len(temporary_files), 1)
+                    os.unlink(temporary_files[0])
+
+    def test_stable_preflight_writes_success_and_actionable_failure_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            constraint = directory / "constraint.lock"
+            output = directory / "receipt.json"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            arguments = [
+                "--source",
+                str(source),
+                "--policy",
+                "stable",
+                "--constraint",
+                str(constraint),
+                "--output",
+                str(output),
+            ]
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                success = verifier.bootstrap_preflight_main(arguments)
+            self.assertEqual(success, 0)
+            success_receipt = cast(dict[str, object], json.loads(output.read_bytes()))
+            self.assertEqual((success_receipt["status"], success_receipt["state"]), ("verified", "stable"))
+
+            constraint.write_text(
+                _constraint_text({**BASE_PINS, "pip-tools": "7.5.2"}),
+                encoding="utf-8",
+            )
+            stderr = StringIO()
+            with (
+                mock.patch.object(verifier.subprocess, "Popen") as popen_mock,
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                failure = verifier.bootstrap_preflight_main(arguments)
+            self.assertEqual(failure, 1)
+            popen_mock.assert_not_called()
+            diagnostic = stderr.getvalue()
+            self.assertEqual(len(diagnostic.splitlines()), 1)
+            self.assertEqual(diagnostic.count("bootstrap-source-lock-mismatch"), 1)
+            self.assertEqual(
+                diagnostic.count(
+                    f"source has pip=={PIP_VERSION}, pip-tools=={PIP_TOOLS_VERSION}"
+                ),
+                1,
+            )
+            self.assertEqual(
+                diagnostic.count(
+                    f"selected constraint has pip=={PIP_VERSION}, pip-tools==7.5.2"
+                ),
+                1,
+            )
+            self.assertEqual(
+                diagnostic.count("Run the native Dependency Locks workflow"),
+                1,
+            )
+            failure_receipt = cast(dict[str, object], json.loads(output.read_bytes()))
+            self.assertEqual((failure_receipt["status"], failure_receipt["state"]), ("failed", "invalid"))
+            errors = cast(list[dict[str, object]], failure_receipt["errors"])
+            self.assertEqual([error["code"] for error in errors], ["bootstrap-source-lock-mismatch"])
+
+    def test_preflight_rejects_source_constraint_and_output_aliases_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            source_bytes = _bootstrap_text().encode("utf-8")
+            source.write_bytes(source_bytes)
+            constraint = directory / "constraint.lock"
+            constraint_bytes = _constraint_text(BASE_PINS).encode("utf-8")
+            constraint.write_bytes(constraint_bytes)
+
+            cases = (
+                ("source-output", source, constraint, source),
+                ("constraint-output", source, constraint, constraint),
+                ("source-constraint", source, source, directory / "receipt.json"),
+            )
+            for label, selected_source, selected_constraint, output in cases:
+                with self.subTest(label=label), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    result = verifier.bootstrap_preflight_main(
+                        [
+                            "--source",
+                            str(selected_source),
+                            "--policy",
+                            "stable",
+                            "--constraint",
+                            str(selected_constraint),
+                            "--output",
+                            str(output),
+                        ]
+                    )
+                self.assertEqual(result, 2)
+                self.assertEqual(source.read_bytes(), source_bytes)
+                self.assertEqual(constraint.read_bytes(), constraint_bytes)
+
+            native_paths = _write_native_constraints(
+                directory,
+                pip_version=PIP_VERSION,
+                pip_tools_version=PIP_TOOLS_VERSION,
+            )
+            native_bytes = native_paths[0].read_bytes()
+            with chdir(directory), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                native_alias = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        source.name,
+                        "--policy",
+                        "native-lock-workflow",
+                        "--output",
+                        str(native_paths[0]),
+                    ]
+                )
+            self.assertEqual(native_alias, 2)
+            self.assertEqual(native_paths[0].read_bytes(), native_bytes)
 
 
 if __name__ == "__main__":

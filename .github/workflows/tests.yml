@@ -28,6 +28,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-linux-py312.lock \
+            --output "$RUNNER_TEMP/tests-linux-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/bin"
           printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
@@ -37,16 +42,16 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-linux-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             -r requirements.txt
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             coverage==7.15.2
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require coverage \
@@ -57,7 +62,8 @@ jobs:
             --expected-python 3.12.13 \
             --expected-platform linux \
             --expected-machine x86_64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-linux-dependencies.json"
 
       - name: Install Qt system dependencies
@@ -121,6 +127,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-macos-py312.lock \
+            --output "$RUNNER_TEMP/tests-macos-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/bin"
           printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
@@ -130,13 +141,13 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-macos-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-macos-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-macos-py312.txt \
+            --constraint constraints/requirements-macos-py312.lock \
             -r requirements.txt
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-macos-py312.txt \
+            --constraint constraints/requirements-macos-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
@@ -146,7 +157,8 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform darwin \
             --expected-machine arm64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-macos-dependencies.json"
 
       - name: Run native macOS managed-output transaction tests
@@ -183,6 +195,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-windows-py312.lock \
+            --output "$RUNNER_TEMP/tests-windows-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/Scripts"
           venv_native="$(cygpath -w "$venv_dir")"
@@ -196,13 +213,13 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-windows-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             -r requirements.txt
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
@@ -212,7 +229,8 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-windows-dependencies.json"
 
       - name: Run Windows outcome and artifact transaction tests
@@ -267,6 +285,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-windows-py312.lock \
+            --output "$RUNNER_TEMP/included-files-scale-windows-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/Scripts"
           venv_native="$(cygpath -w "$venv_dir")"
@@ -280,13 +303,13 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-windows-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             -r requirements.txt
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
@@ -296,7 +319,8 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/included-files-scale-windows-dependencies.json"
 
       - name: Run native Windows Included Files scale gate
@@ -324,6 +348,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-windows-py312.lock \
+            --output "$RUNNER_TEMP/windows-crash-recovery-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/Scripts"
           venv_native="$(cygpath -w "$venv_dir")"
@@ -337,13 +366,13 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-windows-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             -r requirements.txt
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-windows-py312.txt \
+            --constraint constraints/requirements-windows-py312.lock \
             --mode subset \
             --require pip \
             --require Pillow \
@@ -353,7 +382,8 @@ jobs:
             --expected-python 3.12.10 \
             --expected-platform win32 \
             --expected-machine AMD64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/windows-crash-recovery-dependencies.json"
 
       - name: Run native Windows crash recovery matrix

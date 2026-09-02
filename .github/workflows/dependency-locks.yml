@@ -26,7 +26,7 @@ permissions:
 
 concurrency:
   group: dependency-locks-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
 jobs:
   generate:
@@ -41,7 +41,7 @@ jobs:
             runner: ubuntu-24.04
             architecture: x64
             python_version: '3.12.13'
-            constraint: requirements-linux-py312.txt
+            constraint: requirements-linux-py312.lock
             expected_platform: linux
             expected_machine: x86_64
             venv_python: bin/python
@@ -50,7 +50,7 @@ jobs:
             runner: macos-26
             architecture: arm64
             python_version: '3.12.10'
-            constraint: requirements-macos-py312.txt
+            constraint: requirements-macos-py312.lock
             expected_platform: darwin
             expected_machine: arm64
             venv_python: bin/python
@@ -59,7 +59,7 @@ jobs:
             runner: windows-2025
             architecture: x64
             python_version: '3.12.10'
-            constraint: requirements-windows-py312.txt
+            constraint: requirements-windows-py312.lock
             expected_platform: win32
             expected_machine: AMD64
             venv_python: Scripts/python.exe
@@ -70,16 +70,22 @@ jobs:
       EXPECTED_PYTHON: ${{ matrix.python_version }}
       EXPECTED_PLATFORM: ${{ matrix.expected_platform }}
       EXPECTED_MACHINE: ${{ matrix.expected_machine }}
+      BOOTSTRAP_SOURCE: requirements-bootstrap.txt
       COMMITTED_CONSTRAINT: constraints/${{ matrix.constraint }}
       WORK_ROOT: dependency-locks
       WORK_DIR: dependency-locks/work
       ARTIFACT_DIR: dependency-locks/artifact
       CANDIDATE_CONSTRAINT: dependency-locks/artifact/candidate/${{ matrix.constraint }}
       SELFHOST_CONSTRAINT: dependency-locks/artifact/selfhost/${{ matrix.constraint }}
+      BOOTSTRAP_CANDIDATE_CONSTRAINT: dependency-locks/artifact/bootstrap/candidate/${{ matrix.constraint }}
+      BOOTSTRAP_SELFHOST_CONSTRAINT: dependency-locks/artifact/bootstrap/selfhost/${{ matrix.constraint }}
       RECEIPT_DIR: dependency-locks/artifact/receipts
       CURRENT_ENV: dependency-locks/work/current-generator
       CURRENT_PYTHON: dependency-locks/work/current-generator/${{ matrix.venv_python }}
       CURRENT_COMPILE_CACHE: dependency-locks/work/current-pip-tools-cache
+      BOOTSTRAP_ENV: dependency-locks/work/bootstrap-probe-generator
+      BOOTSTRAP_PYTHON: dependency-locks/work/bootstrap-probe-generator/${{ matrix.venv_python }}
+      BOOTSTRAP_COMPILE_CACHE: dependency-locks/work/bootstrap-probe-pip-tools-cache
       CANDIDATE_ENV: dependency-locks/work/candidate-generator
       CANDIDATE_PYTHON: dependency-locks/work/candidate-generator/${{ matrix.venv_python }}
       CANDIDATE_COMPILE_CACHE: dependency-locks/work/candidate-pip-tools-cache
@@ -101,7 +107,7 @@ jobs:
           python-version: ${{ matrix.python_version }}
           architecture: ${{ matrix.architecture }}
 
-      - name: Validate native tuple and committed constraint
+      - name: Validate native tuple and bootstrap transition state
         shell: bash
         run: |
           test -f "$COMMITTED_CONSTRAINT"
@@ -111,14 +117,14 @@ jobs:
             exit 1
           fi
           mkdir -p "$WORK_DIR" "$(dirname "$CANDIDATE_CONSTRAINT")" \
-            "$(dirname "$SELFHOST_CONSTRAINT")" "$RECEIPT_DIR"
+            "$(dirname "$SELFHOST_CONSTRAINT")" \
+            "$(dirname "$BOOTSTRAP_CANDIDATE_CONSTRAINT")" \
+            "$(dirname "$BOOTSTRAP_SELFHOST_CONSTRAINT")" \
+            "$RECEIPT_DIR"
           python - <<'PY'
           import os
           import platform
-          from pathlib import Path
           import sys
-
-          from scripts.verify_dependency_environment import load_constraint
 
           observed = (platform.python_version(), sys.platform, platform.machine())
           expected = (
@@ -128,18 +134,11 @@ jobs:
           )
           if observed != expected:
               raise SystemExit(f"Native tuple mismatch: expected {expected!r}, observed {observed!r}")
-
-          policy = load_constraint(Path(os.environ["COMMITTED_CONSTRAINT"]))
-          try:
-              current_pip = policy.pins["pip"]
-              current_pip_tools = policy.pins["pip-tools"]
-          except KeyError as error:
-              raise SystemExit(f"Committed constraint lacks generator pin: {error.args[0]}") from error
-
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="\n") as output:
-              output.write(f"CURRENT_PIP={current_pip}\n")
-              output.write(f"CURRENT_PIP_TOOLS={current_pip_tools}\n")
           PY
+          python scripts/verify_dependency_bootstrap.py \
+            --source "$BOOTSTRAP_SOURCE" \
+            --policy native-lock-workflow \
+            --output "$RECEIPT_DIR/bootstrap-preflight.json"
 
       - name: Validate refresh request
         shell: bash
@@ -182,10 +181,15 @@ jobs:
               raise SystemExit(
                   f"refresh_package must already be normalized as {normalized_name!r}"
               )
+          if normalized_name in {"pip", "pip-tools"}:
+              raise SystemExit(
+                  "pip and pip-tools must be reviewed together in "
+                  "requirements-bootstrap.txt; package refresh is forbidden"
+              )
           native_constraint_paths = (
-              Path("constraints/requirements-linux-py312.txt"),
-              Path("constraints/requirements-macos-py312.txt"),
-              Path("constraints/requirements-windows-py312.txt"),
+              Path("constraints/requirements-linux-py312.lock"),
+              Path("constraints/requirements-macos-py312.lock"),
+              Path("constraints/requirements-windows-py312.lock"),
           )
           try:
               native_policies = tuple(load_constraint(path) for path in native_constraint_paths)
@@ -209,12 +213,12 @@ jobs:
             --no-cache-dir \
             --only-binary=:all: \
             --constraint "$CONSTRAINT" \
-            "pip==$CURRENT_PIP"
+            pip
           "$CURRENT_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
             --no-cache-dir \
             --only-binary=:all: \
             --constraint "$CONSTRAINT" \
-            "pip-tools==$CURRENT_PIP_TOOLS"
+            pip-tools
           "$CURRENT_PYTHON" scripts/verify_dependency_environment.py \
             --constraint "$CONSTRAINT" \
             --mode subset \
@@ -223,8 +227,95 @@ jobs:
             --expected-python "$EXPECTED_PYTHON" \
             --expected-platform "$EXPECTED_PLATFORM" \
             --expected-machine "$EXPECTED_MACHINE" \
-            --expected-pip "$CURRENT_PIP" \
+            --bootstrap "$BOOTSTRAP_SOURCE" \
+            --bootstrap-policy native-lock-workflow \
             --output "$RECEIPT_DIR/current-generator.json"
+
+      - name: Generate bootstrap compatibility candidate
+        shell: bash
+        run: |
+          cp "$COMMITTED_CONSTRAINT" "$BOOTSTRAP_CANDIDATE_CONSTRAINT"
+          "$CURRENT_PYTHON" -I scripts/compile_dependency_lock.py \
+            --resolver=backtracking \
+            --strip-extras \
+            --allow-unsafe \
+            --no-header \
+            --no-emit-index-url \
+            --no-emit-trusted-host \
+            --no-emit-find-links \
+            --no-emit-options \
+            --no-config \
+            "--pip-args=--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:" \
+            --cache-dir="$CURRENT_COMPILE_CACHE" \
+            --output-file="$BOOTSTRAP_CANDIDATE_CONSTRAINT" \
+            "$BOOTSTRAP_SOURCE"
+          python scripts/verify_dependency_bootstrap.py \
+            --source "$BOOTSTRAP_SOURCE" \
+            --policy stable \
+            --constraint "$BOOTSTRAP_CANDIDATE_CONSTRAINT" \
+            --output "$RECEIPT_DIR/bootstrap-probe-preflight.json"
+
+      - name: Prove bootstrap pair compatibility and self-hosting
+        shell: bash
+        env:
+          CONSTRAINT: ${{ env.BOOTSTRAP_CANDIDATE_CONSTRAINT }}
+        run: |
+          python -m venv "$BOOTSTRAP_ENV"
+          "$BOOTSTRAP_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --constraint "$CONSTRAINT" \
+            pip
+          "$BOOTSTRAP_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
+            --no-cache-dir \
+            --only-binary=:all: \
+            --constraint "$CONSTRAINT" \
+            -r "$BOOTSTRAP_SOURCE"
+          "$BOOTSTRAP_PYTHON" scripts/verify_dependency_environment.py \
+            --constraint "$CONSTRAINT" \
+            --mode complete \
+            --require pip \
+            --require pip-tools \
+            --expected-python "$EXPECTED_PYTHON" \
+            --expected-platform "$EXPECTED_PLATFORM" \
+            --expected-machine "$EXPECTED_MACHINE" \
+            --bootstrap "$BOOTSTRAP_SOURCE" \
+            --bootstrap-policy stable \
+            --output "$RECEIPT_DIR/bootstrap-probe-generator.json"
+
+          cp "$BOOTSTRAP_CANDIDATE_CONSTRAINT" "$BOOTSTRAP_SELFHOST_CONSTRAINT"
+          "$BOOTSTRAP_PYTHON" -I scripts/compile_dependency_lock.py \
+            --resolver=backtracking \
+            --strip-extras \
+            --allow-unsafe \
+            --no-header \
+            --no-emit-index-url \
+            --no-emit-trusted-host \
+            --no-emit-find-links \
+            --no-emit-options \
+            --no-config \
+            "--pip-args=--isolated --disable-pip-version-check --no-input --no-cache-dir --only-binary=:all:" \
+            --cache-dir="$BOOTSTRAP_COMPILE_CACHE" \
+            --output-file="$BOOTSTRAP_SELFHOST_CONSTRAINT" \
+            "$BOOTSTRAP_SOURCE"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.verify_dependency_environment import (
+              load_constraint,
+              pin_fingerprint,
+          )
+
+          candidate = load_constraint(Path(os.environ["BOOTSTRAP_CANDIDATE_CONSTRAINT"]))
+          selfhost = load_constraint(Path(os.environ["BOOTSTRAP_SELFHOST_CONSTRAINT"]))
+          if candidate.pins != selfhost.pins:
+              raise SystemExit(
+                  "Proposed pip/pip-tools generator did not reproduce its bootstrap graph: "
+                  f"candidate={pin_fingerprint(candidate.pins)}, "
+                  f"selfhost={pin_fingerprint(selfhost.pins)}"
+              )
+          PY
 
       - name: Generate preference-seeded candidate constraint
         shell: bash
@@ -255,26 +346,14 @@ jobs:
             --output-file="$CANDIDATE_CONSTRAINT" \
             requirements-lock.in
 
-      - name: Read candidate generator pins
+      - name: Validate candidate bootstrap pair
         shell: bash
         run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-
-          from scripts.verify_dependency_environment import load_constraint
-
-          policy = load_constraint(Path(os.environ["CANDIDATE_CONSTRAINT"]))
-          try:
-              candidate_pip = policy.pins["pip"]
-              candidate_pip_tools = policy.pins["pip-tools"]
-          except KeyError as error:
-              raise SystemExit(f"Candidate constraint lacks generator pin: {error.args[0]}") from error
-
-          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8", newline="\n") as output:
-              output.write(f"CANDIDATE_PIP={candidate_pip}\n")
-              output.write(f"CANDIDATE_PIP_TOOLS={candidate_pip_tools}\n")
-          PY
+          python scripts/verify_dependency_bootstrap.py \
+            --source "$BOOTSTRAP_SOURCE" \
+            --policy stable \
+            --constraint "$CANDIDATE_CONSTRAINT" \
+            --output "$RECEIPT_DIR/candidate-preflight.json"
 
       - name: Create and verify candidate lock generator
         shell: bash
@@ -286,12 +365,12 @@ jobs:
             --no-cache-dir \
             --only-binary=:all: \
             --constraint "$CONSTRAINT" \
-            "pip==$CANDIDATE_PIP"
+            pip
           "$CANDIDATE_PYTHON" -m pip --isolated --disable-pip-version-check --no-input install \
             --no-cache-dir \
             --only-binary=:all: \
             --constraint "$CONSTRAINT" \
-            "pip-tools==$CANDIDATE_PIP_TOOLS"
+            -r "$BOOTSTRAP_SOURCE"
           "$CANDIDATE_PYTHON" scripts/verify_dependency_environment.py \
             --constraint "$CONSTRAINT" \
             --mode subset \
@@ -300,7 +379,8 @@ jobs:
             --expected-python "$EXPECTED_PYTHON" \
             --expected-platform "$EXPECTED_PLATFORM" \
             --expected-machine "$EXPECTED_MACHINE" \
-            --expected-pip "$CANDIDATE_PIP" \
+            --bootstrap "$BOOTSTRAP_SOURCE" \
+            --bootstrap-policy stable \
             --output "$RECEIPT_DIR/candidate-generator.json"
 
       - name: Regenerate constraint with candidate generator
@@ -346,7 +426,7 @@ jobs:
               --no-cache-dir \
               --only-binary=:all: \
               --constraint "$CONSTRAINT" \
-              "pip==$CANDIDATE_PIP"
+              pip
             "$fresh_python" -m pip --isolated --disable-pip-version-check --no-input install \
               --no-cache-dir \
               --only-binary=:all: \
@@ -367,9 +447,25 @@ jobs:
               --expected-python "$EXPECTED_PYTHON" \
               --expected-platform "$EXPECTED_PLATFORM" \
               --expected-machine "$EXPECTED_MACHINE" \
-              --expected-pip "$CANDIDATE_PIP" \
+              --bootstrap "$BOOTSTRAP_SOURCE" \
+              --bootstrap-policy stable \
               --output "$RECEIPT_DIR/fresh-$run_number.json"
           done
+
+      - name: Build verified native dependency snapshot
+        shell: bash
+        run: |
+          fresh_python="$WORK_DIR/fresh-2/$VENV_PYTHON"
+          "$fresh_python" -I scripts/build_dependency_snapshot.py \
+            --constraint "$CANDIDATE_CONSTRAINT" \
+            --verification-receipt "$RECEIPT_DIR/fresh-2.json" \
+            --platform "$PLATFORM_LABEL" \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" \
+            --ref "$GITHUB_REF" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$ARTIFACT_DIR/dependency-submission.json"
 
       - name: Write dependency evidence manifest
         shell: bash
@@ -380,7 +476,12 @@ jobs:
           import os
           from pathlib import Path
 
-          from scripts.verify_dependency_environment import load_constraint, pin_fingerprint
+          from scripts.verify_dependency_environment import (
+              bootstrap_pair,
+              load_bootstrap_requirements,
+              load_constraint,
+              pin_fingerprint,
+          )
 
           def constraint_evidence(environment_name: str) -> dict[str, object]:
               path = Path(os.environ[environment_name])
@@ -393,7 +494,11 @@ jobs:
               }
 
           expected_receipt_names = {
+              "bootstrap-preflight.json",
+              "bootstrap-probe-generator.json",
+              "bootstrap-probe-preflight.json",
               "candidate-generator.json",
+              "candidate-preflight.json",
               "current-generator.json",
               "fresh-1.json",
               "fresh-2.json",
@@ -411,6 +516,8 @@ jobs:
           receipts: dict[str, object] = {}
           for path in receipt_paths:
               receipt = json.loads(path.read_text(encoding="utf-8"))
+              if receipt.get("status") != "verified":
+                  raise SystemExit(f"Dependency receipt is not verified: {path}")
               receipts[path.name] = {
                   "status": receipt.get("status"),
                   "installed_fingerprint": receipt.get("observation", {}).get(
@@ -419,8 +526,18 @@ jobs:
                   "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
               }
 
+          source_policy = load_bootstrap_requirements(Path(os.environ["BOOTSTRAP_SOURCE"]))
+          committed_policy = load_constraint(Path(os.environ["COMMITTED_CONSTRAINT"]))
+          candidate_policy = load_constraint(Path(os.environ["CANDIDATE_CONSTRAINT"]))
+          committed_pair = bootstrap_pair(committed_policy.pins, label="committed constraint")
+          candidate_pair = bootstrap_pair(candidate_policy.pins, label="candidate constraint")
+          snapshot_path = Path(os.environ["ARTIFACT_DIR"]) / "dependency-submission.json"
+          if not snapshot_path.is_file() or snapshot_path.is_symlink():
+              raise SystemExit("Verified dependency snapshot is missing or not a regular file")
+
           manifest = {
-              "schema_version": 1,
+              "schema_version": 2,
+              "repository_sha": os.environ["GITHUB_SHA"],
               "platform": os.environ["PLATFORM_LABEL"],
               "environment": {
                   "python_full_version": os.environ["EXPECTED_PYTHON"],
@@ -432,14 +549,9 @@ jobs:
                   "package": os.environ["REFRESH_PACKAGE"],
               },
               "generators": {
-                  "committed": {
-                      "pip": os.environ["CURRENT_PIP"],
-                      "pip-tools": os.environ["CURRENT_PIP_TOOLS"],
-                  },
-                  "candidate": {
-                      "pip": os.environ["CANDIDATE_PIP"],
-                      "pip-tools": os.environ["CANDIDATE_PIP_TOOLS"],
-                  },
+                  "source": source_policy.pair.as_pins(),
+                  "committed": committed_pair.as_pins(),
+                  "candidate": candidate_pair.as_pins(),
               },
               "constraints": {
                   "committed": constraint_evidence("COMMITTED_CONSTRAINT"),
@@ -447,6 +559,10 @@ jobs:
                   "selfhost": constraint_evidence("SELFHOST_CONSTRAINT"),
               },
               "receipts": receipts,
+              "dependency_submission": {
+                  "path": snapshot_path.as_posix(),
+                  "sha256": hashlib.sha256(snapshot_path.read_bytes()).hexdigest(),
+              },
           }
           output_path = Path(os.environ["ARTIFACT_DIR"]) / "manifest.json"
           output_path.write_text(
@@ -489,3 +605,874 @@ jobs:
           fi
 
           exit "$status"
+
+  submit-dependency-graphs:
+    name: submit verified native dependency graphs
+    needs: generate
+    if: >-
+      ${{ !cancelled() &&
+          needs.generate.result == 'success' &&
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          github.event.deleted == false &&
+          github.sha == github.event.after }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download same-run native evidence without extraction
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dependency-lock-*-py*
+          path: ${{ runner.temp }}/gm2godot-raw-dependency-artifacts
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Fetch authoritative native locks at exact push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          AUTHORITATIVE_FETCH_ROOT: ${{ runner.temp }}/gm2godot-authoritative-lock-fetch
+          AUTHORITATIVE_LOCK_ROOT: ${{ runner.temp }}/gm2godot-authoritative-lock-fetch/locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$ ]]; then
+            echo "::error::Expected repository name is malformed." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Expected push SHA is malformed." >&2
+            exit 1
+          fi
+          if [[ -e "$AUTHORITATIVE_FETCH_ROOT" || -L "$AUTHORITATIVE_FETCH_ROOT" ]]; then
+            echo "::error::Refusing to reuse authoritative dependency lock fetch root." >&2
+            exit 1
+          fi
+          mkdir -m 700 "$AUTHORITATIVE_FETCH_ROOT"
+          mkdir -m 700 "$AUTHORITATIVE_FETCH_ROOT/responses" "$AUTHORITATIVE_LOCK_ROOT"
+          while IFS='|' read -r platform lock_path; do
+            gh api \
+              --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "/repos/${EXPECTED_REPOSITORY}/contents/${lock_path}?ref=${EXPECTED_SHA}" \
+              > "$AUTHORITATIVE_FETCH_ROOT/responses/${platform}.json"
+          done <<'LOCKS'
+          linux-x64|constraints/requirements-linux-py312.lock
+          macos-arm64|constraints/requirements-macos-py312.lock
+          windows-x64|constraints/requirements-windows-py312.lock
+          LOCKS
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import binascii
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+
+          MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
+          MAX_LOCK_BYTES = 1024 * 1024
+          SHA1_PATTERN = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
+          expected = {
+              "linux-x64": "constraints/requirements-linux-py312.lock",
+              "macos-arm64": "constraints/requirements-macos-py312.lock",
+              "windows-x64": "constraints/requirements-windows-py312.lock",
+          }
+
+          class DuplicateKeyError(ValueError):
+              pass
+
+          def checked_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              result: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise DuplicateKeyError(f"duplicate JSON key {key!r}")
+                  result[key] = value
+              return result
+
+          def reject_constant(value: str) -> object:
+              raise ValueError(f"unsupported JSON constant {value}")
+
+          def read_bounded_regular(path: Path, maximum_bytes: int, label: str) -> bytes:
+              try:
+                  before = path.lstat()
+              except OSError as error:
+                  raise SystemExit(f"Cannot inspect {label}: {error}") from error
+              if (
+                  stat.S_ISLNK(before.st_mode)
+                  or not stat.S_ISREG(before.st_mode)
+                  or before.st_size > maximum_bytes
+              ):
+                  raise SystemExit(f"{label} is not one bounded regular file")
+              flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+              descriptor: int | None = None
+              try:
+                  descriptor = os.open(path, flags)
+                  opened = os.fstat(descriptor)
+                  after_open = path.lstat()
+                  identity = lambda value: (
+                      value.st_dev,
+                      value.st_ino,
+                      value.st_size,
+                      value.st_mtime_ns,
+                  )
+                  if (
+                      not stat.S_ISREG(opened.st_mode)
+                      or stat.S_ISLNK(after_open.st_mode)
+                      or identity(before) != identity(opened)
+                      or identity(after_open) != identity(opened)
+                  ):
+                      raise SystemExit(f"{label} changed while it was opened")
+                  with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                      descriptor = None
+                      payload = handle.read(maximum_bytes + 1)
+                      final = os.fstat(handle.fileno())
+                  after_read = path.lstat()
+              except SystemExit:
+                  raise
+              except OSError as error:
+                  raise SystemExit(f"Cannot safely read {label}: {error}") from error
+              finally:
+                  if descriptor is not None:
+                      os.close(descriptor)
+              if (
+                  len(payload) > maximum_bytes
+                  or stat.S_ISLNK(after_read.st_mode)
+                  or identity(opened) != identity(final)
+                  or identity(final) != identity(after_read)
+                  or len(payload) != final.st_size
+              ):
+                  raise SystemExit(f"{label} changed while it was read")
+              return payload
+
+          def parse_response(path: Path, platform: str, lock_path: str) -> bytes:
+              payload = read_bounded_regular(
+                  path,
+                  MAX_API_RESPONSE_BYTES,
+                  f"{platform} repository-contents response",
+              )
+              try:
+                  response = json.loads(
+                      payload.decode("utf-8"),
+                      object_pairs_hook=checked_object,
+                      parse_constant=reject_constant,
+                  )
+              except (
+                  UnicodeDecodeError,
+                  json.JSONDecodeError,
+                  DuplicateKeyError,
+                  ValueError,
+              ) as error:
+                  raise SystemExit(
+                      f"{platform} repository-contents response is not strict UTF-8 JSON: {error}"
+                  ) from error
+              if not isinstance(response, dict):
+                  raise SystemExit(f"{platform} repository-contents response must be an object")
+              required_keys = {"content", "encoding", "name", "path", "sha", "size", "type"}
+              if not required_keys.issubset(response):
+                  raise SystemExit(f"{platform} repository-contents response is incomplete")
+              size = response["size"]
+              if type(size) is not int or size <= 0 or size > MAX_LOCK_BYTES:
+                  raise SystemExit(f"{platform} authoritative lock size is outside policy")
+              expected_name = Path(lock_path).name
+              if (
+                  response["type"] != "file"
+                  or response["encoding"] != "base64"
+                  or response["name"] != expected_name
+                  or response["path"] != lock_path
+                  or not isinstance(response["sha"], str)
+                  or SHA1_PATTERN.fullmatch(response["sha"]) is None
+                  or not isinstance(response["content"], str)
+              ):
+                  raise SystemExit(f"{platform} repository-contents binding is invalid")
+              encoded = response["content"]
+              if re.fullmatch(r"[A-Za-z0-9+/=\n]*", encoded, re.ASCII) is None:
+                  raise SystemExit(f"{platform} repository-contents payload is not canonical base64")
+              try:
+                  lock_bytes = base64.b64decode(encoded.replace("\n", ""), validate=True)
+              except (ValueError, binascii.Error) as error:
+                  raise SystemExit(
+                      f"{platform} repository-contents payload is not canonical base64"
+                  ) from error
+              if len(lock_bytes) != size:
+                  raise SystemExit(f"{platform} authoritative lock size does not match its response")
+              blob_header = f"blob {len(lock_bytes)}\0".encode("ascii")
+              blob_sha = hashlib.sha1(blob_header + lock_bytes).hexdigest()
+              if blob_sha != response["sha"]:
+                  raise SystemExit(f"{platform} authoritative lock blob SHA is invalid")
+              return lock_bytes
+
+          fetch_root = Path(os.environ["AUTHORITATIVE_FETCH_ROOT"])
+          lock_root = Path(os.environ["AUTHORITATIVE_LOCK_ROOT"])
+          response_root = fetch_root / "responses"
+          if (
+              fetch_root.is_symlink()
+              or not fetch_root.is_dir()
+              or response_root.is_symlink()
+              or not response_root.is_dir()
+              or lock_root.is_symlink()
+              or not lock_root.is_dir()
+              or lock_root.parent != fetch_root
+          ):
+              raise SystemExit("Authoritative dependency lock fetch directories are invalid")
+          expected_responses = {f"{platform}.json" for platform in expected}
+          if {path.name for path in response_root.iterdir()} != expected_responses:
+              raise SystemExit("Authoritative repository-contents response inventory differs")
+          if any(lock_root.iterdir()):
+              raise SystemExit("Authoritative dependency lock output directory is not empty")
+
+          verified_locks = {
+              platform: parse_response(
+                  response_root / f"{platform}.json",
+                  platform,
+                  lock_path,
+              )
+              for platform, lock_path in expected.items()
+          }
+          for platform, lock_path in expected.items():
+              destination = lock_root / Path(lock_path).name
+              with destination.open("xb") as handle:
+                  handle.write(verified_locks[platform])
+          print("Fetched and verified all three authoritative native locks at the exact push SHA.")
+          PY
+
+      - name: Validate every snapshot before submission
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_REF: ${{ github.ref }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          AUTHORITATIVE_LOCK_ROOT: ${{ runner.temp }}/gm2godot-authoritative-lock-fetch/locks
+          RAW_ARTIFACT_ROOT: ${{ runner.temp }}/gm2godot-raw-dependency-artifacts
+          SUBMISSION_ROOT: ${{ runner.temp }}/gm2godot-validated-dependency-submissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e "$SUBMISSION_ROOT" || -L "$SUBMISSION_ROOT" ]]; then
+            echo "::error::Refusing to reuse dependency submission validation root." >&2
+            exit 1
+          fi
+          mkdir "$SUBMISSION_ROOT"
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          from collections import Counter
+          from datetime import datetime, timezone
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath, PureWindowsPath
+          import re
+          import stat
+          from urllib.parse import unquote
+          import zipfile
+
+          MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+          MAX_MEMBER_BYTES = 16 * 1024 * 1024
+          MAX_TOTAL_BYTES = 64 * 1024 * 1024
+          MAX_MEMBERS = 256
+          MAX_LOCK_BYTES = 1024 * 1024
+          SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+          PIN_PATTERN = re.compile(
+              r"(?P<name>[A-Z0-9](?:[A-Z0-9._-]*[A-Z0-9])?)"
+              r"\s*==\s*(?P<version>[A-Z0-9][A-Z0-9.!+_-]*)\Z",
+              re.ASCII | re.IGNORECASE,
+          )
+          PURL_PATTERN = re.compile(r"pkg:pypi/(?P<name>[^@/?#]+)@(?P<version>[^/?#]+)\Z")
+          expected = {
+              "linux-x64": {
+                  "artifact": "dependency-lock-linux-x64-py3.12.13",
+                  "constraint": "constraints/requirements-linux-py312.lock",
+                  "candidate": "candidate/requirements-linux-py312.lock",
+                  "authoritative": "requirements-linux-py312.lock",
+                  "python": "3.12.13",
+                  "sys_platform": "linux",
+                  "machine": "x86_64",
+              },
+              "macos-arm64": {
+                  "artifact": "dependency-lock-macos-arm64-py3.12.10",
+                  "constraint": "constraints/requirements-macos-py312.lock",
+                  "candidate": "candidate/requirements-macos-py312.lock",
+                  "authoritative": "requirements-macos-py312.lock",
+                  "python": "3.12.10",
+                  "sys_platform": "darwin",
+                  "machine": "arm64",
+              },
+              "windows-x64": {
+                  "artifact": "dependency-lock-windows-x64-py3.12.10",
+                  "constraint": "constraints/requirements-windows-py312.lock",
+                  "candidate": "candidate/requirements-windows-py312.lock",
+                  "authoritative": "requirements-windows-py312.lock",
+                  "python": "3.12.10",
+                  "sys_platform": "win32",
+                  "machine": "AMD64",
+              },
+          }
+
+          class DuplicateKeyError(ValueError):
+              pass
+
+          def checked_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              result: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise DuplicateKeyError(f"duplicate JSON key {key!r}")
+                  result[key] = value
+              return result
+
+          def reject_constant(value: str) -> object:
+              raise ValueError(f"unsupported JSON constant {value}")
+
+          def parse_json(payload: bytes, label: str) -> dict[str, object]:
+              try:
+                  text = payload.decode("utf-8")
+                  value = json.loads(
+                      text,
+                      object_pairs_hook=checked_object,
+                      parse_constant=reject_constant,
+                  )
+              except (UnicodeDecodeError, json.JSONDecodeError, DuplicateKeyError, ValueError) as error:
+                  raise SystemExit(f"{label} is not strict UTF-8 JSON: {error}") from error
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{label} must be a JSON object")
+              return value
+
+          def mapping(value: object, label: str) -> dict[str, object]:
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{label} must be an object")
+              return value
+
+          def exact_keys(value: dict[str, object], keys: set[str], label: str) -> None:
+              observed = set(value)
+              if observed != keys:
+                  raise SystemExit(
+                      f"{label} keys differ: expected={sorted(keys)!r}, observed={sorted(observed)!r}"
+                  )
+
+          def normalized_name(name: str) -> str:
+              normalized = re.sub(r"[-_.]+", "-", name).lower()
+              if not normalized or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", normalized) is None:
+                  raise SystemExit(f"invalid normalized distribution name {name!r}")
+              return normalized
+
+          def pin_fingerprint(pins: dict[str, str]) -> str:
+              payload = "".join(f"{name}=={pins[name]}\n" for name in sorted(pins)).encode()
+              return hashlib.sha256(payload).hexdigest()
+
+          def parse_constraint(payload: bytes, label: str) -> dict[str, str]:
+              try:
+                  text = payload.decode("utf-8")
+              except UnicodeDecodeError as error:
+                  raise SystemExit(f"{label} is not UTF-8") from error
+              pins: dict[str, str] = {}
+              for line_number, raw_line in enumerate(text.splitlines(), start=1):
+                  if "\\" in raw_line:
+                      raise SystemExit(f"{label}:{line_number} uses a continuation")
+                  content = raw_line.split("#", 1)[0].strip()
+                  if not content:
+                      continue
+                  match = PIN_PATTERN.fullmatch(content)
+                  if match is None or "*" in content:
+                      raise SystemExit(f"{label}:{line_number} is not an exact pin")
+                  name = normalized_name(match.group("name"))
+                  if name in pins:
+                      raise SystemExit(f"{label}:{line_number} repeats {name}")
+                  pins[name] = match.group("version")
+              if not pins:
+                  raise SystemExit(f"{label} contains no pins")
+              return pins
+
+          def safe_member_name(name: str) -> bool:
+              posix = PurePosixPath(name)
+              windows = PureWindowsPath(name)
+              return (
+                  bool(name)
+                  and "\\" not in name
+                  and not posix.is_absolute()
+                  and not windows.is_absolute()
+                  and not windows.drive
+                  and all(part not in {"", ".", ".."} for part in posix.parts)
+              )
+
+          def read_authoritative_lock(platform: str, policy: dict[str, str]) -> bytes:
+              path = authoritative_root / policy["authoritative"]
+              try:
+                  before = path.lstat()
+              except OSError as error:
+                  raise SystemExit(f"Cannot inspect {platform} authoritative lock: {error}") from error
+              if (
+                  stat.S_ISLNK(before.st_mode)
+                  or not stat.S_ISREG(before.st_mode)
+                  or before.st_size > MAX_LOCK_BYTES
+              ):
+                  raise SystemExit(f"{platform} authoritative lock is not one bounded regular file")
+              flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+              descriptor: int | None = None
+              try:
+                  descriptor = os.open(path, flags)
+                  opened = os.fstat(descriptor)
+                  after_open = path.lstat()
+                  identity = lambda value: (
+                      value.st_dev,
+                      value.st_ino,
+                      value.st_size,
+                      value.st_mtime_ns,
+                  )
+                  if (
+                      not stat.S_ISREG(opened.st_mode)
+                      or stat.S_ISLNK(after_open.st_mode)
+                      or identity(before) != identity(opened)
+                      or identity(after_open) != identity(opened)
+                  ):
+                      raise SystemExit(f"{platform} authoritative lock changed while it was opened")
+                  with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                      descriptor = None
+                      payload = handle.read(MAX_LOCK_BYTES + 1)
+                      final = os.fstat(handle.fileno())
+                  after_read = path.lstat()
+              except SystemExit:
+                  raise
+              except OSError as error:
+                  raise SystemExit(
+                      f"Cannot safely read {platform} authoritative lock: {error}"
+                  ) from error
+              finally:
+                  if descriptor is not None:
+                      os.close(descriptor)
+              if (
+                  len(payload) > MAX_LOCK_BYTES
+                  or stat.S_ISLNK(after_read.st_mode)
+                  or identity(opened) != identity(final)
+                  or identity(final) != identity(after_read)
+                  or len(payload) != final.st_size
+              ):
+                  raise SystemExit(f"{platform} authoritative lock changed while it was read")
+              return payload
+
+          def read_archive(platform: str, policy: dict[str, str]) -> dict[str, bytes]:
+              artifact_name = policy["artifact"]
+              artifact_directory = raw_root / artifact_name
+              archive = artifact_directory / f"{artifact_name}.zip"
+              if artifact_directory.is_symlink() or not artifact_directory.is_dir():
+                  raise SystemExit(f"missing regular artifact directory {artifact_name}")
+              if set(path.name for path in artifact_directory.iterdir()) != {archive.name}:
+                  raise SystemExit(f"artifact directory {artifact_name} contains unexpected entries")
+              archive_stat = archive.lstat()
+              if not stat.S_ISREG(archive_stat.st_mode) or archive_stat.st_size > MAX_ARCHIVE_BYTES:
+                  raise SystemExit(f"artifact archive is not one bounded regular file: {archive}")
+              wanted = {
+                  policy["candidate"],
+                  "dependency-submission.json",
+                  "receipts/fresh-2.json",
+              }
+              found: dict[str, bytes] = {}
+              with zipfile.ZipFile(archive) as handle:
+                  entries = handle.infolist()
+                  if len(entries) > MAX_MEMBERS:
+                      raise SystemExit(f"artifact {artifact_name} contains too many members")
+                  names = [entry.filename for entry in entries]
+                  duplicates = [name for name, count in Counter(names).items() if count != 1]
+                  if duplicates:
+                      raise SystemExit(f"artifact {artifact_name} has duplicate members: {duplicates!r}")
+                  total_size = 0
+                  for entry in entries:
+                      if not safe_member_name(entry.filename):
+                          raise SystemExit(f"artifact {artifact_name} has unsafe member {entry.filename!r}")
+                      mode = entry.external_attr >> 16
+                      if stat.S_ISLNK(mode) or (mode and not entry.is_dir() and not stat.S_ISREG(mode)):
+                          raise SystemExit(f"artifact {artifact_name} has a non-regular member")
+                      if entry.flag_bits & 0x1:
+                          raise SystemExit(f"artifact {artifact_name} has an encrypted member")
+                      if entry.file_size > MAX_MEMBER_BYTES:
+                          raise SystemExit(f"artifact {artifact_name} has an oversized member")
+                      total_size += entry.file_size
+                      if total_size > MAX_TOTAL_BYTES:
+                          raise SystemExit(f"artifact {artifact_name} expands beyond the size policy")
+                      if entry.filename in wanted:
+                          payload = handle.read(entry)
+                          if len(payload) != entry.file_size:
+                              raise SystemExit(f"artifact member length changed: {entry.filename}")
+                          found[entry.filename] = payload
+              if set(found) != wanted:
+                  raise SystemExit(
+                      f"artifact {artifact_name} evidence differs: "
+                      f"expected={sorted(wanted)!r}, observed={sorted(found)!r}"
+                  )
+              return found
+
+          def validate_snapshot(
+              platform: str,
+              policy: dict[str, str],
+              members: dict[str, bytes],
+              authoritative_bytes: bytes,
+          ) -> dict[str, object]:
+              candidate_bytes = members[policy["candidate"]]
+              if candidate_bytes != authoritative_bytes:
+                  raise SystemExit(
+                      f"{platform} candidate lock does not match authoritative "
+                      f"{policy['constraint']} at {expected_sha}"
+                  )
+              pins = parse_constraint(candidate_bytes, policy["candidate"])
+              constraint_sha = hashlib.sha256(candidate_bytes).hexdigest()
+              fingerprint = pin_fingerprint(pins)
+              receipt_bytes = members["receipts/fresh-2.json"]
+              receipt = parse_json(receipt_bytes, f"{platform} verification receipt")
+              if receipt.get("status") != "verified" or receipt.get("schema_version") != 2:
+                  raise SystemExit(f"{platform} receipt is not a verified schema-2 receipt")
+              receipt_constraint = mapping(receipt.get("constraint"), f"{platform} receipt.constraint")
+              observation = mapping(receipt.get("observation"), f"{platform} receipt.observation")
+              expected_environment = mapping(
+                  receipt.get("expected_environment"),
+                  f"{platform} receipt.expected_environment",
+              )
+              if receipt_constraint.get("sha256") != constraint_sha:
+                  raise SystemExit(f"{platform} receipt constraint digest disagrees with artifact")
+              if receipt_constraint.get("fingerprint") != fingerprint:
+                  raise SystemExit(f"{platform} receipt constraint fingerprint disagrees with artifact")
+              if observation.get("installed_fingerprint") != fingerprint:
+                  raise SystemExit(f"{platform} installed graph disagrees with candidate lock")
+              if (
+                  expected_environment.get("python_full_version") != policy["python"]
+                  or expected_environment.get("sys_platform") != policy["sys_platform"]
+                  or expected_environment.get("platform_machine") != policy["machine"]
+                  or expected_environment.get("pip_version") != pins.get("pip")
+              ):
+                  raise SystemExit(f"{platform} receipt native tuple is wrong")
+
+              snapshot = parse_json(
+                  members["dependency-submission.json"],
+                  f"{platform} dependency snapshot",
+              )
+              exact_keys(
+                  snapshot,
+                  {"version", "sha", "ref", "job", "detector", "metadata", "scanned", "manifests"},
+                  f"{platform} snapshot",
+              )
+              if snapshot["version"] != 0 or snapshot["sha"] != expected_sha or snapshot["ref"] != expected_ref:
+                  raise SystemExit(f"{platform} snapshot does not bind the exact push")
+              try:
+                  scanned = datetime.fromisoformat(str(snapshot["scanned"]).replace("Z", "+00:00"))
+              except ValueError as error:
+                  raise SystemExit(f"{platform} snapshot scanned time is invalid") from error
+              if scanned.utcoffset() != timezone.utc.utcoffset(scanned):
+                  raise SystemExit(f"{platform} snapshot scanned time must be UTC")
+
+              job = mapping(snapshot["job"], f"{platform} snapshot.job")
+              exact_keys(job, {"id", "correlator", "html_url"}, f"{platform} snapshot.job")
+              expected_correlator = f"gm2godot-dependency-locks-{platform}"
+              expected_html_url = (
+                  f"https://github.com/{expected_repository}/actions/runs/{expected_run_id}"
+              )
+              job_id = job.get("id")
+              job_id_match = (
+                  re.fullmatch(
+                      rf"{re.escape(expected_run_id)}\.([1-9][0-9]{{0,19}})\."
+                      rf"{re.escape(platform)}",
+                      job_id,
+                  )
+                  if isinstance(job_id, str)
+                  else None
+              )
+              if (
+                  job_id_match is None
+                  or int(job_id_match.group(1)) > int(expected_run_attempt)
+                  or job.get("correlator") != expected_correlator
+                  or job.get("html_url") != expected_html_url
+              ):
+                  raise SystemExit(f"{platform} snapshot job binding is wrong")
+
+              detector = mapping(snapshot["detector"], f"{platform} snapshot.detector")
+              exact_keys(detector, {"name", "version", "url"}, f"{platform} snapshot.detector")
+              if detector != {
+                  "name": "gm2godot-native-pip-lock",
+                  "version": "1",
+                  "url": (
+                      f"https://github.com/{expected_repository}/blob/{expected_sha}/"
+                      "scripts/build_dependency_snapshot.py"
+                  ),
+              }:
+                  raise SystemExit(f"{platform} snapshot detector binding is wrong")
+
+              metadata = mapping(snapshot["metadata"], f"{platform} snapshot.metadata")
+              exact_keys(
+                  metadata,
+                  {
+                      "platform",
+                      "constraint_sha256",
+                      "constraint_fingerprint",
+                      "installed_fingerprint",
+                      "source_fingerprint",
+                      "verification_receipt_sha256",
+                      "python_full_version",
+                      "pip_version",
+                  },
+                  f"{platform} snapshot.metadata",
+              )
+              if (
+                  metadata["platform"] != platform
+                  or metadata["constraint_sha256"] != constraint_sha
+                  or metadata["constraint_fingerprint"] != fingerprint
+                  or metadata["installed_fingerprint"] != fingerprint
+                  or metadata["verification_receipt_sha256"]
+                  != hashlib.sha256(receipt_bytes).hexdigest()
+                  or metadata["python_full_version"] != policy["python"]
+                  or metadata["pip_version"] != expected_environment.get("pip_version")
+                  or not isinstance(metadata["source_fingerprint"], str)
+                  or SHA256_PATTERN.fullmatch(metadata["source_fingerprint"]) is None
+              ):
+                  raise SystemExit(f"{platform} snapshot metadata is inconsistent")
+              if any(not isinstance(value, (str, int, float, bool)) for value in metadata.values()):
+                  raise SystemExit(f"{platform} snapshot metadata must contain only scalars")
+
+              manifests = mapping(snapshot["manifests"], f"{platform} snapshot.manifests")
+              if set(manifests) != {policy["constraint"]}:
+                  raise SystemExit(f"{platform} snapshot manifest path is wrong")
+              manifest = mapping(manifests[policy["constraint"]], f"{platform} manifest")
+              exact_keys(manifest, {"name", "file", "resolved"}, f"{platform} manifest")
+              file_binding = mapping(manifest["file"], f"{platform} manifest.file")
+              if manifest["name"] != policy["constraint"] or file_binding != {
+                  "source_location": policy["constraint"]
+              }:
+                  raise SystemExit(f"{platform} manifest source binding is wrong")
+              resolved = mapping(manifest["resolved"], f"{platform} manifest.resolved")
+              purl_by_name: dict[str, str] = {}
+              for key, raw_dependency in resolved.items():
+                  if not isinstance(key, str):
+                      raise SystemExit(f"{platform} resolved key must be a PURL string")
+                  dependency = mapping(raw_dependency, f"{platform} dependency {key}")
+                  exact_keys(
+                      dependency,
+                      {"package_url", "relationship", "scope", "dependencies"},
+                      f"{platform} dependency {key}",
+                  )
+                  if dependency["package_url"] != key:
+                      raise SystemExit(f"{platform} dependency key/PURL mismatch")
+                  match = PURL_PATTERN.fullmatch(key)
+                  if match is None:
+                      raise SystemExit(f"{platform} dependency has noncanonical PyPI PURL {key!r}")
+                  name = normalized_name(unquote(match.group("name")))
+                  version = unquote(match.group("version"))
+                  if name in purl_by_name or pins.get(name) != version:
+                      raise SystemExit(f"{platform} dependency PURL disagrees with lock: {key}")
+                  purl_by_name[name] = key
+                  if dependency["relationship"] not in {"direct", "indirect"}:
+                      raise SystemExit(f"{platform} dependency relationship is invalid")
+                  if dependency["scope"] not in {"runtime", "development"}:
+                      raise SystemExit(f"{platform} dependency scope is invalid")
+                  children = dependency["dependencies"]
+                  if (
+                      not isinstance(children, list)
+                      or any(not isinstance(child, str) for child in children)
+                      or children != sorted(set(children))
+                  ):
+                      raise SystemExit(f"{platform} dependency edges are not canonical")
+              if set(purl_by_name) != set(pins):
+                  raise SystemExit(f"{platform} snapshot does not cover the complete candidate lock")
+              all_purls = set(resolved)
+              for raw_dependency in resolved.values():
+                  dependency = mapping(raw_dependency, f"{platform} dependency")
+                  if any(child not in all_purls for child in dependency["dependencies"]):
+                      raise SystemExit(f"{platform} dependency edge leaves the submitted manifest")
+              return snapshot
+
+          raw_root = Path(os.environ["RAW_ARTIFACT_ROOT"])
+          output_root = Path(os.environ["SUBMISSION_ROOT"])
+          authoritative_root = Path(os.environ["AUTHORITATIVE_LOCK_ROOT"])
+          expected_repository = os.environ["EXPECTED_REPOSITORY"]
+          expected_sha = os.environ["EXPECTED_SHA"]
+          expected_ref = os.environ["EXPECTED_REF"]
+          expected_run_id = os.environ["EXPECTED_RUN_ID"]
+          expected_run_attempt = os.environ["EXPECTED_RUN_ATTEMPT"]
+          if re.fullmatch(r"[0-9a-f]{40}", expected_sha) is None:
+              raise SystemExit("Expected push SHA is malformed")
+          if expected_ref != "refs/heads/main":
+              raise SystemExit("Dependency submissions are restricted to refs/heads/main")
+          if raw_root.is_symlink() or not raw_root.is_dir():
+              raise SystemExit("Downloaded artifact root is not a regular directory")
+          if authoritative_root.is_symlink() or not authoritative_root.is_dir():
+              raise SystemExit("Authoritative dependency lock root is not a regular directory")
+          expected_authoritative_names = {policy["authoritative"] for policy in expected.values()}
+          observed_authoritative_names = {path.name for path in authoritative_root.iterdir()}
+          if observed_authoritative_names != expected_authoritative_names:
+              raise SystemExit(
+                  "Authoritative dependency lock inventory differs: "
+                  f"expected={sorted(expected_authoritative_names)!r}, "
+                  f"observed={sorted(observed_authoritative_names)!r}"
+              )
+          if output_root.is_symlink() or not output_root.is_dir() or any(output_root.iterdir()):
+              raise SystemExit("Submission output root is not one fresh empty directory")
+          expected_artifact_names = {policy["artifact"] for policy in expected.values()}
+          observed_artifact_names = {path.name for path in raw_root.iterdir()}
+          if observed_artifact_names != expected_artifact_names:
+              raise SystemExit(
+                  "Same-run dependency artifact inventory differs: "
+                  f"expected={sorted(expected_artifact_names)!r}, "
+                  f"observed={sorted(observed_artifact_names)!r}"
+              )
+
+          validated: dict[str, dict[str, object]] = {}
+          source_fingerprints: set[object] = set()
+          for platform, policy in expected.items():
+              members = read_archive(platform, policy)
+              authoritative_bytes = read_authoritative_lock(platform, policy)
+              snapshot = validate_snapshot(platform, policy, members, authoritative_bytes)
+              validated[platform] = snapshot
+              source_fingerprints.add(mapping(snapshot["metadata"], "metadata")["source_fingerprint"])
+          if len(source_fingerprints) != 1:
+              raise SystemExit("Native snapshots disagree on the authored source fingerprint")
+
+          for platform, snapshot in validated.items():
+              destination = output_root / f"{platform}.json"
+              destination.write_text(
+                  json.dumps(snapshot, ensure_ascii=True, allow_nan=False, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+          print("Validated all three same-run native dependency snapshots before submission.")
+          PY
+
+      - name: Submit validated native dependency graphs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUBMISSION_ROOT: ${{ runner.temp }}/gm2godot-validated-dependency-submissions
+          SUBMISSION_RECEIPT_ROOT: ${{ runner.temp }}/gm2godot-dependency-submission-responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e "$SUBMISSION_RECEIPT_ROOT" || -L "$SUBMISSION_RECEIPT_ROOT" ]]; then
+            echo "::error::Refusing to reuse dependency submission response root." >&2
+            exit 1
+          fi
+          mkdir "$SUBMISSION_RECEIPT_ROOT"
+          verify_current_main() {
+            local platform="$1"
+            local response="$SUBMISSION_RECEIPT_ROOT/main-ref-before-$platform.json"
+            gh api \
+              --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" > "$response"
+            python3 - "$response" "$GITHUB_SHA" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          class DuplicateKeyError(ValueError):
+              pass
+
+          def checked_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              result: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise DuplicateKeyError(f"duplicate JSON key {key!r}")
+                  result[key] = value
+              return result
+
+          def reject_constant(value: str) -> object:
+              raise ValueError(f"unsupported JSON constant {value}")
+
+          response_path = Path(sys.argv[1])
+          expected_sha = sys.argv[2]
+          if response_path.is_symlink() or not response_path.is_file():
+              raise SystemExit("Current-main response is not one regular file")
+          if response_path.stat().st_size > 1024 * 1024:
+              raise SystemExit("Current-main response exceeds the size policy")
+          try:
+              payload = json.loads(
+                  response_path.read_text(encoding="utf-8"),
+                  object_pairs_hook=checked_object,
+                  parse_constant=reject_constant,
+              )
+          except (OSError, UnicodeError, json.JSONDecodeError, DuplicateKeyError, ValueError) as error:
+              raise SystemExit(f"Current-main response is not strict JSON: {error}") from error
+          if not isinstance(payload, dict) or payload.get("ref") != "refs/heads/main":
+              raise SystemExit("Current-main response is not refs/heads/main")
+          target = payload.get("object")
+          if not isinstance(target, dict) or target.get("type") != "commit":
+              raise SystemExit("Current-main response does not target a commit")
+          observed_sha = target.get("sha")
+          if (
+              not isinstance(observed_sha, str)
+              or re.fullmatch(r"[0-9a-f]{40}", observed_sha) is None
+              or observed_sha != expected_sha
+          ):
+              raise SystemExit(
+                  f"Refusing stale dependency submission: current main is {observed_sha!r}, "
+                  f"workflow SHA is {expected_sha!r}"
+              )
+          PY
+          }
+          for platform in linux-x64 macos-arm64 windows-x64; do
+            snapshot="$SUBMISSION_ROOT/$platform.json"
+            response="$SUBMISSION_RECEIPT_ROOT/$platform.json"
+            test -f "$snapshot"
+            test ! -L "$snapshot"
+            verify_current_main "$platform"
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "/repos/${GITHUB_REPOSITORY}/dependency-graph/snapshots" \
+              --input "$snapshot" > "$response"
+            python3 - "$response" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          class DuplicateKeyError(ValueError):
+              pass
+
+          def checked_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              result: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise DuplicateKeyError(f"duplicate JSON key {key!r}")
+                  result[key] = value
+              return result
+
+          def reject_constant(value: str) -> object:
+              raise ValueError(f"unsupported JSON constant {value}")
+
+          response_path = Path(sys.argv[1])
+          if response_path.is_symlink() or not response_path.is_file():
+              raise SystemExit("Dependency submission response is not one regular file")
+          if response_path.stat().st_size > 1024 * 1024:
+              raise SystemExit("Dependency submission response exceeds the size policy")
+          try:
+              payload = json.loads(
+                  response_path.read_text(encoding="utf-8"),
+                  object_pairs_hook=checked_object,
+                  parse_constant=reject_constant,
+              )
+          except (OSError, UnicodeError, json.JSONDecodeError, DuplicateKeyError, ValueError) as error:
+              raise SystemExit(
+                  f"Dependency submission response is not strict JSON: {error}"
+              ) from error
+          if (
+              not isinstance(payload, dict)
+              or not isinstance(payload.get("id"), int)
+              or payload["id"] <= 0
+              or payload.get("result") != "SUCCESS"
+          ):
+              raise SystemExit(f"Dependency submission response was not successful: {payload!r}")
+          PY
+          done
+
+      - name: Upload dependency submission responses
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-submission-responses-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gm2godot-dependency-submission-responses
+          if-no-files-found: warn
+          retention-days: 30
+          archive: true

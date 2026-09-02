@@ -13,6 +13,64 @@ jobs:
       PIP_CONFIG_FILE: /dev/null
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Enforce Dependabot authored-input boundary
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha_pattern='^[0-9a-f]{40}$'
+          if [[ ! "$PR_BASE_SHA" =~ $sha_pattern || ! "$PR_HEAD_SHA" =~ $sha_pattern ]]; then
+            echo "::error::Dependabot boundary received an invalid pull-request commit SHA." >&2
+            exit 1
+          fi
+          git cat-file -e "${PR_BASE_SHA}^{commit}"
+          git cat-file -e "${PR_HEAD_SHA}^{commit}"
+          merge_base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+          if [[ ! "$merge_base" =~ $sha_pattern ]]; then
+            echo "::error::Dependabot boundary could not resolve one valid PR merge base." >&2
+            exit 1
+          fi
+
+          changed_paths_file="$(mktemp \
+            "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/gm2godot-dependabot-paths.XXXXXX")"
+          trap 'rm -f -- "$changed_paths_file"' EXIT
+          if ! git diff --name-only --no-renames -z \
+            "$merge_base" "$PR_HEAD_SHA" -- > "$changed_paths_file"; then
+            echo "::error::Dependabot boundary could not enumerate the complete PR diff." >&2
+            exit 1
+          fi
+
+          changed_paths=()
+          while IFS= read -r -d '' changed_path; do
+            changed_paths+=("$changed_path")
+          done < "$changed_paths_file"
+
+          bootstrap_changed=false
+          for changed_path in "${changed_paths[@]}"; do
+            if [[ "$changed_path" == constraints/requirements-*-py312.lock ]]; then
+              printf '::error::Dependabot must not edit a native generated lock (%q); regenerate and review all three native artifacts.\n' \
+                "$changed_path" >&2
+              exit 1
+            fi
+            if [[ "$changed_path" == requirements-bootstrap.txt ]]; then
+              bootstrap_changed=true
+            fi
+          done
+
+          if [[ "$bootstrap_changed" == true ]]; then
+            for changed_path in "${changed_paths[@]}"; do
+              if [[ "$changed_path" != requirements-bootstrap.txt ]]; then
+                printf '::error::A pip bootstrap proposal must be limited to requirements-bootstrap.txt; unexpected path: %q.\n' \
+                  "$changed_path" >&2
+                exit 1
+              fi
+            done
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -27,6 +85,11 @@ jobs:
             echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
             exit 1
           fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint constraints/requirements-linux-py312.lock \
+            --output "$RUNNER_TEMP/ruff-bootstrap.json"
           python -m venv "$venv_dir"
           venv_bin="$venv_dir/bin"
           printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
@@ -36,20 +99,21 @@ jobs:
           hash -r
           python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
-            pip==26.2.1
+            --constraint constraints/requirements-linux-py312.lock \
+            pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             ruff==0.15.22
           python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-linux-py312.txt \
+            --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require ruff \
             --expected-python 3.12.13 \
             --expected-platform linux \
             --expected-machine x86_64 \
-            --expected-pip 26.2.1 \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
             --output "$RUNNER_TEMP/ruff-dependencies.json"
 
       - name: Run Ruff

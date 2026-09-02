@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.57 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.58 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -196,7 +196,9 @@ Recorded-tree cleanup verifies directory state top-down. Once a recorded directo
 
 Artifact writable-mode preparation must remain fail-closed when a hard link appears before, during, or immediately after the mode syscall. Retain the modeled Windows target and stage hard-link tests: the transaction must restore only the exact temporary mode it set, through the retained descriptor where available, and must preserve a different external mode rather than overwriting it during abort cleanup. Native Windows hard-link and read-only tests remain authoritative for Win32 metadata behavior.
 
-Artifact transaction changes must also retain exact control-signal identity and chronological precedence. `tests.test_anchored_artifacts` covers present and absent publication, restore, both rollback directions, retained recovery, completed replace/unlink ownership, cleanup durability, persistent completion uncertainty and modeled Windows tombstones. The first `KeyboardInterrupt` or `SystemExit` must escape unchanged after every required rollback or durability attempt; later failures belong in notes, and ordinary cleanup failures must keep their established final-cleanup retry behavior. Run the complete module together with Pyright and Ruff, then rely on the native Windows artifact-transaction job for Win32 completion and identity semantics.
+Artifact transaction changes must also retain exact control-signal identity and chronological precedence. `tests.test_anchored_artifacts` covers present and absent publication, restore, both rollback directions, retained recovery, completed replace/unlink ownership, cleanup durability, persistent completion uncertainty and modeled Windows tombstones. The first `KeyboardInterrupt` or `SystemExit` must escape unchanged after every required rollback or durability attempt, and later failures belong in notes. Internal recovery-stage cleanup retains its deliberate retry behavior, but an unresolved final cleanup error must be visible to the caller.
+
+Backup-lifecycle changes must retain the `after_backup` ordinary-exception, `KeyboardInterrupt`, and `SystemExit` cases; in-place and identity-replacement tamper cases; cross-entry preflight; and cleanup-after-success coverage. Verify the physical backup after every observable staging hook, across the complete set before public mutation, and again at the entry's commit boundary. Cleanup may unlink only the exact owned identity and must surface a retained or indeterminate path. An ordinary cleanup error remains secondary to an earlier operation error, while control signals retain their established precedence and object identity. `tests.test_conversion_manifest` separately proves that stale conversion-artifact cleanup cannot be ignored after the canonical pair commits. Run both complete modules together with Pyright and Ruff, then rely on the native Windows artifact-transaction job for Win32 completion and identity semantics.
 
 Worker-scheduling changes must also retain the deterministic 10,000-source submission bound, changed/unchanged failure and cancellation admission checks, and cross-worker output equivalence:
 

@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.57 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.58 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -29,7 +29,7 @@ For authored sequences and timelines, `GM2GD-SEQUENCE-TRACK-UNSUPPORTED`, `GM2GD
 
 For shaders, `GM2GD-SHADER-*` identifies the exact `.vsh` or `.fsh` line/column, stage, construct, resource, and workaround that prevented safe translation. Unsupported attributes, position/matrix paths, declarations, directives, function conflicts, or varying links fail that logical shader and produce no `.gdshader`; the overall completed conversion is `partial` and a successful rerun removes any prior managed shader/registry row. Fix the GameMaker source to the documented 2D subset or port the pair manually outside managed output. Do not copy an older generated shader back into `res://shaders/`.
 
-The JSON/Markdown pair uses one verified report-directory binding for capture, staging, ordered replacement, rollback, invalidation and cleanup. POSIX hosts use descriptor-relative no-follow operations; Windows retains reparse-checked, no-delete-share handles and write-through moves. When an explicit external report root is missing, GM2Godot creates and durability-syncs each parent entry before descending. Ordinary failures restore the complete prior pair, but a hard crash between the two file commits is not yet pair-atomic, so keep the reports with the latest attempt evidence rather than treating either filename alone as a generation marker.
+The JSON/Markdown pair uses one verified report-directory binding for capture, staging, ordered replacement, rollback, invalidation and cleanup. POSIX hosts use descriptor-relative no-follow operations; Windows retains reparse-checked, no-delete-share handles and write-through moves. When an explicit external report root is missing, GM2Godot creates and durability-syncs each parent entry before descending. Ordinary failures restore the complete prior pair, but a hard crash between the two file commits is not yet pair-atomic, so keep the reports with the latest attempt evidence rather than treating either filename alone as a generation marker. Each private backup is revalidated after staging hooks and before mutation; a changed or replaced same-name path is preserved and reported. If final cleanup fails after both reports committed, the call now fails visibly while leaving the verified committed pair in place, so preserve the cleanup error and named private path before retrying.
 
 The four static compatibility reports use the same retained binding as one deterministic ordered transaction. Rendering completes before publication; the transaction then snapshots and backs up every target, commits and durability-syncs each new report, and validates the complete result. An ordinary failure restores the prior bytes and modes or reports a verified recovery artifact when rollback cannot safely finish; it no longer deletes the prior set.
 

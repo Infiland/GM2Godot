@@ -259,7 +259,10 @@ def write_conversion_artifacts(
             if _owned_temporary_artifact_target(name) != _MANIFEST_FILENAME
             or manifest_outcome is not None
         }
-        transaction.cleanup(stale_to_cleanup)
+        transaction.cleanup_or_raise(
+            stale_to_cleanup,
+            operation="Stale conversion artifact cleanup",
+        )
         transaction.verify_directory()
 
     return (

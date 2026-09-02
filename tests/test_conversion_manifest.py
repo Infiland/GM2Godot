@@ -1890,6 +1890,57 @@ class TestConversionManifest(unittest.TestCase):
 
         self.assertFalse(manifest_recovery.exists())
 
+    def test_stale_owned_cleanup_failure_is_visible_after_committed_generation(
+        self,
+    ) -> None:
+        godot_dir, manifest_path, attempt_path, manifest_before, attempt_before = (
+            self._existing_artifacts()
+        )
+        stale = manifest_path.parent / ".conversion_attempt.json.abcdefgh.backup"
+        stale_content = b"retained stale attempt backup\n"
+        stale.write_bytes(stale_content)
+        stale_identity = (stale.stat().st_dev, stale.stat().st_ino)
+        cleanup_attempts = 0
+
+        def fail_stale_cleanup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal cleanup_attempts
+            if phase == "before_unlink" and name == stale.name:
+                cleanup_attempts += 1
+                raise OSError("injected stale artifact cleanup failure")
+
+        with (
+            patch(
+                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                side_effect=fail_stale_cleanup,
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
+            self._write_artifacts(godot_dir)
+
+        self.assertEqual(cleanup_attempts, 1)
+        failure_details = "\n".join(
+            (str(raised.exception), *getattr(raised.exception, "__notes__", ()))
+        )
+        self.assertIn("injected stale artifact cleanup failure", failure_details)
+        self.assertEqual(stale.read_bytes(), stale_content)
+        self.assertEqual(
+            (stale.stat().st_dev, stale.stat().st_ino),
+            stale_identity,
+        )
+        self.assertNotEqual(manifest_path.read_bytes(), manifest_before)
+        self.assertNotEqual(attempt_path.read_bytes(), attempt_before)
+        self._assert_artifact_pair_digest_matches(godot_dir)
+        self.assertIsNone(recover_conversion_artifacts(str(godot_dir)))
+        self._assert_artifact_pair_digest_matches(godot_dir)
+        self.assertEqual(
+            self._generation_transaction_debris(godot_dir),
+            (stale.name,),
+        )
+
     @unittest.skipUnless(os.name == "posix", "POSIX links are required")
     def test_stale_cleanup_refuses_redirected_and_hardlinked_lookalikes(
         self,

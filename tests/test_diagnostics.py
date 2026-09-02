@@ -618,12 +618,20 @@ class TestDiagnosticCollector(unittest.TestCase):
                 b"old markdown\n",
             )
 
-    def test_cleanup_durability_failure_after_commit_keeps_valid_receipt(
+    def test_cleanup_durability_failure_after_commit_is_visible_with_valid_reports(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             _write_report_pair(root, b"old json\n", b"old markdown\n")
+            diagnostics = DiagnosticCollector()
+            diagnostics.add(
+                "warning",
+                "GM2GD-CLEANUP-DURABILITY",
+                "committed report sentinel",
+            )
+            expected_json = diagnostics.to_json().encode("utf-8")
+            expected_markdown = diagnostics.to_markdown().encode("utf-8")
             failures = 0
 
             def fail_cleanup_sync(
@@ -636,17 +644,32 @@ class TestDiagnosticCollector(unittest.TestCase):
                     failures += 1
                     raise OSError("injected cleanup durability failure")
 
-            with patch(
-                "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
-                side_effect=fail_cleanup_sync,
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_cleanup_sync,
+                ),
+                self.assertRaises(OSError) as raised,
             ):
-                receipt = DiagnosticCollector().publish_reports(root)
+                diagnostics.publish_reports(root)
 
             self.assertEqual(failures, 1)
-            self.assertEqual(
-                hashlib.sha256(Path(receipt.json_path).read_bytes()).hexdigest(),
-                receipt.json_report.sha256,
+            failure_details = "\n".join(
+                (str(raised.exception), *getattr(raised.exception, "__notes__", ()))
             )
+            self.assertIn("injected cleanup durability failure", failure_details)
+            committed = capture_conversion_diagnostic_reports(root)
+            for expected, captured in (
+                (expected_json, committed.json_report),
+                (expected_markdown, committed.markdown_report),
+            ):
+                self.assertEqual(captured.content, expected)
+                self.assertIsNotNone(captured.fingerprint)
+                assert captured.fingerprint is not None
+                self.assertEqual(
+                    captured.fingerprint.sha256,
+                    hashlib.sha256(expected).hexdigest(),
+                )
             self.assertEqual(
                 sorted(path.name for path in (root / "gm2godot").iterdir()),
                 ["conversion_diagnostics.json", "conversion_diagnostics.md"],

@@ -26,6 +26,7 @@ nodejs-wheel-binaries==24.16.0
     # via pyright
 packaging==26.2
     # via
+    #   -r requirements-tooling.txt
     #   build
     #   pyinstaller
     #   pyinstaller-hooks-contrib

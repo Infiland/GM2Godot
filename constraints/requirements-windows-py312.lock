@@ -39,7 +39,7 @@ pefile==2024.8.26
 pillow==12.3.0
     # via -r requirements.txt
 pip-tools==7.6.1
-    # via -r requirements-tooling.txt
+    # via -r requirements-bootstrap.txt
 pyinstaller==6.21.0
     # via -r requirements-tooling.txt
 pyinstaller-hooks-contrib==2026.6
@@ -79,7 +79,7 @@ wheel==0.47.0
 # The following packages are considered to be unsafe in a requirements file:
 pip==26.2.1
     # via
-    #   -r requirements-tooling.txt
+    #   -r requirements-bootstrap.txt
     #   pip-tools
 setuptools==83.0.0
     # via

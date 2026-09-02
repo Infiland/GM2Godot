@@ -1800,9 +1800,9 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         name: str,
         target: _ReplaceTarget | None,
         error: BaseException,
-    ) -> None:
+    ) -> BaseException:
         if target is None or not target.mode_changed:
-            return
+            return error
         try:
             self.directory.chmod_exact(
                 name,
@@ -1810,10 +1810,20 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 target.mode,
                 expected_current_mode=_replaceable_mode(target.mode),
             )
-        except Exception as mode_error:
-            error.add_note(
-                f"Failed to restore replaced artifact target mode: {mode_error}"
+        except BaseException as mode_error:
+            return self._select_transaction_error(
+                error,
+                mode_error,
+                secondary_summary=(
+                    "Failed to restore replaced artifact target mode: "
+                ),
+                secondary_detail=(
+                    "Replaced artifact target mode restoration failure note: "
+                ),
+                primary_summary="Artifact replacement first failed: ",
+                primary_detail="Artifact replacement failure note: ",
             )
+        return error
 
     def replace_staged(
         self,
@@ -1887,8 +1897,15 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 verify_destination=verify_target,
             )
         except BaseException as error:
-            if self.path_matches_stage(target_leaf, staged):
+            original_error = error
+            completed, error = self._probe_completion_after_error(
+                error,
+                lambda: self.path_matches_stage(target_leaf, staged),
+                operation="Artifact stage replacement",
+            )
+            if completed is True:
                 return error
+            completion_unknown = completed is None
             try:
                 self.directory.chmod_exact(
                     staged.name,
@@ -1896,11 +1913,28 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     staged.mode,
                     expected_current_mode=staged.target_mode,
                 )
-            except Exception as mode_error:
-                error.add_note(
-                    f"Failed to restore replaceable artifact stage mode: {mode_error}"
+            except BaseException as mode_error:
+                error = self._select_transaction_error(
+                    error,
+                    mode_error,
+                    secondary_summary=(
+                        "Failed to restore replaceable artifact stage mode: "
+                    ),
+                    secondary_detail=(
+                        "Replaceable artifact stage mode restoration failure note: "
+                    ),
+                    primary_summary="Artifact stage replacement first failed: ",
+                    primary_detail="Artifact stage replacement failure note: ",
                 )
-            self._restore_replace_target_mode(target_leaf, target_state, error)
+            error = self._restore_replace_target_mode(
+                target_leaf,
+                target_state,
+                error,
+            )
+            if completion_unknown:
+                return error
+            if error is not original_error:
+                raise error
             raise
         if completion_error is not None:
             return completion_error
@@ -1917,6 +1951,19 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         staged_copy: StagedArtifact,
         displaced_target: StagedArtifact,
     ) -> BaseException | None:
+        _completed, error = self._replace_target_with_stage_path_exact(
+            target_name,
+            staged_copy,
+            displaced_target,
+        )
+        return error
+
+    def _replace_target_with_stage_path_exact(
+        self,
+        target_name: str,
+        staged_copy: StagedArtifact,
+        displaced_target: StagedArtifact,
+    ) -> tuple[bool | None, BaseException | None]:
         target_leaf = _safe_leaf(target_name)
         self.verify_staged(staged_copy)
         self._verify_artifact_expectation(
@@ -1967,17 +2014,35 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 verify_destination=lambda: self.verify_staged(staged_copy),
             )
         except BaseException as error:
-            if self.path_matches_stage(staged_copy.name, displaced_target):
-                return error
-            self._restore_replace_target_mode(target_leaf, target_state, error)
+            original_error = error
+            completed, error = self._probe_completion_after_error(
+                error,
+                lambda: self.path_matches_stage(
+                    staged_copy.name,
+                    displaced_target,
+                ),
+                operation="Artifact target displacement",
+            )
+            if completed is True:
+                return True, error
+            completion_unknown = completed is None
+            error = self._restore_replace_target_mode(
+                target_leaf,
+                target_state,
+                error,
+            )
+            if completion_unknown:
+                return None, error
+            if error is not original_error:
+                raise error
             raise
         if completion_error is not None:
-            return completion_error
+            return True, completion_error
         try:
             self.verify_staged(displaced_target)
         except BaseException as error:
-            return error
-        return None
+            return True, error
+        return True, None
 
     def unlink_finalized(
         self,
@@ -2011,20 +2076,61 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 sha256=staged.sha256,
             )
             try:
-                completion_error = self.replace_target_with_stage_path(
+                completed, completion_error = self._replace_target_with_stage_path_exact(
                     leaf,
                     placeholder,
                     displaced,
                 )
             except BaseException as error:
-                cleanup_error = self.unlink_staged(placeholder)
-                if cleanup_error is not None:
-                    error.add_note(
-                        "Failed to remove unused artifact tombstone stage: "
-                        f"{cleanup_error}"
+                completed, cleanup_error = self._unlink_staged_exact(placeholder)
+                if (
+                    completed is not False
+                    and cleanup_error is not None
+                    and not isinstance(
+                        cleanup_error,
+                        Exception,
                     )
+                ):
+                    try:
+                        self.sync("tombstone_cleanup_durability")
+                    except BaseException as durability_error:
+                        cleanup_error = self._select_transaction_error(
+                            cleanup_error,
+                            durability_error,
+                            secondary_summary=("Tombstone cleanup durability also failed: "),
+                            secondary_detail=("Tombstone cleanup durability failure note: "),
+                            primary_summary="Tombstone cleanup first failed: ",
+                            primary_detail="Tombstone cleanup failure note: ",
+                        )
+                if cleanup_error is not None:
+                    selected_error = self._select_transaction_error(
+                        error,
+                        cleanup_error,
+                        secondary_summary=(
+                            "Failed to remove unused artifact tombstone stage: "
+                        ),
+                        secondary_detail=(
+                            "Unused artifact tombstone cleanup failure note: "
+                        ),
+                        primary_summary="Artifact tombstone displacement first failed: ",
+                        primary_detail=(
+                            "Artifact tombstone displacement failure note: "
+                        ),
+                    )
+                    if selected_error is not error:
+                        raise selected_error
                 raise
-            return displaced, completion_error
+            if completed is True:
+                owned_tombstone = displaced
+            else:
+                assert completion_error is not None
+                owned_tombstone, completion_error = self._resolve_ambiguous_stage_ownership(
+                    placeholder,
+                    displaced,
+                    completion_error,
+                    operation="Artifact tombstone displacement",
+                )
+            return owned_tombstone, completion_error
         target_state: _ReplaceTarget | None = None
 
         def prepare_target() -> None:
@@ -2055,20 +2161,38 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 verify_target=verify_target,
             )
         except BaseException as error:
-            if not self.directory.lexists(leaf):
+            original_error = error
+            completed, error = self._probe_completion_after_error(
+                error,
+                lambda: not self.directory.lexists(leaf),
+                operation="Artifact target unlink",
+            )
+            if completed is True:
                 return None, error
-            self._restore_replace_target_mode(leaf, target_state, error)
+            completion_unknown = completed is None
+            error = self._restore_replace_target_mode(leaf, target_state, error)
+            if completion_unknown:
+                return None, error
+            if error is not original_error:
+                raise error
             raise
         if completion_error is not None:
             return None, completion_error
-        if self.directory.lexists(leaf):
+        try:
+            remained = self.directory.lexists(leaf)
+        except BaseException as error:
+            return None, error
+        if remained:
             error = OSError(
                 f"Artifact remained after unlink: {self.directory.child_path(leaf)}"
             )
             return None, error
         return None, None
 
-    def unlink_staged(self, staged: StagedArtifact) -> Exception | None:
+    def _unlink_staged_exact(
+        self,
+        staged: StagedArtifact,
+    ) -> tuple[bool | None, BaseException | None]:
         try:
             self.verify_staged(staged)
             completion_error = self.directory.unlink(
@@ -2076,11 +2200,33 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 expected_identity=staged.identity,
                 verify_target=lambda: self.verify_staged(staged),
             )
-            if completion_error is not None:
-                raise completion_error
-        except Exception as error:
+        except BaseException as error:
+            return self._probe_completion_after_error(
+                error,
+                lambda: not self.directory.lexists(staged.name),
+                operation="Artifact stage unlink",
+            )
+        return True, completion_error
+
+    def unlink_staged(self, staged: StagedArtifact) -> Exception | None:
+        completed, error = self._unlink_staged_exact(staged)
+        if error is None:
+            return None
+        if isinstance(error, Exception):
             return error
-        return None
+        if completed is not False:
+            try:
+                self.sync("staged_cleanup_durability")
+            except BaseException as durability_error:
+                error = self._select_transaction_error(
+                    error,
+                    durability_error,
+                    secondary_summary="Artifact stage cleanup durability failed: ",
+                    secondary_detail=("Artifact stage cleanup durability failure note: "),
+                    primary_summary="Artifact stage cleanup first failed: ",
+                    primary_detail="Artifact stage cleanup failure note: ",
+                )
+        raise error
 
     def unlink_if_identity(
         self,
@@ -2101,36 +2247,199 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             return error
         return None
 
+    @staticmethod
+    def _add_secondary_error_context(
+        primary_error: BaseException,
+        secondary_error: BaseException,
+        *,
+        summary_prefix: str,
+        detail_prefix: str,
+    ) -> None:
+        """Attach one secondary failure and all of its PEP 678 notes."""
+        if primary_error is secondary_error:
+            return
+        secondary_notes: tuple[str, ...] = tuple(getattr(secondary_error, "__notes__", ()))
+        propagated_notes = (
+            summary_prefix + str(secondary_error),
+            *(detail_prefix + note for note in secondary_notes),
+        )
+        for note in propagated_notes:
+            primary_error.add_note(note)
+
+    @classmethod
+    def _select_transaction_error(
+        cls,
+        primary_error: BaseException,
+        secondary_error: BaseException,
+        *,
+        secondary_summary: str,
+        secondary_detail: str,
+        primary_summary: str,
+        primary_detail: str,
+    ) -> BaseException:
+        """Preserve the first control signal while retaining failure context."""
+        if not isinstance(primary_error, Exception):
+            cls._add_secondary_error_context(
+                primary_error,
+                secondary_error,
+                summary_prefix=secondary_summary,
+                detail_prefix=secondary_detail,
+            )
+            return primary_error
+        if not isinstance(secondary_error, Exception):
+            cls._add_secondary_error_context(
+                secondary_error,
+                primary_error,
+                summary_prefix=primary_summary,
+                detail_prefix=primary_detail,
+            )
+            return secondary_error
+        primary_error.add_note(secondary_summary + str(secondary_error))
+        return primary_error
+
+    @classmethod
+    def _probe_completion_after_error(
+        cls,
+        error: BaseException,
+        probe: Callable[[], bool],
+        *,
+        operation: str,
+    ) -> tuple[bool | None, BaseException]:
+        """Probe a possibly completed mutation without masking its first signal."""
+        try:
+            return probe(), error
+        except BaseException as probe_error:
+            selected_error = cls._select_transaction_error(
+                error,
+                probe_error,
+                secondary_summary=f"{operation} completion probe also failed: ",
+                secondary_detail=f"{operation} completion probe failure note: ",
+                primary_summary=f"{operation} first failed: ",
+                primary_detail=f"{operation} failure note: ",
+            )
+        try:
+            return probe(), selected_error
+        except BaseException as retry_error:
+            selected_error = cls._select_transaction_error(
+                selected_error,
+                retry_error,
+                secondary_summary=f"{operation} completion retry also failed: ",
+                secondary_detail=f"{operation} completion retry failure note: ",
+                primary_summary=f"{operation} first failed: ",
+                primary_detail=f"{operation} failure note: ",
+            )
+            selected_error.add_note(
+                f"{operation} completion remains indeterminate; recovery "
+                "conservatively assumes the namespace mutation may have completed."
+            )
+            return None, selected_error
+
+    def _resolve_ambiguous_stage_ownership(
+        self,
+        original_stage: StagedArtifact,
+        completed_stage: StagedArtifact,
+        error: BaseException,
+        *,
+        operation: str,
+    ) -> tuple[StagedArtifact, BaseException]:
+        """Resolve which exact inode owns one private name after an unknown move."""
+        try:
+            path_stat = self.directory.stat(original_stage.name)
+            actual_identity = (path_stat.st_dev, path_stat.st_ino)
+            if actual_identity == original_stage.identity:
+                owned_stage = original_stage
+            elif actual_identity == completed_stage.identity:
+                owned_stage = completed_stage
+            else:
+                raise OSError(
+                    f"{operation} left an unrecognized private stage identity: "
+                    f"{self.directory.child_path(original_stage.name)}"
+                )
+            self.verify_staged(owned_stage)
+        except BaseException as ownership_error:
+            selected_error = self._select_transaction_error(
+                error,
+                ownership_error,
+                secondary_summary=f"{operation} ownership probe also failed: ",
+                secondary_detail=f"{operation} ownership probe failure note: ",
+                primary_summary=f"{operation} first failed: ",
+                primary_detail=f"{operation} failure note: ",
+            )
+            selected_error.add_note(
+                f"Ambiguous private stage preserved at: {self.directory.child_path(original_stage.name)}"
+            )
+            return original_stage, selected_error
+        return owned_stage, error
+
     def cleanup(
         self,
         temporary_files: dict[str, StagedArtifact],
     ) -> list[Exception]:
         self.phase("before_cleanup", None)
         errors: list[Exception] = []
-        removed = False
+        cleanup_failures: list[BaseException] = []
+        control_signals: list[BaseException] = []
+        durability_required = False
+        terminal_signal: BaseException | None = None
+
+        def record_failure(error: BaseException) -> None:
+            cleanup_failures.append(error)
+            if isinstance(error, Exception):
+                errors.append(error)
+            else:
+                control_signals.append(error)
+
         for temporary_name, staged in tuple(temporary_files.items()):
             try:
                 if not self.directory.lexists(temporary_name):
                     temporary_files.pop(temporary_name, None)
                     continue
-                self.verify_staged(staged)
-                completion_error = self.directory.unlink(
-                    temporary_name,
-                    expected_identity=staged.identity,
-                    verify_target=lambda staged=staged: self.verify_staged(staged),
-                )
+                completed, cleanup_error = self._unlink_staged_exact(staged)
+            except BaseException as error:
+                if not isinstance(error, Exception):
+                    record_failure(error)
+                    terminal_signal = error
+                    break
+                record_failure(error)
+                continue
+            if completed is True:
                 temporary_files.pop(temporary_name, None)
-                removed = True
-                if completion_error is not None:
-                    raise completion_error
-            except Exception as error:
-                errors.append(error)
-        if removed:
+                durability_required = True
+            elif completed is None:
+                durability_required = True
+            if cleanup_error is not None:
+                if completed is not True and not isinstance(
+                    cleanup_error,
+                    Exception,
+                ):
+                    record_failure(cleanup_error)
+                    terminal_signal = cleanup_error
+                    break
+                record_failure(cleanup_error)
+        if durability_required:
             try:
                 self.sync("cleanup_durability")
-            except Exception as error:
-                errors.append(error)
-        self.phase("after_cleanup", None)
+            except BaseException as error:
+                record_failure(error)
+        if terminal_signal is None and not control_signals:
+            try:
+                self.phase("after_cleanup", None)
+            except BaseException as error:
+                if isinstance(error, Exception) and not control_signals:
+                    raise
+                record_failure(error)
+        if control_signals:
+            selected_signal = control_signals[0]
+            for cleanup_error in cleanup_failures:
+                if cleanup_error is selected_signal:
+                    continue
+                self._add_secondary_error_context(
+                    selected_signal,
+                    cleanup_error,
+                    summary_prefix="Additional artifact cleanup failure: ",
+                    detail_prefix="Additional artifact cleanup failure note: ",
+                )
+            raise selected_signal
         return errors
 
     def sync(self, phase: str = "durability") -> None:
@@ -2335,7 +2644,8 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         snapshot,
                     )
                     mutation_started = True
-                    temporary_files.pop(desired.name, None)
+                    if completion_error is None:
+                        temporary_files.pop(desired.name, None)
                 elif snapshot.present:
                     published_previous = self._snapshot_as_staged(
                         snapshot,
@@ -2375,10 +2685,38 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     temporary_files,
                 )
                 if rollback_error is not None:
-                    error.add_note(f"Artifact publication rollback also failed: {rollback_error}")
+                    selected_error = self._select_transaction_error(
+                        error,
+                        rollback_error,
+                        secondary_summary=("Artifact publication rollback also failed: "),
+                        secondary_detail=("Artifact publication rollback failure note: "),
+                        primary_summary="Artifact publication first failed: ",
+                        primary_detail="Artifact publication failure note: ",
+                    )
+                    active_error = selected_error
+                    if selected_error is not error:
+                        raise selected_error
             raise
         finally:
-            cleanup_errors = self.cleanup(temporary_files)
+            try:
+                cleanup_errors = self.cleanup(temporary_files)
+            except BaseException as cleanup_error:
+                if active_error is None or (
+                    isinstance(active_error, Exception) and isinstance(cleanup_error, Exception)
+                ):
+                    raise
+                selected_error = self._select_transaction_error(
+                    active_error,
+                    cleanup_error,
+                    secondary_summary="Artifact publication cleanup failed: ",
+                    secondary_detail=("Artifact publication cleanup failure note: "),
+                    primary_summary="Artifact publication first failed: ",
+                    primary_detail="Artifact publication failure note: ",
+                )
+                active_error = selected_error
+                if selected_error is cleanup_error:
+                    raise
+                raise selected_error
             if active_error is not None and cleanup_errors:
                 active_error.add_note(
                     "Artifact publication cleanup failed: "
@@ -2485,13 +2823,26 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         name=receipt_copy.name,
                         storage_mode=receipt_copy.mode,
                     )
-                    completion_error = self.replace_target_with_stage_path(
+                    (
+                        displacement_completed,
+                        completion_error,
+                    ) = self._replace_target_with_stage_path_exact(
                         snapshot.name,
                         receipt_copy,
                         displaced_receipt,
                     )
                     mutation_started = True
-                    temporary_files[displaced_receipt.name] = displaced_receipt
+                    if displacement_completed is True:
+                        temporary_files[displaced_receipt.name] = displaced_receipt
+                    else:
+                        assert completion_error is not None
+                        owned_receipt, completion_error = self._resolve_ambiguous_stage_ownership(
+                            receipt_copy,
+                            displaced_receipt,
+                            completion_error,
+                            operation="Artifact receipt displacement",
+                        )
+                        temporary_files[owned_receipt.name] = owned_receipt
                     recorded_mutation = _RestoreMutation(
                         snapshot,
                         receipt,
@@ -2509,7 +2860,8 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         None,
                     )
                     mutation_started = True
-                    temporary_files.pop(restored.name, None)
+                    if completion_error is None:
+                        temporary_files.pop(restored.name, None)
                     if recorded_mutation is None:
                         recorded_mutation = _RestoreMutation(
                             snapshot,
@@ -2536,10 +2888,38 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                     temporary_files,
                 )
                 if rollback_error is not None:
-                    error.add_note(f"Artifact snapshot rollback also failed: {rollback_error}")
+                    selected_error = self._select_transaction_error(
+                        error,
+                        rollback_error,
+                        secondary_summary="Artifact snapshot rollback also failed: ",
+                        secondary_detail=("Artifact snapshot rollback failure note: "),
+                        primary_summary="Artifact snapshot restore first failed: ",
+                        primary_detail="Artifact snapshot restore failure note: ",
+                    )
+                    active_error = selected_error
+                    if selected_error is not error:
+                        raise selected_error
             raise
         finally:
-            cleanup_errors = self.cleanup(temporary_files)
+            try:
+                cleanup_errors = self.cleanup(temporary_files)
+            except BaseException as cleanup_error:
+                if active_error is None or (
+                    isinstance(active_error, Exception) and isinstance(cleanup_error, Exception)
+                ):
+                    raise
+                selected_error = self._select_transaction_error(
+                    active_error,
+                    cleanup_error,
+                    secondary_summary="Artifact restore cleanup failed: ",
+                    secondary_detail="Artifact restore cleanup failure note: ",
+                    primary_summary="Artifact snapshot restore first failed: ",
+                    primary_detail="Artifact snapshot restore failure note: ",
+                )
+                active_error = selected_error
+                if selected_error is cleanup_error:
+                    raise
+                raise selected_error
             if active_error is not None and cleanup_errors:
                 active_error.add_note(
                     "Artifact restore cleanup failed: "
@@ -2553,11 +2933,41 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 restored_stages[snapshot.name],
             )
 
+    def _cleanup_staged_durable(
+        self,
+        staged: StagedArtifact,
+        temporary_files: dict[str, StagedArtifact],
+        durability_phase: str,
+    ) -> BaseException | None:
+        completed, cleanup_error = self._unlink_staged_exact(staged)
+        if isinstance(cleanup_error, Exception):
+            # Preserve the established best-effort recovery cleanup contract:
+            # ordinary failures leave the stage owned for final-cleanup retry.
+            return None
+        if completed is False:
+            return cleanup_error
+        if completed is True:
+            temporary_files.pop(staged.name, None)
+        try:
+            self.sync(durability_phase)
+        except BaseException as durability_error:
+            if cleanup_error is None:
+                return durability_error
+            return self._select_transaction_error(
+                cleanup_error,
+                durability_error,
+                secondary_summary="Artifact stage cleanup durability also failed: ",
+                secondary_detail=("Artifact stage cleanup durability failure note: "),
+                primary_summary="Artifact stage cleanup first failed: ",
+                primary_detail="Artifact stage cleanup failure note: ",
+            )
+        return cleanup_error
+
     def _rollback_published_mutations(
         self,
         mutations: list[_PublishedMutation],
         temporary_files: dict[str, StagedArtifact],
-    ) -> Exception | None:
+    ) -> BaseException | None:
         errors: list[BaseException] = []
         retained_paths: list[str] = []
         try:
@@ -2598,16 +3008,20 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         name,
                         desired,
                     )
-                    temporary_files.pop(backup.name, None)
+                    if completion_error is None:
+                        temporary_files.pop(backup.name, None)
                     if completion_error is not None:
                         raise completion_error
                 self.sync(f"rollback_{name}_durability")
                 self._verify_snapshot_restored(mutation.snapshot, backup)
                 if recovery is not None:
-                    cleanup_error = self.unlink_staged(recovery)
-                    if cleanup_error is None:
-                        temporary_files.pop(recovery.name, None)
-                        self.sync(f"recovery_{name}_cleanup_durability")
+                    cleanup_error = self._cleanup_staged_durable(
+                        recovery,
+                        temporary_files,
+                        f"recovery_{name}_cleanup_durability",
+                    )
+                    if cleanup_error is not None:
+                        raise cleanup_error
             except BaseException as error:
                 errors.append(error)
                 try:
@@ -2629,7 +3043,7 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
         self,
         mutations: list[_RestoreMutation],
         temporary_files: dict[str, StagedArtifact],
-    ) -> Exception | None:
+    ) -> BaseException | None:
         errors: list[BaseException] = []
         retained_paths: list[str] = []
         try:
@@ -2675,7 +3089,8 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                         name,
                         mutation.restored if mutation.restored_committed else None,
                     )
-                    temporary_files.pop(receipt_backup.name, None)
+                    if completion_error is None:
+                        temporary_files.pop(receipt_backup.name, None)
                     if completion_error is not None:
                         raise completion_error
                 self.sync(f"restore_rollback_{name}_durability")
@@ -2685,10 +3100,13 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
                 else:
                     self.verify_receipt(mutation.receipt)
                 if recovery is not None:
-                    cleanup_error = self.unlink_staged(recovery)
-                    if cleanup_error is None:
-                        temporary_files.pop(recovery.name, None)
-                        self.sync(f"restore_recovery_{name}_cleanup_durability")
+                    cleanup_error = self._cleanup_staged_durable(
+                        recovery,
+                        temporary_files,
+                        f"restore_recovery_{name}_cleanup_durability",
+                    )
+                    if cleanup_error is not None:
+                        raise cleanup_error
             except BaseException as error:
                 errors.append(error)
                 try:
@@ -2710,9 +3128,26 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
     def _combined_rollback_error(
         errors: list[BaseException],
         retained_paths: list[str],
-    ) -> Exception | None:
+    ) -> BaseException | None:
         if not errors:
             return None
+        control_signal = next(
+            (error for error in errors if not isinstance(error, Exception)),
+            None,
+        )
+        if control_signal is not None:
+            for additional_error in errors:
+                if additional_error is control_signal:
+                    continue
+                ByteArtifactTransaction._add_secondary_error_context(
+                    control_signal,
+                    additional_error,
+                    summary_prefix="Additional rollback failure: ",
+                    detail_prefix="Additional rollback failure note: ",
+                )
+            if retained_paths:
+                control_signal.add_note("Verified recovery artifact preserved at: " + ", ".join(retained_paths))
+            return control_signal
         details = "; ".join(str(error) for error in errors)
         if retained_paths:
             details += "; verified recovery artifact preserved at: " + ", ".join(
@@ -2720,8 +3155,12 @@ class ByteArtifactTransaction(AbstractContextManager["ByteArtifactTransaction"])
             )
         wrapped = OSError(details)
         wrapped.__cause__ = errors[0]
-        for additional_error in errors[1:]:
-            wrapped.add_note(f"Additional rollback failure: {additional_error}")
+        for index, rollback_error in enumerate(errors):
+            if index:
+                wrapped.add_note(f"Additional rollback failure: {rollback_error}")
+            note_prefix = "Rollback failure note: " if index == 0 else "Additional rollback failure note: "
+            for note in getattr(rollback_error, "__notes__", ()):
+                wrapped.add_note(note_prefix + note)
         return wrapped
 
     def _retain_recovery(

@@ -11,7 +11,11 @@ from typing import Any, Callable, cast
 from unittest.mock import patch
 
 from src.conversion import anchored_artifacts as anchored_artifacts_module
-from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
+from src.conversion.anchored_artifacts import (
+    ArtifactSpec,
+    ByteArtifactTransaction,
+    StagedArtifact,
+)
 
 
 class TestAnchoredArtifacts(unittest.TestCase):
@@ -1756,6 +1760,1752 @@ class TestAnchoredArtifacts(unittest.TestCase):
         self.assertTrue(
             any("verified recovery artifact preserved" in note for note in notes)
         )
+
+    def test_publish_before_rollback_keyboard_interrupt_preempts_forward_error_and_attempts_all(
+        self,
+    ) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"first old\n")
+        second.write_bytes(b"second old\n")
+        forward_error = OSError("injected forward publication failure")
+        rollback_signal = KeyboardInterrupt("injected before-rollback interrupt")
+        rolling_back = False
+        signal_injected = False
+        rollback_attempts: list[str] = []
+
+        def interrupt_before_rollback(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal rolling_back, signal_injected
+            if phase == "before_commit_second.json_durability" and not rolling_back:
+                rolling_back = True
+                raise forward_error
+            if rolling_back and phase == "before_rollback" and not signal_injected:
+                signal_injected = True
+                raise rollback_signal
+            if rolling_back and phase == "before_commit" and name is not None:
+                rollback_attempts.append(name)
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_before_rollback,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs(
+                    (
+                        ArtifactSpec("first.json", b"first new\n"),
+                        ArtifactSpec("second.json", b"second new\n"),
+                    )
+                )
+
+        self.assertIs(raised.exception, rollback_signal)
+        self.assertEqual(rollback_attempts, ["second.json", "first.json"])
+        self.assertEqual(first.read_bytes(), b"first old\n")
+        self.assertEqual(second.read_bytes(), b"second old\n")
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(forward_error) in note for note in notes))
+
+    def test_publish_forward_keyboard_interrupt_survives_ordinary_rollback_failure(
+        self,
+    ) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"first old\n")
+        second.write_bytes(b"second old\n")
+        forward_signal = KeyboardInterrupt("injected forward publication interrupt")
+        rollback_error = OSError("injected ordinary publication rollback failure")
+        rolling_back = False
+        rollback_attempts: list[str] = []
+
+        def interrupt_forward_and_fail_second_rollback(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal rolling_back
+            if phase == "before_commit_second.json_durability" and not rolling_back:
+                rolling_back = True
+                raise forward_signal
+            if not rolling_back or phase != "before_commit" or name is None:
+                return
+            rollback_attempts.append(name)
+            if name == "second.json":
+                raise rollback_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_forward_and_fail_second_rollback,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs(
+                    (
+                        ArtifactSpec("first.json", b"first new\n"),
+                        ArtifactSpec("second.json", b"second new\n"),
+                    )
+                )
+
+        self.assertIs(raised.exception, forward_signal)
+        self.assertEqual(rollback_attempts, ["second.json", "first.json"])
+        self.assertEqual(first.read_bytes(), b"first old\n")
+        self.assertEqual(second.read_bytes(), b"second new\n")
+        retained = [
+            path for path in self.artifact_directory.iterdir() if path.name not in {"first.json", "second.json"}
+        ]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), b"second old\n")
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(rollback_error) in note for note in notes))
+        self.assertTrue(any("verified recovery artifact preserved" in note.lower() for note in notes))
+
+    def test_publish_multiple_rollback_signals_use_first_identity_and_keep_notes(
+        self,
+    ) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"first old\n")
+        second.write_bytes(b"second old\n")
+        forward_error = OSError("injected ordinary publication failure")
+        first_signal = SystemExit(73)
+        second_signal = KeyboardInterrupt("injected later rollback interrupt")
+        rolling_back = False
+        rollback_attempts: list[str] = []
+
+        def raise_each_rollback_signal(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal rolling_back
+            if phase == "before_commit_second.json_durability" and not rolling_back:
+                rolling_back = True
+                raise forward_error
+            if not rolling_back or phase != "before_commit" or name is None:
+                return
+            rollback_attempts.append(name)
+            if name == "second.json":
+                raise first_signal
+            raise second_signal
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=raise_each_rollback_signal,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs(
+                    (
+                        ArtifactSpec("first.json", b"first new\n"),
+                        ArtifactSpec("second.json", b"second new\n"),
+                    )
+                )
+
+        self.assertIs(raised.exception, first_signal)
+        self.assertEqual(first_signal.code, 73)
+        self.assertEqual(rollback_attempts, ["second.json", "first.json"])
+        self.assertEqual(first.read_bytes(), b"first new\n")
+        self.assertEqual(second.read_bytes(), b"second new\n")
+        retained = [
+            path for path in self.artifact_directory.iterdir() if path.name not in {"first.json", "second.json"}
+        ]
+        self.assertEqual(len(retained), 2)
+        self.assertEqual(
+            {path.read_bytes() for path in retained},
+            {b"first old\n", b"second old\n"},
+        )
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(forward_error) in note for note in notes))
+        self.assertTrue(any(str(second_signal) in note for note in notes))
+        self.assertTrue(any("verified recovery artifact preserved" in note.lower() for note in notes))
+
+    def test_restore_rollback_system_exit_preempts_forward_error_and_attempts_all(
+        self,
+    ) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"first old\n")
+        second.write_bytes(b"second old\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("first.json", "second.json"))
+            receipts = transaction.publish_specs(
+                (
+                    ArtifactSpec("first.json", b"first new\n"),
+                    ArtifactSpec("second.json", b"second new\n"),
+                )
+            )
+            first_receipt, second_receipt = receipts
+            assert first_receipt is not None
+            assert second_receipt is not None
+            forward_error = OSError("injected ordinary restore failure")
+            rollback_signal = SystemExit(89)
+            rolling_back = False
+            rollback_attempts: list[str] = []
+
+            def fail_restore_then_exit_from_rollback(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal rolling_back
+                if phase == "before_restore_second.json_durability" and not rolling_back:
+                    rolling_back = True
+                    raise forward_error
+                if not rolling_back or phase != "before_commit" or name is None:
+                    return
+                rollback_attempts.append(name)
+                if name == "second.json":
+                    raise rollback_signal
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_restore_then_exit_from_rollback,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+            transaction.verify_receipt(first_receipt)
+
+        self.assertIs(raised.exception, rollback_signal)
+        self.assertEqual(rollback_signal.code, 89)
+        self.assertEqual(rollback_attempts, ["second.json", "first.json"])
+        self.assertEqual(first.read_bytes(), first_receipt.content)
+        self.assertEqual(second.read_bytes(), b"second old\n")
+        retained = [
+            path for path in self.artifact_directory.iterdir() if path.name not in {"first.json", "second.json"}
+        ]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), second_receipt.content)
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(forward_error) in note for note in notes))
+        self.assertTrue(any("verified recovery artifact preserved" in note.lower() for note in notes))
+
+    def test_restore_forward_system_exit_survives_ordinary_rollback_failure(
+        self,
+    ) -> None:
+        first = self.artifact_directory / "first.json"
+        second = self.artifact_directory / "second.json"
+        first.write_bytes(b"first old\n")
+        second.write_bytes(b"second old\n")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("first.json", "second.json"))
+            receipts = transaction.publish_specs(
+                (
+                    ArtifactSpec("first.json", b"first new\n"),
+                    ArtifactSpec("second.json", b"second new\n"),
+                )
+            )
+            first_receipt, second_receipt = receipts
+            assert first_receipt is not None
+            assert second_receipt is not None
+            forward_signal = SystemExit(97)
+            rollback_error = OSError("injected ordinary restore rollback failure")
+            rolling_back = False
+            rollback_attempts: list[str] = []
+
+            def exit_restore_then_fail_second_rollback(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal rolling_back
+                if phase == "before_restore_second.json_durability" and not rolling_back:
+                    rolling_back = True
+                    raise forward_signal
+                if not rolling_back or phase != "before_commit" or name is None:
+                    return
+                rollback_attempts.append(name)
+                if name == "second.json":
+                    raise rollback_error
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=exit_restore_then_fail_second_rollback,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+            transaction.verify_receipt(first_receipt)
+
+        self.assertIs(raised.exception, forward_signal)
+        self.assertEqual(forward_signal.code, 97)
+        self.assertEqual(rollback_attempts, ["second.json", "first.json"])
+        self.assertEqual(first.read_bytes(), first_receipt.content)
+        self.assertEqual(second.read_bytes(), b"second old\n")
+        retained = [
+            path for path in self.artifact_directory.iterdir() if path.name not in {"first.json", "second.json"}
+        ]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), second_receipt.content)
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(rollback_error) in note for note in notes))
+        self.assertTrue(any("verified recovery artifact preserved" in note.lower() for note in notes))
+
+    def test_completed_present_publish_signal_records_mutation_before_rollback(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        completion_signal = SystemExit(101)
+        signal_injected = False
+
+        def exit_after_completed_replace(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal signal_injected
+            if phase != "after_replace" or name != "report.json" or signal_injected:
+                return
+            signal_injected = True
+            raise completion_signal
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=exit_after_completed_replace,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(signal_injected)
+        self.assertIs(raised.exception, completion_signal)
+        self.assertEqual(completion_signal.code, 101)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_completed_absent_publish_signal_records_mutation_before_rollback(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        completion_signal = KeyboardInterrupt("injected completed unlink interrupt")
+        signal_injected = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            windows_tombstone = transaction.strategy == "windows_handle"
+
+            def interrupt_after_completed_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal signal_injected
+                posix_completion = phase == "after_unlink" and name == "report.json"
+                windows_completion = (
+                    windows_tombstone and phase == "after_replace" and name is not None and name.endswith(".tombstone")
+                )
+                if signal_injected or not (posix_completion or windows_completion):
+                    return
+                signal_injected = True
+                raise completion_signal
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_after_completed_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", None),))
+
+        self.assertTrue(signal_injected)
+        self.assertIs(raised.exception, completion_signal)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_cleanup_completed_unlink_signal_syncs_before_exact_reraise(
+        self,
+    ) -> None:
+        cleanup_signal = KeyboardInterrupt("injected post-unlink cleanup interrupt")
+        phases: list[str] = []
+        signal_injected = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            staged = transaction.stage_bytes(
+                "report.json",
+                b"stage\n",
+                mode=0o600,
+                suffix=".tmp",
+            )
+            temporary_files = {staged.name: staged}
+
+            def interrupt_after_stage_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal signal_injected
+                phases.append(phase)
+                if phase != "after_unlink" or name != staged.name or signal_injected:
+                    return
+                signal_injected = True
+                raise cleanup_signal
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_after_stage_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.cleanup(temporary_files)
+
+        self.assertTrue(signal_injected)
+        self.assertIs(raised.exception, cleanup_signal)
+        self.assertEqual(temporary_files, {})
+        self.assertFalse(Path(staged.path).exists())
+        self.assertIn("before_cleanup_durability", phases)
+        self.assertIn("after_cleanup_durability", phases)
+        self.assertLess(
+            phases.index("after_unlink"),
+            phases.index("before_cleanup_durability"),
+        )
+        self.assertLess(
+            phases.index("before_cleanup_durability"),
+            phases.index("after_cleanup_durability"),
+        )
+
+    def test_cleanup_direct_post_unlink_control_signal_tracks_completion_before_escape(
+        self,
+    ) -> None:
+        for cleanup_signal in (
+            KeyboardInterrupt("injected direct cleanup interrupt"),
+            SystemExit(127),
+        ):
+            with self.subTest(signal_type=type(cleanup_signal).__name__):
+                phases: list[str] = []
+                unlink_attempts: list[str] = []
+
+                with ByteArtifactTransaction.open(
+                    str(self.root),
+                    "gm2godot",
+                    create=False,
+                    description="test artifact directory",
+                ) as transaction:
+                    interrupted = transaction.stage_bytes(
+                        "first.json",
+                        b"first stage\n",
+                        mode=0o600,
+                        suffix=".tmp",
+                    )
+                    later = transaction.stage_bytes(
+                        "second.json",
+                        b"second stage\n",
+                        mode=0o600,
+                        suffix=".tmp",
+                    )
+                    temporary_files = {
+                        interrupted.name: interrupted,
+                        later.name: later,
+                    }
+                    original_unlink = transaction.directory.unlink
+
+                    def unlink_then_raise_control_signal(
+                        name: str,
+                        *,
+                        expected_identity: tuple[int, int],
+                        prepare_target: Callable[[], None] | None = None,
+                        verify_target: Callable[[], None] | None = None,
+                    ) -> BaseException | None:
+                        unlink_attempts.append(name)
+                        completion_error = original_unlink(
+                            name,
+                            expected_identity=expected_identity,
+                            prepare_target=prepare_target,
+                            verify_target=verify_target,
+                        )
+                        if name == interrupted.name:
+                            raise cleanup_signal
+                        return completion_error
+
+                    def record_phase(
+                        phase: str,
+                        _directory_path: str,
+                        _name: str | None,
+                    ) -> None:
+                        phases.append(phase)
+
+                    with (
+                        patch.object(
+                            transaction.directory,
+                            "unlink",
+                            side_effect=unlink_then_raise_control_signal,
+                        ),
+                        patch(
+                            "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                            side_effect=record_phase,
+                        ),
+                        self.assertRaises(BaseException) as raised,
+                    ):
+                        transaction.cleanup(temporary_files)
+
+                self.assertIs(raised.exception, cleanup_signal)
+                if isinstance(cleanup_signal, SystemExit):
+                    self.assertEqual(cleanup_signal.code, 127)
+                self.assertEqual(
+                    unlink_attempts,
+                    [interrupted.name, later.name],
+                )
+                self.assertEqual(temporary_files, {})
+                self.assertFalse(Path(interrupted.path).exists())
+                self.assertFalse(Path(later.path).exists())
+                self.assertIn("before_cleanup_durability", phases)
+                self.assertIn("after_cleanup_durability", phases)
+                self.assertLess(
+                    phases.index("before_cleanup_durability"),
+                    phases.index("after_cleanup_durability"),
+                )
+
+    def test_cleanup_completed_signal_precedes_later_incomplete_signal_and_stops(
+        self,
+    ) -> None:
+        first_signal = KeyboardInterrupt("injected completed first cleanup interrupt")
+        second_signal = SystemExit(149)
+        phases: list[str] = []
+        unlink_attempts: list[str] = []
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            first = transaction.stage_bytes(
+                "first.json",
+                b"first stage\n",
+                mode=0o600,
+                suffix=".tmp",
+            )
+            second = transaction.stage_bytes(
+                "second.json",
+                b"second stage\n",
+                mode=0o600,
+                suffix=".tmp",
+            )
+            later = transaction.stage_bytes(
+                "later.json",
+                b"later stage\n",
+                mode=0o600,
+                suffix=".tmp",
+            )
+            temporary_files = {
+                first.name: first,
+                second.name: second,
+                later.name: later,
+            }
+            original_unlink = transaction.directory.unlink
+
+            def complete_first_then_interrupt_second(
+                name: str,
+                *,
+                expected_identity: tuple[int, int],
+                prepare_target: Callable[[], None] | None = None,
+                verify_target: Callable[[], None] | None = None,
+            ) -> BaseException | None:
+                unlink_attempts.append(name)
+                if name == second.name:
+                    raise second_signal
+                completion_error = original_unlink(
+                    name,
+                    expected_identity=expected_identity,
+                    prepare_target=prepare_target,
+                    verify_target=verify_target,
+                )
+                if name == first.name:
+                    raise first_signal
+                return completion_error
+
+            def record_phase(
+                phase: str,
+                _directory_path: str,
+                _name: str | None,
+            ) -> None:
+                phases.append(phase)
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "unlink",
+                    side_effect=complete_first_then_interrupt_second,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=record_phase,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.cleanup(temporary_files)
+
+        self.assertIs(raised.exception, first_signal)
+        self.assertEqual(second_signal.code, 149)
+        self.assertEqual(unlink_attempts, [first.name, second.name])
+        self.assertNotIn(first.name, temporary_files)
+        self.assertIn(second.name, temporary_files)
+        self.assertIn(later.name, temporary_files)
+        self.assertFalse(Path(first.path).exists())
+        self.assertTrue(Path(second.path).exists())
+        self.assertTrue(Path(later.path).exists())
+        self.assertIn("before_cleanup_durability", phases)
+        self.assertIn("after_cleanup_durability", phases)
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(second_signal.code) in note for note in notes))
+
+    def test_unlink_staged_completed_control_signal_syncs_before_exact_reraise(
+        self,
+    ) -> None:
+        cleanup_signal = SystemExit(151)
+        phases: list[str] = []
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            staged = transaction.stage_bytes(
+                "report.json",
+                b"stage\n",
+                mode=0o600,
+                suffix=".tmp",
+            )
+
+            def exit_after_public_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                phases.append(phase)
+                if phase == "after_unlink" and name == staged.name:
+                    raise cleanup_signal
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=exit_after_public_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.unlink_staged(staged)
+
+        self.assertIs(raised.exception, cleanup_signal)
+        self.assertEqual(cleanup_signal.code, 151)
+        self.assertFalse(Path(staged.path).exists())
+        self.assertIn("before_staged_cleanup_durability", phases)
+        self.assertIn("after_staged_cleanup_durability", phases)
+        self.assertLess(
+            phases.index("after_unlink"),
+            phases.index("before_staged_cleanup_durability"),
+        )
+        self.assertLess(
+            phases.index("before_staged_cleanup_durability"),
+            phases.index("after_staged_cleanup_durability"),
+        )
+
+    def test_publish_rollback_recovery_post_unlink_system_exit_keeps_durability_error(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_error = OSError("injected ordinary post-publication failure")
+        cleanup_signal = SystemExit(137)
+        durability_error = OSError("injected publication recovery cleanup durability failure")
+        cleanup_signal_injected = False
+        durability_error_injected = False
+
+        def exit_after_publish(_name: str) -> None:
+            raise forward_error
+
+        def fail_publish_recovery_cleanup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal cleanup_signal_injected, durability_error_injected
+            if (
+                phase == "after_unlink"
+                and name is not None
+                and name.endswith(".recovery.backup")
+                and not cleanup_signal_injected
+            ):
+                cleanup_signal_injected = True
+                raise cleanup_signal
+            if phase == "before_recovery_report.json_cleanup_durability" and not durability_error_injected:
+                durability_error_injected = True
+                raise durability_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_publish_recovery_cleanup,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs(
+                    (ArtifactSpec("report.json", b"new\n"),),
+                    after_commit=exit_after_publish,
+                )
+
+        self.assertTrue(cleanup_signal_injected)
+        self.assertTrue(durability_error_injected)
+        self.assertIs(raised.exception, cleanup_signal)
+        self.assertEqual(cleanup_signal.code, 137)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(forward_error), notes)
+        self.assertIn(str(durability_error), notes)
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_restore_rollback_recovery_post_unlink_keyboard_interrupt_keeps_durability_error(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_error = OSError("injected ordinary completed restore failure")
+        cleanup_signal = KeyboardInterrupt("injected restore recovery post-unlink interrupt")
+        durability_error = OSError("injected restore recovery cleanup durability failure")
+        cleanup_signal_injected = False
+        durability_error_injected = False
+        forward_error_injected = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("report.json",))
+            receipts = transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+            receipt = receipts[0]
+            assert receipt is not None
+
+            def interrupt_restore_and_fail_recovery_cleanup(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal cleanup_signal_injected
+                nonlocal durability_error_injected
+                nonlocal forward_error_injected
+                if phase == "after_restore_report.json_durability" and not forward_error_injected:
+                    forward_error_injected = True
+                    raise forward_error
+                if (
+                    phase == "after_unlink"
+                    and name is not None
+                    and name.endswith(".recovery.backup")
+                    and not cleanup_signal_injected
+                ):
+                    cleanup_signal_injected = True
+                    raise cleanup_signal
+                if phase == "before_restore_recovery_report.json_cleanup_durability" and not durability_error_injected:
+                    durability_error_injected = True
+                    raise durability_error
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_restore_and_fail_recovery_cleanup,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+
+        self.assertTrue(forward_error_injected)
+        self.assertTrue(cleanup_signal_injected)
+        self.assertTrue(durability_error_injected)
+        self.assertIs(raised.exception, cleanup_signal)
+        self.assertEqual(target.read_bytes(), receipt.content)
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(forward_error), notes)
+        self.assertIn(str(durability_error), notes)
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_publish_rollback_retries_ordinary_recovery_cleanup_without_spurious_failure(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_error = OSError("injected ordinary post-publication failure")
+        cleanup_error = OSError("injected one-shot publication recovery cleanup")
+        recovery_unlink_attempts = 0
+
+        def fail_after_publish(_name: str) -> None:
+            raise forward_error
+
+        def fail_first_publish_recovery_unlink(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal recovery_unlink_attempts
+            if phase != "before_unlink" or name is None or not name.endswith(".recovery.backup"):
+                return
+            recovery_unlink_attempts += 1
+            if recovery_unlink_attempts == 1:
+                raise cleanup_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_first_publish_recovery_unlink,
+                ),
+                self.assertRaises(OSError) as raised,
+            ):
+                transaction.publish_specs(
+                    (ArtifactSpec("report.json", b"new\n"),),
+                    after_commit=fail_after_publish,
+                )
+
+        self.assertIs(raised.exception, forward_error)
+        self.assertEqual(recovery_unlink_attempts, 2)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertFalse(any("rollback" in note.lower() for note in notes))
+        self.assertNotIn(str(cleanup_error), "\n".join(notes))
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_restore_rollback_retries_ordinary_recovery_cleanup_without_spurious_failure(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_error = OSError("injected ordinary completed restore failure")
+        cleanup_error = OSError("injected one-shot restore recovery cleanup")
+        recovery_unlink_attempts = 0
+        forward_error_injected = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("report.json",))
+            receipts = transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+            receipt = receipts[0]
+            assert receipt is not None
+
+            def fail_restore_and_first_recovery_unlink(
+                phase: str,
+                _directory_path: str,
+                name: str | None,
+            ) -> None:
+                nonlocal forward_error_injected, recovery_unlink_attempts
+                if phase == "after_restore_report.json_durability" and not forward_error_injected:
+                    forward_error_injected = True
+                    raise forward_error
+                if phase != "before_unlink" or name is None or not name.endswith(".recovery.backup"):
+                    return
+                recovery_unlink_attempts += 1
+                if recovery_unlink_attempts == 1:
+                    raise cleanup_error
+
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_restore_and_first_recovery_unlink,
+                ),
+                self.assertRaises(OSError) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+
+        self.assertTrue(forward_error_injected)
+        self.assertIs(raised.exception, forward_error)
+        self.assertEqual(recovery_unlink_attempts, 2)
+        self.assertEqual(target.read_bytes(), receipt.content)
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertFalse(any("rollback" in note.lower() for note in notes))
+        self.assertNotIn(str(cleanup_error), "\n".join(notes))
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["report.json"],
+        )
+
+    def test_replace_staged_completion_probe_signal_does_not_mask_original(self) -> None:
+        target = self.artifact_directory / "replace.json"
+        target.write_bytes(b"old\n")
+        original_signal = KeyboardInterrupt("injected completed replacement interrupt")
+        probe_signal = SystemExit(157)
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            staged = transaction.stage_bytes(
+                "replace.json",
+                b"new\n",
+                mode=0o640,
+                suffix=".tmp",
+            )
+            original_replace = transaction.directory.replace
+
+            def replace_then_raise(*args: Any, **kwargs: Any) -> BaseException | None:
+                completion_error = original_replace(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                raise original_signal
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=replace_then_raise,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=probe_signal,
+                ),
+            ):
+                completion_error = transaction.replace_staged(
+                    staged,
+                    "replace.json",
+                )
+
+        self.assertIs(completion_error, original_signal)
+        self.assertEqual(probe_signal.code, 157)
+        self.assertEqual(target.read_bytes(), b"new\n")
+        self.assertFalse(Path(staged.path).exists())
+        notes = "\n".join(getattr(completion_error, "__notes__", ()))
+        self.assertIn(str(probe_signal.code), notes)
+
+    def test_target_displacement_completion_probe_signal_does_not_mask_original(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "displace.json"
+        target.write_bytes(b"old\n")
+        original_signal = SystemExit(163)
+        probe_signal = KeyboardInterrupt("injected displacement probe interrupt")
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshot = transaction.capture_snapshot("displace.json")
+            assert snapshot.content is not None
+            assert snapshot.mode is not None
+            assert snapshot.fingerprint is not None
+            assert snapshot.sha256 is not None
+            staged_copy = transaction.stage_bytes(
+                "displace.json",
+                b"placeholder\n",
+                mode=0o600,
+                suffix=".restore.backup",
+            )
+            displaced_target = StagedArtifact(
+                directory_path=transaction.path,
+                name=staged_copy.name,
+                identity=(snapshot.fingerprint[0], snapshot.fingerprint[1]),
+                content=snapshot.content,
+                mode=staged_copy.mode,
+                target_mode=snapshot.mode,
+                sha256=snapshot.sha256,
+            )
+            original_replace = transaction.directory.replace
+
+            def replace_then_raise(*args: Any, **kwargs: Any) -> BaseException | None:
+                completion_error = original_replace(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                raise original_signal
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=replace_then_raise,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=probe_signal,
+                ),
+            ):
+                completion_error = transaction.replace_target_with_stage_path(
+                    "displace.json",
+                    staged_copy,
+                    displaced_target,
+                )
+
+        self.assertIs(completion_error, original_signal)
+        self.assertEqual(original_signal.code, 163)
+        self.assertFalse(target.exists())
+        self.assertEqual(Path(staged_copy.path).read_bytes(), b"old\n")
+        notes = "\n".join(getattr(completion_error, "__notes__", ()))
+        self.assertIn(str(probe_signal), notes)
+
+    @unittest.skipIf(os.name == "nt", "POSIX unlink completion probe required")
+    def test_unlink_finalized_completion_probe_signal_does_not_mask_original(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "unlink.json"
+        target.write_bytes(b"old\n")
+        original_signal = KeyboardInterrupt("injected completed public unlink")
+        probe_signal = SystemExit(167)
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshot = transaction.capture_snapshot("unlink.json")
+            assert snapshot.content is not None
+            assert snapshot.mode is not None
+            assert snapshot.fingerprint is not None
+            assert snapshot.sha256 is not None
+            finalized = StagedArtifact(
+                directory_path=transaction.path,
+                name="unlink.json",
+                identity=(snapshot.fingerprint[0], snapshot.fingerprint[1]),
+                content=snapshot.content,
+                mode=snapshot.mode,
+                target_mode=snapshot.mode,
+                sha256=snapshot.sha256,
+            )
+            original_unlink = transaction.directory.unlink
+
+            def unlink_then_raise(*args: Any, **kwargs: Any) -> BaseException | None:
+                completion_error = original_unlink(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                raise original_signal
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "unlink",
+                    side_effect=unlink_then_raise,
+                ),
+                patch.object(
+                    transaction.directory,
+                    "lexists",
+                    side_effect=probe_signal,
+                ),
+            ):
+                tombstone, completion_error = transaction.unlink_finalized(
+                    finalized,
+                    "unlink.json",
+                )
+
+        self.assertIsNone(tombstone)
+        self.assertIs(completion_error, original_signal)
+        self.assertEqual(probe_signal.code, 167)
+        self.assertFalse(target.exists())
+        notes = "\n".join(getattr(completion_error, "__notes__", ()))
+        self.assertIn(str(probe_signal.code), notes)
+
+    def test_publish_persistent_replace_probe_uncertainty_rolls_back_owned_mutation(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "persistent-publish.json"
+        target.write_bytes(b"old\n")
+        original_signal = KeyboardInterrupt("injected persistent publication replacement interrupt")
+        probe_signal = SystemExit(173)
+        replace_attempts = 0
+        probe_attempts = 0
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            original_replace = transaction.directory.replace
+
+            def replace_then_raise(*args: Any, **kwargs: Any) -> BaseException | None:
+                nonlocal replace_attempts
+                replace_attempts += 1
+                completion_error = original_replace(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                raise original_signal
+
+            def fail_completion_probe(
+                _name: str,
+                _staged: StagedArtifact,
+            ) -> bool:
+                nonlocal probe_attempts
+                probe_attempts += 1
+                raise probe_signal
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=replace_then_raise,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=fail_completion_probe,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("persistent-publish.json", b"new\n"),))
+
+        self.assertIs(raised.exception, original_signal)
+        self.assertEqual(probe_signal.code, 173)
+        self.assertEqual(replace_attempts, 2)
+        self.assertEqual(probe_attempts, 4)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        retained = [path for path in self.artifact_directory.iterdir() if path != target]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), b"old\n")
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(probe_signal.code), notes)
+        self.assertIn("verified recovery artifact preserved", notes.lower())
+        self.assertIn(str(retained[0]), notes)
+
+    def test_restore_persistent_pre_mutation_displacement_uncertainty_cleans_placeholder(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "persistent-pre-restore.json"
+        sentinel = self.artifact_directory / "unrelated.txt"
+        target.write_bytes(b"old\n")
+        sentinel.write_bytes(b"unrelated\n")
+        original_signal = KeyboardInterrupt("injected pre-mutation restore displacement interrupt")
+        first_probe_signal = SystemExit(179)
+        second_probe_signal = KeyboardInterrupt("injected persistent restore completion retry interrupt")
+        probe_signals = (first_probe_signal, second_probe_signal)
+        receipt_placeholders: list[StagedArtifact] = []
+        replace_attempts = 0
+        probe_attempts = 0
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("persistent-pre-restore.json",))
+            receipts = transaction.publish_specs((ArtifactSpec("persistent-pre-restore.json", b"new\n"),))
+            receipt = receipts[0]
+            assert receipt is not None
+            directory_before = self._directory_snapshot(self.artifact_directory)
+            original_stage_bytes = transaction.stage_bytes
+
+            def capture_receipt_placeholder(
+                *args: Any,
+                **kwargs: Any,
+            ) -> StagedArtifact:
+                staged = original_stage_bytes(*args, **kwargs)
+                if kwargs.get("suffix") == ".restore.backup":
+                    receipt_placeholders.append(staged)
+                return staged
+
+            def fail_displacement_before_replace(
+                *args: Any,
+                **_kwargs: Any,
+            ) -> BaseException | None:
+                nonlocal replace_attempts
+                replace_attempts += 1
+                self.assertEqual(args[0], "persistent-pre-restore.json")
+                self.assertTrue(str(args[1]).endswith(".restore.backup"))
+                raise original_signal
+
+            def fail_completion_probes(
+                _name: str,
+                _staged: StagedArtifact,
+            ) -> bool:
+                nonlocal probe_attempts
+                signal = probe_signals[probe_attempts]
+                probe_attempts += 1
+                raise signal
+
+            with (
+                patch.object(
+                    transaction,
+                    "stage_bytes",
+                    side_effect=capture_receipt_placeholder,
+                ),
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=fail_displacement_before_replace,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=fail_completion_probes,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+
+            self.assertIs(raised.exception, original_signal)
+            transaction.verify_receipt(receipt)
+            self.assertEqual(
+                self._directory_snapshot(self.artifact_directory),
+                directory_before,
+            )
+
+        self.assertEqual(replace_attempts, 1)
+        self.assertEqual(probe_attempts, 2)
+        self.assertEqual(len(receipt_placeholders), 1)
+        self.assertFalse(Path(receipt_placeholders[0].path).exists())
+        self.assertFalse(any(".restore.backup" in path.name for path in self.artifact_directory.iterdir()))
+        self.assertEqual(target.read_bytes(), b"new\n")
+        self.assertEqual(sentinel.read_bytes(), b"unrelated\n")
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(first_probe_signal.code), notes)
+        self.assertIn(str(second_probe_signal), notes)
+
+    def test_restore_persistent_displacement_probe_uncertainty_restores_receipt(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "persistent-restore.json"
+        target.write_bytes(b"old\n")
+        original_signal = SystemExit(179)
+        probe_signal = KeyboardInterrupt("injected persistent restore completion probe interrupt")
+        replace_attempts = 0
+        probe_attempts = 0
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            snapshots = transaction.capture_snapshots(("persistent-restore.json",))
+            receipts = transaction.publish_specs((ArtifactSpec("persistent-restore.json", b"new\n"),))
+            receipt = receipts[0]
+            assert receipt is not None
+            original_replace = transaction.directory.replace
+
+            def replace_then_raise(*args: Any, **kwargs: Any) -> BaseException | None:
+                nonlocal replace_attempts
+                replace_attempts += 1
+                completion_error = original_replace(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                raise original_signal
+
+            def fail_completion_probe(
+                _name: str,
+                _staged: StagedArtifact,
+            ) -> bool:
+                nonlocal probe_attempts
+                probe_attempts += 1
+                raise probe_signal
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=replace_then_raise,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=fail_completion_probe,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.restore_snapshots(snapshots, receipts)
+
+        self.assertIs(raised.exception, original_signal)
+        self.assertEqual(original_signal.code, 179)
+        self.assertEqual(replace_attempts, 2)
+        self.assertEqual(probe_attempts, 4)
+        self.assertEqual(target.read_bytes(), receipt.content)
+        retained = [path for path in self.artifact_directory.iterdir() if path != target]
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), receipt.content)
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(probe_signal), notes)
+        self.assertIn("verified recovery artifact preserved", notes.lower())
+        self.assertIn(str(retained[0]), notes)
+
+    def test_modeled_windows_absent_publish_pre_mutation_tombstone_uncertainty_cleans_placeholder(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "persistent-tombstone.json"
+        sentinel = self.artifact_directory / "unrelated.txt"
+        target.write_bytes(b"old\n")
+        sentinel.write_bytes(b"unrelated\n")
+        original_signal = SystemExit(181)
+        first_probe_signal = KeyboardInterrupt("injected tombstone completion probe interrupt")
+        second_probe_signal = SystemExit(191)
+        probe_signals = (first_probe_signal, second_probe_signal)
+        tombstone_placeholders: list[StagedArtifact] = []
+        replace_attempts = 0
+        probe_attempts = 0
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            directory_before = self._directory_snapshot(self.artifact_directory)
+            original_stage_bytes = transaction.stage_bytes
+
+            def capture_tombstone_placeholder(
+                *args: Any,
+                **kwargs: Any,
+            ) -> StagedArtifact:
+                staged = original_stage_bytes(*args, **kwargs)
+                if kwargs.get("suffix") == ".tombstone":
+                    tombstone_placeholders.append(staged)
+                return staged
+
+            def fail_displacement_before_replace(
+                *args: Any,
+                **_kwargs: Any,
+            ) -> BaseException | None:
+                nonlocal replace_attempts
+                replace_attempts += 1
+                self.assertEqual(args[0], "persistent-tombstone.json")
+                self.assertTrue(str(args[1]).endswith(".tombstone"))
+                raise original_signal
+
+            def fail_completion_probes(
+                _name: str,
+                _staged: StagedArtifact,
+            ) -> bool:
+                nonlocal probe_attempts
+                signal = probe_signals[probe_attempts]
+                probe_attempts += 1
+                raise signal
+
+            with (
+                patch.object(
+                    ByteArtifactTransaction,
+                    "strategy",
+                    property(lambda _transaction: "windows_handle"),
+                ),
+                patch.object(
+                    transaction,
+                    "stage_bytes",
+                    side_effect=capture_tombstone_placeholder,
+                ),
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=fail_displacement_before_replace,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=fail_completion_probes,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("persistent-tombstone.json", None),))
+
+            self.assertIs(raised.exception, original_signal)
+            directory_after = self._directory_snapshot(self.artifact_directory)
+            self.assertEqual(
+                directory_after[target.name],
+                directory_before[target.name],
+            )
+            self.assertEqual(
+                directory_after[sentinel.name],
+                directory_before[sentinel.name],
+            )
+
+        self.assertEqual(replace_attempts, 1)
+        self.assertEqual(probe_attempts, 2)
+        self.assertEqual(len(tombstone_placeholders), 1)
+        self.assertFalse(Path(tombstone_placeholders[0].path).exists())
+        self.assertFalse(any(".tombstone" in path.name for path in self.artifact_directory.iterdir()))
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertEqual(sentinel.read_bytes(), b"unrelated\n")
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(first_probe_signal), notes)
+        self.assertIn(str(second_probe_signal.code), notes)
+
+    def test_modeled_windows_absent_publish_completed_unknown_tombstone_resolves_displaced_owner(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "completed-tombstone.json"
+        sentinel = self.artifact_directory / "unrelated.txt"
+        target.write_bytes(b"old\n")
+        target.chmod(0o640)
+        sentinel.write_bytes(b"unrelated\n")
+        target_identity = (target.stat().st_dev, target.stat().st_ino)
+        sentinel_before = self._directory_snapshot(self.artifact_directory)[sentinel.name]
+        original_signal = KeyboardInterrupt("injected completed tombstone displacement interrupt")
+        first_probe_signal = SystemExit(193)
+        second_probe_signal = KeyboardInterrupt("injected completed tombstone retry interrupt")
+        probe_signals = (first_probe_signal, second_probe_signal)
+        tombstone_placeholders: list[StagedArtifact] = []
+        resolved_owners: list[StagedArtifact] = []
+        replace_attempts = 0
+        probe_attempts = 0
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            original_stage_bytes = transaction.stage_bytes
+            original_replace = transaction.directory.replace
+            original_resolver = cast(
+                Callable[..., tuple[StagedArtifact, BaseException]],
+                getattr(transaction, "_resolve_ambiguous_stage_ownership"),
+            )
+
+            def capture_tombstone_placeholder(
+                *args: Any,
+                **kwargs: Any,
+            ) -> StagedArtifact:
+                staged = original_stage_bytes(*args, **kwargs)
+                if kwargs.get("suffix") == ".tombstone":
+                    tombstone_placeholders.append(staged)
+                return staged
+
+            def complete_first_displacement_then_interrupt(
+                *args: Any,
+                **kwargs: Any,
+            ) -> BaseException | None:
+                nonlocal replace_attempts
+                replace_attempts += 1
+                completion_error = original_replace(*args, **kwargs)
+                self.assertIsNone(completion_error)
+                if replace_attempts == 1:
+                    self.assertEqual(args[0], "completed-tombstone.json")
+                    self.assertTrue(str(args[1]).endswith(".tombstone"))
+                    raise original_signal
+                return None
+
+            def fail_completion_probes(
+                _name: str,
+                _staged: StagedArtifact,
+            ) -> bool:
+                nonlocal probe_attempts
+                signal = probe_signals[probe_attempts]
+                probe_attempts += 1
+                raise signal
+
+            def record_resolved_owner(
+                original_stage: StagedArtifact,
+                completed_stage: StagedArtifact,
+                error: BaseException,
+                *,
+                operation: str,
+            ) -> tuple[StagedArtifact, BaseException]:
+                owned_stage, selected_error = original_resolver(
+                    original_stage,
+                    completed_stage,
+                    error,
+                    operation=operation,
+                )
+                resolved_owners.append(owned_stage)
+                return owned_stage, selected_error
+
+            with (
+                patch.object(
+                    ByteArtifactTransaction,
+                    "strategy",
+                    property(lambda _transaction: "windows_handle"),
+                ),
+                patch.object(
+                    transaction,
+                    "stage_bytes",
+                    side_effect=capture_tombstone_placeholder,
+                ),
+                patch.object(
+                    transaction.directory,
+                    "replace",
+                    side_effect=complete_first_displacement_then_interrupt,
+                ),
+                patch.object(
+                    transaction,
+                    "path_matches_stage",
+                    side_effect=fail_completion_probes,
+                ),
+                patch.object(
+                    transaction,
+                    "_resolve_ambiguous_stage_ownership",
+                    side_effect=record_resolved_owner,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("completed-tombstone.json", None),))
+
+            self.assertIs(raised.exception, original_signal)
+
+        self.assertEqual(replace_attempts, 2)
+        self.assertEqual(probe_attempts, 2)
+        self.assertEqual(len(tombstone_placeholders), 1)
+        self.assertEqual(len(resolved_owners), 1)
+        self.assertEqual(resolved_owners[0].name, tombstone_placeholders[0].name)
+        self.assertEqual(resolved_owners[0].identity, target_identity)
+        self.assertNotEqual(
+            resolved_owners[0].identity,
+            tombstone_placeholders[0].identity,
+        )
+        self.assertFalse(Path(resolved_owners[0].path).exists())
+        self.assertFalse(any(".tombstone" in path.name for path in self.artifact_directory.iterdir()))
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["completed-tombstone.json", "unrelated.txt"],
+        )
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertArtifactModeEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+        self.assertEqual(
+            self._directory_snapshot(self.artifact_directory)[sentinel.name],
+            sentinel_before,
+        )
+        notes = "\n".join(getattr(raised.exception, "__notes__", ()))
+        self.assertIn(str(first_probe_signal.code), notes)
+        self.assertIn(str(second_probe_signal), notes)
+
+    @unittest.skipIf(os.name == "nt", "POSIX unlink completion probe required")
+    def test_absent_publish_post_success_probe_signal_records_and_rolls_back_unlink(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "persistent-unlink.json"
+        target.write_bytes(b"old\n")
+        probe_signal = KeyboardInterrupt("injected post-success absent publication probe interrupt")
+        phases: list[str] = []
+        public_unlink_completed = False
+        probe_injected = False
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            original_unlink = transaction.directory.unlink
+            original_lexists = transaction.directory.lexists
+
+            def record_successful_unlink(
+                *args: Any,
+                **kwargs: Any,
+            ) -> BaseException | None:
+                nonlocal public_unlink_completed
+                completion_error = original_unlink(*args, **kwargs)
+                if args and args[0] == "persistent-unlink.json":
+                    self.assertIsNone(completion_error)
+                    public_unlink_completed = True
+                return completion_error
+
+            def fail_first_post_success_probe(name: str) -> bool:
+                nonlocal probe_injected
+                if name == "persistent-unlink.json" and public_unlink_completed and not probe_injected:
+                    probe_injected = True
+                    raise probe_signal
+                return original_lexists(name)
+
+            def record_phase(
+                phase: str,
+                _directory_path: str,
+                _name: str | None,
+            ) -> None:
+                phases.append(phase)
+
+            with (
+                patch.object(
+                    transaction.directory,
+                    "unlink",
+                    side_effect=record_successful_unlink,
+                ),
+                patch.object(
+                    transaction.directory,
+                    "lexists",
+                    side_effect=fail_first_post_success_probe,
+                ),
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=record_phase,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("persistent-unlink.json", None),))
+
+        self.assertTrue(public_unlink_completed)
+        self.assertTrue(probe_injected)
+        self.assertIs(raised.exception, probe_signal)
+        self.assertIn("before_rollback", phases)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        self.assertEqual(
+            sorted(path.name for path in self.artifact_directory.iterdir()),
+            ["persistent-unlink.json"],
+        )
+
+    def test_publish_cleanup_system_exit_preempts_forward_error_with_note(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_error = OSError("injected ordinary pre-commit failure")
+        cleanup_signal = SystemExit(109)
+        forward_injected = False
+        cleanup_injected = False
+        phases: list[str] = []
+
+        def fail_forward_then_exit_after_cleanup_unlink(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal cleanup_injected, forward_injected
+            phases.append(phase)
+            if phase == "before_commit" and name == "report.json" and not forward_injected:
+                forward_injected = True
+                raise forward_error
+            if phase == "after_unlink" and name is not None and name != "report.json" and not cleanup_injected:
+                cleanup_injected = True
+                raise cleanup_signal
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=fail_forward_then_exit_after_cleanup_unlink,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(forward_injected)
+        self.assertTrue(cleanup_injected)
+        self.assertIs(raised.exception, cleanup_signal)
+        self.assertEqual(cleanup_signal.code, 109)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(forward_error) in note for note in notes))
+        self.assertIn("before_cleanup_durability", phases)
+        self.assertIn("after_cleanup_durability", phases)
+
+    def test_publish_forward_keyboard_interrupt_keeps_cleanup_failure_note(
+        self,
+    ) -> None:
+        target = self.artifact_directory / "report.json"
+        target.write_bytes(b"old\n")
+        forward_signal = KeyboardInterrupt("injected pre-commit interrupt")
+        cleanup_error = OSError("injected ordinary cleanup failure")
+        forward_injected = False
+        cleanup_injected = False
+
+        def interrupt_forward_then_fail_cleanup(
+            phase: str,
+            _directory_path: str,
+            name: str | None,
+        ) -> None:
+            nonlocal cleanup_injected, forward_injected
+            if phase == "before_commit" and name == "report.json" and not forward_injected:
+                forward_injected = True
+                raise forward_signal
+            if phase == "before_unlink" and name is not None and name != "report.json" and not cleanup_injected:
+                cleanup_injected = True
+                raise cleanup_error
+
+        with ByteArtifactTransaction.open(
+            str(self.root),
+            "gm2godot",
+            create=False,
+            description="test artifact directory",
+        ) as transaction:
+            with (
+                patch(
+                    "src.conversion.anchored_artifacts._before_anchored_artifact_phase",
+                    side_effect=interrupt_forward_then_fail_cleanup,
+                ),
+                self.assertRaises(BaseException) as raised,
+            ):
+                transaction.publish_specs((ArtifactSpec("report.json", b"new\n"),))
+
+        self.assertTrue(forward_injected)
+        self.assertTrue(cleanup_injected)
+        self.assertIs(raised.exception, forward_signal)
+        self.assertEqual(target.read_bytes(), b"old\n")
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(any(str(cleanup_error) in note for note in notes))
+        retained = [path for path in self.artifact_directory.iterdir() if path.name != "report.json"]
+        self.assertEqual(len(retained), 1)
 
     @unittest.skipUnless(os.name == "nt", "native Windows handle semantics required")
     def test_windows_binding_blocks_directory_and_root_relocation(self) -> None:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.56 - 2026-09-02
+
+- Preserved the exact first `KeyboardInterrupt` or `SystemExit` object through artifact publication, restoration, rollback, and cleanup instead of replacing the control signal with an aggregate `OSError`.
+- Kept deterministic chronological precedence while attaching later rollback and cleanup failures as notes, and completed mutation ownership plus required durability work before re-raising a post-operation control signal.
+- Retained ordinary-exception aggregation and rollback compatibility across present and absent publication, both rollback directions, recovery cleanup, and native Windows behavior with focused identity and failure-order coverage.
+
 ## 0.7.55 - 2026-09-02
 
 - Revalidated the immutable staged source and expected destination identity, mode, bytes, and SHA-256 after the observable replace/unlink hook and immediately before each namespace mutation.

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, redirect_stderr
 from io import StringIO
+import inspect
 import os
 from pathlib import Path
 import shlex
@@ -18,6 +20,12 @@ import warnings
 import zipfile
 
 from scripts import verify_linux_gui_artifact as verifier
+
+
+NON_TIMEOUT_INTEGRATION_SECONDS = 15.0
+CHILD_READINESS_SECONDS = 15.0
+INTENTIONAL_TIMEOUT_SECONDS = 0.25
+READINESS_POLL_SECONDS = 0.01
 
 
 class _ReapAwareProcess:
@@ -119,6 +127,92 @@ def _assert_process_gone(test_case: unittest.TestCase, process_id: int) -> None:
         time.sleep(0.02)
 
 
+def _read_test_child_pid(receipt_path: Path) -> int | None:
+    try:
+        raw_process_id = receipt_path.read_text(encoding="ascii")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError) as error:
+        raise AssertionError(
+            f"test child readiness receipt could not be read: "
+            f"{receipt_path}: {error}"
+        ) from error
+
+    try:
+        process_id = int(raw_process_id)
+    except ValueError:
+        return None
+    return process_id if process_id > 0 else None
+
+
+def _wait_for_test_child_pid(
+    receipt_path: Path,
+    process: subprocess.Popen[bytes],
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> int:
+    deadline = clock() + CHILD_READINESS_SECONDS
+    while True:
+        process_id = _read_test_child_pid(receipt_path)
+        if process_id is not None:
+            return process_id
+
+        returncode = process.poll()
+        if returncode is not None:
+            process_id = _read_test_child_pid(receipt_path)
+            if process_id is not None:
+                return process_id
+            raise AssertionError(
+                f"test child exited with status {returncode} before publishing "
+                f"a valid PID readiness receipt: {receipt_path}"
+            )
+
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise AssertionError(
+                f"test child did not publish a valid PID readiness receipt within "
+                f"{CHILD_READINESS_SECONDS:g} seconds: {receipt_path}"
+            )
+        sleeper(min(READINESS_POLL_SECONDS, remaining))
+
+
+@contextmanager
+def _runtime_timeout_after_test_child_ready(
+    receipt_path: Path,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> Generator[list[int]]:
+    delegate = verifier._wait_for_process
+    process_ids: list[int] = []
+
+    def wait_after_readiness(
+        process: subprocess.Popen[bytes],
+        output: object,
+        timeout_seconds: float,
+    ) -> int:
+        process_ids.append(
+            _wait_for_test_child_pid(
+                receipt_path,
+                process,
+                clock=clock,
+                sleeper=sleeper,
+            )
+        )
+        return delegate(process, output, timeout_seconds)
+
+    with mock.patch.object(verifier, "_wait_for_process", wait_after_readiness):
+        yield process_ids
+
+
+def _require_fatal_diagnostic(output: str) -> tuple[str, str]:
+    diagnostic = verifier._fatal_output_diagnostic(output)
+    if diagnostic is None:
+        raise AssertionError("expected a fatal loader/platform diagnostic")
+    return diagnostic
+
+
 def _success_body(extra: str = "") -> str:
     return (
         '[ "$QT_QPA_PLATFORM" = "xcb" ]\n'
@@ -149,7 +243,12 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def verify(self, body: str, *, timeout_seconds: float = 3.0) -> None:
+    def verify(
+        self,
+        body: str,
+        *,
+        timeout_seconds: float = NON_TIMEOUT_INTEGRATION_SECONDS,
+    ) -> None:
         archive = _write_archive(self.root, _executable_script(body))
         verifier.verify_archive(
             archive,
@@ -178,64 +277,61 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
     def test_wrong_receipt_content_and_mode_are_rejected(self) -> None:
         cases = {
             "content": (
-                f"printf 'wrong\\n' > \"${verifier.GUI_SMOKE_RECEIPT_ENV}\"\n"
-                f'chmod 600 "${verifier.GUI_SMOKE_RECEIPT_ENV}"\n',
+                b"wrong\n",
+                0o600,
                 "content is invalid",
             ),
             "mode": (
-                f"printf '{verifier.GUI_SMOKE_RECEIPT.decode('ascii')}' "
-                f' > "${verifier.GUI_SMOKE_RECEIPT_ENV}"\n'
-                f'chmod 644 "${verifier.GUI_SMOKE_RECEIPT_ENV}"\n',
+                verifier.GUI_SMOKE_RECEIPT,
+                0o644,
                 "does not have mode 0600",
             ),
         }
-        for name, (body, message) in cases.items():
+        for name, (content, mode, message) in cases.items():
             with self.subTest(name=name):
+                receipt_path = self.root / f"{name}.receipt"
+                receipt_path.write_bytes(content)
+                receipt_path.chmod(mode)
                 with self.assertRaisesRegex(
                     verifier.LinuxGuiArtifactVerificationError,
                     message,
                 ):
-                    self.verify(body)
+                    verifier._validate_receipt(receipt_path)
 
-    def test_fatal_loader_and_platform_diagnostics_are_rejected(self) -> None:
+    def test_fatal_loader_and_platform_diagnostics_are_classified(self) -> None:
         for signature in verifier._FATAL_OUTPUT_SIGNATURES:
             with self.subTest(signature=signature):
-                body = _success_body(
-                    f"printf '%s\\n' '{signature.upper()}' >&2\n"
+                classified, excerpt = _require_fatal_diagnostic(
+                    signature.upper()
                 )
-                with self.assertRaisesRegex(
-                    verifier.LinuxGuiArtifactVerificationError,
-                    "fatal loader/platform diagnostic",
-                ):
-                    self.verify(body)
+                self.assertEqual(classified, signature)
+                self.assertEqual(excerpt, f"'{signature.upper()}'")
 
-    def test_missing_qtgui_graphics_loader_dependencies_are_rejected(self) -> None:
+    def test_real_process_fatal_diagnostic_is_rejected(self) -> None:
+        signature = verifier._FATAL_OUTPUT_SIGNATURES[0]
+        body = _success_body(f"printf '%s\\n' '{signature.upper()}' >&2\n")
+        with self.assertRaisesRegex(
+            verifier.LinuxGuiArtifactVerificationError,
+            "fatal loader/platform diagnostic",
+        ):
+            self.verify(body)
+
+    def test_missing_qtgui_graphics_loader_dependencies_are_classified(self) -> None:
         for library in ("libEGL.so.1", "libGL.so.1"):
             with self.subTest(library=library):
-                body = _success_body(
-                    f"printf '%s\\n' 'ImportError: {library}: "
-                    "cannot open shared object file: No such file or directory' >&2\n"
+                _, excerpt = _require_fatal_diagnostic(
+                    f"ImportError: {library}: cannot open shared object file: "
+                    "No such file or directory"
                 )
-                with self.assertRaisesRegex(
-                    verifier.LinuxGuiArtifactVerificationError,
-                    library.replace(".", r"\."),
-                ):
-                    self.verify(body)
+                self.assertIn(library, excerpt)
 
     def test_fatal_diagnostic_reports_one_bounded_matching_line(self) -> None:
         marker = "cannot open shared object file"
-        body = _success_body(
-            "printf '%s\\n' 'before-line-sentinel' >&2\n"
-            f"printf '%s\\n' '{'p' * 2000}{marker}{'s' * 2000}' >&2\n"
-            "printf '%s\\n' 'after-line-sentinel' >&2\n"
+        _, excerpt = _require_fatal_diagnostic(
+            "before-line-sentinel\n"
+            f"{'p' * 2000}{marker}{'s' * 2000}\n"
+            "after-line-sentinel\n"
         )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        message = str(raised.exception)
-        excerpt = message.partition("matching output: ")[2]
         self.assertIn(marker, excerpt)
         self.assertTrue(excerpt.startswith("'..."))
         self.assertTrue(excerpt.endswith("...'"))
@@ -249,46 +345,27 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
     def test_first_fatal_output_line_is_reported(self) -> None:
         first = "could not load the qt platform plugin"
         later = "error while loading shared libraries"
-        body = _success_body(
-            f"printf '%s\\n' 'first: {first}' >&2\n"
-            f"printf '%s\\n' 'later: {later}' >&2\n"
+        signature, excerpt = _require_fatal_diagnostic(
+            f"first: {first}\nlater: {later}\n"
         )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        message = str(raised.exception)
-        self.assertIn(f"matching output: 'first: {first}'", message)
-        self.assertNotIn(f"later: {later}", message)
+        self.assertEqual(signature, first)
+        self.assertEqual(excerpt, f"'first: {first}'")
+        self.assertNotIn(f"later: {later}", excerpt)
 
     def test_leftmost_fatal_signature_on_one_line_is_classified(self) -> None:
         first = "could not load the qt platform plugin"
         later = "error while loading shared libraries"
-        body = _success_body(
-            f"printf '%s\\n' 'first: {first}; later: {later}' >&2\n"
+        signature, excerpt = _require_fatal_diagnostic(
+            f"first: {first}; later: {later}"
         )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        self.assertIn(
-            f"fatal loader/platform diagnostic: {first};",
-            str(raised.exception),
-        )
+        self.assertEqual(signature, first)
+        self.assertEqual(excerpt, f"'first: {first}; later: {later}'")
 
     def test_non_ascii_prefix_does_not_shift_fatal_marker_excerpt(self) -> None:
         marker = "cannot open shared object file"
-        body = _success_body(
-            f"printf '%s\\n' '{'ß' * 2000}{marker}{'x' * 2000}' >&2\n"
+        _, excerpt = _require_fatal_diagnostic(
+            f"{'ß' * 2000}{marker}{'x' * 2000}"
         )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        excerpt = str(raised.exception).partition("matching output: ")[2]
         self.assertIn(marker, excerpt)
         self.assertLessEqual(
             len(excerpt),
@@ -297,15 +374,9 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
 
     def test_escaped_prefix_does_not_expand_bounded_excerpt(self) -> None:
         marker = "cannot open shared object file"
-        body = _success_body(
-            f"printf '%s\\n' '{chr(92) * 2000}{marker}{chr(92) * 2000}' >&2\n"
+        _, excerpt = _require_fatal_diagnostic(
+            f"{chr(92) * 2000}{marker}{chr(92) * 2000}"
         )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        excerpt = str(raised.exception).partition("matching output: ")[2]
         self.assertIn(marker, excerpt)
         self.assertLessEqual(
             len(excerpt),
@@ -315,15 +386,7 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
     def test_quote_heavy_prefix_keeps_diagnostic_wrapper_unambiguous(self) -> None:
         marker = "cannot open shared object file"
         diagnostic_line = "'" * 2000 + "a" + marker + "x" * 2000
-        body = _success_body(
-            f'printf \'%s\\n\' "{diagnostic_line}" >&2\n'
-        )
-        with self.assertRaises(
-            verifier.LinuxGuiArtifactVerificationError
-        ) as raised:
-            self.verify(body)
-
-        excerpt = str(raised.exception).partition("matching output: ")[2]
+        _, excerpt = _require_fatal_diagnostic(diagnostic_line)
         self.assertIn(marker, excerpt)
         self.assertEqual(excerpt.count("'"), 2)
         self.assertNotRegex(excerpt, "[\\r\\n\\x00-\\x1f\\x7f]")
@@ -350,6 +413,112 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             verifier.MAX_DIAGNOSTIC_LINE_CHARACTERS + 2,
         )
 
+    def test_delayed_child_readiness_precedes_short_runtime_timeout_without_sleep(
+        self,
+    ) -> None:
+        receipt_path = self.root / "delayed-child.pid"
+        raw_process = mock.Mock()
+        raw_process.poll.return_value = None
+        process = cast(subprocess.Popen[bytes], raw_process)
+        output = object()
+        delegate = mock.Mock(
+            side_effect=verifier.LinuxGuiArtifactVerificationError(
+                "packaged GUI timed out after 0.25 seconds"
+            )
+        )
+        clock = mock.Mock(side_effect=(0.0, 0.0))
+
+        def publish_readiness(delay_seconds: float) -> None:
+            self.assertEqual(delay_seconds, READINESS_POLL_SECONDS)
+            receipt_path.write_text("24680", encoding="ascii")
+
+        sleeper = mock.Mock(side_effect=publish_readiness)
+        with (
+            mock.patch.object(verifier, "_wait_for_process", delegate),
+            _runtime_timeout_after_test_child_ready(
+                receipt_path,
+                clock=clock,
+                sleeper=sleeper,
+            ) as process_ids,
+            self.assertRaisesRegex(
+                verifier.LinuxGuiArtifactVerificationError,
+                "timed out after 0.25 seconds",
+            ),
+        ):
+            verifier._wait_for_process(
+                process,
+                output,
+                INTENTIONAL_TIMEOUT_SECONDS,
+            )
+
+        self.assertEqual(process_ids, [24680])
+        delegate.assert_called_once_with(
+            process,
+            output,
+            INTENTIONAL_TIMEOUT_SECONDS,
+        )
+        sleeper.assert_called_once_with(READINESS_POLL_SECONDS)
+
+    def test_child_exit_observation_rechecks_readiness_receipt(self) -> None:
+        receipt_path = self.root / "fast-child.pid"
+        raw_process = mock.Mock()
+
+        def publish_then_exit() -> int:
+            receipt_path.write_text("24680", encoding="ascii")
+            return 0
+
+        raw_process.poll.side_effect = publish_then_exit
+        process = cast(subprocess.Popen[bytes], raw_process)
+        sleeper = mock.Mock()
+
+        process_id = _wait_for_test_child_pid(
+            receipt_path,
+            process,
+            clock=mock.Mock(return_value=0.0),
+            sleeper=sleeper,
+        )
+
+        self.assertEqual(process_id, 24680)
+        raw_process.poll.assert_called_once_with()
+        sleeper.assert_not_called()
+
+    def test_missing_child_readiness_is_a_clear_startup_test_failure(self) -> None:
+        receipt_path = self.root / "missing-child.pid"
+        raw_process = mock.Mock()
+        raw_process.poll.return_value = None
+        process = cast(subprocess.Popen[bytes], raw_process)
+        delegate = mock.Mock(return_value=0)
+        sleeper = mock.Mock()
+
+        with (
+            mock.patch.object(verifier, "_wait_for_process", delegate),
+            _runtime_timeout_after_test_child_ready(
+                receipt_path,
+                clock=mock.Mock(side_effect=(0.0, CHILD_READINESS_SECONDS)),
+                sleeper=sleeper,
+            ) as process_ids,
+            self.assertRaisesRegex(
+                AssertionError,
+                "did not publish a valid PID readiness receipt within 15 seconds",
+            ),
+        ):
+            verifier._wait_for_process(
+                process,
+                object(),
+                INTENTIONAL_TIMEOUT_SECONDS,
+            )
+
+        self.assertEqual(process_ids, [])
+        delegate.assert_not_called()
+        sleeper.assert_not_called()
+
+    def test_production_process_timeout_remains_sixty_seconds(self) -> None:
+        timeout_default = inspect.signature(verifier.verify_archive).parameters[
+            "timeout_seconds"
+        ].default
+        self.assertEqual(verifier.PROCESS_TIMEOUT_SECONDS, 60.0)
+        self.assertEqual(timeout_default, verifier.PROCESS_TIMEOUT_SECONDS)
+
     def test_timeout_kills_the_isolated_process_group(self) -> None:
         child_receipt = self.root / "timeout-child.pid"
         body = (
@@ -358,12 +527,16 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             f"printf '%s' \"$child\" > {shlex.quote(os.fspath(child_receipt))}\n"
             "wait \"$child\"\n"
         )
-        with self.assertRaisesRegex(
-            verifier.LinuxGuiArtifactVerificationError,
-            "timed out",
+        with (
+            _runtime_timeout_after_test_child_ready(child_receipt) as process_ids,
+            self.assertRaisesRegex(
+                verifier.LinuxGuiArtifactVerificationError,
+                "timed out",
+            ),
         ):
-            self.verify(body, timeout_seconds=3.0)
-        _assert_process_gone(self, int(child_receipt.read_text(encoding="ascii")))
+            self.verify(body, timeout_seconds=INTENTIONAL_TIMEOUT_SECONDS)
+        self.assertEqual(len(process_ids), 1)
+        _assert_process_gone(self, process_ids[0])
 
     def test_normal_delayed_xvfb_teardown_is_given_a_bounded_grace(self) -> None:
         archive = _write_archive(
@@ -375,7 +548,7 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
         verifier.verify_archive(
             archive,
             xvfb_run_path=delayed_wrapper,
-            timeout_seconds=3,
+            timeout_seconds=NON_TIMEOUT_INTEGRATION_SECONDS,
         )
 
     def test_cleanup_escalates_when_process_group_ignores_sigterm(self) -> None:
@@ -386,14 +559,16 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             "while :; do /bin/sleep 1; done\n"
         )
         with (
+            _runtime_timeout_after_test_child_ready(process_receipt) as process_ids,
             mock.patch.object(verifier, "PROCESS_TERMINATION_GRACE_SECONDS", 0.1),
             self.assertRaisesRegex(
                 verifier.LinuxGuiArtifactVerificationError,
                 "timed out",
             ),
         ):
-            self.verify(body, timeout_seconds=3.0)
-        _assert_process_gone(self, int(process_receipt.read_text(encoding="ascii")))
+            self.verify(body, timeout_seconds=INTENTIONAL_TIMEOUT_SECONDS)
+        self.assertEqual(len(process_ids), 1)
+        _assert_process_gone(self, process_ids[0])
 
     def test_group_disappearance_probe_reaps_linux_zombie_first(self) -> None:
         fake_process = _ReapAwareProcess()
@@ -422,6 +597,7 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             + "exit 0\n"
         )
         with (
+            _runtime_timeout_after_test_child_ready(child_receipt) as process_ids,
             mock.patch.object(verifier, "PROCESS_GROUP_GRACE_SECONDS", 0.1),
             self.assertRaisesRegex(
                 verifier.LinuxGuiArtifactVerificationError,
@@ -429,7 +605,8 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             ),
         ):
             self.verify(body)
-        _assert_process_gone(self, int(child_receipt.read_text(encoding="ascii")))
+        self.assertEqual(len(process_ids), 1)
+        _assert_process_gone(self, process_ids[0])
 
     def test_oversized_output_is_rejected_without_pipe_deadlock(self) -> None:
         child_receipt = self.root / "output-child.pid"
@@ -441,6 +618,7 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             "exit 0\n"
         )
         with (
+            _runtime_timeout_after_test_child_ready(child_receipt) as process_ids,
             mock.patch.object(verifier, "MAX_PROCESS_OUTPUT_BYTES", 64),
             mock.patch.object(verifier, "PROCESS_GROUP_GRACE_SECONDS", 0.1),
             self.assertRaisesRegex(
@@ -449,7 +627,8 @@ class LinuxGuiArtifactVerifierTests(unittest.TestCase):
             ),
         ):
             self.verify(body)
-        _assert_process_gone(self, int(child_receipt.read_text(encoding="ascii")))
+        self.assertEqual(len(process_ids), 1)
+        _assert_process_gone(self, process_ids[0])
 
     def test_archive_path_symlink_is_rejected(self) -> None:
         actual = self.root / "actual.zip"

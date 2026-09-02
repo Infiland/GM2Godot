@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.61 - 2026-09-02
+
+- Made intentional Linux packaged-GUI timeout and cleanup tests wait for a bounded child PID readiness receipt before starting their short runtime deadline.
+- Moved receipt and loader-diagnostic policy coverage to direct deterministic helpers while retaining representative real-process, process-group, output-limit, and Xvfb integration coverage under a named 15-second non-timeout budget.
+- Kept the production Linux release verifier fail-closed at 60 seconds and preserved GameMaker LTS 2026 conversion behavior plus exact Godot 4.7.1 output.
+
 ## 0.7.60 - 2026-09-02
 
 - Raised only the native Windows managed-output crash-recovery job timeout from 20 to 30 minutes so its exhaustive subprocess matrix has room for normal runner variance.

@@ -64,7 +64,7 @@ if not exist "%VENV_PYTHON%" (
 echo Installing required packages...
 "%VENV_PYTHON%" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: ^
     --constraint "%DEPENDENCY_CONSTRAINT%" ^
-    pip==26.1.2
+    pip==26.2.1
 if errorlevel 1 goto :fail
 "%VENV_PYTHON%" -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: ^
     --constraint "%DEPENDENCY_CONSTRAINT%" ^
@@ -84,7 +84,7 @@ echo Verifying dependency environment...
     --expected-python 3.12.10 ^
     --expected-platform win32 ^
     --expected-machine AMD64 ^
-    --expected-pip 26.1.2 ^
+    --expected-pip 26.2.1 ^
     --output "%BUILD_RECEIPT%"
 if errorlevel 1 goto :fail
 

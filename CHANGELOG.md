@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.57 - 2026-09-02
+
+- Upgraded the reviewed bootstrap toolchain atomically to `pip==26.2.1` and `pip-tools==7.6.1`, covering the pip 26.2 security fixes and the matching pip-tools compatibility release across every live build, CI, policy, and documentation surface.
+- Regenerated the Linux x64, macOS arm64, and Windows x64 constraints on their exact native Python baselines, with candidate/self-hosted equality and two identical clean-install receipts per platform.
+- Retained the trusted-index, isolated, no-cache, wheel-only installation policy, documented the explicit build-constraint requirement for any future source-build path, and left GameMaker LTS 2026 conversion behavior plus exact Godot 4.7.1 output unchanged.
+
 ## 0.7.56 - 2026-09-02
 
 - Preserved the exact first `KeyboardInterrupt` or `SystemExit` object through artifact publication, restoration, rollback, and cleanup instead of replacing the control signal with an aggregate `OSError`.

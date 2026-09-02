@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.56 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.57 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -46,7 +46,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.56`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.57`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 ## Run from source
 
@@ -71,7 +71,7 @@ python --version  # Python 3.12.10
 $env:PIP_CONFIG_FILE = "nul"
 python -m pip --isolated --disable-pip-version-check --no-input install `
   --no-cache-dir --only-binary=:all: `
-  --constraint constraints/requirements-windows-py312.txt pip==26.1.2
+  --constraint constraints/requirements-windows-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install `
   --no-cache-dir --only-binary=:all: `
   --constraint constraints/requirements-windows-py312.txt -r requirements.txt
@@ -91,7 +91,7 @@ python --version  # Python 3.12.10
 export PIP_CONFIG_FILE=/dev/null
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-macos-py312.txt pip==26.1.2
+  --constraint constraints/requirements-macos-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
   --constraint constraints/requirements-macos-py312.txt -r requirements.txt
@@ -115,14 +115,14 @@ python --version  # Python 3.12.13
 export PIP_CONFIG_FILE=/dev/null
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
-  --constraint constraints/requirements-linux-py312.txt pip==26.1.2
+  --constraint constraints/requirements-linux-py312.txt pip==26.2.1
 python -m pip --isolated --disable-pip-version-check --no-input install \
   --no-cache-dir --only-binary=:all: \
   --constraint constraints/requirements-linux-py312.txt -r requirements.txt
 python main.py
 ```
 
-The null config file and `--isolated` prevent machine-local pip settings from changing the reviewed install behavior. The constraints include reviewed transitive dependencies for these exact native environments. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) compiles `requirements-lock.in` with the committed generator pin, currently `pip-tools==7.6.0`, and uses preference-seeded `refresh=locked` generation on pull requests and pushes. Manual runs also offer `refresh=all` or `refresh=package`; package refreshes require a normalized `refresh_package` name. Each native candidate must reproduce itself and produce identical receipts from two clean installs. Evidence is uploaded before a changed candidate intentionally fails the committed-equality gate; review and commit the native constraints, then rerun. Generator upgrades may require committing the uploaded self-hosted result first. Do not generate one platform's constraint from another platform.
+The null config file and `--isolated` prevent machine-local pip settings from changing the reviewed install behavior. The constraints include reviewed transitive dependencies for these exact native environments. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) compiles `requirements-lock.in` with the committed generator pin, currently `pip-tools==7.6.1`, and uses preference-seeded `refresh=locked` generation on pull requests and pushes. Manual runs also offer `refresh=all` or `refresh=package`; package refreshes require a normalized `refresh_package` name. Each native candidate must reproduce itself and produce identical receipts from two clean installs. Evidence is uploaded before a changed candidate intentionally fails the committed-equality gate; review and commit the native constraints, then rerun. Generator upgrades may require committing the uploaded self-hosted result first. Do not generate one platform's constraint from another platform. Treat `pip` and `pip-tools` as one compatibility unit. Current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
 
 ## Verify the source installation
 
@@ -133,6 +133,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.56`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.7.57`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

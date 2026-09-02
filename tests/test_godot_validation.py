@@ -594,7 +594,6 @@ class TestGodotValidation(unittest.TestCase):
         os_proxy = _ModuleBindingProxy(
             os,
             killpg=_ignore_killpg,
-            name="posix",
         )
         subprocess_proxy = _ModuleBindingProxy(
             subprocess,

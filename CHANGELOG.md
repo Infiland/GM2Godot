@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.60 - 2026-09-02
+
+- Raised only the native Windows managed-output crash-recovery job timeout from 20 to 30 minutes so its exhaustive subprocess matrix has room for normal runner variance.
+- Kept the Windows artifact-transaction and Included Files scale jobs at 20 minutes, with workflow policy tests enforcing exactly one top-level timeout for each shard.
+- Preserved GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output while changing CI scheduling only.
+
 ## 0.7.59 - 2026-09-02
 
 - Performed one final nonblocking Godot-output read attempt when validation shutdown begins, so buffered warning/error diagnostics cannot be mistaken for clean import-only timeouts.

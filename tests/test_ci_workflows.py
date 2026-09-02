@@ -5021,7 +5021,13 @@ class TestCIWorkflows(unittest.TestCase):
         ]
 
         self.assertIn("runs-on: windows-2025", windows_job)
-        self.assertIn("timeout-minutes: 20", windows_job)
+        self.assertEqual(
+            re.findall(
+                r"(?m)^    timeout-minutes: ([0-9]+)$",
+                windows_job,
+            ),
+            ["20"],
+        )
         self.assertIn("python-version: '3.12.10'", windows_job)
         self.assertIn("architecture: x64", windows_job)
         self.assertIn("shell: bash", windows_job)
@@ -5109,7 +5115,13 @@ class TestCIWorkflows(unittest.TestCase):
             (),
         )
         self.assertIn("runs-on: windows-2025", scale_job)
-        self.assertIn("timeout-minutes: 20", scale_job)
+        self.assertEqual(
+            re.findall(
+                r"(?m)^    timeout-minutes: ([0-9]+)$",
+                scale_job,
+            ),
+            ["20"],
+        )
         self.assertIn("PIP_CONFIG_FILE: nul", scale_job)
         self.assertIn("python-version: '3.12.10'", scale_job)
         self.assertIn("architecture: x64", scale_job)
@@ -5194,7 +5206,13 @@ class TestCIWorkflows(unittest.TestCase):
         ]
 
         self.assertIn("runs-on: windows-2025", windows_job)
-        self.assertIn("timeout-minutes: 20", windows_job)
+        self.assertEqual(
+            re.findall(
+                r"(?m)^    timeout-minutes: ([0-9]+)$",
+                windows_job,
+            ),
+            ["30"],
+        )
         self.assertIn("python-version: '3.12.10'", windows_job)
         self.assertIn("architecture: x64", windows_job)
         self.assertIn("shell: bash", windows_job)

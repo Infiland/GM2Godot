@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.55 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.56 · GameMaker LTS 2026 · Godot 4.7.1
 >
 > **Last reviewed:** 2026-09-02
 
@@ -193,6 +193,8 @@ Native Windows CI keeps the broad `windows-artifact-transactions` suite separate
 Recorded-tree cleanup verifies directory state top-down. Once a recorded directory is proven absent under its expected identity-bound parent, cleanup skips every recorded file descendant below it instead of repeating missing-parent fallback probes. Retain `test_cleanup_skips_file_probes_below_proven_absent_directory` and its constant operation-count comparison across different entry counts. Also retain `test_cleanup_preserves_directory_that_reappears_after_absence_proof`: a directory or file that reappears after the proof is unknown external state and must be preserved by the later bottom-up directory/root cleanup.
 
 Artifact writable-mode preparation must remain fail-closed when a hard link appears before, during, or immediately after the mode syscall. Retain the modeled Windows target and stage hard-link tests: the transaction must restore only the exact temporary mode it set, through the retained descriptor where available, and must preserve a different external mode rather than overwriting it during abort cleanup. Native Windows hard-link and read-only tests remain authoritative for Win32 metadata behavior.
+
+Artifact transaction changes must also retain exact control-signal identity and chronological precedence. `tests.test_anchored_artifacts` covers present and absent publication, restore, both rollback directions, retained recovery, completed replace/unlink ownership, cleanup durability, persistent completion uncertainty and modeled Windows tombstones. The first `KeyboardInterrupt` or `SystemExit` must escape unchanged after every required rollback or durability attempt; later failures belong in notes, and ordinary cleanup failures must keep their established final-cleanup retry behavior. Run the complete module together with Pyright and Ruff, then rely on the native Windows artifact-transaction job for Win32 completion and identity semantics.
 
 Worker-scheduling changes must also retain the deterministic 10,000-source submission bound, changed/unchanged failure and cancellation admission checks, and cross-worker output equivalence:
 

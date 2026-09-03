@@ -82,7 +82,7 @@ Compatibility work continues to target GameMaker LTS 2026 source projects and ex
 - Keep functions focused and concise
 - Use type hints where appropriate
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
-- Run `ruff check .` before submitting Python code. The project currently enables fatal/static Ruff checks in CI; broader style rules should be introduced separately from feature work.
+- Run `ruff check .` before submitting Python code. CI enforces Ruff's `E9` fatal-error checks and the complete Pyflakes (`F`) rule family. Do not disable `F` or individual `F`-numbered rules globally or per file. Broader style rules should be introduced separately from feature work.
 
 ### UI Development
 - Maintain consistency with the existing dark theme

@@ -52,7 +52,7 @@ class ProjectSettingsConverter(BaseConverter):
             target_platform=gm_platform,
         )
         self.options_platform_path = os.path.join(self.gm_project_path, 'options', self.gm_platform, f'options_{self.gm_platform}.yy')
-        self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', f'options_windows.yy')
+        self.options_windows_path = os.path.join(self.gm_project_path, 'options', 'windows', 'options_windows.yy')
         self.options_main_path = os.path.join(self.gm_project_path, 'options', 'main', 'options_main.yy')
 
     def convert_icon(self) -> ProjectOperationResult:

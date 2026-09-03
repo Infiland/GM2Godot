@@ -1114,8 +1114,8 @@ class SpriteConverter(BaseConverter):
 
         parts.append(f'\n[node name="{sprite_name}" type="Area2D"]\n')
         parts.extend(self._sprite_metadata_lines(collision_data))
-        parts.append(f'\n[node name="Sprite2D" type="Sprite2D" parent="."]\n')
-        parts.append(f'texture = ExtResource("1")\n')
+        parts.append('\n[node name="Sprite2D" type="Sprite2D" parent="."]\n')
+        parts.append('texture = ExtResource("1")\n')
         parts.append(self._sprite_visual_position_line(collision_data))
 
         if has_collision:
@@ -1172,7 +1172,7 @@ class SpriteConverter(BaseConverter):
         godot_fps = self._compute_godot_fps(animation_data)
         loop_str = "true" if animation_data["loop"] else "false"
 
-        parts.append(f'\n[sub_resource type="SpriteFrames" id="SpriteFrames_1"]\n')
+        parts.append('\n[sub_resource type="SpriteFrames" id="SpriteFrames_1"]\n')
         parts.append(f'animations = [{{\n"frames": [{frames_str}],\n"loop": {loop_str},\n"name": &"default",\n"speed": {godot_fps}\n}}]\n')
 
         if has_collision:
@@ -1186,10 +1186,10 @@ class SpriteConverter(BaseConverter):
             parts.append(f"metadata/gamemaker_mask_frame_count = {frame_count}\n")
             parts.append("metadata/gamemaker_active_mask_frame = 0\n")
 
-        parts.append(f'\n[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]\n')
-        parts.append(f'sprite_frames = SubResource("SpriteFrames_1")\n')
-        parts.append(f'animation = &"default"\n')
-        parts.append(f'autoplay = "default"\n')
+        parts.append('\n[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]\n')
+        parts.append('sprite_frames = SubResource("SpriteFrames_1")\n')
+        parts.append('animation = &"default"\n')
+        parts.append('autoplay = "default"\n')
         parts.append(self._sprite_visual_position_line(collision_data))
 
         if has_collision:

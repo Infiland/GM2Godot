@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
+from typing import cast
 
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
 from src.version import get_version
@@ -53,6 +55,22 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
+EXPECTED_RUFF_CONFIG: dict[str, object] = {
+    "target-version": "py312",
+    "line-length": 120,
+    "extend-exclude": ["build", "dist", "release", "venv"],
+    "lint": {"select": ["E9", "F"]},
+}
+EXPECTED_RUFF_LINT_STEPS = """\
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Run Ruff on every tracked lint input
+        run: |
+          git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
+            xargs -0 -- python -m ruff check --isolated --target-version py312 \\
+              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+"""
 
 
 class TestDocumentationHealth(unittest.TestCase):
@@ -260,13 +278,29 @@ class TestDocumentationHealth(unittest.TestCase):
                 for phrase in phrases:
                     self.assertIn(phrase, content)
 
-    def test_code_health_workflow_runs_ruff(self) -> None:
+    def test_code_health_workflow_runs_complete_pyflakes_suite(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "code-health.yml").read_text(encoding="utf-8")
-        pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:
+            ruff_config = cast(
+                dict[str, object],
+                tomllib.load(pyproject_file)["tool"]["ruff"],
+            )
 
-        self.assertIn("ruff check .", workflow)
-        self.assertIn("[tool.ruff.lint]", pyproject)
-        self.assertIn('"F82"', pyproject)
+        self.assertEqual(ruff_config, EXPECTED_RUFF_CONFIG)
+        self.assertTrue(workflow.endswith(EXPECTED_RUFF_LINT_STEPS))
+
+    def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
+        required_guidance = (
+            "CI enforces Ruff's `E9` fatal-error checks and the complete "
+            "Pyflakes (`F`) rule family. Do not disable `F` or individual "
+            "`F`-numbered rules globally or per file."
+        )
+        for path in (
+            PROJECT_ROOT / "CONTRIBUTING.md",
+            WIKI_SOURCE_DIR / "Contributing-and-Testing.md",
+        ):
+            with self.subTest(path=path.relative_to(PROJECT_ROOT)):
+                self.assertIn(required_guidance, path.read_text(encoding="utf-8"))
 
     def test_dependabot_updates_actions_weekly_and_pip_security_only(self) -> None:
         dependabot = (

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.66 - 2026-09-03
+
+- Enabled Ruff's complete Pyflakes (`F`) rule family while retaining the existing fatal-error checks, and added executable policy coverage that rejects whole-family, individual-rule, per-file, and `ALL` escapes.
+- Removed one duplicate identical manifest key and nine redundant constant f-string prefixes without changing generated sprite scenes, project settings, manifest output, or GUI presentation.
+- Documented the enforced lint policy and kept GameMaker LTS 2026 conversion behavior plus exact Godot 4.7.1 output unchanged.
+
 ## 0.7.65 - 2026-09-03
 
 - Reused retained, verified Windows cleanup-parent bindings across present Included Files trees instead of recapturing and reverifying the same ancestor chain for every child.

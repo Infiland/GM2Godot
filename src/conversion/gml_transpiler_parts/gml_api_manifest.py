@@ -73,7 +73,6 @@ _CATEGORY_ISSUE_NUMBERS = {
     "Sequences and Timelines": 567,
     "Time": 497,
     "Data Structures Sequential": 498,
-    "Data Structures Sequential": 498,
     "Data Structures Maps": 499,
     "Data Structures Grids": 500,
     "Accessors": 501,

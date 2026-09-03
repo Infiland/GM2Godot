@@ -88,6 +88,8 @@ Version 0.7.64 makes the canonical generated-project documentation enumerate eve
 
 Version 0.7.65 reuses retained, verified Windows cleanup-parent bindings across present Included Files trees, removing repeated ancestor capture and re-verification for every child. Nested cleanup now uses iterative full-tree preflight and bottom-up removal with live native handles bounded by directory depth while retaining exact identity, no-follow, reparse/junction, mount, hard-link, digest, read-only, relocation/replacement, tombstone, and rollback defenses. Deterministic flat, nested, and deep-tree operation-count and adversarial tests cover the optimized fallback. GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output remain unchanged.
 
+Version 0.7.66 enables Ruff's complete Pyflakes rule family while retaining the existing fatal-error checks. Executable policy coverage prevents whole-family, individual-rule, per-file, and `ALL` escapes; the ten newly enforced findings were corrected without changing generated sprite scenes, project settings, manifest output, or GUI presentation. GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -108,7 +110,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.65`.
+Current source version: `0.7.66`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

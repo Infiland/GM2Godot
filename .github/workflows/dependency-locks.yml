@@ -968,6 +968,13 @@ jobs:
               payload = "".join(f"{name}=={pins[name]}\n" for name in sorted(pins)).encode()
               return hashlib.sha256(payload).hexdigest()
 
+          def normalize_lock_newlines(payload: bytes) -> bytes:
+              # Native generators use their host text convention, while the
+              # repository-contents API returns canonical Git blob bytes.
+              # Preserve every non-newline byte and match the authored-source
+              # fingerprint's CRLF/lone-CR normalization policy.
+              return payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
           def parse_constraint(payload: bytes, label: str) -> dict[str, str]:
               try:
                   text = payload.decode("utf-8")
@@ -1116,7 +1123,9 @@ jobs:
               authoritative_bytes: bytes,
           ) -> dict[str, object]:
               candidate_bytes = members[policy["candidate"]]
-              if candidate_bytes != authoritative_bytes:
+              if normalize_lock_newlines(candidate_bytes) != normalize_lock_newlines(
+                  authoritative_bytes
+              ):
                   raise SystemExit(
                       f"{platform} candidate lock does not match authoritative "
                       f"{policy['constraint']} at {expected_sha}"

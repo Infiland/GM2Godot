@@ -82,6 +82,8 @@ Version 0.7.61 makes the Linux packaged-GUI verifier tests distinguish child sta
 
 Version 0.7.62 makes `requirements-bootstrap.txt` the only reviewed source for the exact pip/pip-tools compatibility pair and moves generated native constraints to `.lock` paths that hosted Dependabot does not treat as editable pip manifests. Every live consumer preflights the source against its selected lock before creating an environment and requests constrained unversioned `pip`; the native lock workflow alone may enter an explicit all-three-lock source transition, then proves the proposed pair by installation and self-hosting before generating the complete graphs. Dependabot bootstrap proposals are source-only, generated locks still require three native candidate/self-host/two-clean-install receipts, and verified per-platform dependency snapshots preserve transitive security-alert coverage after the path change. GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output remain unchanged.
 
+Version 0.7.63 makes the privileged dependency-submission validator compare native lock artifacts with canonical Git blob bytes after normalizing only CRLF and lone-CR line endings. Exact native bytes remain bound to their receipt hashes, while every non-newline content, provenance, pin, or ordering difference still fails closed. This restores verified Linux, macOS, and Windows dependency-graph submission without changing GameMaker LTS 2026 conversion behavior or exact Godot 4.7.1 output.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -102,7 +104,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.62`.
+Current source version: `0.7.63`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

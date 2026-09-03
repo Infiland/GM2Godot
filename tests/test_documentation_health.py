@@ -66,6 +66,10 @@ def _ruff_selectors(value: object) -> tuple[str, ...]:
     return tuple(selector for selector in selectors if isinstance(selector, str))
 
 
+def _ruff_selector_disables_pyflakes(selector: str) -> bool:
+    return selector == "ALL" or PYFLAKES_SELECTOR_PATTERN.fullmatch(selector) is not None
+
+
 def _ruff_pyflakes_policy_errors(lint_config: Mapping[str, object]) -> tuple[str, ...]:
     errors: list[str] = []
     if "F" not in _ruff_selectors(lint_config.get("select")):
@@ -73,7 +77,7 @@ def _ruff_pyflakes_policy_errors(lint_config: Mapping[str, object]) -> tuple[str
 
     for setting in ("ignore", "extend-ignore"):
         for selector in _ruff_selectors(lint_config.get(setting)):
-            if PYFLAKES_SELECTOR_PATTERN.fullmatch(selector):
+            if _ruff_selector_disables_pyflakes(selector):
                 errors.append(f"{setting} disables Pyflakes selector {selector}")
 
     for setting in ("per-file-ignores", "extend-per-file-ignores"):
@@ -85,7 +89,7 @@ def _ruff_pyflakes_policy_errors(lint_config: Mapping[str, object]) -> tuple[str
             per_file_ignores,
         ).items():
             for selector in _ruff_selectors(configured_selectors):
-                if PYFLAKES_SELECTOR_PATTERN.fullmatch(selector):
+                if _ruff_selector_disables_pyflakes(selector):
                     errors.append(
                         f"{setting}[{file_pattern}] disables Pyflakes selector {selector}"
                     )
@@ -337,6 +341,10 @@ class TestDocumentationHealth(unittest.TestCase):
                 {"select": ["E9", "F"], "ignore": ["F"]},
                 ("ignore disables Pyflakes selector F",),
             ),
+            "ignored all rules": (
+                {"select": ["E9", "F"], "ignore": ["ALL"]},
+                ("ignore disables Pyflakes selector ALL",),
+            ),
             "extended ignored rule": (
                 {"select": ["E9", "F"], "extend-ignore": ["F601"]},
                 ("extend-ignore disables Pyflakes selector F601",),
@@ -348,6 +356,15 @@ class TestDocumentationHealth(unittest.TestCase):
                 },
                 (
                     "per-file-ignores[tests/*.py] disables Pyflakes selector F541",
+                ),
+            ),
+            "per-file ignored all rules": (
+                {
+                    "select": ["E9", "F"],
+                    "per-file-ignores": {"tests/*.py": ["ALL"]},
+                },
+                (
+                    "per-file-ignores[tests/*.py] disables Pyflakes selector ALL",
                 ),
             ),
             "extended per-file ignored family": (

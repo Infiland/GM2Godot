@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.65 - 2026-09-03
+
+- Reused retained, verified Windows cleanup-parent bindings across present Included Files trees instead of recapturing and reverifying the same ancestor chain for every child.
+- Made nested Windows cleanup perform an iterative full-tree preflight followed by bottom-up removal with live native handles bounded by directory depth, while preserving exact identity, no-follow, reparse/junction, mount, hard-link, digest, read-only, relocation/replacement, tombstone, and rollback defenses.
+- Added deterministic flat, nested, and deep-tree operation-count and adversarial coverage for the optimized fallback while preserving GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output.
+
 ## 0.7.64 - 2026-09-03
 
 - Documented `particles/` and `particlesystems/` in the complete generated-project tree and converter-managed output-root list.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.64 - 2026-09-03
+
+- Documented `particles/` and `particlesystems/` in the complete generated-project tree and converter-managed output-root list.
+- Bound the marked canonical Wiki list to the production `MANAGED_OUTPUT_DIRECTORIES` order with an executable documentation-health check so future ownership changes cannot silently drift from user guidance.
+- Kept GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output unchanged while preparing the reviewed Wiki source for publication.
+
 ## 0.7.63 - 2026-09-03
 
 - Normalized only CRLF and lone-CR line endings when the privileged dependency-submission validator compares native lock artifacts with canonical Git blob bytes.

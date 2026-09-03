@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-from types import FrameType
+from types import FrameType, SimpleNamespace
 from typing import Any, Callable
 import unittest
 from unittest import mock
@@ -572,7 +572,11 @@ class AnchoredReceiptOuterLeaseTests(unittest.TestCase):
         try:
             with (
                 mock.patch.object(anchored, "open_rooted_output_parent", side_effect=reuse_binding),
-                mock.patch.object(self.posix.sys, "platform", "darwin"),
+                mock.patch.object(
+                    self.posix,
+                    "sys",
+                    SimpleNamespace(platform="darwin"),
+                ),
                 mock.patch.object(
                     self.posix,
                     "_open_posix_receipt_stage",

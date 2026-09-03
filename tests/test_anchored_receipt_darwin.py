@@ -937,7 +937,11 @@ class AnchoredReceiptDarwinTests(unittest.TestCase):
             close=mock.Mock(return_value=()),
         )
         with (
-            mock.patch.object(self.posix.sys, "platform", "darwin"),
+            mock.patch.object(
+                self.posix,
+                "sys",
+                SimpleNamespace(platform="darwin"),
+            ),
             mock.patch.object(
                 self.posix,
                 "_open_posix_receipt_stage",
@@ -2061,6 +2065,11 @@ class AnchoredReceiptDarwinTests(unittest.TestCase):
 
         with (
             mock.patch.object(
+                self.posix,
+                "sys",
+                SimpleNamespace(platform="darwin"),
+            ),
+            mock.patch.object(
                 self.posix.os,
                 "unlink",
                 side_effect=unlink_then_interrupt,
@@ -2239,10 +2248,17 @@ class AnchoredReceiptDarwinTests(unittest.TestCase):
             cleanup_calls += 1
             raise OSError("final named-stage cleanup")
 
-        with mock.patch.object(
-            self.posix,
-            "_cleanup_darwin_named_stage",
-            side_effect=fail_final_cleanup,
+        with (
+            mock.patch.object(
+                self.posix,
+                "sys",
+                SimpleNamespace(platform="darwin"),
+            ),
+            mock.patch.object(
+                self.posix,
+                "_cleanup_darwin_named_stage",
+                side_effect=fail_final_cleanup,
+            ),
         ):
             failures = publication.close()
 

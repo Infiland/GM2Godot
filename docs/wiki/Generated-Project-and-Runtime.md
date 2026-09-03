@@ -32,6 +32,8 @@ GodotProject/
 ├── included_files/
 ├── notes/
 ├── objects/
+├── particles/
+├── particlesystems/
 ├── paths/
 ├── rooms/
 ├── scripts/
@@ -44,8 +46,24 @@ GodotProject/
 
 GM2Godot treats these directories as managed output roots:
 
+<!-- managed-output-directories:start -->
 - `addons/gm2godot_extensions/`
-- `fonts/`, `gm2godot/`, `included_files/`, `notes/`, `objects/`, `paths/`, `rooms/`, `scripts/`, `sequences/`, `shaders/`, `sounds/`, `sprites/`, and `tilesets/`
+- `fonts/`
+- `gm2godot/`
+- `included_files/`
+- `notes/`
+- `objects/`
+- `particles/`
+- `particlesystems/`
+- `paths/`
+- `rooms/`
+- `scripts/`
+- `sequences/`
+- `shaders/`
+- `sounds/`
+- `sprites/`
+- `tilesets/`
+<!-- managed-output-directories:end -->
 
 The top-level `default_bus_layout.tres`, `icon.ico`, and `icon.png` are managed files. `project.godot` is jointly managed: GM2Godot can update the generated `GM*` autoload entries and, when a room is generated, set `run/main_scene` from the first GameMaker `RoomOrderNodes` entry. Existing unrelated project settings and unrelated autoloads are preserved.
 

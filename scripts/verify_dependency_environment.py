@@ -8,6 +8,7 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import IO, Literal, Never, cast
+from types import ModuleType
+from typing import IO, Callable, Literal, Never, cast
 
 
 RECEIPT_SCHEMA_VERSION = 2
@@ -68,6 +70,44 @@ class PolicyError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class ReceiptOutputError(OSError):
+    """A dependency receipt could not satisfy its publication contract."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _load_anchored_output_module() -> ModuleType:
+    module_path = Path(__file__).resolve(strict=True).with_name("_anchored_output.py")
+    module_name = "_gm2godot_anchored_output"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        existing_path = getattr(existing, "__file__", None)
+        if isinstance(existing_path, str) and Path(existing_path).resolve(strict=True) == module_path:
+            return existing
+        raise ImportError(f"Refusing conflicting anchored output module {module_name!r}.")
+    specification = importlib.util.spec_from_file_location(module_name, module_path)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"Cannot load anchored output helper: {module_path}")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[module_name] = module
+    try:
+        specification.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+_ANCHORED_OUTPUT = _load_anchored_output_module()
+_ANCHORED_OUTPUT_ERROR = cast(type[ValueError], getattr(_ANCHORED_OUTPUT, "AnchoredOutputError"))
+_PUBLISH_IDENTICAL_RECEIPT_BYTES = cast(
+    Callable[[Path, bytes], None],
+    getattr(_ANCHORED_OUTPUT, "publish_identical_receipt_bytes"),
+)
 
 
 class DuplicateJsonKeyError(ValueError):
@@ -1558,43 +1598,41 @@ def atomic_write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
         )
         + "\n"
     ).encode("utf-8")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    temporary_path = Path(temporary_name)
     try:
-        try:
-            handle = os.fdopen(descriptor, "wb")
-        except BaseException as error:
-            try:
-                os.close(descriptor)
-            except BaseException as cleanup_error:
-                error.add_note(
-                    f"Could not close receipt temporary descriptor: {cleanup_error}"
-                )
-            raise
-        try:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        except BaseException as error:
-            try:
-                handle.close()
-            except BaseException as cleanup_error:
-                error.add_note(f"Could not close receipt temporary file: {cleanup_error}")
-            raise
-        else:
-            handle.close()
-        os.replace(temporary_path, path)
-    except BaseException as error:
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except BaseException as cleanup_error:
-            error.add_note(f"Could not remove receipt temporary file: {cleanup_error}")
-        raise
+        _PUBLISH_IDENTICAL_RECEIPT_BYTES(path, payload)
+    except _ANCHORED_OUTPUT_ERROR as error:
+        translated = ReceiptOutputError(cast(str, getattr(error, "code")), str(error))
+        for note in cast(list[str], getattr(error, "__notes__", [])):
+            translated.add_note(note)
+        raise translated from error
+
+
+def _print_receipt_output_error(prefix: str, path: Path, error: OSError) -> None:
+    record: dict[str, object] = {
+        "message": str(error),
+        "path": os.fspath(path),
+    }
+    label = ""
+    if isinstance(error, ReceiptOutputError):
+        record["code"] = error.code
+        label = f" [{error.code}]"
+    else:
+        record["type"] = type(error).__name__
+    error_record = json.dumps(
+        record,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    print(f"{prefix}{label}: {error_record}", file=sys.stderr)
+    for note in cast(Sequence[str], getattr(error, "__notes__", ())):
+        note_record = json.dumps(
+            {"note": note},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        print(f"Receipt output cleanup note: {note_record}", file=sys.stderr)
 
 
 def _parse_bootstrap_arguments(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -1655,8 +1693,19 @@ def bootstrap_preflight_main(argv: Sequence[str] | None = None) -> int:
 
     try:
         atomic_write_receipt(output_path, receipt)
+    except ReceiptOutputError as error:
+        _print_receipt_output_error(
+            "Cannot write bootstrap verification receipt",
+            output_path,
+            error,
+        )
+        return 2
     except OSError as error:
-        print(f"Cannot write bootstrap verification receipt {output_path}: {error}", file=sys.stderr)
+        _print_receipt_output_error(
+            "Cannot write bootstrap verification receipt",
+            output_path,
+            error,
+        )
         return 2
 
     if receipt["status"] == "verified":
@@ -1825,8 +1874,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         atomic_write_receipt(output_path, receipt)
+    except ReceiptOutputError as error:
+        _print_receipt_output_error(
+            "Cannot write dependency verification receipt",
+            output_path,
+            error,
+        )
+        return 2
     except OSError as error:
-        print(f"Cannot write dependency verification receipt {output_path}: {error}", file=sys.stderr)
+        _print_receipt_output_error(
+            "Cannot write dependency verification receipt",
+            output_path,
+            error,
+        )
         return 2
 
     if receipt["status"] == "verified":

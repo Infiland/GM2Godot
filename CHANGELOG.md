@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.67 - 2026-09-03
+
+- Extracted dependency snapshot publication into one private, stdlib-only anchored byte publisher loaded directly from its sibling path in isolated mode.
+- Preserved snapshot JSON bytes, containment rules, no-overwrite behavior, stable error codes, and POSIX and Windows anchoring while expanding direct and isolated-loader coverage.
+- Kept GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output unchanged.
+
 ## 0.7.66 - 2026-09-03
 
 - Enabled Ruff's complete Pyflakes (`F`) rule family while retaining the existing fatal-error checks, and added executable policy coverage that rejects whole-family, individual-rule, per-file, and `ALL` escapes.

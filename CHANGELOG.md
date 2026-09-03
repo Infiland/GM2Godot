@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.68 - 2026-09-03
+
+- Bound dependency-receipt publication to the physical filesystem root and every output ancestor, creating missing parents only through retained descriptors or handles.
+- Added identical-only publication with private staging, no-replace installation, exact byte/mode/link/identity verification, and fail-closed cleanup across POSIX, macOS ACLs, and modeled Windows mutation boundaries.
+- Preserved receipt schemas, dependency resolution, GameMaker LTS 2026 conversion behavior, and generated Godot output; native Windows proof remains isolated in its dedicated follow-up gate.
+
 ## 0.7.67 - 2026-09-03
 
 - Extracted dependency snapshot publication into one private, stdlib-only anchored byte publisher loaded directly from its sibling path in isolated mode.

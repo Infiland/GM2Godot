@@ -92,6 +92,8 @@ Version 0.7.66 enables Ruff's complete Pyflakes rule family while retaining the 
 
 Version 0.7.67 extracts dependency snapshot publication into one private, stdlib-only anchored byte publisher loaded directly from its sibling path in isolated mode. Snapshot JSON bytes, containment rules, no-overwrite behavior, stable error codes, and POSIX and Windows anchoring remain unchanged, with direct and isolated-loader coverage guarding the shared primitive. GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output remain unchanged.
 
+Version 0.7.68 binds dependency-receipt publication to the physical filesystem root and every output ancestor for the whole operation. Missing parents are created only through retained descriptors or handles; existing identical receipts preserve their bytes and inode, while different, redirected, multiply linked, non-regular, wrong-mode, or non-canonical targets fail untouched. Private staging, no-replace publication, exact post-publication verification, and reverse-order cleanup remain bounded across POSIX, macOS ACL, and modeled Windows mutation boundaries. Receipt schemas, dependency resolution, GameMaker LTS 2026 conversion behavior, and generated Godot output are unchanged; native Windows proof remains isolated in its dedicated follow-up gate.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -112,7 +114,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.67`.
+Current source version: `0.7.68`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

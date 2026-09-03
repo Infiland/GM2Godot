@@ -30,6 +30,20 @@ BASE_PINS = {
 _OMIT = object()
 
 
+def _file_snapshot(path: Path) -> tuple[tuple[int, ...], bytes]:
+    value = path.lstat()
+    metadata = (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+    return metadata, path.read_bytes()
+
+
 def _installed_item(
     name: str,
     version: str,
@@ -400,6 +414,375 @@ class TestDependencyEnvironmentVerifier(unittest.TestCase, DependencyVerifierHar
         ]
         self.assertEqual(calls[0][0], [*command_prefix, "inspect"])
         self.assertEqual(calls[1][0], [*command_prefix, "check"])
+
+    def test_main_same_receipt_rerun_preserves_inode_and_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            prefix = directory / "isolated"
+            prefix.mkdir()
+            report = copy.deepcopy(_inspect_report())
+            _materialize_default_metadata_locations(report, prefix)
+            constraint = directory / "constraints-linux.txt"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt.json"
+            arguments = [
+                "--constraint",
+                str(constraint),
+                "--mode",
+                "subset",
+                "--require",
+                "root-package",
+                "--expected-python",
+                PYTHON_VERSION,
+                "--expected-platform",
+                "linux",
+                "--expected-machine",
+                "x86_64",
+                "--bootstrap",
+                str(bootstrap),
+                "--bootstrap-policy",
+                "stable",
+                "--output",
+                str(output),
+            ]
+            inspect_output = json.dumps(report, ensure_ascii=True, sort_keys=True)
+            popen_factory = _PopenFactory(
+                [
+                    _completed(inspect_output),
+                    _completed("No broken requirements found.\n"),
+                    _completed(inspect_output),
+                    _completed("No broken requirements found.\n"),
+                ]
+            )
+            with (
+                mock.patch.object(verifier.subprocess, "Popen", side_effect=popen_factory),
+                mock.patch.object(verifier.sys, "prefix", str(prefix)),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                first_result = verifier.main(arguments)
+                before = _file_snapshot(output)
+                second_result = verifier.main(arguments)
+
+            self.assertEqual((first_result, second_result), (0, 0))
+            self.assertEqual(_file_snapshot(output), before)
+
+    def test_main_rejects_different_existing_receipt_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            prefix = directory / "isolated"
+            prefix.mkdir()
+            report = copy.deepcopy(_inspect_report())
+            _materialize_default_metadata_locations(report, prefix)
+            constraint = directory / "constraints-linux.txt"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt.json"
+            output.write_bytes(b"different existing receipt\n")
+            output.chmod(0o600)
+            before = _file_snapshot(output)
+            popen_factory = _PopenFactory(
+                [
+                    _completed(json.dumps(report, ensure_ascii=True, sort_keys=True)),
+                    _completed("No broken requirements found.\n"),
+                ]
+            )
+            stderr = StringIO()
+            with (
+                mock.patch.object(verifier.subprocess, "Popen", side_effect=popen_factory),
+                mock.patch.object(verifier.sys, "prefix", str(prefix)),
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                result = verifier.main(
+                    [
+                        "--constraint",
+                        str(constraint),
+                        "--mode",
+                        "subset",
+                        "--require",
+                        "root-package",
+                        "--expected-python",
+                        PYTHON_VERSION,
+                        "--expected-platform",
+                        "linux",
+                        "--expected-machine",
+                        "x86_64",
+                        "--bootstrap",
+                        str(bootstrap),
+                        "--bootstrap-policy",
+                        "stable",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            self.assertEqual(_file_snapshot(output), before)
+            diagnostic = stderr.getvalue()
+            self.assertEqual(len(diagnostic.splitlines()), 1)
+            self.assertIn("Cannot write dependency verification receipt", diagnostic)
+            self.assertIn("[output-different]", diagnostic)
+            self.assertIn("Refusing to replace different existing receipt output", diagnostic)
+
+    def test_main_receipt_diagnostic_includes_stable_code_and_cleanup_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            constraint = directory / "constraints-linux.txt"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt\n\t\x1b.json"
+            message = "publication\nfailed\t\x1b"
+            note = "Could not close receipt parent descriptor:\ninjected\t\x1b close failure"
+            error = verifier.ReceiptOutputError("output-parent-changed", message)
+            error.add_note(note)
+            stderr = StringIO()
+
+            with (
+                mock.patch.object(verifier, "atomic_write_receipt", side_effect=error),
+                mock.patch.object(verifier.subprocess, "Popen") as popen_mock,
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                result = verifier.main(
+                    [
+                        "--constraint",
+                        str(constraint),
+                        "--mode",
+                        "subset",
+                        "--expected-python",
+                        "invalid",
+                        "--expected-platform",
+                        "linux",
+                        "--expected-machine",
+                        "x86_64",
+                        "--bootstrap",
+                        str(bootstrap),
+                        "--bootstrap-policy",
+                        "stable",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            popen_mock.assert_not_called()
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "Cannot write dependency verification receipt [output-parent-changed]: "
+                    + json.dumps(
+                        {
+                            "code": "output-parent-changed",
+                            "message": message,
+                            "path": os.fspath(output),
+                        },
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "Receipt output cleanup note: "
+                    + json.dumps(
+                        {"note": note},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ],
+            )
+
+    def test_main_raw_receipt_error_diagnostic_escapes_controls_and_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            constraint = directory / "constraints-linux.txt"
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            bootstrap = directory / "requirements-bootstrap.txt"
+            bootstrap.write_text(_bootstrap_text(), encoding="utf-8")
+            output = directory / "receipt\n\t\x1b.json"
+            error = PermissionError(13, "device\n\t\x1b failure")
+            note = "raw cleanup note\n\t\x1b"
+            error.add_note(note)
+            stderr = StringIO()
+
+            with (
+                mock.patch.object(verifier, "atomic_write_receipt", side_effect=error),
+                mock.patch.object(verifier.subprocess, "Popen") as popen_mock,
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                result = verifier.main(
+                    [
+                        "--constraint",
+                        str(constraint),
+                        "--mode",
+                        "subset",
+                        "--expected-python",
+                        "invalid",
+                        "--expected-platform",
+                        "linux",
+                        "--expected-machine",
+                        "x86_64",
+                        "--bootstrap",
+                        str(bootstrap),
+                        "--bootstrap-policy",
+                        "stable",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            popen_mock.assert_not_called()
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "Cannot write dependency verification receipt: "
+                    + json.dumps(
+                        {
+                            "message": str(error),
+                            "path": os.fspath(output),
+                            "type": "PermissionError",
+                        },
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "Receipt output cleanup note: "
+                    + json.dumps(
+                        {"note": note},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ],
+            )
+
+    def test_atomic_write_receipt_translates_anchored_error_without_losing_context(self) -> None:
+        original_publisher = cast(
+            Callable[[Path, bytes], None],
+            verifier.atomic_write_receipt.__globals__["_PUBLISH_IDENTICAL_RECEIPT_BYTES"],
+        )
+        source_errors: list[ValueError] = []
+        published: list[tuple[Path, bytes]] = []
+
+        def publish_with_notes(path: Path, payload: bytes) -> None:
+            published.append((path, payload))
+            try:
+                original_publisher(path, payload)
+            except ValueError as error:
+                source_errors.append(error)
+                error.add_note("first cleanup note")
+                error.add_note("second cleanup note")
+                raise
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            output = Path(raw_directory).resolve() / "receipt.json"
+            output.write_bytes(b"different receipt\n")
+            output.chmod(0o600)
+            with (
+                mock.patch.object(
+                    verifier,
+                    "_PUBLISH_IDENTICAL_RECEIPT_BYTES",
+                    side_effect=publish_with_notes,
+                ),
+                self.assertRaises(verifier.ReceiptOutputError) as raised,
+            ):
+                verifier.atomic_write_receipt(output, {"status": "verified"})
+
+        translated = raised.exception
+        self.assertEqual(translated.code, "output-different")
+        self.assertIn("Refusing to replace different existing receipt output", str(translated))
+        self.assertEqual(len(source_errors), 1)
+        self.assertIs(translated.__cause__, source_errors[0])
+        self.assertEqual(
+            getattr(translated, "__notes__", ()),
+            ["first cleanup note", "second cleanup note"],
+        )
+        self.assertIsNot(
+            getattr(translated, "__notes__", None),
+            getattr(source_errors[0], "__notes__", None),
+        )
+        self.assertEqual(len(published), 1)
+        published_path, payload = published[0]
+        self.assertEqual(published_path, output)
+        self.assertEqual(
+            json.loads(payload),
+            {"status": "verified"},
+        )
+
+    def test_verifier_exact_loader_ignores_active_hostile_import_search_path(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            hostile = directory / "hostile"
+            hostile.mkdir()
+            shadow = hostile / "_anchored_output.py"
+            sentinel = directory / "shadow-loader-ran"
+            shadow.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(sentinel)!r}).write_text('shadowed', encoding='utf-8')\n"
+                "raise RuntimeError('hostile anchored output shadow loaded')\n",
+                encoding="utf-8",
+            )
+            script = Path(verifier.__file__).resolve(strict=True)
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(hostile)
+            program = (
+                "import importlib.util, pathlib, runpy, sys\n"
+                f"shadow = pathlib.Path({str(shadow)!r}).resolve()\n"
+                "specification = importlib.util.find_spec('_anchored_output')\n"
+                "assert specification is not None\n"
+                "assert pathlib.Path(specification.origin).resolve() == shadow\n"
+                f"sys.argv = [{str(script)!r}, '--help']\n"
+                f"runpy.run_path({str(script)!r}, run_name='__main__')\n"
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-c", program],
+                cwd=hostile,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=verifier.COMMAND_TIMEOUT_SECONDS,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Verify that a Python environment", result.stdout)
+            self.assertFalse(sentinel.exists())
+
+    def test_verifier_exact_loader_works_under_isolation_and_hostile_pythonpath(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            hostile = directory / "hostile"
+            hostile.mkdir()
+            sentinel = directory / "shadow-loader-ran"
+            (hostile / "_anchored_output.py").write_text(
+                "from pathlib import Path\n"
+                f"Path({str(sentinel)!r}).write_text('shadowed', encoding='utf-8')\n"
+                "raise RuntimeError('hostile anchored output shadow loaded')\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(hostile)
+            script = Path(verifier.__file__).resolve(strict=True)
+
+            result = subprocess.run(
+                [sys.executable, "-I", str(script), "--help"],
+                cwd=hostile,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=verifier.COMMAND_TIMEOUT_SECONDS,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Verify that a Python environment", result.stdout)
+            self.assertFalse(sentinel.exists())
 
     def test_pip_commands_ignore_checkout_and_pythonpath_shadow_modules(self) -> None:
         baseline_environment = {
@@ -1837,7 +2220,6 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
             )
             (directory / "requirements-bootstrap.txt").write_text(_bootstrap_text(), encoding="utf-8")
             output = directory / "receipt.json"
-            output.write_text("stale", encoding="utf-8")
             with chdir(directory), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 result = verifier.bootstrap_preflight_main(
                     [
@@ -1866,6 +2248,7 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
                 self.assertRegex(cast(str, item["pin_fingerprint"]), r"[0-9a-f]{64}\Z")
             transition = cast(dict[str, object], receipt["source_transition"])
             self.assertEqual(transition["active"], True)
+            before = _file_snapshot(output)
             with chdir(directory), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 repeated_result = verifier.bootstrap_preflight_main(
                     [
@@ -1879,100 +2262,155 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
                 )
             self.assertEqual(repeated_result, 0)
             self.assertEqual(output.read_bytes(), payload)
+            self.assertEqual(_file_snapshot(output), before)
 
-    def test_atomic_receipt_closes_raw_descriptor_when_fdopen_fails(self) -> None:
-        for close_fails in (False, True):
-            with self.subTest(close_fails=close_fails):
-                with tempfile.TemporaryDirectory() as raw_directory:
-                    directory = Path(raw_directory).resolve()
-                    output = directory / "receipt.json"
-                    real_mkstemp = tempfile.mkstemp
-                    real_close = os.close
-                    created_descriptor = -1
-                    primary_error = RuntimeError("injected fdopen failure")
+    def test_preflight_rejects_different_existing_receipt_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            constraint = directory / "constraint.lock"
+            output = directory / "receipt.json"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            output.write_bytes(b"different existing bootstrap receipt\n")
+            output.chmod(0o600)
+            before = _file_snapshot(output)
+            stderr = StringIO()
 
-                    def recording_mkstemp(
-                        suffix: str | None = None,
-                        prefix: str | None = None,
-                        directory: str | os.PathLike[str] | None = None,
-                        text: bool = False,
-                        **kwargs: str | os.PathLike[str] | bool | None,
-                    ) -> tuple[int, str]:
-                        nonlocal created_descriptor
-                        selected_directory = cast(
-                            str | os.PathLike[str] | None,
-                            kwargs.get("dir", directory),
-                        )
-                        created_descriptor, temporary_name = real_mkstemp(
-                            suffix=suffix,
-                            prefix=prefix,
-                            dir=selected_directory,
-                            text=text,
-                        )
-                        return created_descriptor, temporary_name
+            with redirect_stdout(StringIO()), redirect_stderr(stderr):
+                result = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        str(source),
+                        "--policy",
+                        "stable",
+                        "--constraint",
+                        str(constraint),
+                        "--output",
+                        str(output),
+                    ]
+                )
 
-                    def close_descriptor(descriptor: int) -> None:
-                        real_close(descriptor)
-                        if close_fails:
-                            raise OSError("injected descriptor close failure")
+            self.assertEqual(result, 2)
+            self.assertEqual(_file_snapshot(output), before)
+            diagnostic = stderr.getvalue()
+            self.assertEqual(len(diagnostic.splitlines()), 1)
+            self.assertIn("Cannot write bootstrap verification receipt", diagnostic)
+            self.assertIn("[output-different]", diagnostic)
+            self.assertIn("Refusing to replace different existing receipt output", diagnostic)
 
-                    with (
-                        mock.patch.object(
-                            verifier.tempfile,
-                            "mkstemp",
-                            side_effect=recording_mkstemp,
-                        ),
-                        mock.patch.object(verifier.os, "fdopen", side_effect=primary_error),
-                        mock.patch.object(verifier.os, "close", side_effect=close_descriptor),
-                        self.assertRaises(RuntimeError) as raised,
-                    ):
-                        verifier.atomic_write_receipt(output, {"status": "verified"})
+    def test_preflight_receipt_diagnostic_includes_stable_code_and_cleanup_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            constraint = directory / "constraint.lock"
+            output = directory / "receipt\n\t\x1b.json"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            message = "publication\nfailed\t\x1b"
+            note = "Could not close receipt parent descriptor:\ninjected\t\x1b close failure"
+            error = verifier.ReceiptOutputError("output-parent-changed", message)
+            error.add_note(note)
+            stderr = StringIO()
 
-                    self.assertIs(raised.exception, primary_error)
-                    self.assertGreaterEqual(created_descriptor, 0)
-                    with self.assertRaises(OSError):
-                        os.fstat(created_descriptor)
-                    notes = "\n".join(getattr(raised.exception, "__notes__", ()))
-                    if close_fails:
-                        self.assertIn(
-                            "Could not close receipt temporary descriptor: "
-                            "injected descriptor close failure",
-                            notes,
-                        )
-                    else:
-                        self.assertEqual(notes, "")
-                    self.assertEqual(list(directory.glob(".receipt.json.*.tmp")), [])
+            with (
+                mock.patch.object(verifier, "atomic_write_receipt", side_effect=error),
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                result = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        str(source),
+                        "--policy",
+                        "stable",
+                        "--constraint",
+                        str(constraint),
+                        "--output",
+                        str(output),
+                    ]
+                )
 
-    def test_atomic_receipt_cleanup_does_not_mask_primary_base_exception(self) -> None:
-        primary_errors = (
-            RuntimeError("injected replace failure"),
-            KeyboardInterrupt("interrupt"),
-            SystemExit(23),
-        )
-        for primary_error in primary_errors:
-            with self.subTest(primary=type(primary_error).__name__):
-                with tempfile.TemporaryDirectory() as raw_directory:
-                    directory = Path(raw_directory).resolve()
-                    output = directory / "receipt.json"
-                    with (
-                        mock.patch.object(verifier.os, "replace", side_effect=primary_error),
-                        mock.patch.object(
-                            verifier.Path,
-                            "unlink",
-                            side_effect=OSError("injected cleanup failure"),
-                        ),
-                        self.assertRaises(type(primary_error)) as raised,
-                    ):
-                        verifier.atomic_write_receipt(output, {"status": "verified"})
+            self.assertEqual(result, 2)
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "Cannot write bootstrap verification receipt [output-parent-changed]: "
+                    + json.dumps(
+                        {
+                            "code": "output-parent-changed",
+                            "message": message,
+                            "path": os.fspath(output),
+                        },
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "Receipt output cleanup note: "
+                    + json.dumps(
+                        {"note": note},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ],
+            )
 
-                    self.assertIs(raised.exception, primary_error)
-                    self.assertIn(
-                        "Could not remove receipt temporary file: injected cleanup failure",
-                        "\n".join(getattr(raised.exception, "__notes__", ())),
-                    )
-                    temporary_files = list(directory.glob(".receipt.json.*.tmp"))
-                    self.assertEqual(len(temporary_files), 1)
-                    os.unlink(temporary_files[0])
+    def test_preflight_raw_receipt_error_diagnostic_escapes_controls_and_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = Path(raw_directory).resolve()
+            source = directory / "requirements-bootstrap.txt"
+            constraint = directory / "constraint.lock"
+            output = directory / "receipt\n\t\x1b.json"
+            source.write_text(_bootstrap_text(), encoding="utf-8")
+            constraint.write_text(_constraint_text(BASE_PINS), encoding="utf-8")
+            error = FileNotFoundError(2, "device\n\t\x1b disappeared")
+            note = "raw cleanup note\n\t\x1b"
+            error.add_note(note)
+            stderr = StringIO()
+
+            with (
+                mock.patch.object(verifier, "atomic_write_receipt", side_effect=error),
+                redirect_stdout(StringIO()),
+                redirect_stderr(stderr),
+            ):
+                result = verifier.bootstrap_preflight_main(
+                    [
+                        "--source",
+                        str(source),
+                        "--policy",
+                        "stable",
+                        "--constraint",
+                        str(constraint),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "Cannot write bootstrap verification receipt: "
+                    + json.dumps(
+                        {
+                            "message": str(error),
+                            "path": os.fspath(output),
+                            "type": "FileNotFoundError",
+                        },
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    "Receipt output cleanup note: "
+                    + json.dumps(
+                        {"note": note},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ],
+            )
 
     def test_stable_preflight_writes_success_and_actionable_failure_receipts(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
@@ -2002,6 +2440,8 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
                 _constraint_text({**BASE_PINS, "pip-tools": "7.5.2"}),
                 encoding="utf-8",
             )
+            failure_output = directory / "failure-receipt.json"
+            arguments[-1] = str(failure_output)
             stderr = StringIO()
             with (
                 mock.patch.object(verifier.subprocess, "Popen") as popen_mock,
@@ -2030,7 +2470,7 @@ class TestDependencyBootstrapPolicy(unittest.TestCase):
                 diagnostic.count("Run the native Dependency Locks workflow"),
                 1,
             )
-            failure_receipt = cast(dict[str, object], json.loads(output.read_bytes()))
+            failure_receipt = cast(dict[str, object], json.loads(failure_output.read_bytes()))
             self.assertEqual((failure_receipt["status"], failure_receipt["state"]), ("failed", "invalid"))
             errors = cast(list[dict[str, object]], failure_receipt["errors"])
             self.assertEqual([error["code"] for error in errors], ["bootstrap-source-lock-mismatch"])

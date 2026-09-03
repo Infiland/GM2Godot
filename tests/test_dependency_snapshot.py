@@ -1105,6 +1105,32 @@ class DependencySnapshotTests(unittest.TestCase):
         ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
+    def test_legacy_atomic_output_preserves_existing_parent_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            parent = root / "shared-output"
+            parent.mkdir()
+            parent.chmod(0o770)
+            output = parent / "snapshot.json"
+
+            with _working_directory(root):
+                binding = OPEN_OUTPUT_PARENT(output)
+                try:
+                    self.assertFalse(binding.receipt_parent_policy)
+                    binding.verify()
+                finally:
+                    self.assertEqual(binding.close(), ())
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o770)
+
+                ANCHORED_OUTPUT.publish_new_bytes(output, b"payload\n")
+
+            self.assertEqual(output.read_bytes(), b"payload\n")
+            self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o770)
+
+    @unittest.skipUnless(
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
+        "Descriptor-relative output binding is unavailable on this platform.",
+    )
     def test_atomic_output_recovers_when_initial_fstat_fails_once(
         self,
     ) -> None:

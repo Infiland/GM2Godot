@@ -14,6 +14,7 @@ import tracemalloc
 import unittest
 from collections.abc import Collection, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import BinaryIO, Callable
@@ -80,6 +81,72 @@ def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:
                     )
                 )
     return tuple(sorted(debris))
+
+
+class _ModeledWindowsCleanupParentBinding:
+    """Model the path/identity contract of a retained native Windows handle."""
+
+    def __init__(
+        self,
+        path: str,
+        identity: tuple[int, int],
+        *,
+        close_error: BaseException | None = None,
+    ) -> None:
+        self.path = os.path.abspath(path)
+        self.identity = identity
+        self.closed = False
+        self.verify_count = 0
+        self.close_count = 0
+        self.close_error = close_error
+
+    def __enter__(self) -> "_ModeledWindowsCleanupParentBinding":
+        self.verify()
+        return self
+
+    def __exit__(
+        self,
+        _exception_type: object,
+        active_error: BaseException | None,
+        _traceback: object,
+    ) -> None:
+        try:
+            self.close()
+        except BaseException as close_error:
+            if active_error is None:
+                raise
+            active_error.add_note(
+                "Could not close modeled Included Files cleanup parent "
+                f"binding: {close_error}"
+            )
+
+    def verify(self) -> None:
+        self.verify_count += 1
+        if self.closed:
+            raise OSError(f"Included Files cleanup parent binding is closed: {self.path}")
+        try:
+            path_stat = os.lstat(self.path)
+        except OSError as error:
+            raise OSError(
+                f"Included Files cleanup parent changed: {self.path}"
+            ) from error
+        if (
+            included_files_module._included_output_path_is_redirected(
+                self.path,
+                path_stat,
+            )
+            or not stat.S_ISDIR(path_stat.st_mode)
+            or (path_stat.st_dev, path_stat.st_ino) != self.identity
+        ):
+            raise OSError(f"Included Files cleanup parent changed: {self.path}")
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.close_count += 1
+        if self.close_error is not None:
+            raise self.close_error
 
 
 class TestIncludedFilesConverterBasic(unittest.TestCase):
@@ -283,6 +350,12 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
             *,
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
+            windows_source_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
+            windows_destination_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> None:
             original_move(
                 source,
@@ -290,6 +363,10 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
                 expected_identity,
                 source_parent_identity=source_parent_identity,
                 destination_parent_identity=destination_parent_identity,
+                windows_source_parent_binding=windows_source_parent_binding,
+                windows_destination_parent_binding=(
+                    windows_destination_parent_binding
+                ),
             )
             if destination == registry_path:
                 raise OSError("registry publication failed")
@@ -370,6 +447,50 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
     ) -> BinaryIO:
         del deny_writes, no_follow
         return open(path, "rb")
+
+    def _modeled_windows_cleanup_context(
+        self,
+        binding_opener: Callable[
+            [str, tuple[int, int]],
+            _ModeledWindowsCleanupParentBinding,
+        ],
+    ) -> ExitStack:
+        cleanup_context = ExitStack()
+        cleanup_context.enter_context(
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            )
+        )
+        cleanup_context.enter_context(
+            patch.object(included_files_module.os, "name", "nt")
+        )
+        cleanup_context.enter_context(
+            patch.object(included_files_module.sys, "platform", "win32")
+        )
+        cleanup_context.enter_context(
+            patch.object(
+                included_files_module._WindowsIncludedCleanupParentBinding,
+                "open",
+                side_effect=binding_opener,
+            )
+        )
+        cleanup_context.enter_context(
+            patch.object(
+                included_files_module,
+                "_rename_included_transaction_entry",
+                side_effect=os.rename,
+            )
+        )
+        cleanup_context.enter_context(
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            )
+        )
+        return cleanup_context
 
     def _converter(self, *, max_workers: int = 2) -> IncludedFilesConverter:
         return IncludedFilesConverter(
@@ -1154,6 +1275,1210 @@ IncludedFilesConverter(
         )
         self.assertLessEqual(fallback_ancestor_counts[0], 64)
 
+    def test_windows_nested_absent_subtree_skips_descendant_work(self) -> None:
+        root_path = os.path.join(self.godot_dir, "windows-absent-stage")
+        nested_path = os.path.join(root_path, "included_files")
+        deep_path = os.path.join(nested_path, "deep")
+        os.makedirs(deep_path)
+        expected_contents: dict[str, bytes] = {}
+        for index in range(16):
+            filename = f"entry-{index:04d}.txt"
+            content = f"preserved payload {index}\n".encode()
+            expected_contents[filename] = content
+            with open(os.path.join(deep_path, filename), "wb") as entry_file:
+                entry_file.write(content)
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        published_path = os.path.join(
+            self.godot_dir,
+            "windows-published-stage",
+        )
+        os.rename(nested_path, published_path)
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            bindings.append(binding)
+            return binding
+
+        cleanup_file_state = included_files_module._included_cleanup_file_state
+        cleanup_directory_state = (
+            included_files_module._included_cleanup_directory_state
+        )
+        with (
+            self._modeled_windows_cleanup_context(open_binding),
+            patch.object(
+                included_files_module,
+                "_included_cleanup_file_state",
+                wraps=cleanup_file_state,
+            ) as file_state_mock,
+            patch.object(
+                included_files_module,
+                "_included_cleanup_directory_state",
+                wraps=cleanup_directory_state,
+            ) as directory_state_mock,
+        ):
+            warnings = included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "b" * 32,
+                "windows-absent-stage",
+            )
+
+        self.assertEqual(warnings, ())
+        self.assertEqual(file_state_mock.call_count, 0)
+        self.assertEqual(len(bindings), 1)
+        self.assertEqual(bindings[0].path, os.path.abspath(root_path))
+        self.assertTrue(bindings[0].closed)
+        self.assertEqual(bindings[0].close_count, 1)
+        probed_directory_paths = {
+            os.path.abspath(call.args[0])
+            for call in directory_state_mock.call_args_list
+        }
+        self.assertNotIn(os.path.abspath(deep_path), probed_directory_paths)
+        self.assertFalse(os.path.lexists(root_path))
+        published_deep_path = os.path.join(published_path, "deep")
+        self.assertEqual(
+            sorted(os.listdir(published_deep_path)),
+            sorted(expected_contents),
+        )
+        for filename, expected_content in expected_contents.items():
+            with open(
+                os.path.join(published_deep_path, filename),
+                "rb",
+            ) as published_file:
+                self.assertEqual(published_file.read(), expected_content)
+
+    def test_windows_flat_present_cleanup_reuses_one_parent_binding(self) -> None:
+        ancestor_capture_counts: list[int] = []
+        binding_verify_counts: list[int] = []
+
+        for entry_count in (16, 256):
+            with self.subTest(entry_count=entry_count):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"flat-present-{entry_count}",
+                )
+                os.mkdir(root_path)
+                for index in range(entry_count):
+                    with open(
+                        os.path.join(root_path, f"entry-{index:04d}.txt"),
+                        "wb",
+                    ) as entry_file:
+                        entry_file.write(f"payload {index}\n".encode())
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = project_stat.st_dev, project_stat.st_ino
+                snapshot = included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=project_identity,
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+                bindings: list[_ModeledWindowsCleanupParentBinding] = []
+
+                def open_binding(
+                    path: str,
+                    identity: tuple[int, int],
+                ) -> _ModeledWindowsCleanupParentBinding:
+                    binding = _ModeledWindowsCleanupParentBinding(path, identity)
+                    bindings.append(binding)
+                    return binding
+
+                with (
+                    self._modeled_windows_cleanup_context(open_binding),
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_capture,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "c" * 32,
+                            "flat-present",
+                        )
+                )
+
+                self.assertEqual(warnings, ())
+                self.assertEqual(len(bindings), 1)
+                self.assertEqual(bindings[0].path, os.path.abspath(root_path))
+                self.assertEqual(bindings[0].identity, snapshot.identity)
+                self.assertTrue(bindings[0].closed)
+                self.assertEqual(bindings[0].close_count, 1)
+                self.assertFalse(os.path.lexists(root_path))
+                ancestor_capture_counts.append(ancestor_capture.call_count)
+                binding_verify_counts.append(bindings[0].verify_count)
+
+        self.assertEqual(
+            ancestor_capture_counts,
+            [ancestor_capture_counts[0]] * len(ancestor_capture_counts),
+        )
+        self.assertLessEqual(ancestor_capture_counts[0], 32)
+        self.assertGreater(binding_verify_counts[1], binding_verify_counts[0])
+        self.assertLessEqual(
+            binding_verify_counts[1],
+            binding_verify_counts[0] * 16 + 32,
+        )
+
+    def test_windows_nested_same_parent_cleanup_reuses_one_binding(self) -> None:
+        ancestor_capture_counts: list[int] = []
+        nested_verify_counts: list[int] = []
+
+        for entry_count in (16, 256):
+            with self.subTest(entry_count=entry_count):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"nested-same-parent-{entry_count}",
+                )
+                nested_path = os.path.join(root_path, "nested")
+                os.makedirs(nested_path)
+                for index in range(entry_count):
+                    with open(
+                        os.path.join(nested_path, f"entry-{index:04d}.txt"),
+                        "wb",
+                    ) as entry_file:
+                        entry_file.write(f"nested payload {index}\n".encode())
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = project_stat.st_dev, project_stat.st_ino
+                snapshot = included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=project_identity,
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+                bindings: list[_ModeledWindowsCleanupParentBinding] = []
+
+                def open_binding(
+                    path: str,
+                    identity: tuple[int, int],
+                ) -> _ModeledWindowsCleanupParentBinding:
+                    binding = _ModeledWindowsCleanupParentBinding(path, identity)
+                    bindings.append(binding)
+                    return binding
+
+                with (
+                    self._modeled_windows_cleanup_context(open_binding),
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_capture,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "1" * 32,
+                            "nested-same-parent",
+                        )
+                    )
+
+                self.assertEqual(warnings, ())
+                self.assertEqual(len(bindings), 2)
+                self.assertEqual(
+                    [binding.path for binding in bindings],
+                    [os.path.abspath(root_path), os.path.abspath(nested_path)],
+                )
+                self.assertTrue(all(binding.closed for binding in bindings))
+                self.assertTrue(
+                    all(binding.close_count == 1 for binding in bindings)
+                )
+                self.assertFalse(os.path.lexists(root_path))
+                ancestor_capture_counts.append(ancestor_capture.call_count)
+                nested_verify_counts.append(bindings[1].verify_count)
+
+        self.assertEqual(
+            ancestor_capture_counts,
+            [ancestor_capture_counts[0]] * len(ancestor_capture_counts),
+        )
+        self.assertLessEqual(ancestor_capture_counts[0], 32)
+        self.assertGreater(nested_verify_counts[1], nested_verify_counts[0])
+        self.assertLessEqual(
+            nested_verify_counts[1],
+            nested_verify_counts[0] * 16 + 32,
+        )
+
+    def test_windows_multilevel_cleanup_binding_operations_are_linear(
+        self,
+    ) -> None:
+        ancestor_capture_counts: list[int] = []
+        binding_open_counts: list[int] = []
+        binding_verify_counts: list[int] = []
+
+        for branch_count in (16, 256):
+            with self.subTest(branch_count=branch_count):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"nested-branches-{branch_count}",
+                )
+                os.mkdir(root_path)
+                branch_paths: list[tuple[str, str]] = []
+                for index in range(branch_count):
+                    branch_path = os.path.join(
+                        root_path,
+                        f"branch-{index:04d}",
+                    )
+                    leaf_path = os.path.join(branch_path, "leaf")
+                    os.makedirs(leaf_path)
+                    with open(
+                        os.path.join(leaf_path, "payload.bin"),
+                        "wb",
+                    ) as payload_file:
+                        payload_file.write(
+                            f"multilevel payload {index}\n".encode()
+                        )
+                    branch_paths.append((branch_path, leaf_path))
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = project_stat.st_dev, project_stat.st_ino
+                snapshot = included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=project_identity,
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+                bindings: list[_ModeledWindowsCleanupParentBinding] = []
+                maximum_live_bindings = 0
+
+                def open_binding(
+                    path: str,
+                    identity: tuple[int, int],
+                ) -> _ModeledWindowsCleanupParentBinding:
+                    nonlocal maximum_live_bindings
+                    binding = _ModeledWindowsCleanupParentBinding(path, identity)
+                    bindings.append(binding)
+                    maximum_live_bindings = max(
+                        maximum_live_bindings,
+                        sum(not candidate.closed for candidate in bindings),
+                    )
+                    return binding
+
+                with (
+                    self._modeled_windows_cleanup_context(open_binding),
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_capture,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "2" * 32,
+                            "nested-branches",
+                        )
+                    )
+
+                self.assertEqual(warnings, ())
+                self.assertEqual(
+                    len(bindings),
+                    1 + branch_count * 3,
+                )
+                self.assertEqual(maximum_live_bindings, 3)
+                self.assertTrue(all(binding.closed for binding in bindings))
+                self.assertTrue(
+                    all(binding.close_count == 1 for binding in bindings)
+                )
+                path_open_counts: dict[str, int] = {}
+                for binding in bindings:
+                    path_open_counts[binding.path] = (
+                        path_open_counts.get(binding.path, 0) + 1
+                    )
+                self.assertEqual(path_open_counts[os.path.abspath(root_path)], 1)
+                for branch_path, leaf_path in branch_paths:
+                    self.assertEqual(
+                        path_open_counts[os.path.abspath(branch_path)],
+                        2,
+                    )
+                    self.assertEqual(
+                        path_open_counts[os.path.abspath(leaf_path)],
+                        1,
+                    )
+                self.assertFalse(os.path.lexists(root_path))
+                ancestor_capture_counts.append(ancestor_capture.call_count)
+                binding_open_counts.append(len(bindings))
+                binding_verify_counts.append(
+                    sum(binding.verify_count for binding in bindings)
+                )
+
+        self.assertEqual(
+            ancestor_capture_counts,
+            [ancestor_capture_counts[0]] * len(ancestor_capture_counts),
+        )
+        self.assertLessEqual(ancestor_capture_counts[0], 32)
+        self.assertEqual(binding_open_counts, [49, 769])
+        self.assertGreater(binding_verify_counts[1], binding_verify_counts[0])
+        self.assertLessEqual(
+            binding_verify_counts[1],
+            binding_verify_counts[0] * 16 + 64,
+        )
+
+    def test_windows_cleanup_binding_operations_scale_with_depth(self) -> None:
+        total_entry_count = 40
+        metrics: list[tuple[int, int, int, int, int, int]] = []
+
+        for depth in (1, 8, 32):
+            with self.subTest(depth=depth):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"depth-sweep-{depth}",
+                )
+                os.mkdir(root_path)
+                leaf_directory = root_path
+                for _index in range(depth):
+                    leaf_directory = os.path.join(leaf_directory, "d")
+                    os.mkdir(leaf_directory)
+                for index in range(total_entry_count - depth):
+                    with open(
+                        os.path.join(leaf_directory, f"entry-{index:04d}.txt"),
+                        "wb",
+                    ) as entry_file:
+                        entry_file.write(f"depth payload {index}\n".encode())
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = project_stat.st_dev, project_stat.st_ino
+                with patch.object(
+                    included_files_module,
+                    "_included_descriptor_paths_supported",
+                    return_value=False,
+                ):
+                    snapshot = included_files_module._capture_included_tree(
+                        root_path,
+                        expected_parent_identity=project_identity,
+                    )
+                self.assertEqual(len(snapshot.entries), total_entry_count)
+
+                bindings: list[_ModeledWindowsCleanupParentBinding] = []
+                maximum_live_bindings = 0
+
+                def open_binding(
+                    path: str,
+                    identity: tuple[int, int],
+                ) -> _ModeledWindowsCleanupParentBinding:
+                    nonlocal maximum_live_bindings
+                    binding = _ModeledWindowsCleanupParentBinding(path, identity)
+                    # The real native ``open`` verifies its new handle once
+                    # before returning it. Keep that verification in these
+                    # operation counts even though the handle itself is modeled.
+                    binding.verify()
+                    bindings.append(binding)
+                    maximum_live_bindings = max(
+                        maximum_live_bindings,
+                        sum(not candidate.closed for candidate in bindings),
+                    )
+                    return binding
+
+                binding_opener = MagicMock(side_effect=open_binding)
+                verify_parent_binding = (
+                    included_files_module._verify_windows_included_cleanup_parent_binding
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+                with (
+                    self._modeled_windows_cleanup_context(binding_opener),
+                    patch.object(
+                        included_files_module,
+                        "_verify_windows_included_cleanup_parent_binding",
+                        wraps=verify_parent_binding,
+                    ) as parent_binding_verifier,
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_capture,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "7" * 32,
+                            "depth-sweep",
+                        )
+                    )
+
+                expected_open_count = depth * 2
+                # With the entry count fixed, exchanging one leaf file for one
+                # directory adds only five retained-parent checks. It must not
+                # cause every entry to walk the complete ancestor chain.
+                expected_helper_verify_count = (
+                    total_entry_count * 19 + depth * 5 - 2
+                )
+                expected_native_verify_count = (
+                    expected_helper_verify_count + expected_open_count
+                )
+                self.assertEqual(warnings, ())
+                self.assertEqual(binding_opener.call_count, expected_open_count)
+                self.assertEqual(
+                    parent_binding_verifier.call_count,
+                    expected_helper_verify_count,
+                )
+                self.assertEqual(
+                    sum(binding.verify_count for binding in bindings),
+                    expected_native_verify_count,
+                )
+                self.assertEqual(ancestor_capture.call_count, 14)
+                self.assertEqual(maximum_live_bindings, depth + 1)
+                self.assertTrue(all(binding.closed for binding in bindings))
+                self.assertTrue(
+                    all(binding.close_count == 1 for binding in bindings)
+                )
+                self.assertFalse(os.path.lexists(root_path))
+                metrics.append(
+                    (
+                        depth,
+                        binding_opener.call_count,
+                        parent_binding_verifier.call_count,
+                        sum(binding.verify_count for binding in bindings),
+                        ancestor_capture.call_count,
+                        maximum_live_bindings,
+                    )
+                )
+
+        self.assertEqual(
+            metrics,
+            [
+                (1, 2, 763, 765, 14, 2),
+                (8, 16, 798, 814, 14, 9),
+                (32, 64, 918, 982, 14, 33),
+            ],
+        )
+
+    def test_windows_present_cleanup_chain_exceeds_recursion_limit(self) -> None:
+        depth = 128
+        modeled_recursion_limit = 80
+        self.assertGreater(depth, modeled_recursion_limit)
+
+        root_path = os.path.join(self.godot_dir, "iterative-depth")
+        os.mkdir(root_path)
+        leaf_directory = root_path
+        for _index in range(depth):
+            leaf_directory = os.path.join(leaf_directory, "d")
+            os.mkdir(leaf_directory)
+        payload_path = os.path.join(leaf_directory, "payload.txt")
+        with open(payload_path, "wb") as payload_file:
+            payload_file.write(b"deep iterative cleanup payload\n")
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        with patch.object(
+            included_files_module,
+            "_included_descriptor_paths_supported",
+            return_value=False,
+        ):
+            snapshot = included_files_module._capture_included_tree(
+                root_path,
+                expected_parent_identity=project_identity,
+            )
+        self.assertEqual(len(snapshot.entries), depth + 1)
+
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+        maximum_live_bindings = 0
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            nonlocal maximum_live_bindings
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            binding.verify()
+            bindings.append(binding)
+            maximum_live_bindings = max(
+                maximum_live_bindings,
+                sum(not candidate.closed for candidate in bindings),
+            )
+            return binding
+
+        binding_opener = MagicMock(side_effect=open_binding)
+        with self._modeled_windows_cleanup_context(binding_opener):
+            previous_recursion_limit = sys.getrecursionlimit()
+            sys.setrecursionlimit(modeled_recursion_limit)
+            try:
+                warnings = included_files_module._cleanup_recorded_included_tree(
+                    root_path,
+                    snapshot,
+                    project_identity,
+                    "8" * 32,
+                    "iterative-depth",
+                )
+            finally:
+                sys.setrecursionlimit(previous_recursion_limit)
+
+        self.assertEqual(warnings, ())
+        self.assertEqual(binding_opener.call_count, depth * 2)
+        self.assertEqual(maximum_live_bindings, depth + 1)
+        self.assertTrue(all(binding.closed for binding in bindings))
+        self.assertTrue(all(binding.close_count == 1 for binding in bindings))
+        self.assertFalse(os.path.lexists(payload_path))
+        self.assertFalse(os.path.lexists(root_path))
+
+    def test_windows_nested_bindings_close_before_parent_removal(self) -> None:
+        root_path = os.path.join(self.godot_dir, "nested-binding-lifetime")
+        nested_path = os.path.join(root_path, "nested")
+        deep_path = os.path.join(nested_path, "deep")
+        os.makedirs(deep_path)
+        payload_path = os.path.join(deep_path, "payload.txt")
+        with open(payload_path, "wb") as payload_file:
+            payload_file.write(b"binding lifetime payload\n")
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+        live_bindings_before_move: dict[str, frozenset[str]] = {}
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            bindings.append(binding)
+            return binding
+
+        def record_live_bindings(source: str, _destination: str) -> None:
+            live_bindings_before_move[os.path.abspath(source)] = frozenset(
+                binding.path for binding in bindings if not binding.closed
+            )
+
+        with (
+            self._modeled_windows_cleanup_context(open_binding),
+            patch.object(
+                included_files_module,
+                "_before_included_transaction_rename_fallback",
+                side_effect=record_live_bindings,
+            ),
+        ):
+            warnings = included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "3" * 32,
+                "nested-lifetime",
+            )
+
+        absolute_root = os.path.abspath(root_path)
+        absolute_nested = os.path.abspath(nested_path)
+        absolute_deep = os.path.abspath(deep_path)
+        self.assertEqual(warnings, ())
+        self.assertEqual(
+            live_bindings_before_move[os.path.abspath(payload_path)],
+            frozenset({absolute_root, absolute_nested, absolute_deep}),
+        )
+        self.assertEqual(
+            live_bindings_before_move[absolute_deep],
+            frozenset({absolute_root, absolute_nested}),
+        )
+        self.assertEqual(
+            live_bindings_before_move[absolute_nested],
+            frozenset({absolute_root}),
+        )
+        self.assertEqual(
+            live_bindings_before_move[absolute_root],
+            frozenset(),
+        )
+        self.assertTrue(all(binding.closed for binding in bindings))
+        self.assertTrue(all(binding.close_count == 1 for binding in bindings))
+        self.assertFalse(os.path.lexists(root_path))
+
+    def test_windows_child_binding_open_rechecks_nested_parent(self) -> None:
+        root_path = os.path.join(self.godot_dir, "nested-open-race")
+        outer_path = os.path.join(root_path, "outer")
+        parked_outer_path = os.path.join(root_path, "outer-parked")
+        inner_path = os.path.join(outer_path, "inner")
+        owned_path = os.path.join(inner_path, "owned.txt")
+        os.makedirs(inner_path)
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(b"recorded acquisition-race content\n")
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+        parent_changed = False
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            nonlocal parent_changed
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            bindings.append(binding)
+            if (
+                not parent_changed
+                and os.path.abspath(path) == os.path.abspath(inner_path)
+            ):
+                self.assertTrue(
+                    any(
+                        candidate.path == os.path.abspath(outer_path)
+                        and not candidate.closed
+                        for candidate in bindings
+                    )
+                )
+                os.rename(outer_path, parked_outer_path)
+                os.makedirs(inner_path)
+                with open(owned_path, "wb") as replacement_file:
+                    replacement_file.write(b"unknown acquisition replacement\n")
+                parent_changed = True
+            return binding
+
+        with (
+            self._modeled_windows_cleanup_context(open_binding),
+            self.assertRaisesRegex(OSError, "cleanup parent changed"),
+        ):
+            included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "5" * 32,
+                "nested-open-race",
+            )
+
+        self.assertTrue(parent_changed)
+        self.assertEqual(len(bindings), 4)
+        self.assertTrue(all(binding.closed for binding in bindings))
+        self.assertTrue(all(binding.close_count == 1 for binding in bindings))
+        self.assertEqual(bindings[-1].path, os.path.abspath(inner_path))
+        with open(
+            os.path.join(parked_outer_path, "inner", "owned.txt"),
+            "rb",
+        ) as parked_file:
+            self.assertEqual(
+                parked_file.read(),
+                b"recorded acquisition-race content\n",
+            )
+        with open(owned_path, "rb") as replacement_file:
+            self.assertEqual(
+                replacement_file.read(),
+                b"unknown acquisition replacement\n",
+            )
+
+    def test_windows_nested_cleanup_keeps_primary_close_errors_as_notes(
+        self,
+    ) -> None:
+        root_path = os.path.join(self.godot_dir, "nested-close-errors")
+        nested_path = os.path.join(root_path, "nested")
+        owned_path = os.path.join(nested_path, "owned.txt")
+        os.makedirs(nested_path)
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(b"nested close-error content\n")
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        primary_error = RuntimeError("injected nested cleanup interruption")
+        root_close_error = OSError("injected root binding close failure")
+        nested_close_error = OSError("injected nested binding close failure")
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            close_error = (
+                root_close_error
+                if os.path.abspath(path) == os.path.abspath(root_path)
+                else nested_close_error
+            )
+            binding = _ModeledWindowsCleanupParentBinding(
+                path,
+                identity,
+                close_error=close_error,
+            )
+            bindings.append(binding)
+            return binding
+
+        def interrupt_after_quarantine(phase: str) -> None:
+            if phase == (
+                "cleanup:nested-close-errors:nested/owned.txt:quarantined"
+            ):
+                raise primary_error
+
+        with (
+            self._modeled_windows_cleanup_context(open_binding),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=interrupt_after_quarantine,
+            ),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "6" * 32,
+                "nested-close-errors",
+            )
+
+        self.assertIs(raised.exception, primary_error)
+        notes = getattr(raised.exception, "__notes__", ())
+        self.assertTrue(
+            any(str(nested_close_error) in note for note in notes),
+            notes,
+        )
+        self.assertTrue(
+            any(str(root_close_error) in note for note in notes),
+            notes,
+        )
+        self.assertEqual(len(bindings), 2)
+        self.assertTrue(all(binding.closed for binding in bindings))
+        self.assertTrue(all(binding.close_count == 1 for binding in bindings))
+        self.assertFalse(os.path.lexists(owned_path))
+        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+            owned_path,
+            "6" * 32,
+            "nested-close-errors",
+            "nested/owned.txt",
+            expect_directory=False,
+        )
+        self.assertTrue(os.path.isfile(tombstone_path))
+
+    def _assert_windows_nested_cleanup_parent_change_is_preserved(
+        self,
+        *,
+        install_replacement: bool,
+    ) -> None:
+        label = "replacement" if install_replacement else "relocation"
+        root_path = os.path.join(self.godot_dir, f"nested-parent-{label}")
+        nested_path = os.path.join(root_path, "nested")
+        parked_path = os.path.join(root_path, "nested-parked")
+        owned_path = os.path.join(nested_path, "owned.txt")
+        os.makedirs(nested_path)
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(b"recorded nested content\n")
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+        parent_changed = False
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            bindings.append(binding)
+            return binding
+
+        def change_parent_before_move(source: str, _destination: str) -> None:
+            nonlocal parent_changed
+            if parent_changed or os.path.abspath(source) != os.path.abspath(
+                owned_path
+            ):
+                return
+            os.rename(nested_path, parked_path)
+            if install_replacement:
+                os.mkdir(nested_path)
+                with open(owned_path, "wb") as replacement_file:
+                    replacement_file.write(b"unknown nested replacement\n")
+            parent_changed = True
+
+        with (
+            self._modeled_windows_cleanup_context(open_binding),
+            patch.object(
+                included_files_module,
+                "_before_included_transaction_rename_fallback",
+                side_effect=change_parent_before_move,
+            ),
+            self.assertRaisesRegex(OSError, "cleanup parent changed"),
+        ):
+            included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "4" * 32,
+                f"nested-parent-{label}",
+            )
+
+        self.assertTrue(parent_changed)
+        self.assertEqual(len(bindings), 2)
+        self.assertTrue(all(binding.closed for binding in bindings))
+        self.assertTrue(all(binding.close_count == 1 for binding in bindings))
+        with open(
+            os.path.join(parked_path, "owned.txt"),
+            "rb",
+        ) as parked_file:
+            self.assertEqual(parked_file.read(), b"recorded nested content\n")
+        if install_replacement:
+            with open(owned_path, "rb") as replacement_file:
+                self.assertEqual(
+                    replacement_file.read(),
+                    b"unknown nested replacement\n",
+                )
+        else:
+            self.assertFalse(os.path.lexists(nested_path))
+
+    def test_windows_nested_cleanup_rejects_parent_relocation(self) -> None:
+        self._assert_windows_nested_cleanup_parent_change_is_preserved(
+            install_replacement=False,
+        )
+
+    def test_windows_nested_cleanup_rejects_parent_replacement(self) -> None:
+        self._assert_windows_nested_cleanup_parent_change_is_preserved(
+            install_replacement=True,
+        )
+
+    def test_windows_flat_readonly_cleanup_reuses_parent_binding(self) -> None:
+        ancestor_capture_counts: list[int] = []
+
+        for entry_count in (16, 256):
+            with self.subTest(entry_count=entry_count):
+                root_path = os.path.join(
+                    self.godot_dir,
+                    f"flat-readonly-{entry_count}",
+                )
+                os.mkdir(root_path)
+                for index in range(entry_count):
+                    entry_path = os.path.join(
+                        root_path,
+                        f"entry-{index:04d}.txt",
+                    )
+                    with open(entry_path, "wb") as entry_file:
+                        entry_file.write(f"readonly payload {index}\n".encode())
+                    os.chmod(entry_path, 0o400)
+
+                project_stat = os.lstat(self.godot_dir)
+                project_identity = project_stat.st_dev, project_stat.st_ino
+                snapshot = included_files_module._capture_included_tree(
+                    root_path,
+                    expected_parent_identity=project_identity,
+                )
+                capture_ancestors = (
+                    included_files_module._capture_fallback_directory_ancestors
+                )
+                supports_without_chmod = set(os.supports_fd)
+                supports_without_chmod.discard(os.chmod)
+                bindings: list[_ModeledWindowsCleanupParentBinding] = []
+
+                def open_binding(
+                    path: str,
+                    identity: tuple[int, int],
+                ) -> _ModeledWindowsCleanupParentBinding:
+                    binding = _ModeledWindowsCleanupParentBinding(path, identity)
+                    bindings.append(binding)
+                    return binding
+
+                with (
+                    patch.object(
+                        included_files_module,
+                        "_included_descriptor_paths_supported",
+                        return_value=False,
+                    ),
+                    patch.object(included_files_module.os, "name", "nt"),
+                    patch.object(included_files_module.sys, "platform", "win32"),
+                    patch.object(
+                        included_files_module.os,
+                        "supports_fd",
+                        supports_without_chmod,
+                    ),
+                    patch.object(
+                        included_files_module._WindowsIncludedCleanupParentBinding,
+                        "open",
+                        side_effect=open_binding,
+                    ) as binding_open,
+                    patch.object(
+                        included_files_module,
+                        "_rename_included_transaction_entry",
+                        side_effect=os.rename,
+                    ),
+                    patch.object(
+                        included_files_module,
+                        "_open_included_file_validation_stream",
+                        side_effect=self._open_modeled_windows_validation_stream,
+                    ),
+                    patch.object(
+                        included_files_module,
+                        "_capture_fallback_directory_ancestors",
+                        wraps=capture_ancestors,
+                    ) as ancestor_capture,
+                    patch.object(
+                        included_files_module,
+                        "_before_included_fallback_chmod_open",
+                    ) as chmod_open,
+                ):
+                    warnings = (
+                        included_files_module._cleanup_recorded_included_tree(
+                            root_path,
+                            snapshot,
+                            project_identity,
+                            "e" * 32,
+                            "flat-readonly",
+                        )
+                    )
+
+                self.assertEqual(warnings, ())
+                binding_open.assert_called_once_with(root_path, snapshot.identity)
+                self.assertEqual(chmod_open.call_count, entry_count)
+                self.assertEqual(len(bindings), 1)
+                self.assertTrue(bindings[0].closed)
+                self.assertEqual(bindings[0].close_count, 1)
+                self.assertFalse(os.path.lexists(root_path))
+                ancestor_capture_counts.append(ancestor_capture.call_count)
+
+        self.assertEqual(
+            ancestor_capture_counts,
+            [ancestor_capture_counts[0]] * len(ancestor_capture_counts),
+        )
+        self.assertLessEqual(ancestor_capture_counts[0], 32)
+
+    def test_windows_flat_readonly_cleanup_keeps_primary_close_error(self) -> None:
+        root_path = os.path.join(self.godot_dir, "flat-readonly-close-error")
+        os.mkdir(root_path)
+        owned_path = os.path.join(root_path, "owned.txt")
+        content = b"readonly close-error payload\n"
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(content)
+        os.chmod(owned_path, 0o400)
+
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        root_identity = snapshot.identity
+        if root_identity is None:
+            self.fail("captured read-only cleanup root unexpectedly disappeared")
+        kernel32 = MagicMock()
+        kernel32.GetFileType.return_value = (
+            included_files_module._WINDOWS_FILE_TYPE_DISK
+        )
+        kernel32.CloseHandle.return_value = 0
+        binding = included_files_module._WindowsIncludedCleanupParentBinding(
+            path=os.path.abspath(root_path),
+            identity=root_identity,
+            kernel32=kernel32,
+            handle=1234,
+        )
+        supports_without_chmod = set(os.supports_fd)
+        supports_without_chmod.discard(os.chmod)
+        primary_error = RuntimeError("injected read-only cleanup interruption")
+        close_error = OSError("injected cleanup parent close failure")
+
+        def interrupt_after_readonly_clear(phase: str) -> None:
+            if phase == "cleanup-readonly-cleared":
+                raise primary_error
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(
+                included_files_module.os,
+                "supports_fd",
+                supports_without_chmod,
+            ),
+            patch.object(
+                included_files_module._WindowsIncludedCleanupParentBinding,
+                "open",
+                return_value=binding,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_identity",
+                return_value=root_identity,
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_cleanup_parent_attributes",
+                return_value=(
+                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                ),
+            ),
+            patch.object(
+                included_files_module,
+                "_windows_included_transaction_error",
+                return_value=close_error,
+            ),
+            patch.object(
+                included_files_module,
+                "_rename_included_transaction_entry",
+                side_effect=os.rename,
+            ),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
+            patch.object(
+                included_files_module,
+                "_after_included_transaction_phase",
+                side_effect=interrupt_after_readonly_clear,
+            ),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "f" * 32,
+                "flat-readonly-close-error",
+            )
+
+        self.assertIs(raised.exception, primary_error)
+        self.assertTrue(
+            any(
+                "Could not close Included Files cleanup parent binding"
+                in note
+                and str(close_error) in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+        self.assertIsNone(binding.handle)
+        kernel32.CloseHandle.assert_called_once_with(1234)
+        self.assertFalse(os.path.lexists(owned_path))
+        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+            owned_path,
+            "f" * 32,
+            "flat-readonly-close-error",
+            "owned.txt",
+            expect_directory=False,
+        )
+        self.assertTrue(os.lstat(tombstone_path).st_mode & stat.S_IWRITE)
+
+    def _assert_windows_flat_cleanup_parent_change_is_preserved(
+        self,
+        *,
+        install_replacement: bool,
+    ) -> None:
+        label = "replacement" if install_replacement else "relocation"
+        root_path = os.path.join(self.godot_dir, f"flat-parent-{label}")
+        parked_path = root_path + "-parked"
+        owned_path = os.path.join(root_path, "owned.txt")
+        os.mkdir(root_path)
+        with open(owned_path, "wb") as owned_file:
+            owned_file.write(b"recorded owned content\n")
+        project_stat = os.lstat(self.godot_dir)
+        project_identity = project_stat.st_dev, project_stat.st_ino
+        snapshot = included_files_module._capture_included_tree(
+            root_path,
+            expected_parent_identity=project_identity,
+        )
+        bindings: list[_ModeledWindowsCleanupParentBinding] = []
+        parent_changed = False
+
+        def open_binding(
+            path: str,
+            identity: tuple[int, int],
+        ) -> _ModeledWindowsCleanupParentBinding:
+            binding = _ModeledWindowsCleanupParentBinding(path, identity)
+            bindings.append(binding)
+            return binding
+
+        def change_parent_before_move(_source: str, _destination: str) -> None:
+            nonlocal parent_changed
+            if parent_changed:
+                return
+            os.rename(root_path, parked_path)
+            if install_replacement:
+                os.mkdir(root_path)
+                with open(owned_path, "wb") as replacement_file:
+                    replacement_file.write(b"unknown replacement content\n")
+            parent_changed = True
+
+        with (
+            patch.object(
+                included_files_module,
+                "_included_descriptor_paths_supported",
+                return_value=False,
+            ),
+            patch.object(included_files_module.os, "name", "nt"),
+            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(
+                included_files_module._WindowsIncludedCleanupParentBinding,
+                "open",
+                side_effect=open_binding,
+            ),
+            patch.object(
+                included_files_module,
+                "_rename_included_transaction_entry",
+                side_effect=os.rename,
+            ),
+            patch.object(
+                included_files_module,
+                "_open_included_file_validation_stream",
+                side_effect=self._open_modeled_windows_validation_stream,
+            ),
+            patch.object(
+                included_files_module,
+                "_before_included_transaction_rename_fallback",
+                side_effect=change_parent_before_move,
+            ),
+            self.assertRaisesRegex(OSError, "cleanup parent changed"),
+        ):
+            included_files_module._cleanup_recorded_included_tree(
+                root_path,
+                snapshot,
+                project_identity,
+                "d" * 32,
+                f"flat-parent-{label}",
+            )
+
+        self.assertTrue(parent_changed)
+        self.assertEqual(len(bindings), 1)
+        self.assertTrue(bindings[0].closed)
+        self.assertEqual(bindings[0].close_count, 1)
+        with open(
+            os.path.join(parked_path, "owned.txt"),
+            "rb",
+        ) as parked_file:
+            self.assertEqual(parked_file.read(), b"recorded owned content\n")
+        if install_replacement:
+            with open(owned_path, "rb") as replacement_file:
+                self.assertEqual(
+                    replacement_file.read(),
+                    b"unknown replacement content\n",
+                )
+        else:
+            self.assertFalse(os.path.lexists(root_path))
+
+    def test_windows_flat_cleanup_rejects_parent_relocation(self) -> None:
+        self._assert_windows_flat_cleanup_parent_change_is_preserved(
+            install_replacement=False,
+        )
+
+    def test_windows_flat_cleanup_rejects_parent_replacement(self) -> None:
+        self._assert_windows_flat_cleanup_parent_change_is_preserved(
+            install_replacement=True,
+        )
+
     def test_cleanup_preserves_directory_that_reappears_after_absence_proof(
         self,
     ) -> None:
@@ -1182,12 +2507,17 @@ IncludedFilesConverter(
             path: str,
             expected_identity: tuple[int, int],
             expected_parent_identity: tuple[int, int],
+            *,
+            windows_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> bool | None:
             nonlocal replacement_created
             state = cleanup_directory_state(
                 path,
                 expected_identity,
                 expected_parent_identity,
+                windows_parent_binding=windows_parent_binding,
             )
             if (
                 not replacement_created
@@ -6813,6 +8143,12 @@ os._exit(88)
             *,
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
+            windows_source_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
+            windows_destination_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> None:
             nonlocal publication_failed
             original_move(
@@ -6821,6 +8157,10 @@ os._exit(88)
                 expected_identity,
                 source_parent_identity=source_parent_identity,
                 destination_parent_identity=destination_parent_identity,
+                windows_source_parent_binding=windows_source_parent_binding,
+                windows_destination_parent_binding=(
+                    windows_destination_parent_binding
+                ),
             )
             if destination == final_registry_path and not publication_failed:
                 publication_failed = True
@@ -9465,6 +10805,12 @@ os._exit(88)
             *,
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
+            windows_source_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
+            windows_destination_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> None:
             if (
                 destination == final_root_path
@@ -9477,6 +10823,10 @@ os._exit(88)
                 expected_identity,
                 source_parent_identity=source_parent_identity,
                 destination_parent_identity=destination_parent_identity,
+                windows_source_parent_binding=windows_source_parent_binding,
+                windows_destination_parent_binding=(
+                    windows_destination_parent_binding
+                ),
             )
 
         with patch.object(
@@ -9626,6 +10976,12 @@ os._exit(88)
             *,
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
+            windows_source_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
+            windows_destination_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> None:
             nonlocal publication_failed
             original_move(
@@ -9634,6 +10990,10 @@ os._exit(88)
                 expected_identity,
                 source_parent_identity=source_parent_identity,
                 destination_parent_identity=destination_parent_identity,
+                windows_source_parent_binding=windows_source_parent_binding,
+                windows_destination_parent_binding=(
+                    windows_destination_parent_binding
+                ),
             )
             if destination == final_registry_path and not publication_failed:
                 publication_failed = True
@@ -9711,6 +11071,12 @@ os._exit(88)
             *,
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
+            windows_source_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
+            windows_destination_parent_binding: (
+                included_files_module._WindowsIncludedCleanupParentBinding | None
+            ) = None,
         ) -> None:
             nonlocal cancellation_injected
             original_move(
@@ -9719,6 +11085,10 @@ os._exit(88)
                 expected_identity,
                 source_parent_identity=source_parent_identity,
                 destination_parent_identity=destination_parent_identity,
+                windows_source_parent_binding=windows_source_parent_binding,
+                windows_destination_parent_binding=(
+                    windows_destination_parent_binding
+                ),
             )
             if destination == final_registry_path and not cancellation_injected:
                 cancellation_injected = True

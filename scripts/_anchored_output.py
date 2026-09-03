@@ -2280,6 +2280,30 @@ def _publish_windows_receipt_bytes(
                         "the valid public receipt was left untouched."
                     )
             if outcome is None and loaded_windows_receipt.is_windows_publication_unavailable(error):
+                diagnostic_parts = [
+                    f"type={type(error).__name__}",
+                    f"errno={getattr(error, 'errno', None)}",
+                    f"message={error}",
+                ]
+                nt_operation = getattr(error, "_windows_receipt_nt_operation", None)
+                nt_status = getattr(error, "_windows_receipt_nt_status", None)
+                if nt_operation is not None:
+                    diagnostic_parts.append(f"nt_operation={nt_operation}")
+                if nt_status is not None:
+                    diagnostic_parts.append(f"nt_status=0x{int(nt_status):08X}")
+                native_cause = error.__cause__
+                if isinstance(native_cause, OSError):
+                    diagnostic_parts.extend(
+                        (
+                            f"cause_type={type(native_cause).__name__}",
+                            f"cause_errno={native_cause.errno}",
+                            f"cause_message={native_cause}",
+                        )
+                    )
+                error.add_note(
+                    "Windows retained-handle publication diagnostic: "
+                    + "; ".join(diagnostic_parts)
+                )
                 translated = _translated_anchored_output_error(
                     error,
                     "output-anchor-unavailable",

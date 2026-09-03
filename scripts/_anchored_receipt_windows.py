@@ -18,6 +18,7 @@ WCHAR = ctypes.c_uint16
 USHORT = ctypes.c_uint16
 ULONG = ctypes.c_uint32
 NTSTATUS = ctypes.c_int32
+FILE_INFORMATION_CLASS = ctypes.c_int32
 ULONG_PTR = ctypes.c_size_t
 
 
@@ -37,7 +38,6 @@ FILE_TYPE_DISK = 1
 FILE_BEGIN = 0
 FILE_BASIC_INFO = 0
 FILE_STANDARD_INFO = 1
-FILE_RENAME_INFO = 3
 FILE_DISPOSITION_INFO = 4
 FILE_ID_INFO = 18
 ERROR_FILE_EXISTS = 80
@@ -55,12 +55,14 @@ FILE_CREATE = 0x00000002
 FILE_OPEN_IF = 0x00000003
 FILE_OPENED = 0x00000001
 FILE_CREATED = 0x00000002
+FILE_RENAME_INFORMATION = 10
 FILE_DIRECTORY_FILE = 0x00000001
 FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
 FILE_NON_DIRECTORY_FILE = 0x00000040
 FILE_OPEN_REPARSE_POINT = 0x00200000
 STATUS_OBJECT_NAME_COLLISION = 0xC0000035
 STATUS_FILE_IS_A_DIRECTORY = 0xC00000BA
+STATUS_PENDING = 0x00000103
 
 _WINDOWS_CLOSE_RESULT_PENDING = object()
 _WINDOWS_CLOSE_ERROR_PENDING = object()
@@ -125,7 +127,7 @@ class _FileDispositionInfo(ctypes.Structure):
     _fields_ = (("DeleteFile", BOOLEAN),)
 
 
-class _FileRenameInfo(ctypes.Structure):
+class _FileRenameInformation(ctypes.Structure):
     _fields_ = (
         ("ReplaceIfExists", BOOLEAN),
         ("RootDirectory", ctypes.c_void_p),
@@ -363,11 +365,11 @@ def _translated_windows_validation_error(
 
 
 class _DefiniteRenameError(OSError):
-    """A FileRenameInfo call returned FALSE without changing namespace state."""
+    """NtSetInformationFile returned a definite failure before renaming."""
 
 
 class _DefiniteRenameCollision(FileExistsError):
-    """A FileRenameInfo call returned FALSE with a destination collision."""
+    """NtSetInformationFile returned a definite destination collision."""
 
 
 class _StageNameCollision(FileExistsError):
@@ -470,6 +472,14 @@ def _configure_nt_api(api: Any) -> Any:
         ULONG,
     )
     api.NtCreateFile.restype = NTSTATUS
+    api.NtSetInformationFile.argtypes = (
+        ctypes.c_void_p,
+        ctypes.POINTER(_IoStatusBlock),
+        ctypes.c_void_p,
+        ULONG,
+        FILE_INFORMATION_CLASS,
+    )
+    api.NtSetInformationFile.restype = NTSTATUS
     api.RtlNtStatusToDosError.argtypes = (NTSTATUS,)
     api.RtlNtStatusToDosError.restype = ULONG
     return api
@@ -841,37 +851,71 @@ def _read_candidate(api: Any, handle: int, maximum: int) -> bytes:
     return bytes(output)
 
 
-def _prepare_rename(parent_handle: int, leaf: str) -> tuple[ctypes.Array[ctypes.c_char], int]:
+def _prepare_rename(leaf: str) -> tuple[ctypes.Array[ctypes.c_char], int]:
     _validate_windows_relative_leaf(leaf)
     encoded = leaf.encode("utf-16-le")
-    logical_size = _FileRenameInfo.FileName.offset + len(encoded)
-    storage = ctypes.create_string_buffer(max(ctypes.sizeof(_FileRenameInfo), logical_size))
-    rename = _FileRenameInfo.from_buffer(storage)
+    # Microsoft requires at least sizeof(FILE_RENAME_INFORMATION) plus the
+    # byte length of FileName, even though FileName[1] is part of sizeof.
+    allocation_size = ctypes.sizeof(_FileRenameInformation) + len(encoded)
+    storage = ctypes.create_string_buffer(allocation_size)
+    rename = _FileRenameInformation.from_buffer(storage)
     rename.ReplaceIfExists = 0
-    rename.RootDirectory = parent_handle
+    # This is the native FILE_RENAME_INFORMATION contract, not the public
+    # FILE_RENAME_INFO wrapper contract. A simple name with a NULL root
+    # renames within the open source handle's existing directory, so no
+    # process-relative path is resolved during publication.
+    rename.RootDirectory = None
     rename.FileNameLength = len(encoded)
-    ctypes.memmove(ctypes.addressof(storage) + _FileRenameInfo.FileName.offset, encoded, len(encoded))
+    ctypes.memmove(
+        ctypes.addressof(storage) + _FileRenameInformation.FileName.offset,
+        encoded,
+        len(encoded),
+    )
 
     return storage, len(storage)
 
 
 def _rename(
-    api: Any,
+    nt_api: Any,
     handle: int,
     storage: ctypes.Array[ctypes.c_char],
     allocation_size: int,
     leaf: str,
 ) -> None:
-    """Make the single native rename call and classify only a FALSE return."""
-    if not api.SetFileInformationByHandle(handle, FILE_RENAME_INFO, storage, allocation_size):
-        error = _failure(api, "FileRenameInfo")
-        if error.errno in (ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS):
+    """Make one native rename call and authenticate only direct failures."""
+    io_status = _IoStatusBlock()
+    io_status.Status = ctypes.c_int32(STATUS_PENDING).value
+    status = int(
+        nt_api.NtSetInformationFile(
+            handle,
+            ctypes.byref(io_status),
+            storage,
+            allocation_size,
+            FILE_RENAME_INFORMATION,
+        )
+    )
+    if not _nt_success(status):
+        error = _nt_failure(nt_api, "FileRenameInformation", status, leaf)
+        if _nt_status_bits(status) == STATUS_OBJECT_NAME_COLLISION or error.errno in (
+            ERROR_FILE_EXISTS,
+            ERROR_ALREADY_EXISTS,
+        ):
             collision = _DefiniteRenameCollision(error.errno, error.strerror, leaf)
             setattr(collision, "_windows_receipt_definite_provenance", _INTERNAL_FAILURE_PROVENANCE)
             raise collision from error
         failure = _DefiniteRenameError(error.errno, error.strerror, leaf)
         setattr(failure, "_windows_receipt_definite_provenance", _INTERNAL_FAILURE_PROVENANCE)
         raise failure from error
+    if status != 0:
+        raise _nt_failure(nt_api, "FileRenameInformation nonfinal return", status, leaf)
+    completion_status = int(io_status.Status)
+    if completion_status != 0:
+        raise _nt_failure(
+            nt_api,
+            "FileRenameInformation completion",
+            completion_status,
+            leaf,
+        )
 
 
 def _is_internal_definite_rename_error(error: BaseException) -> bool:
@@ -1402,7 +1446,7 @@ def publish_windows_receipt(
     _validate_windows_relative_leaf(leaf)
     if not payload:
         raise ValueError("receipt payload must not be empty")
-    rename_storage, rename_size = _prepare_rename(parent_handle, leaf)
+    rename_storage, rename_size = _prepare_rename(leaf)
     selected_api, selected_nt_api = _select_apis(api, nt_api)
     if publication_lease.api is not selected_api:
         raise ValueError("Windows receipt publication lease belongs to another API")
@@ -1453,10 +1497,10 @@ def publish_windows_receipt(
                     raise OSError("Receipt staging identity, attributes, links, or size changed")
                 candidate = WindowsReceiptResult(leaf, *_identity(after[2]), len(payload))
                 publication_lease.candidate = candidate
-                # From this point until a definite FALSE return, namespace
-                # outcome is unknown and the handle must never be disposed.
+                # From this point until a directly returned failing NTSTATUS,
+                # namespace outcome is unknown and must never be disposed.
                 publication_lease.phase = "unknown"
-                _rename(selected_api, handle, rename_storage, rename_size, leaf)
+                _rename(selected_nt_api, handle, rename_storage, rename_size, leaf)
                 publication_lease.phase = "published"
                 if _read_exact(selected_api, handle, len(payload)) != payload:
                     raise OSError("Published receipt bytes do not match the canonical payload")

@@ -126,6 +126,9 @@ class FakeNtApi:
         self.raise_create: BaseException | None = None
         self.raise_after_acquire: BaseException | None = None
         self.raise_convert: BaseException | None = None
+        self.rename_status = 0
+        self.rename_completion_status = 0
+        self.rename_calls: list[dict[str, object]] = []
         self.error_codes: dict[int, int] = {
             0xC000000F: receipt.ERROR_FILE_NOT_FOUND,
             0xC0000022: 5,
@@ -190,6 +193,37 @@ class FakeNtApi:
         bits = ctypes.c_uint32(status).value
         self.conversions.append(bits)
         return self.error_codes.get(bits, 317)
+
+    def NtSetInformationFile(
+        self,
+        handle: int,
+        io_status: Any,
+        pointer: Any,
+        size: int,
+        info_class: int,
+    ) -> int:
+        raw = ctypes.string_at(pointer, size)
+        info = receipt._FileRenameInformation.from_buffer_copy(
+            raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInformation) - len(raw)))
+        )
+        self.rename_calls.append(
+            {
+                "handle": handle,
+                "class": info_class,
+                "size": size,
+                "root": info.RootDirectory,
+                "replace": info.ReplaceIfExists,
+                "name_length": info.FileNameLength,
+                "name": raw[
+                    receipt._FileRenameInformation.FileName.offset :
+                    receipt._FileRenameInformation.FileName.offset + info.FileNameLength
+                ].decode("utf-16-le"),
+            }
+        )
+        completion = ctypes.cast(io_status, ctypes.POINTER(receipt._IoStatusBlock)).contents
+        completion.Status = ctypes.c_int32(self.rename_completion_status).value
+        completion.Information = 0
+        return ctypes.c_int32(self.rename_status).value
 
 
 class FakeKernelApi:
@@ -324,6 +358,7 @@ class WindowsNtAbiTests(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(receipt.USHORT), 2)
         self.assertEqual(ctypes.sizeof(receipt.ULONG), 4)
         self.assertEqual(ctypes.sizeof(receipt.NTSTATUS), 4)
+        self.assertEqual(ctypes.sizeof(receipt.FILE_INFORMATION_CLASS), 4)
         self.assertEqual(ctypes.sizeof(receipt._UnicodeString), expected["unicode"])
         self.assertEqual(receipt._UnicodeString.Buffer.offset, expected["unicode_buffer"])
         self.assertEqual(ctypes.sizeof(receipt._ObjectAttributes), expected["object"])
@@ -341,7 +376,15 @@ class WindowsNtAbiTests(unittest.TestCase):
             def __call__(self, *_args: object) -> int:
                 return 0
 
-        api = type("Api", (), {"NtCreateFile": Function(), "RtlNtStatusToDosError": Function()})()
+        api = type(
+            "Api",
+            (),
+            {
+                "NtCreateFile": Function(),
+                "NtSetInformationFile": Function(),
+                "RtlNtStatusToDosError": Function(),
+            },
+        )()
         configured: Any = receipt._configure_nt_api(api)
         args = configured.NtCreateFile.argtypes
         self.assertIs(args[0]._type_, ctypes.c_void_p)
@@ -353,6 +396,18 @@ class WindowsNtAbiTests(unittest.TestCase):
         self.assertIs(args[9], ctypes.c_void_p)
         self.assertIs(args[10], receipt.ULONG)
         self.assertIs(configured.NtCreateFile.restype, receipt.NTSTATUS)
+        set_args = configured.NtSetInformationFile.argtypes
+        self.assertEqual(
+            set_args,
+            (
+                ctypes.c_void_p,
+                ctypes.POINTER(receipt._IoStatusBlock),
+                ctypes.c_void_p,
+                receipt.ULONG,
+                receipt.FILE_INFORMATION_CLASS,
+            ),
+        )
+        self.assertIs(configured.NtSetInformationFile.restype, receipt.NTSTATUS)
         self.assertEqual(configured.RtlNtStatusToDosError.argtypes, (receipt.NTSTATUS,))
         self.assertIs(configured.RtlNtStatusToDosError.restype, receipt.ULONG)
 

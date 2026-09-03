@@ -25,6 +25,7 @@ from tests.test_anchored_receipt_windows_relative import (
 PAYLOAD = b'{"status":"verified"}\n'
 _API_NAMES = (
     "NtCreateFile",
+    "NtSetInformationFile",
     "RtlNtStatusToDosError",
     "WriteFile",
     "ReadFile",
@@ -118,22 +119,34 @@ class _ExistingWinnerKernel32(FakeKernel32):
         self.error = receipt.ERROR_FILE_EXISTS
         self.public_data = bytearray(public_data)
 
-    def SetFileInformationByHandle(self, handle: int, info_class: int, pointer: Any, size: int) -> bool:
-        if info_class == receipt.FILE_RENAME_INFO:
-            raw = ctypes.string_at(pointer, size)
-            info = receipt._FileRenameInfo.from_buffer_copy(
-                raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInfo) - len(raw)))
-            )
-            if info.ReplaceIfExists:
-                self.failures["Rename"] = True
-                try:
-                    result = super().SetFileInformationByHandle(handle, info_class, pointer, size)
-                finally:
-                    self.failures["Rename"] = False
-                if result:
-                    self.public_data[:] = self.data
-                return result
-        return super().SetFileInformationByHandle(handle, info_class, pointer, size)
+    def NtSetInformationFile(
+        self,
+        handle: int,
+        io_status: Any,
+        pointer: Any,
+        size: int,
+        info_class: int,
+    ) -> int:
+        raw = ctypes.string_at(pointer, size)
+        info = receipt._FileRenameInformation.from_buffer_copy(
+            raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInformation) - len(raw)))
+        )
+        if info.ReplaceIfExists:
+            self.failures["Rename"] = True
+            try:
+                result = super().NtSetInformationFile(
+                    handle,
+                    io_status,
+                    pointer,
+                    size,
+                    info_class,
+                )
+            finally:
+                self.failures["Rename"] = False
+            if receipt._nt_success(result):
+                self.public_data[:] = self.data
+            return result
+        return super().NtSetInformationFile(handle, io_status, pointer, size, info_class)
 
 
 class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
@@ -372,7 +385,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
 
     def test_unsupported_win32_publication_has_stable_anchor_code(self) -> None:
         api = _assignable_api(FakeKernel32({"Rename": False}))
-        api.error = receipt.ERROR_NOT_SUPPORTED
+        api.error = receipt.ERROR_INVALID_PARAMETER
         binding = _Binding(api)
         helper = anchored._windows_receipt_module()
         reader = mock.Mock(side_effect=FileNotFoundError())
@@ -389,6 +402,16 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "output-anchor-unavailable")
         self.assertIsInstance(raised.exception.__cause__, helper._DefiniteRenameError)
+        diagnostic = next(
+            note
+            for note in getattr(raised.exception, "__notes__", ())
+            if note.startswith("Windows retained-handle publication diagnostic:")
+        )
+        self.assertIn("type=_DefiniteRenameError", diagnostic)
+        self.assertIn(f"errno={receipt.ERROR_INVALID_PARAMETER}", diagnostic)
+        self.assertIn("NT FileRenameInformation failed", diagnostic)
+        self.assertIn("cause_type=OSError", diagnostic)
+        self.assertIn(f"cause_errno={receipt.ERROR_INVALID_PARAMETER}", diagnostic)
         self.assertEqual(reader.call_count, 1)
         self.assertEqual(binding.closed, 1)
         classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
@@ -419,7 +442,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 1)
         self.assertEqual(binding.closed, 1)
         classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
-        self.assertNotIn(receipt.FILE_RENAME_INFO, classes)
+        self.assertFalse(any(name == "NtSetInformationFile" for name, _args in api.calls))
         self.assertIn(receipt.FILE_DISPOSITION_INFO, classes)
 
     def test_unsupported_error_after_rename_keeps_published_outcome_and_primary(self) -> None:
@@ -451,7 +474,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 2)
         self.assertEqual(binding.closed, 1)
         classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
-        self.assertIn(receipt.FILE_RENAME_INFO, classes)
+        self.assertTrue(any(name == "NtSetInformationFile" for name, _args in api.calls))
         self.assertNotIn(receipt.FILE_DISPOSITION_INFO, classes)
 
     def test_unsupported_rename_exception_keeps_unknown_outcome_and_primary(self) -> None:
@@ -479,7 +502,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 2)
         self.assertEqual(binding.closed, 1)
         classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
-        self.assertIn(receipt.FILE_RENAME_INFO, classes)
+        self.assertTrue(any(name == "NtSetInformationFile" for name, _args in api.calls))
         self.assertNotIn(receipt.FILE_DISPOSITION_INFO, classes)
 
     def test_generic_win32_publication_io_error_remains_native(self) -> None:
@@ -505,6 +528,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         api = FakeKernel32()
         binding, reader = self._publish(api)
         ctypes_api = cast(Any, api)
+        helper = anchored._windows_receipt_module()
 
         self.assertEqual(ctypes_api.WriteFile.argtypes[0], ctypes.c_void_p)
         self.assertEqual(ctypes_api.WriteFile.argtypes[2], ctypes.c_uint32)
@@ -512,6 +536,17 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         self.assertEqual(ctypes_api.FlushFileBuffers.argtypes, (ctypes.c_void_p,))
         self.assertEqual(ctypes_api.SetFilePointerEx.argtypes[0], ctypes.c_void_p)
         self.assertEqual(ctypes_api.CloseHandle.argtypes, (ctypes.c_void_p,))
+        self.assertEqual(
+            ctypes_api.NtSetInformationFile.argtypes,
+            (
+                ctypes.c_void_p,
+                ctypes.POINTER(helper._IoStatusBlock),
+                ctypes.c_void_p,
+                helper.ULONG,
+                helper.FILE_INFORMATION_CLASS,
+            ),
+        )
+        self.assertIs(ctypes_api.NtSetInformationFile.restype, helper.NTSTATUS)
         self.assertEqual(binding.closed, 1)
         self.assertEqual(binding.verified, 7)
         self.assertEqual(reader.call_count, 2)
@@ -600,7 +635,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 2)
         self.assertEqual(binding.closed, 1)
         classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
-        self.assertIn(receipt.FILE_RENAME_INFO, classes)
+        self.assertTrue(any(name == "NtSetInformationFile" for name, _args in api.calls))
         self.assertIn(receipt.FILE_DISPOSITION_INFO, classes)
 
     def test_definite_collision_preserves_different_existing_winner(self) -> None:
@@ -818,6 +853,7 @@ class WindowsReceiptFacadeIntegrationTests(unittest.TestCase):
 class WindowsRootedParentFacadeTests(unittest.TestCase):
     def test_binding_keeps_parent_handle_open_when_child_cleanup_is_retained(self) -> None:
         helper = anchored._windows_receipt_module()
+        original_close = helper.close_windows_handle_lease
         interruption = KeyboardInterrupt("child handle remains retained")
 
         for failure_mode in ("return", "raise"):
@@ -841,6 +877,11 @@ class WindowsRootedParentFacadeTests(unittest.TestCase):
                     _primary: BaseException | None,
                     _context: str,
                 ) -> BaseException | None:
+                    # A delayed lease finalizer from another test can run while
+                    # this module-level helper is patched. Keep that cleanup
+                    # real and exclude it from this binding's call order.
+                    if lease is not child and lease is not root:
+                        return original_close(_api, lease, _primary, _context)
                     calls.append(lease.handle)
                     if lease is child and not child_may_close:
                         if failure_mode == "raise":

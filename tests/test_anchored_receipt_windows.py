@@ -39,6 +39,9 @@ class FakeKernel32:
         self.info_failure_at: tuple[int, int, BaseException] | None = None
         self.info_counts: dict[int, int] = {}
         self.read_failure_seek: tuple[int, BaseException] | None = None
+        self.rename_status = 0
+        self.rename_completion_status = 0
+        self.rename_information = 0
 
     def get_last_error(self) -> int:
         return self._last_error
@@ -110,6 +113,37 @@ class FakeKernel32:
         if ctypes.c_uint32(status).value == receipt.STATUS_OBJECT_NAME_COLLISION:
             return self.error
         return self.error
+
+    def NtSetInformationFile(
+        self,
+        handle: int,
+        io_status: Any,
+        pointer: Any,
+        size: int,
+        info_class: int,
+    ) -> int:
+        raw = ctypes.string_at(pointer, size)
+        self.calls.append(("NtSetInformationFile", (handle, info_class, raw, size)))
+        padded = raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInformation) - len(raw)))
+        rename = receipt._FileRenameInformation.from_buffer_copy(padded)
+        minimum_size = ctypes.sizeof(receipt._FileRenameInformation) + rename.FileNameLength
+        if info_class != receipt.FILE_RENAME_INFORMATION or size < minimum_size:
+            return ctypes.c_int32(0xC0000004).value
+        action = self.failures.get("Rename")
+        if isinstance(action, BaseException):
+            raise action
+        if action is False:
+            status = receipt.STATUS_OBJECT_NAME_COLLISION if self.error in (
+                receipt.ERROR_FILE_EXISTS,
+                receipt.ERROR_ALREADY_EXISTS,
+            ) else 0xC0000022
+            return ctypes.c_int32(status).value
+        completion = ctypes.cast(io_status, ctypes.POINTER(receipt._IoStatusBlock)).contents
+        completion.Status = ctypes.c_int32(self.rename_completion_status).value
+        completion.Information = self.rename_information
+        if self.rename_status == 0 and self.rename_completion_status == 0:
+            self.rename_succeeded = True
+        return ctypes.c_int32(self.rename_status).value
 
     def WriteFile(self, handle: int, buffer: Any, size: int, written: Any, _overlap: object) -> bool:
         self.calls.append(("WriteFile", (handle, size)))
@@ -189,10 +223,8 @@ class FakeKernel32:
     def SetFileInformationByHandle(self, handle: int, info_class: int, pointer: Any, size: int) -> bool:
         raw = ctypes.string_at(pointer, size)
         self.calls.append(("SetFileInformationByHandle", (handle, info_class, raw, size)))
-        name = "Rename" if info_class == receipt.FILE_RENAME_INFO else "Disposition"
+        name = "Disposition" if info_class == receipt.FILE_DISPOSITION_INFO else f"SetInfo:{info_class}"
         result = self._action(name)
-        if name == "Rename" and result:
-            self.rename_succeeded = True
         return result
 
     def CloseHandle(self, handle: int) -> bool:
@@ -241,19 +273,23 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
         rename_call = next(
             args
             for name, args in api.calls
-            if name == "SetFileInformationByHandle" and args[1] == receipt.FILE_RENAME_INFO
+            if name == "NtSetInformationFile" and args[1] == receipt.FILE_RENAME_INFORMATION
         )
         raw = cast(bytes, rename_call[2])
-        info = receipt._FileRenameInfo.from_buffer_copy(
-            raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInfo) - len(raw)))
+        info = receipt._FileRenameInformation.from_buffer_copy(
+            raw + bytes(max(0, ctypes.sizeof(receipt._FileRenameInformation) - len(raw)))
         )
         encoded = "receipt.json".encode("utf-16-le")
         self.assertEqual(info.ReplaceIfExists, 0)
-        self.assertEqual(info.RootDirectory, 0x4567)
+        self.assertIsNone(info.RootDirectory)
         self.assertEqual(info.FileNameLength, len(encoded))
-        offset = receipt._FileRenameInfo.FileName.offset
+        offset = receipt._FileRenameInformation.FileName.offset
         self.assertEqual(raw[offset : offset + len(encoded)], encoded)
-        self.assertEqual(rename_call[3], max(ctypes.sizeof(receipt._FileRenameInfo), offset + len(encoded)))
+        self.assertEqual(rename_call[3], ctypes.sizeof(receipt._FileRenameInformation) + len(encoded))
+        self.assertEqual(
+            raw[offset + len(encoded) :],
+            bytes(ctypes.sizeof(receipt._FileRenameInformation) - offset),
+        )
         self.assertNotIn(
             receipt.FILE_DISPOSITION_INFO, [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
         )
@@ -272,11 +308,62 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
         rename_call = next(
             args
             for name, args in api.calls
-            if name == "SetFileInformationByHandle" and args[1] == receipt.FILE_RENAME_INFO
+            if name == "NtSetInformationFile" and args[1] == receipt.FILE_RENAME_INFORMATION
         )
-        self.assertEqual(rename_call[3], ctypes.sizeof(receipt._FileRenameInfo))
-        info = receipt._FileRenameInfo.from_buffer_copy(cast(bytes, rename_call[2]))
+        self.assertEqual(
+            rename_call[3],
+            ctypes.sizeof(receipt._FileRenameInformation) + len("x".encode("utf-16-le")),
+        )
+        info = receipt._FileRenameInformation.from_buffer_copy(cast(bytes, rename_call[2]))
         self.assertEqual(info.FileNameLength, len("x".encode("utf-16-le")))
+
+    def test_modeled_nt_rejects_undersized_rename_buffer(self) -> None:
+        api = FakeKernel32()
+        encoded = "receipt.json".encode("utf-16-le")
+        undersized = ctypes.create_string_buffer(
+            receipt._FileRenameInformation.FileName.offset + len(encoded)
+        )
+        rename = receipt._FileRenameInformation.from_buffer(undersized)
+        rename.FileNameLength = len(encoded)
+
+        self.assertFalse(
+            receipt._nt_success(
+                api.NtSetInformationFile(
+                    api.handle,
+                    ctypes.byref(receipt._IoStatusBlock()),
+                    undersized,
+                    len(undersized),
+                    receipt.FILE_RENAME_INFORMATION,
+                )
+            )
+        )
+
+    def test_modeled_nt_allows_explicit_root_handle_for_relative_target(self) -> None:
+        api = FakeKernel32()
+        encoded = "receipt.json".encode("utf-16-le")
+        storage = ctypes.create_string_buffer(
+            ctypes.sizeof(receipt._FileRenameInformation) + len(encoded)
+        )
+        rename = receipt._FileRenameInformation.from_buffer(storage)
+        rename.RootDirectory = 0x4567
+        rename.FileNameLength = len(encoded)
+        ctypes.memmove(
+            ctypes.addressof(storage) + receipt._FileRenameInformation.FileName.offset,
+            encoded,
+            len(encoded),
+        )
+
+        self.assertTrue(
+            receipt._nt_success(
+                api.NtSetInformationFile(
+                    api.handle,
+                    ctypes.byref(receipt._IoStatusBlock()),
+                    storage,
+                    len(storage),
+                    receipt.FILE_RENAME_INFORMATION,
+                )
+            )
+        )
 
     def test_write_loops_and_read_requires_exact_eof(self) -> None:
         api = FakeKernel32()
@@ -347,9 +434,9 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
                     self.publish(api)
                 self.assertFalse(
                     any(
-                        args[1] == receipt.FILE_RENAME_INFO
+                        args[1] == receipt.FILE_RENAME_INFORMATION
                         for name, args in api.calls
-                        if name == "SetFileInformationByHandle"
+                        if name == "NtSetInformationFile"
                     )
                 )
 
@@ -367,9 +454,9 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
         self.assertEqual(receipt._FileId128.Identifier.offset, 0)
         expected_root_offset = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 4
         expected_name_length_offset = expected_root_offset + ctypes.sizeof(ctypes.c_void_p)
-        self.assertEqual(receipt._FileRenameInfo.RootDirectory.offset, expected_root_offset)
-        self.assertEqual(receipt._FileRenameInfo.FileNameLength.offset, expected_name_length_offset)
-        self.assertEqual(receipt._FileRenameInfo.FileName.offset, expected_name_length_offset + 4)
+        self.assertEqual(receipt._FileRenameInformation.RootDirectory.offset, expected_root_offset)
+        self.assertEqual(receipt._FileRenameInformation.FileNameLength.offset, expected_name_length_offset)
+        self.assertEqual(receipt._FileRenameInformation.FileName.offset, expected_name_length_offset + 4)
 
     def test_native_api_declarations_use_fixed_width_counts(self) -> None:
         class Function:
@@ -577,7 +664,7 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
                 self.publish(api)
             self.assertEqual(caught.exception.errno, code)
 
-    def test_definite_false_rename_disposes_but_raised_rename_is_unknown(self) -> None:
+    def test_definite_negative_rename_disposes_but_raised_rename_is_unknown(self) -> None:
         api = FakeKernel32({"Rename": False})
         api.error = 5
         with self.assertRaises(receipt._DefiniteRenameError):
@@ -605,6 +692,49 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
                 classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
                 self.assertNotIn(receipt.FILE_DISPOSITION_INFO, classes)
                 self.assertIn("Could not close", "\n".join(getattr(failure, "__notes__", [])))
+
+    def test_raw_collision_status_is_authenticated_before_dos_code_mapping(self) -> None:
+        api = FakeKernel32()
+        api.rename_status = receipt.STATUS_OBJECT_NAME_COLLISION
+        api.error = 5
+
+        with self.assertRaises(receipt._DefiniteRenameCollision) as caught:
+            self.publish(api)
+
+        self.assertTrue(receipt.is_internal_definite_rename_collision(caught.exception))
+        self.assertIn(
+            receipt.FILE_DISPOSITION_INFO,
+            [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"],
+        )
+
+    def test_nonfinal_return_and_nonzero_completion_keep_unknown_outcome(self) -> None:
+        cases = (
+            ("nonfinal-return", receipt.STATUS_PENDING, 0),
+            ("failing-completion", 0, 0xC0000022),
+            ("nonfinal-completion", 0, receipt.STATUS_PENDING),
+        )
+        for label, status, completion_status in cases:
+            with self.subTest(label=label):
+                api = FakeKernel32()
+                api.rename_status = status
+                api.rename_completion_status = completion_status
+
+                with self.assertRaises(OSError) as caught:
+                    self.publish(api)
+
+                outcome = receipt.outcome_from_error(caught.exception)
+                self.assertIsNotNone(outcome)
+                assert outcome is not None
+                self.assertEqual(outcome.state, "unknown")
+                self.assertFalse(api.rename_succeeded)
+                self.assertEqual(
+                    sum(name == "NtSetInformationFile" for name, _args in api.calls),
+                    1,
+                )
+                self.assertNotIn(
+                    receipt.FILE_DISPOSITION_INFO,
+                    [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"],
+                )
 
     def test_trace_boundaries_never_dispose_unknown_or_published_rename(self) -> None:
         publisher_code = receipt.publish_windows_receipt.__code__
@@ -654,8 +784,9 @@ class WindowsAnchoredReceiptTests(unittest.TestCase):
                 self.assertIsNotNone(outcome)
                 assert outcome is not None
                 self.assertEqual(outcome.state, "published" if boundary == "post-confirmation" else "unknown")
+                rename_calls = [args for name, args in api.calls if name == "NtSetInformationFile"]
+                self.assertEqual(len(rename_calls), 0 if boundary == "pre-call" else 1)
                 classes = [args[1] for name, args in api.calls if name == "SetFileInformationByHandle"]
-                self.assertEqual(classes.count(receipt.FILE_RENAME_INFO), 0 if boundary == "pre-call" else 1)
                 self.assertNotIn(receipt.FILE_DISPOSITION_INFO, classes)
                 self.assertEqual(api.calls[-1][0], "CloseHandle")
 

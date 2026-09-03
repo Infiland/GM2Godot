@@ -4792,7 +4792,10 @@ class TestCIWorkflows(unittest.TestCase):
             step_name="Validate every snapshot before submission",
         )
         self.assertNotIn("GH_TOKEN", validator)
-        self.assertIn("candidate_bytes != authoritative_bytes", validator)
+        self.assertIn(
+            "normalize_lock_newlines(candidate_bytes) != normalize_lock_newlines(",
+            validator,
+        )
 
     def test_dependency_lock_stale_candidate_fails_after_evidence_upload_step(self) -> None:
         content = (
@@ -5079,6 +5082,10 @@ class TestCIWorkflows(unittest.TestCase):
         run_id = "12345"
         expected_attempt = "2"
         source_fingerprint = hashlib.sha256(b"authored dependency inputs").hexdigest()
+
+        def normalized_newlines(payload: bytes) -> bytes:
+            return payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
         platforms = {
             "linux-x64": (
                 "dependency-lock-linux-x64-py3.12.13",
@@ -5138,6 +5145,16 @@ class TestCIWorkflows(unittest.TestCase):
                 elif candidate_kind == "mutated-candidate":
                     if platform == "linux-x64":
                         candidate_bytes += b"\n# coherent artifact-only mutation\n"
+                elif candidate_kind == "windows-crlf":
+                    if platform == "windows-x64":
+                        candidate_bytes = normalized_newlines(candidate_bytes).replace(
+                            b"\n", b"\r\n"
+                        )
+                elif candidate_kind == "windows-lone-cr":
+                    if platform == "windows-x64":
+                        candidate_bytes = normalized_newlines(candidate_bytes).replace(
+                            b"\n", b"\r"
+                        )
                 elif candidate_kind != "authoritative":
                     raise AssertionError(f"Unsupported candidate kind: {candidate_kind}")
 
@@ -5268,7 +5285,7 @@ class TestCIWorkflows(unittest.TestCase):
             for platform, policy in authoritative.items():
                 constraint_path = platforms[platform][1]
                 (authoritative_root / Path(constraint_path).name).write_bytes(
-                    policy.file.content
+                    normalized_newlines(policy.file.content)
                 )
             environment = os.environ.copy()
             environment.update(
@@ -5299,6 +5316,25 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
                     tuple(sorted(path.name for path in (root / "validated").iterdir())),
+                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                )
+
+        for candidate_kind in ("windows-crlf", "windows-lone-cr"):
+            with (
+                self.subTest(case=candidate_kind),
+                tempfile.TemporaryDirectory() as raw_directory,
+            ):
+                root = Path(raw_directory)
+                result = run_validator(
+                    root,
+                    snapshot_attempt="2",
+                    candidate_kind=candidate_kind,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    tuple(
+                        sorted(path.name for path in (root / "validated").iterdir())
+                    ),
                     ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
                 )
 

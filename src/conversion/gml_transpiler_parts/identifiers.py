@@ -1,19 +1,19 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 from .constants import (
-    _GDSCRIPT_RESERVED_IDENTIFIERS,
-    _GENERATED_IDENTIFIER_PREFIX,
-    _GML_IDENTIFIER_MAX_LENGTH,
+    GDSCRIPT_RESERVED_IDENTIFIERS,
+    GENERATED_IDENTIFIER_PREFIX,
+    GML_IDENTIFIER_MAX_LENGTH,
 )
 from .shared_models import GMLTranspileError, ScopeContext as _ScopeContext
 
 def _sanitize_gdscript_identifier(name: str) -> str:
     if not _is_plain_identifier(name):
         return name
-    if name in _GDSCRIPT_RESERVED_IDENTIFIERS:
+    if name in GDSCRIPT_RESERVED_IDENTIFIERS:
         return f"{name}_"
-    if name.startswith(_GENERATED_IDENTIFIER_PREFIX):
+    if name.startswith(GENERATED_IDENTIFIER_PREFIX):
         return f"gml_user{name}"
     return name
 
@@ -29,7 +29,7 @@ def _is_plain_identifier(name: str) -> bool:
 def _validate_gml_identifier(name: str) -> None:
     if not name:
         raise GMLTranspileError("Expected identifier name")
-    if len(name) > _GML_IDENTIFIER_MAX_LENGTH:
+    if len(name) > GML_IDENTIFIER_MAX_LENGTH:
         raise GMLTranspileError("GML identifier exceeds 64 characters")
     if not (name[0].isalpha() or name[0] == "_"):
         raise GMLTranspileError("GML identifier must start with a letter or underscore")

@@ -4,7 +4,7 @@ from __future__ import annotations
 from bisect import bisect_left
 from collections.abc import Sequence
 
-from .constants import _BLOCK_DELIMITER_REPLACEMENTS, _MULTI_CHAR_OPERATORS
+from .constants import BLOCK_DELIMITER_REPLACEMENTS, MULTI_CHAR_OPERATORS
 from .identifiers import _validate_gml_identifier
 from .lexical import (
     _is_verbatim_string_start,
@@ -149,7 +149,7 @@ def _tokenize(source: str) -> list[_Token]:
                 _validate_gml_identifier(identifier)
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
-            block_delimiter = _BLOCK_DELIMITER_REPLACEMENTS.get(identifier)
+            block_delimiter = BLOCK_DELIMITER_REPLACEMENTS.get(identifier)
             if block_delimiter is not None:
                 tokens.append(_Token("OP", block_delimiter, line=line, column=column, index=start))
             else:
@@ -157,7 +157,7 @@ def _tokenize(source: str) -> list[_Token]:
             continue
 
         matched_operator = None
-        for operator in _MULTI_CHAR_OPERATORS:
+        for operator in MULTI_CHAR_OPERATORS:
             if source.startswith(operator, index):
                 matched_operator = operator
                 break

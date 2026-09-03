@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from .constants import _GML_BUILTIN_CONSTANT_IDENTIFIERS, _READ_ONLY_BUILTIN_VARIABLES
+from .constants import GML_BUILTIN_CONSTANT_IDENTIFIERS, READ_ONLY_BUILTIN_VARIABLES
 from .expression_parser import _parse_gml_expression
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
@@ -173,7 +173,7 @@ def _reject_readonly_builtin_assignment_target(
         unwrapped_target = _unwrap_grouped_expression(unwrapped_target.target)
     if isinstance(unwrapped_target, _Name):
         name = unwrapped_target.value
-        if name not in local_name_set and name in _READ_ONLY_BUILTIN_VARIABLES:
+        if name not in local_name_set and name in READ_ONLY_BUILTIN_VARIABLES:
             raise GMLTranspileError(f"Cannot assign to read-only built-in variable {name}")
 
 
@@ -184,7 +184,7 @@ def _reject_constant_assignment_target_name(
     target_name = _raw_identifier_target_name(target_source)
     if target_name is None:
         return
-    if target_name in _GML_BUILTIN_CONSTANT_IDENTIFIERS:
+    if target_name in GML_BUILTIN_CONSTANT_IDENTIFIERS:
         raise GMLTranspileError(f"Cannot assign to built-in constant {target_name}")
     if target_name in macro_names:
         raise GMLTranspileError(f"Cannot assign to macro constant {target_name}")
@@ -194,7 +194,7 @@ def _reject_constant_declaration_name(
     name: str,
     macro_names: Iterable[str],
 ) -> None:
-    if name in _GML_BUILTIN_CONSTANT_IDENTIFIERS:
+    if name in GML_BUILTIN_CONSTANT_IDENTIFIERS:
         raise GMLTranspileError(f"Cannot redeclare built-in constant {name}")
     if name in macro_names:
         raise GMLTranspileError(f"Cannot redeclare macro constant {name}")

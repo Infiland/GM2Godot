@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import (
-    _BUILTIN_ARRAY_VARIABLES,
-    _BUILTIN_GLOBAL_VARIABLES,
-    _BUILTIN_INSTANCE_VARIABLES,
-    _COMPOUND_RUNTIME_FUNCTIONS,
-    _GML_LITERAL_IDENTIFIERS,
+    BUILTIN_ARRAY_VARIABLES,
+    BUILTIN_GLOBAL_VARIABLES,
+    BUILTIN_INSTANCE_VARIABLES,
+    COMPOUND_RUNTIME_FUNCTIONS,
+    GML_LITERAL_IDENTIFIERS,
 )
 from .emitter import (
     _is_alarm_array_access,
@@ -763,8 +763,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_struct_set({static_scope}, {member_name}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
                     f"GMRuntime.gml_struct_set({static_scope}, {member_name}, "
@@ -783,8 +783,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
                     f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
@@ -830,8 +830,8 @@ def _transpile_statement(
                         f"{instance_target}, {member_name}, {value})"
                     ],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
                     "GMRuntime.gml_variable_instance_set("
@@ -858,8 +858,8 @@ def _transpile_statement(
                         f"{instance_target}, {member_name}, {value})"
                     ],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
                     "GMRuntime.gml_variable_instance_set("
@@ -886,8 +886,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [_alarm_array_set(scope_context, index, value)],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
                     _alarm_array_set(
@@ -947,8 +947,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_array_set({container}, {index}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
                 return [
                     *prelude_lines,
@@ -990,8 +990,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_array_set({container}, {index}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_array_get({container}, {index})"
                 return [
                     *prelude_lines,
@@ -1030,8 +1030,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_map_find_value({container}, {key})"
                 return [
                     *prelude_lines,
@@ -1071,8 +1071,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_list_find_value({container}, {index})"
                 return [
                     *prelude_lines,
@@ -1118,8 +1118,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_ds_grid_get({container}, {x_index}, {y_index})"
                 return [
                     *prelude_lines,
@@ -1165,8 +1165,8 @@ def _transpile_statement(
                     f"GMRuntime.gml_selector_set_if_nullish({container}, {key}, "
                     f"func(): return {value})",
                 ]
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = _next_generated_name_from_counter(
                     generated_counter,
                     "_gml_selector_value",
@@ -1217,8 +1217,8 @@ def _transpile_statement(
                     value_prelude_lines,
                     [f"GMRuntime.gml_struct_set({container}, {key}, {value})"],
                 )
-            if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-                helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+            if operator in COMPOUND_RUNTIME_FUNCTIONS:
+                helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 current_value = f"GMRuntime.gml_struct_get({container}, {key})"
                 return [
                     *prelude_lines,
@@ -1233,8 +1233,8 @@ def _transpile_statement(
                 value_prelude_lines,
                 [f"{target} = {value}"],
             )
-        if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-            return [*prelude_lines, f"{target} = GMRuntime.{_COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
+        if operator in COMPOUND_RUNTIME_FUNCTIONS:
+            return [*prelude_lines, f"{target} = GMRuntime.{COMPOUND_RUNTIME_FUNCTIONS[operator]}({target}, {value})"]
         if operator == ":=":
             return [*prelude_lines, f"{target} = {value}"]
         return [*prelude_lines, f"{target} {operator} {value}"]
@@ -1559,11 +1559,11 @@ def _scoped_instance_assignment_parts(
     if (
         name in local_names
         or name in scope_context.direct_instance_names
-        or name in _GML_LITERAL_IDENTIFIERS
-        or name in _BUILTIN_ARRAY_VARIABLES
-        or name in _BUILTIN_GLOBAL_VARIABLES
+        or name in GML_LITERAL_IDENTIFIERS
+        or name in BUILTIN_ARRAY_VARIABLES
+        or name in BUILTIN_GLOBAL_VARIABLES
         or (
-            name in _BUILTIN_INSTANCE_VARIABLES
+            name in BUILTIN_INSTANCE_VARIABLES
             and _uses_direct_builtin_instance_members(scope_context)
         )
         or not _is_plain_identifier(name)
@@ -1586,11 +1586,11 @@ def _dynamic_instance_assignment_parts(
         name in local_names
         or name in scope_context.direct_instance_names
         or name not in scope_context.dynamic_instance_names
-        or name in _GML_LITERAL_IDENTIFIERS
-        or name in _BUILTIN_ARRAY_VARIABLES
-        or name in _BUILTIN_GLOBAL_VARIABLES
+        or name in GML_LITERAL_IDENTIFIERS
+        or name in BUILTIN_ARRAY_VARIABLES
+        or name in BUILTIN_GLOBAL_VARIABLES
         or (
-            name in _BUILTIN_INSTANCE_VARIABLES
+            name in BUILTIN_INSTANCE_VARIABLES
             and _uses_direct_builtin_instance_members(scope_context)
         )
         or not _is_plain_identifier(name)
@@ -1640,8 +1640,8 @@ def _motion_assignment_lines(
             f"if GMRuntime.gml_is_nullish({current_value}):",
             f"\tGMRuntime.gml_motion_set_{member_name}({instance_target}, {value})",
         ]
-    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+    if operator in COMPOUND_RUNTIME_FUNCTIONS:
+        helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
         return [
             f"GMRuntime.gml_motion_set_{member_name}("
             f"{instance_target}, GMRuntime.{helper}({current_value}, {value}))"
@@ -1671,7 +1671,7 @@ def _global_scope_assignment_parts(
     if not isinstance(target_expr, _Name):
         return None
     name = target_expr.value
-    if name in _BUILTIN_GLOBAL_VARIABLES and name not in local_names:
+    if name in BUILTIN_GLOBAL_VARIABLES and name not in local_names:
         return "GMRuntime.gml_global_scope()", json.dumps(name)
     if not _name_resolves_to_global(name, local_names, scope_context):
         return None
@@ -1689,7 +1689,7 @@ def _record_instance_assignment(
     tokens = _expression_tokens(target.strip())
     if len(tokens) >= 4 and tokens[0].kind == "IDENT" and tokens[1].value == "[":
         name = tokens[0].value
-        if name not in local_names and name not in _BUILTIN_INSTANCE_VARIABLES:
+        if name not in local_names and name not in BUILTIN_INSTANCE_VARIABLES:
             instance_variables.add(name)
         return
 
@@ -1697,7 +1697,7 @@ def _record_instance_assignment(
         return
 
     name = tokens[0].value
-    if name in local_names or name in _BUILTIN_INSTANCE_VARIABLES:
+    if name in local_names or name in BUILTIN_INSTANCE_VARIABLES:
         return
     instance_variables.add(name)
 
@@ -2451,8 +2451,8 @@ def _member_backed_array_assignment_lines(
             value_prelude_lines,
             writeback_lines,
         )
-    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
-        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+    if operator in COMPOUND_RUNTIME_FUNCTIONS:
+        helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
         return [
             *setup_lines,
             f"GMRuntime.gml_array_set({container_name}, {index}, "
@@ -2573,7 +2573,7 @@ def _transpile_assignment_expression_to_temp(
             *_indent_lines(write_value(result_name)),
         ], result_name
 
-    if operator in _COMPOUND_RUNTIME_FUNCTIONS:
+    if operator in COMPOUND_RUNTIME_FUNCTIONS:
         rhs_lines, rhs_value = _transpile_assignment_expression_to_temp(
             value,
             local_names,
@@ -2585,7 +2585,7 @@ def _transpile_assignment_expression_to_temp(
             generated_counter=generated_counter,
             result_required=True,
         )
-        helper = _COMPOUND_RUNTIME_FUNCTIONS[operator]
+        helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
         result_name = _next_generated_name_from_counter(
             generated_counter,
             "_gml_assignment_value",

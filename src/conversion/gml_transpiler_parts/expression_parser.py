@@ -6,11 +6,11 @@ import json
 from typing import Iterable, Mapping, MutableMapping
 
 from .constants import (
-    _BINARY_PRECEDENCE,
-    _EOF,
-    _NAME_REPLACEMENTS,
-    _RIGHT_ASSOCIATIVE,
-    _TERNARY_PRECEDENCE,
+    BINARY_PRECEDENCE,
+    EOF,
+    NAME_REPLACEMENTS,
+    RIGHT_ASSOCIATIVE,
+    TERNARY_PRECEDENCE,
 )
 from .identifiers import _reject_asset_identifier_name, _validate_gml_identifier
 from .lexical import _decode_gml_verbatim_string_literal
@@ -86,12 +86,12 @@ class _ExpressionParser:
 
         while True:
             if self._match("?"):
-                if _TERNARY_PRECEDENCE < min_precedence:
+                if TERNARY_PRECEDENCE < min_precedence:
                     self.position -= 1
                     break
                 true_expr = self._parse_expression()
                 self._consume(":")
-                false_expr = self._parse_expression(_TERNARY_PRECEDENCE)
+                false_expr = self._parse_expression(TERNARY_PRECEDENCE)
                 left = _Ternary(left, true_expr, false_expr)
                 continue
 
@@ -99,12 +99,12 @@ class _ExpressionParser:
             if operator is None:
                 break
 
-            precedence = _BINARY_PRECEDENCE[operator]
+            precedence = BINARY_PRECEDENCE[operator]
             if precedence < min_precedence:
                 break
 
             self._advance()
-            next_precedence = precedence if operator in _RIGHT_ASSOCIATIVE else precedence + 1
+            next_precedence = precedence if operator in RIGHT_ASSOCIATIVE else precedence + 1
             right = self._parse_expression(next_precedence)
             left = _Binary(left, operator, right)
 
@@ -125,7 +125,7 @@ class _ExpressionParser:
                 if not self._check(")"):
                     while True:
                         if self._check(",") or self._check(")"):
-                            args.append(_Name(_NAME_REPLACEMENTS["undefined"]))
+                            args.append(_Name(NAME_REPLACEMENTS["undefined"]))
                         else:
                             args.append(self._parse_expression())
                         if not self._match(","):
@@ -214,7 +214,7 @@ class _ExpressionParser:
             macro_expr = self._parse_macro_expansion(token.value)
             if macro_expr is not None:
                 return macro_expr
-            return _Name(_NAME_REPLACEMENTS.get(token.value, token.value))
+            return _Name(NAME_REPLACEMENTS.get(token.value, token.value))
         if token.value == "[":
             elements: list[_Expression] = []
             if not self._check("]"):
@@ -254,7 +254,7 @@ class _ExpressionParser:
                             field_value = self._parse_expression()
                         else:
                             field_value = _Name(
-                                _NAME_REPLACEMENTS.get(field_name, field_name)
+                                NAME_REPLACEMENTS.get(field_name, field_name)
                             )
                     fields.append((field_name, field_value))
                     if not self._match(","):
@@ -316,7 +316,7 @@ class _ExpressionParser:
         if not self._check(")"):
             while True:
                 if self._check(",") or self._check(")"):
-                    args.append(_Name(_NAME_REPLACEMENTS["undefined"]))
+                    args.append(_Name(NAME_REPLACEMENTS["undefined"]))
                 else:
                     args.append(self._parse_expression())
                 if not self._match(","):
@@ -476,9 +476,9 @@ class _ExpressionParser:
 
     def _current_operator(self) -> str | None:
         token = self._peek()
-        if token.kind == "IDENT" and token.value in _BINARY_PRECEDENCE:
+        if token.kind == "IDENT" and token.value in BINARY_PRECEDENCE:
             return token.value
-        if token.value in _BINARY_PRECEDENCE:
+        if token.value in BINARY_PRECEDENCE:
             return token.value
         return None
 
@@ -547,7 +547,7 @@ class _ExpressionParser:
 
     def _peek(self) -> _Token:
         if self.position >= len(self.tokens):
-            return _EOF
+            return EOF
         return self.tokens[self.position]
 
     def _at_end(self) -> bool:

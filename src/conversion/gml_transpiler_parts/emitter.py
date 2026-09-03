@@ -6,28 +6,28 @@ from typing import Iterable, TypeGuard
 
 from .asset_lowering import asset_argument_indices, first_argument_is_script_asset
 from .constants import (
-    _ARITHMETIC_RUNTIME_FUNCTIONS,
-    _BINARY_PRECEDENCE,
-    _BITWISE_RUNTIME_FUNCTIONS,
-    _BOOLEAN_RESULT_BINARY_OPERATORS,
-    _BOOLEAN_RESULT_FUNCTIONS,
-    _BUILTIN_ARRAY_VARIABLES,
-    _BUILTIN_GLOBAL_VARIABLES,
-    _BUILTIN_INSTANCE_VARIABLES,
-    _COMPARISON_RUNTIME_FUNCTIONS,
-    _DIRECT_MEMBER_TARGETS,
-    _GML_BUILTIN_CONSTANT_IDENTIFIERS,
-    _GML_LITERAL_IDENTIFIERS,
-    _INSTANCE_NAME_REPLACEMENTS,
-    _NAME_REPLACEMENTS,
-    _OPERATOR_REPLACEMENTS,
-    _POSTFIX_PRECEDENCE,
-    _PRIMARY_PRECEDENCE,
-    _RIGHT_ASSOCIATIVE,
-    _TERNARY_PRECEDENCE,
-    _UNARY_PRECEDENCE,
-    _VIRTUAL_KEY_ACTIONS,
-    _VIRTUAL_KEY_CONSTANTS,
+    ARITHMETIC_RUNTIME_FUNCTIONS,
+    BINARY_PRECEDENCE,
+    BITWISE_RUNTIME_FUNCTIONS,
+    BOOLEAN_RESULT_BINARY_OPERATORS,
+    BOOLEAN_RESULT_FUNCTIONS,
+    BUILTIN_ARRAY_VARIABLES,
+    BUILTIN_GLOBAL_VARIABLES,
+    BUILTIN_INSTANCE_VARIABLES,
+    COMPARISON_RUNTIME_FUNCTIONS,
+    DIRECT_MEMBER_TARGETS,
+    GML_BUILTIN_CONSTANT_IDENTIFIERS,
+    GML_LITERAL_IDENTIFIERS,
+    INSTANCE_NAME_REPLACEMENTS,
+    NAME_REPLACEMENTS,
+    OPERATOR_REPLACEMENTS,
+    POSTFIX_PRECEDENCE,
+    PRIMARY_PRECEDENCE,
+    RIGHT_ASSOCIATIVE,
+    TERNARY_PRECEDENCE,
+    UNARY_PRECEDENCE,
+    VIRTUAL_KEY_ACTIONS,
+    VIRTUAL_KEY_CONSTANTS,
 )
 from .gml_function_dispatch import (
     GMLFunctionDescriptor,
@@ -114,11 +114,11 @@ def _emit_name(
 ) -> tuple[str, int]:
     is_local = value in local_names
     if not is_local and value == "self":
-        return scope_context.self_expression, _PRIMARY_PRECEDENCE
+        return scope_context.self_expression, PRIMARY_PRECEDENCE
     if not is_local and value == "other":
-        return scope_context.other_expression, _PRIMARY_PRECEDENCE
-    if not is_local and value in _GML_LITERAL_IDENTIFIERS:
-        return value, _PRIMARY_PRECEDENCE
+        return scope_context.other_expression, PRIMARY_PRECEDENCE
+    if not is_local and value in GML_LITERAL_IDENTIFIERS:
+        return value, PRIMARY_PRECEDENCE
     if (
         not is_local
         and scope_context.static_scope is not None
@@ -126,18 +126,18 @@ def _emit_name(
     ):
         return (
             f"GMRuntime.gml_struct_get({scope_context.static_scope}, {json.dumps(value)})",
-            _POSTFIX_PRECEDENCE,
+            POSTFIX_PRECEDENCE,
         )
     if not is_local:
-        if value in _BUILTIN_ARRAY_VARIABLES:
-            return f"GMRuntime.gml_builtin_array({json.dumps(value)})", _POSTFIX_PRECEDENCE
-        if value in _BUILTIN_GLOBAL_VARIABLES:
-            return f"GMRuntime.gml_builtin_global({json.dumps(value)})", _POSTFIX_PRECEDENCE
+        if value in BUILTIN_ARRAY_VARIABLES:
+            return f"GMRuntime.gml_builtin_array({json.dumps(value)})", POSTFIX_PRECEDENCE
+        if value in BUILTIN_GLOBAL_VARIABLES:
+            return f"GMRuntime.gml_builtin_global({json.dumps(value)})", POSTFIX_PRECEDENCE
         legacy_argument = _legacy_argument_replacement(value)
         if legacy_argument is not None:
-            return legacy_argument, _POSTFIX_PRECEDENCE
+            return legacy_argument, POSTFIX_PRECEDENCE
         if value.startswith("audiogroup_") and _is_plain_identifier(value):
-            return json.dumps(value), _PRIMARY_PRECEDENCE
+            return json.dumps(value), PRIMARY_PRECEDENCE
         if value in scope_context.asset_names and _is_plain_identifier(value):
             if value in scope_context.global_names:
                 raise GMLTranspileError(
@@ -145,32 +145,32 @@ def _emit_name(
                     f"use global.{value} for the global or asset_get_index({json.dumps(value)}) for the asset."
                 )
             if resolve_asset_names:
-                return f"GMRuntime.gml_asset_get_index({json.dumps(value)})", _POSTFIX_PRECEDENCE
+                return f"GMRuntime.gml_asset_get_index({json.dumps(value)})", POSTFIX_PRECEDENCE
         if _name_resolves_to_global(value, local_names, scope_context):
             return (
                 "GMRuntime.gml_struct_get("
                 f"GMRuntime.gml_global_scope(), {json.dumps(value)})"
-            ), _POSTFIX_PRECEDENCE
-        if value in _INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
-            return _INSTANCE_NAME_REPLACEMENTS[value], _POSTFIX_PRECEDENCE
-        if value in _BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
-            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+            ), POSTFIX_PRECEDENCE
+        if value in INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
+            return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
+        if value in BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
+            return _sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
         if _is_gdscript_constant_identifier(value):
-            return value, _PRIMARY_PRECEDENCE
+            return value, PRIMARY_PRECEDENCE
         if value in scope_context.direct_instance_names:
-            return _sanitize_gdscript_identifier(value), _PRIMARY_PRECEDENCE
+            return _sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
         if value in scope_context.dynamic_instance_names and _is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.self_expression}, {json.dumps(value)})"
-            ), _POSTFIX_PRECEDENCE
+            ), POSTFIX_PRECEDENCE
         if scope_context.instance_target is not None and _is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.instance_target}, {json.dumps(value)})"
-            ), _POSTFIX_PRECEDENCE
+            ), POSTFIX_PRECEDENCE
     value = _sanitize_gdscript_identifier(value)
-    return value, _PRIMARY_PRECEDENCE
+    return value, PRIMARY_PRECEDENCE
 
 
 def _is_gdscript_constant_identifier(value: str) -> bool:
@@ -196,16 +196,16 @@ def _name_resolves_to_global(
 ) -> bool:
     if name in local_names or not _is_plain_identifier(name):
         return False
-    if name in _GML_LITERAL_IDENTIFIERS:
+    if name in GML_LITERAL_IDENTIFIERS:
         return False
-    if name in _BUILTIN_ARRAY_VARIABLES or name in _BUILTIN_GLOBAL_VARIABLES:
+    if name in BUILTIN_ARRAY_VARIABLES or name in BUILTIN_GLOBAL_VARIABLES:
         return False
     if name in scope_context.global_names:
         return True
     return (
         scope_context.global_scope
-        and name not in _BUILTIN_INSTANCE_VARIABLES
-        and name not in _GML_BUILTIN_CONSTANT_IDENTIFIERS
+        and name not in BUILTIN_INSTANCE_VARIABLES
+        and name not in GML_BUILTIN_CONSTANT_IDENTIFIERS
     )
 
 
@@ -243,41 +243,41 @@ def _emit_expression(
     local_names = _normalize_local_names(local_names)
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
-        return expr.value, _PRIMARY_PRECEDENCE
+        return expr.value, PRIMARY_PRECEDENCE
     if isinstance(expr, _EnumMember):
-        return str(expr.value), _PRIMARY_PRECEDENCE
+        return str(expr.value), PRIMARY_PRECEDENCE
     if isinstance(expr, _TemplateStringLiteral):
         return _emit_template_string(expr, local_names, scope_context)
     if isinstance(expr, _NameOf):
-        return json.dumps(expr.value), _PRIMARY_PRECEDENCE
+        return json.dumps(expr.value), PRIMARY_PRECEDENCE
     if isinstance(expr, _Name):
         return _emit_name(expr.value, local_names, scope_context)
     if isinstance(expr, _Grouped):
         return (
             f"({_emit_expression(expr.expr, local_names, scope_context=scope_context)[0]})",
-            _PRIMARY_PRECEDENCE,
+            PRIMARY_PRECEDENCE,
         )
     if isinstance(expr, _Unary):
         if expr.operator == "!":
             return (
                 f"not {_emit_truthy_expression(expr.operand, local_names, scope_context=scope_context)}",
-                _UNARY_PRECEDENCE,
+                UNARY_PRECEDENCE,
             )
         if expr.operator == "not":
             return (
                 f"not {_emit_truthy_expression(expr.operand, local_names, scope_context=scope_context)}",
-                _UNARY_PRECEDENCE,
+                UNARY_PRECEDENCE,
             )
         if expr.operator == "~":
             operand = _emit_expression(expr.operand, local_names, scope_context=scope_context)[0]
-            return f"GMRuntime.gml_bit_not({operand})", _POSTFIX_PRECEDENCE
+            return f"GMRuntime.gml_bit_not({operand})", POSTFIX_PRECEDENCE
         operand = _emit_child(
             expr.operand,
-            _UNARY_PRECEDENCE,
+            UNARY_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
-        return f"{expr.operator}{operand}", _UNARY_PRECEDENCE
+        return f"{expr.operator}{operand}", UNARY_PRECEDENCE
     if isinstance(expr, _Binary):
         return _emit_binary(expr, local_names, scope_context=scope_context)
     if isinstance(expr, _Ternary):
@@ -288,21 +288,21 @@ def _emit_expression(
         )
         true_expr = _emit_child(
             expr.true_expr,
-            _TERNARY_PRECEDENCE,
+            TERNARY_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
         false_expr = _emit_child(
             expr.false_expr,
-            _TERNARY_PRECEDENCE,
+            TERNARY_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
-        return f"{true_expr} if {condition} else {false_expr}", _TERNARY_PRECEDENCE
+        return f"{true_expr} if {condition} else {false_expr}", TERNARY_PRECEDENCE
     if isinstance(expr, _Call):
         builtin_call = _emit_builtin_call(expr, local_names, scope_context=scope_context)
         if builtin_call is not None:
-            return builtin_call, _POSTFIX_PRECEDENCE
+            return builtin_call, POSTFIX_PRECEDENCE
         args = ", ".join(
             _emit_expression(arg, local_names, scope_context=scope_context)[0]
             for arg in expr.args
@@ -316,7 +316,7 @@ def _emit_expression(
                 "GMRuntime.gml_script_call("
                 f"GMRuntime.gml_asset_get_index({json.dumps(expr.callee.value)}), "
                 f"[{args}], {scope_context.self_expression}, {scope_context.other_expression})",
-                _POSTFIX_PRECEDENCE,
+                POSTFIX_PRECEDENCE,
             )
         if isinstance(expr.callee, _Name):
             if (
@@ -329,39 +329,39 @@ def _emit_expression(
                     "GMRuntime.gml_call_value("
                     f"{callee}, [{args}], {scope_context.self_expression}, "
                     f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
-                    _POSTFIX_PRECEDENCE,
+                    POSTFIX_PRECEDENCE,
                 )
             if expr.callee.value not in local_names:
                 return (
                     "GMRuntime.gml_call_named("
                     f"{json.dumps(expr.callee.value)}, [{args}], "
                     f"{scope_context.self_expression}, {scope_context.other_expression})",
-                    _POSTFIX_PRECEDENCE,
+                    POSTFIX_PRECEDENCE,
                 )
             callee = _emit_name(expr.callee.value, local_names, scope_context)[0]
             return (
                 "GMRuntime.gml_call_value("
                 f"{callee}, [{args}], {scope_context.self_expression}, "
                 f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
-                _POSTFIX_PRECEDENCE,
+                POSTFIX_PRECEDENCE,
             )
         callee = _emit_child(
             expr.callee,
-            _POSTFIX_PRECEDENCE,
+            POSTFIX_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
         return (
             "GMRuntime.gml_call_value("
             f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})",
-            _POSTFIX_PRECEDENCE,
+            POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _ArrayLiteral):
         elements = ", ".join(
             _emit_expression(element, local_names, scope_context=scope_context)[0]
             for element in expr.elements
         )
-        return f"[{elements}]", _PRIMARY_PRECEDENCE
+        return f"[{elements}]", PRIMARY_PRECEDENCE
     if isinstance(expr, _FunctionLiteral):
         function_literal = _emit_function_literal(expr, local_names, scope_context=scope_context)
         if expr.static_scope_id is not None:
@@ -374,14 +374,14 @@ def _emit_expression(
                 return (
                     "GMRuntime.gml_receiver_constructor("
                     f"{scope_context.self_expression}, {function_literal})",
-                    _POSTFIX_PRECEDENCE,
+                    POSTFIX_PRECEDENCE,
                 )
             return (
                 "GMRuntime.gml_receiver_method("
                 f"{scope_context.self_expression}, {function_literal})",
-                _POSTFIX_PRECEDENCE,
+                POSTFIX_PRECEDENCE,
             )
-        return function_literal, _PRIMARY_PRECEDENCE
+        return function_literal, PRIMARY_PRECEDENCE
     if isinstance(expr, _NewCall):
         constructor = _emit_expression(
             expr.constructor,
@@ -395,7 +395,7 @@ def _emit_expression(
         return (
             f"GMRuntime.gml_new({constructor}, [{args}], "
             f"{scope_context.self_expression}, {scope_context.other_expression})",
-            _POSTFIX_PRECEDENCE,
+            POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _StructLiteral):
         fields = ", ".join(
@@ -407,52 +407,52 @@ def _emit_expression(
             )
             for field_name, field_value in expr.fields
         )
-        return f"GMRuntime.gml_struct({{{fields}}})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_struct({{{fields}}})", POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
         if _is_alarm_array_access(expr, local_names):
             index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
             return (
                 f"GMRuntime.gml_alarm_get({scope_context.self_expression}, {index})",
-                _POSTFIX_PRECEDENCE,
+                POSTFIX_PRECEDENCE,
             )
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_array_get({target}, {index})", POSTFIX_PRECEDENCE
     if isinstance(expr, _StructAccess):
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         key = _emit_expression(expr.key, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_struct_get({target}, {key})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_struct_get({target}, {key})", POSTFIX_PRECEDENCE
     if isinstance(expr, _DSMapAccess):
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         key = _emit_expression(expr.key, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_ds_map_find_value({target}, {key})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_ds_map_find_value({target}, {key})", POSTFIX_PRECEDENCE
     if isinstance(expr, _DSListAccess):
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_ds_list_find_value({target}, {index})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_ds_list_find_value({target}, {index})", POSTFIX_PRECEDENCE
     if isinstance(expr, _DSGridAccess):
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         x_index = _emit_expression(expr.x_index, local_names, scope_context=scope_context)[0]
         y_index = _emit_expression(expr.y_index, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_ds_grid_get({target}, {x_index}, {y_index})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_ds_grid_get({target}, {x_index}, {y_index})", POSTFIX_PRECEDENCE
     if isinstance(expr, _ArrayRefAccess):
         target = _emit_expression(expr.target, local_names, scope_context=scope_context)[0]
         index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_array_get({target}, {index})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_array_get({target}, {index})", POSTFIX_PRECEDENCE
     if _uses_direct_member_access(expr, scope_context=scope_context):
         target = _emit_child(
             expr.target,
-            _POSTFIX_PRECEDENCE,
+            POSTFIX_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
-        return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", _POSTFIX_PRECEDENCE
+        return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", POSTFIX_PRECEDENCE
     target = _emit_instance_keyword_argument(
         expr.target,
         local_names,
         scope_context=scope_context,
     )
-    return f"GMRuntime.gml_selector_get({target}, {json.dumps(expr.member)})", _POSTFIX_PRECEDENCE
+    return f"GMRuntime.gml_selector_get({target}, {json.dumps(expr.member)})", POSTFIX_PRECEDENCE
 
 
 def _emit_template_string(
@@ -474,12 +474,12 @@ def _emit_template_string(
         emitted_parts.append(emitted)
 
     if not emitted_parts:
-        return '""', _PRIMARY_PRECEDENCE
+        return '""', PRIMARY_PRECEDENCE
     if len(emitted_parts) == 1:
         precedence = (
-            _PRIMARY_PRECEDENCE
+            PRIMARY_PRECEDENCE
             if isinstance(expr.parts[0], str)
-            else _POSTFIX_PRECEDENCE
+            else POSTFIX_PRECEDENCE
         )
         result = (
             emitted_parts[0]
@@ -490,7 +490,7 @@ def _emit_template_string(
 
     return (
         f"GMRuntime.gml_string_join([{', '.join(emitted_parts)}], \"\")",
-        _POSTFIX_PRECEDENCE,
+        POSTFIX_PRECEDENCE,
     )
 
 
@@ -505,7 +505,7 @@ def _uses_direct_member_access(
         return False
     if expr.target.value == "other" and scope_context.other_expression != "other":
         return False
-    return expr.target.value in _DIRECT_MEMBER_TARGETS
+    return expr.target.value in DIRECT_MEMBER_TARGETS
 
 
 def _emit_function_literal(
@@ -686,10 +686,10 @@ def _emit_descriptor_call(
 
     if descriptor.lowering_kind == "keyboard_check":
         key = args[0]
-        if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_ACTIONS:
-            return f'Input.is_action_pressed("{_VIRTUAL_KEY_ACTIONS[key.value]}")'
-        if isinstance(key, _Name) and key.value in _VIRTUAL_KEY_CONSTANTS:
-            return f"Input.is_key_pressed({_VIRTUAL_KEY_CONSTANTS[key.value]})"
+        if isinstance(key, _Name) and key.value in VIRTUAL_KEY_ACTIONS:
+            return f'Input.is_action_pressed("{VIRTUAL_KEY_ACTIONS[key.value]}")'
+        if isinstance(key, _Name) and key.value in VIRTUAL_KEY_CONSTANTS:
+            return f"Input.is_key_pressed({VIRTUAL_KEY_CONSTANTS[key.value]})"
         raise GMLTranspileError(
             "GML API 'keyboard_check' currently supports mapped vk_* constants only; "
             f"tracked by #{descriptor.issue_number}."
@@ -697,7 +697,7 @@ def _emit_descriptor_call(
 
     if descriptor.lowering_kind == "method":
         scope = _emit_expression(args[0], local_names, scope_context=scope_context)[0]
-        if scope == _NAME_REPLACEMENTS["undefined"]:
+        if scope == NAME_REPLACEMENTS["undefined"]:
             scope = scope_context.self_expression
         function_reference = _unwrap_grouped_expression(args[1])
         if (
@@ -1077,33 +1077,33 @@ def _emit_binary(
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, int]:
     scope_context = _normalize_scope_context(scope_context)
-    operator = _OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
+    operator = OPERATOR_REPLACEMENTS.get(expr.operator, expr.operator)
 
     if expr.operator in ("&&", "and", "||", "or"):
         operator = "and" if expr.operator in ("&&", "and") else "or"
         left = _emit_truthy_expression(expr.left, local_names, scope_context=scope_context)
         right = _emit_truthy_expression(expr.right, local_names, scope_context=scope_context)
-        return f"{left} {operator} {right}", _BINARY_PRECEDENCE[expr.operator]
+        return f"{left} {operator} {right}", BINARY_PRECEDENCE[expr.operator]
 
     if expr.operator == "^^":
         left = _emit_truthy_expression(expr.left, local_names, scope_context=scope_context)
         right = _emit_truthy_expression(expr.right, local_names, scope_context=scope_context)
-        return f"{left} != {right}", _BINARY_PRECEDENCE[expr.operator]
+        return f"{left} != {right}", BINARY_PRECEDENCE[expr.operator]
 
     if expr.operator == "div":
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_int_div({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_int_div({left}, {right})", POSTFIX_PRECEDENCE
 
     if expr.operator == "??":
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_child(
             expr.right,
-            _TERNARY_PRECEDENCE,
+            TERNARY_PRECEDENCE,
             local_names=local_names,
             scope_context=scope_context,
         )
-        return f"{left} if not GMRuntime.gml_is_nullish({left}) else {right}", _TERNARY_PRECEDENCE
+        return f"{left} if not GMRuntime.gml_is_nullish({left}) else {right}", TERNARY_PRECEDENCE
 
     if expr.operator in ("=", "==", "!=") and (
         _contains_gml_undefined(expr.left)
@@ -1120,29 +1120,29 @@ def _emit_binary(
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
         helper = "gml_ne" if expr.operator == "!=" else "gml_eq"
-        return f"GMRuntime.{helper}({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.{helper}({left}, {right})", POSTFIX_PRECEDENCE
 
     if expr.operator == "/":
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.gml_div({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.gml_div({left}, {right})", POSTFIX_PRECEDENCE
 
-    if expr.operator in _COMPARISON_RUNTIME_FUNCTIONS:
+    if expr.operator in COMPARISON_RUNTIME_FUNCTIONS:
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.{_COMPARISON_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.{COMPARISON_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", POSTFIX_PRECEDENCE
 
-    if expr.operator in _ARITHMETIC_RUNTIME_FUNCTIONS:
+    if expr.operator in ARITHMETIC_RUNTIME_FUNCTIONS:
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.{_ARITHMETIC_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.{ARITHMETIC_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", POSTFIX_PRECEDENCE
 
-    if expr.operator in _BITWISE_RUNTIME_FUNCTIONS:
+    if expr.operator in BITWISE_RUNTIME_FUNCTIONS:
         left = _emit_expression(expr.left, local_names, scope_context=scope_context)[0]
         right = _emit_expression(expr.right, local_names, scope_context=scope_context)[0]
-        return f"GMRuntime.{_BITWISE_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", _POSTFIX_PRECEDENCE
+        return f"GMRuntime.{BITWISE_RUNTIME_FUNCTIONS[expr.operator]}({left}, {right})", POSTFIX_PRECEDENCE
 
-    precedence = _BINARY_PRECEDENCE[expr.operator]
+    precedence = BINARY_PRECEDENCE[expr.operator]
     left = _emit_child(
         expr.left,
         precedence,
@@ -1365,9 +1365,9 @@ def _emits_boolean_result(expr: _Expression) -> bool:
     if isinstance(expr, _Unary):
         return expr.operator in ("!", "not")
     if isinstance(expr, _Binary):
-        return expr.operator in _BOOLEAN_RESULT_BINARY_OPERATORS
+        return expr.operator in BOOLEAN_RESULT_BINARY_OPERATORS
     if isinstance(expr, _Call) and isinstance(expr.callee, _Name):
-        return expr.callee.value in _BOOLEAN_RESULT_FUNCTIONS
+        return expr.callee.value in BOOLEAN_RESULT_FUNCTIONS
     return False
 
 
@@ -1385,7 +1385,7 @@ def _emit_child(
 ) -> str:
     text, precedence = _emit_expression(expr, local_names, scope_context=scope_context)
     needs_parentheses = precedence < parent_precedence
-    if is_right_child and precedence == parent_precedence and parent_operator not in _RIGHT_ASSOCIATIVE:
+    if is_right_child and precedence == parent_precedence and parent_operator not in RIGHT_ASSOCIATIVE:
         needs_parentheses = True
     if needs_parentheses:
         return f"({text})"

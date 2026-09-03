@@ -10,6 +10,7 @@ from typing import cast
 import unittest
 
 import src.conversion.gml_transpiler as gml_transpiler
+from src.conversion.gml_transpiler_parts import constants as language_metadata
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -266,20 +267,16 @@ src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.constants|_BUI
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.expression_parser|_ExpressionParser,_parse_gml_expression
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.model|_ArrayLiteral,_Binary,_BuiltinVariableMetadata,_Call,_DSMapAccess,_Expression,_FunctionLiteral,_FunctionParameter,_Grouped,_Index,_Literal,_Member,_Name,_NameOf,_NewCall,_NumberLiteral,_ScopeContext,_StaticDeclaration,_StringLiteral,_StructAccess,_StructLiteral,_TemplateStringLiteral,_Ternary,_Token,_Unary
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.tokens|_expression_tokens,_tokenize
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.constants|_LEGACY_GLOBAL_BUILTINS
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.function_helpers|_emit_static_initialization_lines
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.tokens|_tokenize
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.utils|_prefix_multiline
-src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.constants|_ARITHMETIC_RUNTIME_FUNCTIONS,_BINARY_PRECEDENCE,_BITWISE_RUNTIME_FUNCTIONS,_BOOLEAN_RESULT_BINARY_OPERATORS,_BOOLEAN_RESULT_FUNCTIONS,_BUILTIN_ARRAY_VARIABLES,_BUILTIN_GLOBAL_VARIABLES,_BUILTIN_INSTANCE_VARIABLES,_COMPARISON_RUNTIME_FUNCTIONS,_DIRECT_MEMBER_TARGETS,_GML_BUILTIN_CONSTANT_IDENTIFIERS,_GML_LITERAL_IDENTIFIERS,_INSTANCE_NAME_REPLACEMENTS,_NAME_REPLACEMENTS,_OPERATOR_REPLACEMENTS,_POSTFIX_PRECEDENCE,_PRIMARY_PRECEDENCE,_RIGHT_ASSOCIATIVE,_TERNARY_PRECEDENCE,_UNARY_PRECEDENCE,_VIRTUAL_KEY_ACTIONS,_VIRTUAL_KEY_CONSTANTS
 src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.identifiers|_is_plain_identifier,_sanitize_gdscript_identifier
 src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_prefix_multiline,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.constants|_GML_BUILTIN_CONSTANT_IDENTIFIERS,_READ_ONLY_BUILTIN_VARIABLES
 src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.tokens|_expression_tokens
 src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_tokens_to_source,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.constants|_BINARY_PRECEDENCE,_EOF,_NAME_REPLACEMENTS,_RIGHT_ASSOCIATIVE,_TERNARY_PRECEDENCE
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line,_emit_static_initialization_lines
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.identifiers|_reject_asset_identifier_name,_validate_gml_identifier
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.lexical|_decode_gml_verbatim_string_literal
@@ -293,17 +290,13 @@ src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transp
 src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_scope_context_with_global_names
 src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.emitter|_emit_expression
 src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.gml_function_dispatch|src.conversion.gml_transpiler_parts.constants|_ARRAY_RUNTIME_FUNCTIONS,_ASSET_RUNTIME_FUNCTIONS,_ASYNC_RUNTIME_FUNCTIONS,_AUDIO_RUNTIME_FUNCTIONS,_BUFFER_RUNTIME_FUNCTIONS,_COLLISION_RUNTIME_FUNCTIONS,_DRAW_RUNTIME_FUNCTIONS,_DS_COLLECTIONS_FUNCTIONS,_DS_GRID_FUNCTIONS,_DS_MAP_RUNTIME_FUNCTIONS,_FILE_RUNTIME_FUNCTIONS,_FLEXPANEL_RUNTIME_FUNCTIONS,_INPUT_RUNTIME_FUNCTIONS,_INSTANCE_RUNTIME_FUNCTIONS,_LAYER_RUNTIME_FUNCTIONS,_MATH_RUNTIME_FUNCTIONS,_MOTION_RUNTIME_FUNCTIONS,_MP_GRID_RUNTIME_FUNCTIONS,_NETWORK_RUNTIME_FUNCTIONS,_OS_DEBUG_GC_RUNTIME_FUNCTIONS,_PATH_RUNTIME_FUNCTIONS,_PHYSICS_RUNTIME_FUNCTIONS,_PLATFORM_SERVICE_RUNTIME_FUNCTIONS,_ROOM_RUNTIME_FUNCTIONS,_RUNTIME_FUNCTIONS,_SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS,_STRING_RUNTIME_FUNCTIONS,_STRUCT_RUNTIME_FUNCTIONS,_TIME_RUNTIME_FUNCTIONS,_VARIABLE_RUNTIME_FUNCTIONS
-src.conversion.gml_transpiler_parts.identifiers|src.conversion.gml_transpiler_parts.constants|_GDSCRIPT_RESERVED_IDENTIFIERS,_GENERATED_IDENTIFIER_PREFIX,_GML_IDENTIFIER_MAX_LENGTH
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_verbatim_string
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.tokens|_read_template_string
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.utils|_join_macro_continuation_lines,_macro_configuration_matches,_strip_comments
-src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.constants|_GDSCRIPT_RESERVED_IDENTIFIERS
 src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.identifiers|_sanitize_gdscript_identifier
 src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_ordinary_string,_read_verbatim_string
 src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.tokens|_read_template_string
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.constants|_BINARY_PRECEDENCE,_EOF
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.emitter|_emit_instance_keyword_argument
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.enum_helpers|_evaluate_enum_value_tokens
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
@@ -311,7 +304,6 @@ src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpil
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.statements|_ControlFlowCapture,_control_flow_dispatch_lines,_transpile_statement
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.static_declarations|_read_static_declaration_tokens
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.utils|_indent_lines,_insert_lines_before_continue,_insert_until_check_before_continue,_macro_configuration_matches,_normalize_scope_context,_scope_context_with_global_names,_split_top_level_tokens,_tokens_to_source
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.constants|_BUILTIN_ARRAY_VARIABLES,_BUILTIN_GLOBAL_VARIABLES,_BUILTIN_INSTANCE_VARIABLES,_COMPOUND_RUNTIME_FUNCTIONS,_GML_LITERAL_IDENTIFIERS
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.emitter|_emit_expression,_emit_instance_keyword_argument,_is_alarm_array_access,_name_resolves_to_global,_uses_direct_builtin_instance_members,_uses_direct_member_access
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.enum_helpers|_reject_constant_assignment_target_name,_reject_constant_declaration_name,_reject_enum_assignment_target,_reject_readonly_builtin_assignment_target
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
@@ -320,10 +312,8 @@ src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_par
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.utils|_cache_assignment_part,_indent_lines,_next_generated_name_from_counter,_normalize_scope_context,_split_assignment,_split_top_level,_unwrap_grouped_expression
 src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
 src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level,_tokens_to_source
-src.conversion.gml_transpiler_parts.tokens|src.conversion.gml_transpiler_parts.constants|_BLOCK_DELIMITER_REPLACEMENTS,_MULTI_CHAR_OPERATORS
 src.conversion.gml_transpiler_parts.tokens|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
 src.conversion.gml_transpiler_parts.tokens|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_ordinary_string,_read_verbatim_string
-src.conversion.gml_transpiler_parts.utils|src.conversion.gml_transpiler_parts.constants|_ASSIGNMENT_OPERATORS
 src.conversion.gml_transpiler_parts.utils|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_verbatim_string
 src.conversion.gml_transpiler_parts.utils|src.conversion.gml_transpiler_parts.tokens|_line_column,_read_template_string
 """
@@ -334,7 +324,7 @@ src.conversion.asset_registry|src.conversion.gml_transpiler|GMLTranspileError,tr
 src.conversion.extension_registry|src.conversion.gml_transpiler_parts.extension_functions|EXTENSION_FUNCTION_MAPPING_FILENAME,load_gml_extension_function_mappings
 src.conversion.gml_runtime_parts.manifest|src.conversion.gml_transpiler_parts.gml_api_manifest|iter_gml_api_entries
 src.conversion.objects|src.conversion.gml_transpiler|GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,merge_gml_source_maps,transpile_gml_code_with_source_map,write_gml_source_map
-src.conversion.objects|src.conversion.gml_transpiler_parts.constants|_ASSIGNMENT_OPERATORS,_BUILTIN_GLOBAL_VARIABLES,_BUILTIN_INSTANCE_VARIABLES,_GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,_GML_LITERAL_IDENTIFIERS
+src.conversion.objects|src.conversion.gml_transpiler_parts.constants|ASSIGNMENT_OPERATORS,BUILTIN_GLOBAL_VARIABLES,BUILTIN_INSTANCE_VARIABLES,GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,GML_LITERAL_IDENTIFIERS
 src.conversion.objects|src.conversion.gml_transpiler_parts.shared_models|Token
 src.conversion.objects|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source
 src.conversion.objects|src.conversion.gml_transpiler_parts.tokens|_tokenize
@@ -353,8 +343,8 @@ src.conversion.script_functions|src.conversion.gml_transpiler_parts.lexical|_is_
 src.conversion.script_functions|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source_preserving_layout
 src.conversion.script_functions|src.conversion.gml_transpiler_parts.tokens|_read_template_string
 src.conversion.script_functions|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level
-src.conversion.script_generator|src.conversion.gml_transpiler_parts.constants|_GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 src.conversion.script_generator|src.conversion.gml_transpiler_parts.identifiers|_sanitize_gdscript_identifier
+src.conversion.script_generator|src.conversion.gml_transpiler_parts.constants|GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 src.conversion.scripts|src.conversion.gml_transpiler|EXTENSION_FUNCTION_MAPPING_FILENAME,GMLExtensionFunction,GMLExtensionFunctionMapping,GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,load_gml_extension_function_mappings,merge_gml_source_maps,render_gml_source_header,transpile_gml_code_with_source_map,transpile_gml_expression,write_gml_source_map
 src.conversion.scripts|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.scripts|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line
@@ -507,6 +497,8 @@ UTILS_STAGE_BY_CONSUMER: dict[str, int] = {
 def _disposition_for(edge: ImportEdge) -> BoundaryDisposition:
     if edge.name in EXPECTED_PUBLIC_FACADE_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.SUPPORTED_PUBLIC_FACADE, None)
+    if edge.owner == f"{PARTS_PACKAGE}.constants" and edge.name in language_metadata.__all__:
+        return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if (edge.owner, edge.name) in RETAINED_PACKAGE_INTERNAL_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if not edge.name.startswith("_"):
@@ -573,16 +565,6 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
             "src/conversion/gml_transpiler_parts/gml_api_manifest.py",
             1,
             "# pyright: reportPrivateUsage=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/gml_function_dispatch.py",
-            1,
-            "# pyright: reportPrivateUsage=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/identifiers.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
         ),
         (
             "src/conversion/gml_transpiler_parts/preprocessor.py",
@@ -794,8 +776,12 @@ import src.conversion.gml_transpiler_parts.api as phase_api
             actual_internal | actual_production,
         )
 
-        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 209)
+        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 135)
         self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 60)
+        self.assertEqual(
+            sum(edge.name.startswith("_") for edge in EXPECTED_PRODUCTION_IMPORTS),
+            16,
+        )
         self.assertEqual(
             actual_internal,
             EXPECTED_INTERNAL_PRIVATE_IMPORTS,
@@ -805,6 +791,20 @@ import src.conversion.gml_transpiler_parts.api as phase_api
             actual_production,
             EXPECTED_PRODUCTION_IMPORTS,
             difference,
+        )
+        self.assertEqual(
+            {
+                edge
+                for edge in actual_internal | actual_production
+                if edge.owner == f"{PARTS_PACKAGE}.constants" and edge.name.startswith("_")
+            },
+            {
+                ImportEdge(
+                    FACADE_MODULE,
+                    f"{PARTS_PACKAGE}.constants",
+                    "_BUILTIN_VARIABLE_REGISTRY",
+                )
+            },
         )
 
     def test_private_model_aliases_are_facade_only(self) -> None:
@@ -891,7 +891,7 @@ import src.conversion.gml_transpiler_parts.api as phase_api
 
     def test_transitional_private_usage_suppressions_are_exact(self) -> None:
         actual = _actual_private_usage_suppressions()
-        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 17)
+        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 15)
         self.assertEqual(actual, EXPECTED_PRIVATE_USAGE_SUPPRESSIONS)
 
 

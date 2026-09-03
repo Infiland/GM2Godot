@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 import re
 import tomllib
@@ -56,45 +55,22 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
-PYFLAKES_SELECTOR_PATTERN = re.compile(r"^F(?:\d+)?$")
+EXPECTED_RUFF_CONFIG: dict[str, object] = {
+    "target-version": "py312",
+    "line-length": 120,
+    "extend-exclude": ["build", "dist", "release", "venv"],
+    "lint": {"select": ["E9", "F"]},
+}
+EXPECTED_RUFF_LINT_STEPS = """\
+      - name: Run Ruff
+        run: python -m ruff check .
 
-
-def _ruff_selectors(value: object) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        return ()
-    selectors = cast(list[object], value)
-    return tuple(selector for selector in selectors if isinstance(selector, str))
-
-
-def _ruff_selector_disables_pyflakes(selector: str) -> bool:
-    return selector == "ALL" or PYFLAKES_SELECTOR_PATTERN.fullmatch(selector) is not None
-
-
-def _ruff_pyflakes_policy_errors(lint_config: Mapping[str, object]) -> tuple[str, ...]:
-    errors: list[str] = []
-    if "F" not in _ruff_selectors(lint_config.get("select")):
-        errors.append("select must include the exact F selector")
-
-    for setting in ("ignore", "extend-ignore"):
-        for selector in _ruff_selectors(lint_config.get(setting)):
-            if _ruff_selector_disables_pyflakes(selector):
-                errors.append(f"{setting} disables Pyflakes selector {selector}")
-
-    for setting in ("per-file-ignores", "extend-per-file-ignores"):
-        per_file_ignores = lint_config.get(setting)
-        if not isinstance(per_file_ignores, dict):
-            continue
-        for file_pattern, configured_selectors in cast(
-            dict[object, object],
-            per_file_ignores,
-        ).items():
-            for selector in _ruff_selectors(configured_selectors):
-                if _ruff_selector_disables_pyflakes(selector):
-                    errors.append(
-                        f"{setting}[{file_pattern}] disables Pyflakes selector {selector}"
-                    )
-
-    return tuple(errors)
+      - name: Run Ruff on every tracked lint input
+        run: |
+          git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
+            xargs -0 -- python -m ruff check --isolated --target-version py312 \\
+              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+"""
 
 
 class TestDocumentationHealth(unittest.TestCase):
@@ -305,85 +281,13 @@ class TestDocumentationHealth(unittest.TestCase):
     def test_code_health_workflow_runs_complete_pyflakes_suite(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "code-health.yml").read_text(encoding="utf-8")
         with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:
-            lint_config = cast(
+            ruff_config = cast(
                 dict[str, object],
-                tomllib.load(pyproject_file)["tool"]["ruff"]["lint"],
+                tomllib.load(pyproject_file)["tool"]["ruff"],
             )
 
-        self.assertIn("ruff check .", workflow)
-        self.assertIn("E9", _ruff_selectors(lint_config.get("select")))
-        self.assertEqual(_ruff_pyflakes_policy_errors(lint_config), ())
-
-    def test_ruff_pyflakes_policy_uses_exact_selector_boundaries(self) -> None:
-        unrelated_families = ["FBT", "FIX", "FA", "FLY", "FURB"]
-        self.assertEqual(
-            _ruff_pyflakes_policy_errors(
-                {
-                    "select": ["E9", "F", *unrelated_families],
-                    "ignore": unrelated_families,
-                    "extend-ignore": unrelated_families,
-                    "per-file-ignores": {"tests/*.py": unrelated_families},
-                    "extend-per-file-ignores": {"src/*.py": unrelated_families},
-                }
-            ),
-            (),
-        )
-
-    def test_ruff_pyflakes_policy_rejects_missing_or_disabled_rules(self) -> None:
-        invalid_configs = {
-            "missing exact F": (
-                {"select": ["E9", "FBT", "F82"]},
-                (
-                    "select must include the exact F selector",
-                ),
-            ),
-            "ignored family": (
-                {"select": ["E9", "F"], "ignore": ["F"]},
-                ("ignore disables Pyflakes selector F",),
-            ),
-            "ignored all rules": (
-                {"select": ["E9", "F"], "ignore": ["ALL"]},
-                ("ignore disables Pyflakes selector ALL",),
-            ),
-            "extended ignored rule": (
-                {"select": ["E9", "F"], "extend-ignore": ["F601"]},
-                ("extend-ignore disables Pyflakes selector F601",),
-            ),
-            "per-file ignored rule": (
-                {
-                    "select": ["E9", "F"],
-                    "per-file-ignores": {"tests/*.py": ["F541"]},
-                },
-                (
-                    "per-file-ignores[tests/*.py] disables Pyflakes selector F541",
-                ),
-            ),
-            "per-file ignored all rules": (
-                {
-                    "select": ["E9", "F"],
-                    "per-file-ignores": {"tests/*.py": ["ALL"]},
-                },
-                (
-                    "per-file-ignores[tests/*.py] disables Pyflakes selector ALL",
-                ),
-            ),
-            "extended per-file ignored family": (
-                {
-                    "select": ["E9", "F"],
-                    "extend-per-file-ignores": {"src/*.py": ["F"]},
-                },
-                (
-                    "extend-per-file-ignores[src/*.py] disables Pyflakes selector F",
-                ),
-            ),
-        }
-
-        for label, (lint_config, expected_errors) in invalid_configs.items():
-            with self.subTest(label=label):
-                self.assertEqual(
-                    _ruff_pyflakes_policy_errors(lint_config),
-                    expected_errors,
-                )
+        self.assertEqual(ruff_config, EXPECTED_RUFF_CONFIG)
+        self.assertTrue(workflow.endswith(EXPECTED_RUFF_LINT_STEPS))
 
     def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
         required_guidance = (

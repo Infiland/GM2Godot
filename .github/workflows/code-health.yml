@@ -118,3 +118,9 @@ jobs:
 
       - name: Run Ruff
         run: python -m ruff check .
+
+      - name: Run Ruff on every tracked lint input
+        run: |
+          git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
+            xargs -0 -- python -m ruff check --isolated --target-version py312 \
+              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --

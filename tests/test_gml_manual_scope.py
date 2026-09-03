@@ -16,6 +16,10 @@ from src.conversion.gml_transpiler import (
 )
 
 
+EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
+MONTHLY_MANUAL_PATH = "/monthly/en/"
+
+
 class TestGMLManualScope(unittest.TestCase):
     def test_manual_scope_entries_have_required_metadata(self):
         entries = tuple(iter_gml_manual_scope_entries())
@@ -27,7 +31,11 @@ class TestGMLManualScope(unittest.TestCase):
                 self.assertTrue(entry.title)
                 self.assertTrue(entry.section)
                 self.assertTrue(entry.owner_area)
-                self.assertTrue(entry.docs_url.startswith("https://manual.gamemaker.io/monthly/en/"))
+                self.assertTrue(
+                    entry.docs_url.startswith(EXPECTED_LTS_MANUAL_ROOT),
+                    entry.docs_url,
+                )
+                self.assertNotIn(MONTHLY_MANUAL_PATH, entry.docs_url)
                 self.assertTrue(entry.manifest_categories)
                 self.assertGreaterEqual(entry.issue_number, 575)
 
@@ -88,6 +96,8 @@ class TestGMLManualScope(unittest.TestCase):
         self.assertIn("### GML Reference: Drawing", markdown)
         self.assertIn("`compatibility_report`", markdown)
         self.assertIn("#602", markdown)
+        self.assertIn(EXPECTED_LTS_MANUAL_ROOT, markdown)
+        self.assertNotIn(MONTHLY_MANUAL_PATH, markdown)
 
 
 if __name__ == "__main__":

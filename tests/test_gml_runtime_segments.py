@@ -25,6 +25,10 @@ from src.conversion.gml_runtime_parts.manifest import (
 from src.conversion.gml_transpiler_parts.gml_api_manifest import iter_gml_api_entries
 
 
+EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
+MONTHLY_MANUAL_PATH = "/monthly/en/"
+
+
 EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "00_prelude.gd",
     "15_asset_registry.gd",
@@ -135,6 +139,22 @@ class TestGMLRuntimeSegments(unittest.TestCase):
                 missing_segments.append(api_name)
 
         self.assertEqual(missing_segments, [])
+
+    def test_runtime_api_index_uses_manifest_lts_documentation_urls(self) -> None:
+        manifest_urls = {
+            entry.name: entry.docs_url for entry in iter_gml_api_entries()
+        }
+        api_index = runtime_api_index()
+
+        self.assertEqual(set(api_index), set(manifest_urls))
+        for api_name, api_entry in api_index.items():
+            with self.subTest(api=api_name):
+                self.assertEqual(api_entry.docs_url, manifest_urls[api_name])
+                self.assertTrue(
+                    api_entry.docs_url.startswith(EXPECTED_LTS_MANUAL_ROOT),
+                    api_entry.docs_url,
+                )
+                self.assertNotIn(MONTHLY_MANUAL_PATH, api_entry.docs_url)
 
     def test_manifest_segment_owner_modules_resolve_to_declared_segments(self) -> None:
         for api_entry in iter_gml_api_entries():

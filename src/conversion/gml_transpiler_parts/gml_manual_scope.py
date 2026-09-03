@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Iterable, Literal, TypeAlias
 
 from src.conversion.gml_transpiler_parts.gml_api_manifest import (
+    GAMEMAKER_LTS_MANUAL_ROOT,
     GMLAPISupportStatus,
     category_issue_numbers,
+    gamemaker_lts_manual_url,
 )
 
 GMLManualDiagnosticPolicy: TypeAlias = Literal[
@@ -52,13 +54,6 @@ class GMLManualScopeCategoryReport:
         )
 
 
-_GM_DOCS = "https://manual.gamemaker.io/monthly/en"
-
-
-def _gm_docs(path: str) -> str:
-    return f"{_GM_DOCS}/{path}"
-
-
 def _entry(
     key: str,
     title: str,
@@ -80,7 +75,7 @@ def _entry(
         issue_number=issue_number,
         owner_area=owner_area,
         diagnostic_policy=diagnostic_policy,
-        docs_url=_gm_docs(docs_path),
+        docs_url=gamemaker_lts_manual_url(docs_path),
         manifest_categories=manifest_categories,
         test_paths=test_paths,
         notes=notes,
@@ -241,10 +236,10 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         586,
         "preprocessor",
         "source_diagnostic",
-        "GameMaker_Language/GML_Overview/Preprocessor.htm",
+        "GameMaker_Language/GML_Overview/Variables/Constants.htm",
         ("Preprocessor",),
         ("tests/test_gml_transpiler.py", "tests/test_scripts.py", "tests/test_objects.py"),
-        "Boolean/comparison preprocessor expressions, selected configuration symbols, and unsupported directive diagnostics have regression coverage.",
+        "The LTS topic documents #macro and configuration overrides. Boolean/comparison conditionals and other C-style directives are GM2Godot compatibility extensions with explicit unsupported-directive diagnostics.",
     ),
     _entry(
         "reference_variable_functions",
@@ -267,7 +262,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         583,
         "array/accessor runtime",
         "compatibility_report",
-        "GameMaker_Language/GML_Reference/Variable_Functions/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/Array_Functions.htm",
         ("Arrays", "Accessors"),
         ("tests/test_gml_runtime.py",),
         "Array helpers and nested accessor mutation caching exist; exact copy/reference behavior remains partial.",
@@ -690,7 +685,7 @@ def validate_gml_manual_scope_against_manifest() -> tuple[str, ...]:
             problems.append(f"Duplicate manual scope key: {entry.key}")
         seen_keys.add(entry.key)
 
-        if not entry.docs_url.startswith(_GM_DOCS):
+        if not entry.docs_url.startswith(GAMEMAKER_LTS_MANUAL_ROOT):
             problems.append(f"Manual scope entry {entry.key} has non-GameMaker docs URL")
         if not entry.owner_area:
             problems.append(f"Manual scope entry {entry.key} has no owner area")

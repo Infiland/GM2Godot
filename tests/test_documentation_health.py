@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
 
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
@@ -262,11 +263,15 @@ class TestDocumentationHealth(unittest.TestCase):
 
     def test_code_health_workflow_runs_ruff(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "code-health.yml").read_text(encoding="utf-8")
-        pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:
+            ruff_select = tomllib.load(pyproject_file)["tool"]["ruff"]["lint"]["select"]
 
         self.assertIn("ruff check .", workflow)
-        self.assertIn("[tool.ruff.lint]", pyproject)
-        self.assertIn('"F82"', pyproject)
+        self.assertIn("E9", ruff_select)
+        self.assertEqual(
+            [selector for selector in ruff_select if selector.startswith("F")],
+            ["F"],
+        )
 
     def test_dependabot_updates_actions_weekly_and_pip_security_only(self) -> None:
         dependabot = (

@@ -73,7 +73,7 @@ class InfoBar(QWidget):
         lang_button.setIcon(language_icon)
         lang_button.setFixedSize(32, 32)
         lang_button.setStyleSheet(
-            f"background-color: transparent; border: none;"
+            "background-color: transparent; border: none;"
         )
         lang_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         lang_button.clicked.connect(on_language_click)

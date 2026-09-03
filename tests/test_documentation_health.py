@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 import re
 import tomllib
 import unittest
+from typing import cast
 
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
 from src.version import get_version
@@ -54,6 +56,41 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
+PYFLAKES_SELECTOR_PATTERN = re.compile(r"^F(?:\d+)?$")
+
+
+def _ruff_selectors(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    selectors = cast(list[object], value)
+    return tuple(selector for selector in selectors if isinstance(selector, str))
+
+
+def _ruff_pyflakes_policy_errors(lint_config: Mapping[str, object]) -> tuple[str, ...]:
+    errors: list[str] = []
+    if "F" not in _ruff_selectors(lint_config.get("select")):
+        errors.append("select must include the exact F selector")
+
+    for setting in ("ignore", "extend-ignore"):
+        for selector in _ruff_selectors(lint_config.get(setting)):
+            if PYFLAKES_SELECTOR_PATTERN.fullmatch(selector):
+                errors.append(f"{setting} disables Pyflakes selector {selector}")
+
+    for setting in ("per-file-ignores", "extend-per-file-ignores"):
+        per_file_ignores = lint_config.get(setting)
+        if not isinstance(per_file_ignores, dict):
+            continue
+        for file_pattern, configured_selectors in cast(
+            dict[object, object],
+            per_file_ignores,
+        ).items():
+            for selector in _ruff_selectors(configured_selectors):
+                if PYFLAKES_SELECTOR_PATTERN.fullmatch(selector):
+                    errors.append(
+                        f"{setting}[{file_pattern}] disables Pyflakes selector {selector}"
+                    )
+
+    return tuple(errors)
 
 
 class TestDocumentationHealth(unittest.TestCase):
@@ -261,17 +298,88 @@ class TestDocumentationHealth(unittest.TestCase):
                 for phrase in phrases:
                     self.assertIn(phrase, content)
 
-    def test_code_health_workflow_runs_ruff(self) -> None:
+    def test_code_health_workflow_runs_complete_pyflakes_suite(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "code-health.yml").read_text(encoding="utf-8")
         with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:
-            ruff_select = tomllib.load(pyproject_file)["tool"]["ruff"]["lint"]["select"]
+            lint_config = cast(
+                dict[str, object],
+                tomllib.load(pyproject_file)["tool"]["ruff"]["lint"],
+            )
 
         self.assertIn("ruff check .", workflow)
-        self.assertIn("E9", ruff_select)
+        self.assertIn("E9", _ruff_selectors(lint_config.get("select")))
+        self.assertEqual(_ruff_pyflakes_policy_errors(lint_config), ())
+
+    def test_ruff_pyflakes_policy_uses_exact_selector_boundaries(self) -> None:
+        unrelated_families = ["FBT", "FIX", "FA", "FLY", "FURB"]
         self.assertEqual(
-            [selector for selector in ruff_select if selector.startswith("F")],
-            ["F"],
+            _ruff_pyflakes_policy_errors(
+                {
+                    "select": ["E9", "F", *unrelated_families],
+                    "ignore": unrelated_families,
+                    "extend-ignore": unrelated_families,
+                    "per-file-ignores": {"tests/*.py": unrelated_families},
+                    "extend-per-file-ignores": {"src/*.py": unrelated_families},
+                }
+            ),
+            (),
         )
+
+    def test_ruff_pyflakes_policy_rejects_missing_or_disabled_rules(self) -> None:
+        invalid_configs = {
+            "missing exact F": (
+                {"select": ["E9", "FBT", "F82"]},
+                (
+                    "select must include the exact F selector",
+                ),
+            ),
+            "ignored family": (
+                {"select": ["E9", "F"], "ignore": ["F"]},
+                ("ignore disables Pyflakes selector F",),
+            ),
+            "extended ignored rule": (
+                {"select": ["E9", "F"], "extend-ignore": ["F601"]},
+                ("extend-ignore disables Pyflakes selector F601",),
+            ),
+            "per-file ignored rule": (
+                {
+                    "select": ["E9", "F"],
+                    "per-file-ignores": {"tests/*.py": ["F541"]},
+                },
+                (
+                    "per-file-ignores[tests/*.py] disables Pyflakes selector F541",
+                ),
+            ),
+            "extended per-file ignored family": (
+                {
+                    "select": ["E9", "F"],
+                    "extend-per-file-ignores": {"src/*.py": ["F"]},
+                },
+                (
+                    "extend-per-file-ignores[src/*.py] disables Pyflakes selector F",
+                ),
+            ),
+        }
+
+        for label, (lint_config, expected_errors) in invalid_configs.items():
+            with self.subTest(label=label):
+                self.assertEqual(
+                    _ruff_pyflakes_policy_errors(lint_config),
+                    expected_errors,
+                )
+
+    def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
+        required_guidance = (
+            "CI enforces Ruff's `E9` fatal-error checks and the complete "
+            "Pyflakes (`F`) rule family. Do not disable `F` or individual "
+            "`F`-numbered rules globally or per file."
+        )
+        for path in (
+            PROJECT_ROOT / "CONTRIBUTING.md",
+            WIKI_SOURCE_DIR / "Contributing-and-Testing.md",
+        ):
+            with self.subTest(path=path.relative_to(PROJECT_ROOT)):
+                self.assertIn(required_guidance, path.read_text(encoding="utf-8"))
 
     def test_dependabot_updates_actions_weekly_and_pip_security_only(self) -> None:
         dependabot = (

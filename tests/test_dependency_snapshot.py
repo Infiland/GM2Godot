@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 import copy
 import errno
 from io import StringIO
@@ -8,8 +8,11 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
+from types import ModuleType
 from typing import Any, cast
 import unittest
 from unittest import mock
@@ -19,18 +22,20 @@ from scripts import build_dependency_snapshot as snapshotter
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 SCANNED = "2026-09-02T12:34:56Z"
-OUTPUT_PARENT_BINDING_TYPE: Any = getattr(snapshotter, "_OutputParentBinding")
-OPEN_OUTPUT_PARENT: Any = getattr(snapshotter, "_open_output_parent")
+ANCHORED_OUTPUT: ModuleType = getattr(snapshotter, "_ANCHORED_OUTPUT")
+ANCHORED_OUTPUT_ERROR: Any = getattr(ANCHORED_OUTPUT, "AnchoredOutputError")
+OUTPUT_PARENT_BINDING_TYPE: Any = getattr(ANCHORED_OUTPUT, "OutputParentBinding")
+OPEN_OUTPUT_PARENT: Any = getattr(ANCHORED_OUTPUT, "open_output_parent")
 WINDOWS_FILE_ATTRIBUTE_DIRECTORY = cast(
     int,
-    getattr(snapshotter, "_WINDOWS_FILE_ATTRIBUTE_DIRECTORY"),
+    getattr(ANCHORED_OUTPUT, "_WINDOWS_FILE_ATTRIBUTE_DIRECTORY"),
 )
 WINDOWS_FILE_TYPE_DISK = cast(
     int,
-    getattr(snapshotter, "_WINDOWS_FILE_TYPE_DISK"),
+    getattr(ANCHORED_OUTPUT, "_WINDOWS_FILE_TYPE_DISK"),
 )
 OPEN_WINDOWS_DIRECTORY_HANDLE: Any = getattr(
-    snapshotter,
+    ANCHORED_OUTPUT,
     "_open_windows_directory_handle",
 )
 ENVIRONMENT = {
@@ -55,6 +60,20 @@ PINS = {
     "pip-tools": "7.6.1",
     "tool": "4.0",
 }
+
+
+def _publish_new_json(path: Path, value: Mapping[str, object]) -> None:
+    payload = (
+        json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    ANCHORED_OUTPUT.publish_new_bytes(path, payload)
 
 
 def _installed_item(
@@ -925,15 +944,91 @@ class DependencySnapshotTests(unittest.TestCase):
                 with self.assertRaises(snapshotter.SnapshotError):
                     snapshotter.parse_inspect_report(value)
 
+    def test_anchored_output_exact_loader_supports_isolated_script_execution(
+        self,
+    ) -> None:
+        loader = cast(
+            Callable[[], object],
+            getattr(snapshotter, "_load_anchored_output_module"),
+        )
+        before_path = tuple(sys.path)
+        self.assertIs(loader(), ANCHORED_OUTPUT)
+        self.assertEqual(tuple(sys.path), before_path)
+        anchored_output_path = ANCHORED_OUTPUT.__file__
+        self.assertIsNotNone(anchored_output_path)
+        assert anchored_output_path is not None
+        self.assertEqual(
+            Path(anchored_output_path).resolve(strict=True),
+            Path(snapshotter.__file__)
+            .resolve(strict=True)
+            .with_name("_anchored_output.py"),
+        )
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            shadow = Path(raw_directory) / "_anchored_output.py"
+            shadow.write_text(
+                'raise RuntimeError("loaded shadow anchored output")\n',
+                encoding="utf-8",
+            )
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = raw_directory
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    os.fspath(Path(snapshotter.__file__).resolve(strict=True)),
+                    "--help",
+                ],
+                cwd=raw_directory,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("loaded shadow anchored output", completed.stderr)
+
+    def test_snapshot_json_adapter_preserves_publication_error_and_cleanup_note(
+        self,
+    ) -> None:
+        real_close = OUTPUT_PARENT_BINDING_TYPE.close
+
+        def close_then_report_failure(binding: Any) -> tuple[BaseException, ...]:
+            self.assertEqual(real_close(binding), ())
+            return (OSError("injected adapter close failure"),)
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            output = root / "snapshot.json"
+            output.write_bytes(b"existing\n")
+            with (
+                _working_directory(root),
+                mock.patch.object(
+                    OUTPUT_PARENT_BINDING_TYPE,
+                    "close",
+                    close_then_report_failure,
+                ),
+                self.assertRaises(snapshotter.SnapshotError) as raised,
+            ):
+                snapshotter.atomic_write_new_json(output, {"version": 0})
+
+            self.assertEqual(raised.exception.code, "output-exists")
+            self.assertIn(
+                "injected adapter close failure",
+                "\n".join(getattr(raised.exception, "__notes__", ())),
+            )
+            self.assertEqual(output.read_bytes(), b"existing\n")
+
     def test_atomic_output_never_overwrites_and_rejects_symlink_parent(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:
             root = Path(raw_directory)
             output = root / "snapshot.json"
             with _working_directory(root):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
                 original = output.read_bytes()
-                with self.assertRaisesRegex(snapshotter.SnapshotError, "overwrite"):
-                    snapshotter.atomic_write_new_json(output, {"version": 1})
+                with self.assertRaisesRegex(ANCHORED_OUTPUT_ERROR, "overwrite"):
+                    _publish_new_json(output, {"version": 1})
             self.assertEqual(output.read_bytes(), original)
             self.assertEqual(list(root.glob(".snapshot.json.*.tmp")), [])
 
@@ -961,9 +1056,9 @@ class DependencySnapshotTests(unittest.TestCase):
 
             with (
                 _working_directory(root),
-                self.assertRaisesRegex(snapshotter.SnapshotError, "overwrite"),
+                self.assertRaisesRegex(ANCHORED_OUTPUT_ERROR, "overwrite"),
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
 
             self.assertTrue(output.is_symlink())
             self.assertFalse(redirected.exists())
@@ -990,10 +1085,10 @@ class DependencySnapshotTests(unittest.TestCase):
                     self.skipTest("This platform cannot create directory symlinks.")
 
                 with self.assertRaisesRegex(
-                    snapshotter.SnapshotError,
+                    ANCHORED_OUTPUT_ERROR,
                     "Cannot bind snapshot output parent",
                 ):
-                    snapshotter.atomic_write_new_json(output, {"version": 0})
+                    _publish_new_json(output, {"version": 0})
 
             self.assertFalse((redirected_safe / "out" / output.name).exists())
             self.assertFalse((original_safe / "out" / output.name).exists())
@@ -1007,7 +1102,7 @@ class DependencySnapshotTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(
-        snapshotter.descriptor_relative_output_supported(),
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
     def test_atomic_output_recovers_when_initial_fstat_fails_once(
@@ -1044,13 +1139,13 @@ class DependencySnapshotTests(unittest.TestCase):
                     recording_open_new,
                 ),
                 mock.patch.object(
-                    snapshotter.os,
+                    ANCHORED_OUTPUT.os,
                     "fstat",
                     side_effect=fail_created_descriptor_once,
                 ),
                 self.assertRaisesRegex(OSError, "injected post-open fstat failure"),
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
 
             self.assertTrue(injected)
             self.assertFalse(output.exists())
@@ -1059,7 +1154,7 @@ class DependencySnapshotTests(unittest.TestCase):
                 real_fstat(created_descriptor)
 
     @unittest.skipUnless(
-        snapshotter.descriptor_relative_output_supported(),
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
     def test_atomic_output_persistent_initial_fstat_failure_is_bounded(
@@ -1090,13 +1185,13 @@ class DependencySnapshotTests(unittest.TestCase):
                     recording_open_new,
                 ),
                 mock.patch.object(
-                    snapshotter.os,
+                    ANCHORED_OUTPUT.os,
                     "fstat",
                     side_effect=fail_created_descriptor,
                 ),
                 self.assertRaisesRegex(OSError, "persistent post-open fstat failure") as raised,
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
 
             self.assertFalse(output.exists())
             temporary_files = list(root.glob(".snapshot.json.*.tmp"))
@@ -1110,7 +1205,7 @@ class DependencySnapshotTests(unittest.TestCase):
                 real_fstat(created_descriptor)
 
     @unittest.skipUnless(
-        snapshotter.descriptor_relative_output_supported(),
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
     def test_atomic_output_propagates_directory_sync_failure_and_cleans_up(
@@ -1129,13 +1224,13 @@ class DependencySnapshotTests(unittest.TestCase):
             with (
                 _working_directory(root),
                 mock.patch.object(
-                    snapshotter.os,
+                    ANCHORED_OUTPUT.os,
                     "fsync",
                     side_effect=reject_directory_sync,
                 ),
                 self.assertRaises(OSError) as raised,
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
 
             self.assertEqual(raised.exception.errno, errno.EIO)
             self.assertFalse(output.exists())
@@ -1156,7 +1251,7 @@ class DependencySnapshotTests(unittest.TestCase):
             strategy="posix-dir-fd",
             descriptors=(1, 2, 3),
         )
-        with mock.patch.object(snapshotter.os, "close", side_effect=close_descriptor):
+        with mock.patch.object(ANCHORED_OUTPUT.os, "close", side_effect=close_descriptor):
             posix_failures = posix_binding.close()
         self.assertEqual(closed_descriptors, [3, 2, 1])
         self.assertEqual(len(posix_failures), 2)
@@ -1186,6 +1281,58 @@ class DependencySnapshotTests(unittest.TestCase):
         self.assertEqual(windows_api.closed, [30, 20, 10])
         self.assertEqual(len(windows_failures), 2)
 
+    def test_output_binding_close_collects_control_flow_and_keeps_closing(self) -> None:
+        for strategy in ("posix-dir-fd", "windows-handle"):
+            for failure_type in (KeyboardInterrupt, SystemExit):
+                with self.subTest(strategy=strategy, failure=failure_type.__name__):
+                    failure = failure_type("injected close control flow")
+                    attempted: list[int] = []
+                    if strategy == "posix-dir-fd":
+                        binding = OUTPUT_PARENT_BINDING_TYPE(
+                            checkout=Path("checkout"),
+                            parent=Path("parent"),
+                            leaf="snapshot.json",
+                            strategy=strategy,
+                            descriptors=(1, 2),
+                        )
+
+                        def close_descriptor(descriptor: int) -> None:
+                            attempted.append(descriptor)
+                            if descriptor == 2:
+                                raise failure
+
+                        context = mock.patch.object(
+                            ANCHORED_OUTPUT.os,
+                            "close",
+                            side_effect=close_descriptor,
+                        )
+                    else:
+                        class FakeWindowsApi:
+                            def CloseHandle(self, handle: int) -> int:
+                                attempted.append(handle)
+                                if handle == 2:
+                                    raise failure
+                                return 1
+
+                        binding = OUTPUT_PARENT_BINDING_TYPE(
+                            checkout=Path("checkout"),
+                            parent=Path("parent"),
+                            leaf="snapshot.json",
+                            strategy=strategy,
+                            windows_api=FakeWindowsApi(),
+                            windows_entries=(
+                                (Path("one"), (1, 1), 1),
+                                (Path("two"), (2, 2), 2),
+                            ),
+                        )
+                        context = nullcontext()
+
+                    with context:
+                        failures = binding.close()
+
+                    self.assertEqual(attempted, [2, 1])
+                    self.assertEqual(failures, (failure,))
+
     def test_anchor_close_failure_preserves_primary_or_reports_published_output(
         self,
     ) -> None:
@@ -1193,7 +1340,7 @@ class DependencySnapshotTests(unittest.TestCase):
 
         def close_then_report_failure(
             binding: Any,
-        ) -> tuple[Exception, ...]:
+        ) -> tuple[BaseException, ...]:
             self.assertEqual(real_close(binding), ())
             return (OSError("injected anchor close failure"),)
 
@@ -1208,9 +1355,9 @@ class DependencySnapshotTests(unittest.TestCase):
                     "close",
                     close_then_report_failure,
                 ),
-                self.assertRaises(snapshotter.SnapshotError) as raised,
+                self.assertRaises(ANCHORED_OUTPUT_ERROR) as raised,
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
             self.assertEqual(raised.exception.code, "output-exists")
             self.assertIn(
                 "injected anchor close failure",
@@ -1227,14 +1374,95 @@ class DependencySnapshotTests(unittest.TestCase):
                     "close",
                     close_then_report_failure,
                 ),
-                self.assertRaises(snapshotter.SnapshotError) as raised,
+                self.assertRaises(ANCHORED_OUTPUT_ERROR) as raised,
             ):
-                snapshotter.atomic_write_new_json(output, {"version": 0})
+                _publish_new_json(output, {"version": 0})
             self.assertEqual(raised.exception.code, "output-anchor-close-failed")
             self.assertEqual(json.loads(output.read_bytes()), {"version": 0})
 
+    def test_anchor_close_control_flow_respects_active_primary_cross_product(
+        self,
+    ) -> None:
+        real_close = OUTPUT_PARENT_BINDING_TYPE.close
+        primary_types = (OSError, KeyboardInterrupt, SystemExit)
+        cleanup_types = (OSError, KeyboardInterrupt, SystemExit)
+
+        for primary_type in primary_types:
+            for cleanup_type in cleanup_types:
+                with (
+                    self.subTest(
+                        primary=primary_type.__name__,
+                        cleanup=cleanup_type.__name__,
+                    ),
+                    tempfile.TemporaryDirectory() as raw_directory,
+                ):
+                    root = Path(raw_directory)
+                    output = root / "snapshot.json"
+                    primary = primary_type("injected primary")
+                    cleanup = cleanup_type("injected cleanup")
+
+                    def close_then_report_failure(
+                        binding: Any,
+                    ) -> tuple[BaseException, ...]:
+                        self.assertEqual(real_close(binding), ())
+                        return (cleanup,)
+
+                    with (
+                        _working_directory(root),
+                        mock.patch.object(
+                            OUTPUT_PARENT_BINDING_TYPE,
+                            "open_new",
+                            side_effect=primary,
+                        ),
+                        mock.patch.object(
+                            OUTPUT_PARENT_BINDING_TYPE,
+                            "close",
+                            close_then_report_failure,
+                        ),
+                        self.assertRaises(primary_type) as raised,
+                    ):
+                        ANCHORED_OUTPUT.publish_new_bytes(output, b"payload\n")
+
+                    self.assertIs(raised.exception, primary)
+                    self.assertIn(
+                        "injected cleanup",
+                        "\n".join(getattr(raised.exception, "__notes__", ())),
+                    )
+                    self.assertFalse(output.exists())
+
+    def test_anchor_close_control_flow_without_primary_is_propagated(self) -> None:
+        real_close = OUTPUT_PARENT_BINDING_TYPE.close
+        for cleanup_type in (KeyboardInterrupt, SystemExit):
+            with (
+                self.subTest(cleanup=cleanup_type.__name__),
+                tempfile.TemporaryDirectory() as raw_directory,
+            ):
+                root = Path(raw_directory)
+                output = root / "snapshot.json"
+                cleanup = cleanup_type("injected cleanup")
+
+                def close_then_report_failure(
+                    binding: Any,
+                ) -> tuple[BaseException, ...]:
+                    self.assertEqual(real_close(binding), ())
+                    return (cleanup,)
+
+                with (
+                    _working_directory(root),
+                    mock.patch.object(
+                        OUTPUT_PARENT_BINDING_TYPE,
+                        "close",
+                        close_then_report_failure,
+                    ),
+                    self.assertRaises(cleanup_type) as raised,
+                ):
+                    ANCHORED_OUTPUT.publish_new_bytes(output, b"payload\n")
+
+                self.assertIs(raised.exception, cleanup)
+                self.assertEqual(output.read_bytes(), b"payload\n")
+
     @unittest.skipUnless(
-        snapshotter.descriptor_relative_output_supported(),
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
     def test_cli_rejects_output_ancestor_replaced_during_snapshot_build(self) -> None:
@@ -1272,8 +1500,8 @@ class DependencySnapshotTests(unittest.TestCase):
                     return_value=fixture.inspect_value,
                 ),
                 mock.patch.object(
-                    snapshotter,
-                    "_open_output_parent",
+                    ANCHORED_OUTPUT,
+                    "open_output_parent",
                     side_effect=bind_then_replace_output_ancestor,
                 ),
                 redirect_stderr(stderr),
@@ -1339,12 +1567,12 @@ class DependencySnapshotTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(
-                    snapshotter,
+                    ANCHORED_OUTPUT,
                     "_windows_directory_attributes",
                     return_value=WINDOWS_FILE_ATTRIBUTE_DIRECTORY,
                 ),
                 mock.patch.object(
-                    snapshotter,
+                    ANCHORED_OUTPUT,
                     "_windows_handle_identity",
                     return_value=identity,
                 ),
@@ -1353,7 +1581,7 @@ class DependencySnapshotTests(unittest.TestCase):
                 parent.rename(original_parent)
                 parent.mkdir()
                 with self.assertRaisesRegex(
-                    snapshotter.SnapshotError,
+                    ANCHORED_OUTPUT_ERROR,
                     "ancestor changed",
                 ):
                     binding.verify()
@@ -1389,12 +1617,12 @@ class DependencySnapshotTests(unittest.TestCase):
                     windows_api = FakeWindowsApi(close_failure)
                     with (
                         mock.patch.object(
-                            snapshotter,
+                            ANCHORED_OUTPUT,
                             "_windows_directory_attributes",
                             return_value=0,
                         ),
                         mock.patch.object(
-                            snapshotter,
+                            ANCHORED_OUTPUT,
                             "_windows_handle_identity",
                             return_value=identity,
                         ),
@@ -1416,7 +1644,7 @@ class DependencySnapshotTests(unittest.TestCase):
                         self.assertIn("injected CloseHandle failure", notes)
 
     @unittest.skipUnless(
-        snapshotter.descriptor_relative_output_supported(),
+        ANCHORED_OUTPUT.descriptor_relative_output_supported(),
         "Descriptor-relative output binding is unavailable on this platform.",
     )
     def test_output_parent_binding_preserves_control_flow_exceptions(self) -> None:
@@ -1433,7 +1661,7 @@ class DependencySnapshotTests(unittest.TestCase):
                 with (
                     _working_directory(root),
                     mock.patch.object(
-                        snapshotter.os,
+                        ANCHORED_OUTPUT.os,
                         "close",
                         side_effect=recording_close,
                     ),

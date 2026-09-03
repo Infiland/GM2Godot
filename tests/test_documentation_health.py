@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import unittest
 
+from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
 from src.version import get_version
 
 
@@ -137,6 +138,25 @@ class TestDocumentationHealth(unittest.TestCase):
                 with self.subTest(source=source.name, target=target):
                     self.assertIn(target_filename, WIKI_PAGES | {"_Sidebar.md"})
                     self.assertTrue((WIKI_SOURCE_DIR / target_filename).is_file())
+
+    def test_wiki_managed_output_roots_match_production(self) -> None:
+        generated_project = (
+            WIKI_SOURCE_DIR / "Generated-Project-and-Runtime.md"
+        ).read_text(encoding="utf-8")
+        start_marker = "<!-- managed-output-directories:start -->"
+        end_marker = "<!-- managed-output-directories:end -->"
+        before, separator, remainder = generated_project.partition(start_marker)
+        self.assertTrue(separator, "Managed-output directory start marker is missing")
+        managed_roots, separator, after = remainder.partition(end_marker)
+        self.assertTrue(separator, "Managed-output directory end marker is missing")
+        self.assertNotIn(start_marker, before + after)
+        self.assertNotIn(end_marker, before + after)
+
+        expected_roots = "\n" + "\n".join(
+            f"- `{Path(directory).as_posix()}/`"
+            for directory in MANAGED_OUTPUT_DIRECTORIES
+        ) + "\n"
+        self.assertEqual(managed_roots, expected_roots)
 
     def test_user_documentation_links_and_guidance_are_current(self) -> None:
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")

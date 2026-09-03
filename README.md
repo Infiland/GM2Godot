@@ -84,6 +84,8 @@ Version 0.7.62 makes `requirements-bootstrap.txt` the only reviewed source for t
 
 Version 0.7.63 makes the privileged dependency-submission validator compare native lock artifacts with canonical Git blob bytes after normalizing only CRLF and lone-CR line endings. Exact native bytes remain bound to their receipt hashes, while every non-newline content, provenance, pin, or ordering difference still fails closed. This restores verified Linux, macOS, and Windows dependency-graph submission without changing GameMaker LTS 2026 conversion behavior or exact Godot 4.7.1 output.
 
+Version 0.7.64 makes the canonical generated-project documentation enumerate every converter-managed output root in exact production order, including `particles/` and `particlesystems/`. An executable documentation-health check binds the marked list to `MANAGED_OUTPUT_DIRECTORIES`, so future ownership changes cannot silently drift from Wiki guidance. This documentation-only release leaves GameMaker LTS 2026 conversion behavior and exact Godot 4.7.1 output unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -104,7 +106,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.63`.
+Current source version: `0.7.64`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

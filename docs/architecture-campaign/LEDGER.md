@@ -41,8 +41,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound sco
 | Task | State | Implementation owner | Independent reviewer | Evidence |
 | --- | --- | --- | --- | --- |
 | Initial audit/plan | verified | root | three read-only investigators | initial-metrics.json, issue/pr history, native-environment.json |
-| R02 | planned | policy implementer, isolated worktree | audit_policy_tests_docs + root | two reproduced bypasses |
-| R01 | planned | GML integration implementer, isolated worktree | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
+| R02 | implementing | audit_transactions_cli, GM2Godot-080-policy | audit_policy_tests_docs + root | two reproduced bypasses |
+| R01 | implementing | audit_gml_resources, GM2Godot-080-gml | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
 | Remaining contracts | planned | assigned at contract acceptance | independent owner + root | see contracts.json |
 
 No implementation task is integrated or verified in this checkpoint.
+
+Plan review requested explicit particles/extensions/alias-retirement rows, serialization edges, slice-specific G01 targets, pre-extraction I01 state inventory, complete G05 structured-family ownership and measured time/memory evidence. Root incorporated these findings; the finite roadmap now has 54 rows. R02 repairs may proceed independently.

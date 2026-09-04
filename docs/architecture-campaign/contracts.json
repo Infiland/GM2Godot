@@ -311,7 +311,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "Explicit recursive JSON types/validation with field paths; unknown fields retained; eliminate source resolver/manifest cycle. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Missing/null/wrong-type/deep nesting/unknown fields; trailing-comma compatibility; path containment and malformed diagnostics; no downstream broad casts. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R10 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -346,7 +346,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One project parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact options/resource order/audio/texture metadata. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R11 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -366,7 +366,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "path_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R11"
       ],
       "allowed_files": [
         "src/conversion/path_registry.py",
@@ -380,7 +380,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One paths parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact point order/closure/precision and path movement. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R12 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -400,7 +400,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "fonts.py, asset_registry.py, asset_output_paths.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R12"
       ],
       "allowed_files": [
         "src/conversion/fonts.py",
@@ -416,7 +416,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One fonts parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact source resolution/bundled fonts; eliminate renderer-registry cycle. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R13 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -436,7 +436,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "scripts.py, script_functions.py, project_source_discovery.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R13"
       ],
       "allowed_files": [
         "src/conversion/scripts.py",
@@ -452,7 +452,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One scripts parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact contained source references/initializer and function aliases/source maps. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R14 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -472,7 +472,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "sounds.py, asset_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R14"
       ],
       "allowed_files": [
         "src/conversion/sounds.py",
@@ -487,7 +487,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One sounds parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact sound path/settings/groups/volume/compression/audio resource load. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R15 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -507,7 +507,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "sprites.py, asset_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R15"
       ],
       "allowed_files": [
         "src/conversion/sprites.py",
@@ -522,7 +522,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One sprites parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact frames/sequence/origin/layers/collision masks and animation. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R16 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -542,7 +542,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "shaders.py, asset_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R16"
       ],
       "allowed_files": [
         "src/conversion/shaders.py",
@@ -557,7 +557,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One shaders parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact stage references/generated shader import/runtime parameters. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R17 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -577,7 +577,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "tilesets.py, room_layers.py, asset_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R17"
       ],
       "allowed_files": [
         "src/conversion/tilesets.py",
@@ -593,7 +593,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One tilesets parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact atlas layout/coordinates/animation. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R18 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -613,7 +613,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "objects.py, asset_registry.py, project_source_discovery.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R18"
       ],
       "allowed_files": [
         "src/conversion/objects.py",
@@ -629,7 +629,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One objects parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact events/inheritance/references/callback ordering. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R19 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -649,7 +649,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "rooms.py, room_layers.py, asset_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R19"
       ],
       "allowed_files": [
         "src/conversion/rooms.py",
@@ -665,7 +665,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One rooms and layers parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact typed layers/instances/creation order/room transitions. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R20 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -685,7 +685,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "asset_registry.py sequence parser and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R20"
       ],
       "allowed_files": [
         "src/conversion/asset_registry.py sequence parser",
@@ -699,7 +699,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One sequences parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact tracks/keyframes/references and sequence runtime. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R21 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -719,7 +719,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "asset_registry.py timeline parser and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R21"
       ],
       "allowed_files": [
         "src/conversion/asset_registry.py timeline parser",
@@ -733,7 +733,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One timelines parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact ordered moments/actions and runtime event delivery. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R22 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -753,7 +753,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "animation_curve_registry.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R10"
+        "R22"
       ],
       "allowed_files": [
         "src/conversion/animation_curve_registry.py",
@@ -767,7 +767,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One animation curves parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact channels/points/interpolation/channel order. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R23 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -777,38 +777,24 @@
     {
       "task_id": "R24",
       "issue": 797,
-      "title": "Authoritative remaining resources resource model",
+      "title": "Authoritative extension resource model",
       "state": "planned",
-      "problem_and_evidence": "Descriptive resource_models has no production callers; remaining resources consumers parse raw data separately.",
-      "expected_benefit": "One remaining resources parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model.",
-      "current_owner": "extension_registry.py, project_settings.py, resource_models.py, remaining raw JSON consumers",
-      "proposed_owner": "Authoritative remaining resources resource model",
+      "problem_and_evidence": "Extensions still use duplicate lenient loading and nested raw casts despite existing canonical entry types.",
+      "expected_benefit": "One validated extension parser using existing typed entries; preserve stub/report/path behavior and unmapped function diagnostics.",
+      "current_owner": "src/conversion/extension_registry.py",
+      "proposed_owner": "Existing ExtensionEntry/FileEntry/FunctionEntry models and one validated parser",
       "inputs_and_outputs": "Existing source and typed contracts -> explicitly owned implementation with unchanged observable output. Characterize missing/null/malformed/unknown field behavior and exact extensions/generic validated extras; remove final legacy Any aliases and loaders. Preserve diagnostic text/default coercions until separately approved changes.",
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "extension_registry.py, project_settings.py, resource_models.py, remaining raw JSON consumers and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R11",
-        "R12",
-        "R13",
-        "R14",
-        "R15",
-        "R16",
-        "R17",
-        "R18",
-        "R19",
-        "R20",
-        "R21",
-        "R22",
         "R23"
       ],
       "allowed_files": [
         "src/conversion/extension_registry.py",
-        "src/conversion/project_settings.py",
+        "src/conversion/gml_transpiler_parts/extension_functions.py",
+        "src/conversion/asset_registry.py",
         "src/conversion/resource_models.py",
-        "src/conversion/remaining raw JSON consumers",
-        "one corresponding canonical model module",
-        "src/conversion/resource_models.py",
-        "focused family tests/fixtures",
+        "focused extension tests and fixtures",
         "maintainability-baseline.json"
       ],
       "non_goals": "No feature changes, wholesale formatting, new framework, or version/release metadata edits.",
@@ -816,11 +802,100 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "One remaining resources parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact extensions/generic validated extras; remove final legacy Any aliases and loaders. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated R24 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
+      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+    },
+    {
+      "task_id": "R25",
+      "issue": 797,
+      "title": "Authoritative authored particle system model",
+      "state": "planned",
+      "problem_and_evidence": "Particle normalizer consumes and produces JsonDict and independently coerces emitters/types/colours/spawn references.",
+      "expected_benefit": "One authoritative typed particle parser; validated forward-compatible extras; no raw model dictionaries in rendering.",
+      "current_owner": "src/conversion/particle_assets.py and asset_registry.py",
+      "proposed_owner": "Typed particle system/type/emitter descriptor models",
+      "inputs_and_outputs": "Existing source and typed contracts -> explicitly owned implementation with unchanged observable output. Characterize missing/null/malformed/unknown field behavior and exact extensions/generic validated extras; remove final legacy Any aliases and loaders. Preserve diagnostic text/default coercions until separately approved changes.",
+      "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
+      "callers_to_migrate": "extension_registry.py, project_settings.py, resource_models.py, remaining raw JSON consumers and direct production/test consumers found by explicit import and call inventory.",
+      "dependencies": [
+        "R24"
+      ],
+      "allowed_files": [
+        "src/conversion/particle_assets.py",
+        "src/conversion/particle_models.py",
+        "src/conversion/asset_registry.py",
+        "src/conversion/resource_models.py",
+        "tests/test_particle_assets.py",
+        "particle Godot tests and fixtures",
+        "maintainability-baseline.json"
+      ],
+      "non_goals": "No feature changes, wholesale formatting, new framework, or version/release metadata edits.",
+      "compatibility_constraints": "GameMaker LTS 2026; exact Godot 4.7.2.stable.official.ed1daf0bf; preserve public signatures, generated bytes/maps, ordering, identifiers, diagnostics, exit status and native safety guarantees.",
+      "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
+      "expected_measurable_improvement": "One remaining resources parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
+      "characterization_tests": "Legacy separate types and modern embedded emitters, shapes/distributions/draw ordering/colours/spawn descriptors and unsupported modifiers; exact descriptor/resource bytes and Godot emitter/runtime assertions.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
+      "implementation_owner": "One designated R25 implementer in isolated worktree; preserve unrelated #847 mismatch-taxonomy work.",
+      "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
+      "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
+      "temporary_adapter_removal_condition": "Remove migrated raw particle descriptor adapters when last production caller is typed; same task.",
+      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+    },
+    {
+      "task_id": "R26",
+      "issue": 797,
+      "title": "Retire legacy JSON aliases and duplicate boundary adapters",
+      "state": "planned",
+      "problem_and_evidence": "Cross-cutting generated report schemas and source adapters still refer to legacy JSON aliases after family migration.",
+      "expected_benefit": "Zero Any JSON aliases and zero duplicate GameMaker deserializers; generated report schemas retain their own behavior and existing typed records.",
+      "current_owner": "Remaining explicitly inventoried JSON alias consumers",
+      "proposed_owner": "Validated JSON boundary plus existing resource-family and report-schema models",
+      "inputs_and_outputs": "Existing source and typed contracts -> explicitly owned implementation with unchanged observable output. Characterize missing/null/malformed/unknown field behavior and exact extensions/generic validated extras; remove final legacy Any aliases and loaders. Preserve diagnostic text/default coercions until separately approved changes.",
+      "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
+      "callers_to_migrate": "extension_registry.py, project_settings.py, resource_models.py, remaining raw JSON consumers and direct production/test consumers found by explicit import and call inventory.",
+      "dependencies": [
+        "R25",
+        "I10",
+        "E01"
+      ],
+      "allowed_files": [
+        "src/conversion/type_defs.py",
+        "src/conversion/resource_models.py",
+        "src/conversion/resource_index.py",
+        "src/conversion/base_converter.py",
+        "src/conversion/room_creation_code.py",
+        "src/conversion/script_generator.py",
+        "src/conversion/sequence_assets.py",
+        "src/conversion/project_godot.py",
+        "src/conversion/included_file_registry.py",
+        "src/conversion/events/base.py",
+        "src/conversion/events/mappings/core.py",
+        "src/conversion/events/mappings/input.py",
+        "src/conversion/architecture_policy.py",
+        "src/conversion/conversion_artifact_generation.py",
+        "src/conversion/conversion_manifest.py",
+        "src/conversion/conversion_outcome.py",
+        "src/conversion/generation_inventory.py",
+        "src/conversion/godot_validation.py",
+        "src/conversion/managed_output_publisher.py",
+        "src/conversion/managed_resource_outputs.py",
+        "focused alias-consumer tests",
+        "maintainability-baseline.json"
+      ],
+      "non_goals": "No new resource families, transaction/report formats, new feature schemas or automatic expansion beyond the listed consumer files; missing true prerequisites require root decision.",
+      "compatibility_constraints": "GameMaker LTS 2026; exact Godot 4.7.2.stable.official.ed1daf0bf; preserve public signatures, generated bytes/maps, ordering, identifiers, diagnostics, exit status and native safety guarantees.",
+      "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
+      "expected_measurable_improvement": "One remaining resources parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
+      "characterization_tests": "Type checker confirms every legacy alias consumer migrated; exact output/report inventory/bytes/diagnostics; field-path and unknown generic resource preservation; original diagnostic and recovery malformed-record tests.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
+      "implementation_owner": "One designated R26 cleanup implementer; serialize with all listed subsystem owners.",
+      "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
+      "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
+      "temporary_adapter_removal_condition": "Delete transitional raw adapters, unused descriptive models and legacy Any aliases after all named family consumers migrate; no deferred removal in #797 closure.",
       "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
     },
     {
@@ -832,7 +907,7 @@
       "expected_benefit": "Reduce original and destination hotspot sizes/complexity; explicit acyclic lifecycle ownership; no facade aliases for private test internals.",
       "current_owner": "src/conversion/included_files.py",
       "proposed_owner": "Included Files models and planning",
-      "inputs_and_outputs": "Existing source and typed contracts -> explicitly owned implementation with unchanged observable output. Manifest to deterministic source/output plan; requested/skipped counts, fallback, collisions, missing/undeclared folders.",
+      "inputs_and_outputs": "Before extraction, write exact transaction states and phase ordering, descriptor/handle/worker/stage cleanup ownership transfers, acyclic dependency map and no-follow/reparse/hardlink/relocation/durability/rollback/cancellation/recovery/journal-integrity invariants. Then preserve manifest -> immutable plan/model outputs.",
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "src/conversion/included_files.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
@@ -983,7 +1058,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "src/conversion/included_files.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "I01"
+        "I04"
       ],
       "allowed_files": [
         "src/conversion/included_files.py",
@@ -1218,7 +1293,7 @@
       "non_goals": "No new syntax, alternate AST/parser, reflective dispatch, generic visitor or semantic bug fixes.",
       "compatibility_constraints": "GameMaker LTS 2026; exact Godot 4.7.2.stable.official.ed1daf0bf; preserve public signatures, generated bytes/maps, ordering, identifiers, diagnostics, exit status and native safety guarantees.",
       "before_metrics": "statements.py2771 lines; dispatcher1161/C122; lvalue helper266/C20; assignment helper151/C16.",
-      "expected_measurable_improvement": "Localized typed handlers; dispatcher and new handlers <=15 complexity/150 lines with unchanged facade. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
+      "expected_measurable_improvement": "Replace sixteen lowering parameters with one typed context and migrate all existing parser call sites; no new debt. Final dispatcher <=150 lines/C15 is G05 acceptance, not this preparatory context row.",
       "characterization_tests": "Nested evaluation/scope/with-self-other/loop/switch/try-finally/static semantics; Replace 16 parameters with canonical context; parser retains cursor/source ownership. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
       "implementation_owner": "One designated G01 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
@@ -1275,7 +1350,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "gml_transpiler_parts/statements.py and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "G01"
+        "G02"
       ],
       "allowed_files": [
         "src/conversion/gml_transpiler_parts/statements.py",
@@ -1359,7 +1434,7 @@
       "compatibility_constraints": "GameMaker LTS 2026; exact Godot 4.7.2.stable.official.ed1daf0bf; preserve public signatures, generated bytes/maps, ordering, identifiers, diagnostics, exit status and native safety guarantees.",
       "before_metrics": "statements.py2771 lines; dispatcher1161/C122; lvalue helper266/C20; assignment helper151/C16.",
       "expected_measurable_improvement": "Localized typed handlers; dispatcher and new handlers <=15 complexity/150 lines with unchanged facade. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
-      "characterization_tests": "Nested evaluation/scope/with-self-other/loop/switch/try-finally/static semantics; Explicit dispatch <=150 lines/C15; trace conditionals/loops/switch/with/try owners; remove unused _split_statements and superseded helpers. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
+      "characterization_tests": "Nested evaluation/scope/with-self-other/loop/switch/try-finally/static semantics; Explicit dispatch <=150 lines/C15; trace conditionals/loops/switch/with/try owners; remove unused _split_statements and superseded helpers. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate. Inventory exact _StatementParser conditional, loop, switch, with, try and declaration owner functions with before/after size/C; retain cohesive existing methods only with explicit ownership and unchanged tests. Each requested statement family must appear in the final owner map.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
       "implementation_owner": "One designated G05 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
@@ -1430,7 +1505,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "Readable coordinator with explicit state and outcome/rendering ownership. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Production Converter.managed_output_transactional=True has sole CLI reader; prove supported injection contract, correct test fakes, preserve real cancellation/report failures. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated L01 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -1466,7 +1541,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "Readable coordinator with explicit state and outcome/rendering ownership. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Separate argument resolution, validation, plan, execution/session/signal lifecycle; preserve first/second SIGINT, flags/defaults and partial outcomes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated L02 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -1502,7 +1577,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "Readable coordinator with explicit state and outcome/rendering ownership. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "_run_convert <=150 lines/C15; stdout/stderr/status/rendering and exit mapping remain exact, import CLI without loading Qt. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated L03 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
@@ -1735,7 +1810,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "README454 lines/37 version paragraphs; CONTRIBUTING338 lines plus inherited additions and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R24",
+        "R26",
         "I10",
         "G05",
         "L03",
@@ -1773,7 +1848,7 @@
       "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
       "callers_to_migrate": "README454 lines/37 version paragraphs; CONTRIBUTING338 lines plus inherited additions and direct production/test consumers found by explicit import and call inventory.",
       "dependencies": [
-        "R24",
+        "R26",
         "I10",
         "G05",
         "L03",
@@ -1817,7 +1892,7 @@
         "R03",
         "R04",
         "R05",
-        "R24",
+        "R26",
         "I10",
         "G05",
         "L03",
@@ -1837,7 +1912,7 @@
       "before_metrics": "Measure exact owner and immediate consumers again at task acceptance.",
       "expected_measurable_improvement": "Every finite checklist item has exact revision evidence, before/after metrics and independent review. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Full suite/type/lint/ratchet; exact Godot conversion/import/resource-load/boot/targeted semantics; same-input immutable parity; native Windows/Linux/macOS; independent add/remove walkthrough. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
-      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
+      "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
       "implementation_owner": "One designated V01 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",

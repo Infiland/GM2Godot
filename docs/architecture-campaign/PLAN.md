@@ -75,7 +75,7 @@ grammar calls must remain explicit and cycle-safe. No new cycles are permitted.
 
 Resource models are not yet authoritative production input. `type_defs.py` still
 defines `JsonValue = Any`, and converter families repeat dictionary parsing.
-R10 establishes recursive JSON validation and source-aware field paths; R11–R24
+R10 establishes recursive JSON validation and source-aware field paths; R11–R26
 migrate one family at a time, retaining validated unknown fields.
 
 There are 43 local Godot finder definitions (37 identical), 51 `_write_text`
@@ -127,7 +127,7 @@ or messages accidentally. No parallel diagnostic registry is authorized.
 
 ## Finite roadmap
 
-Rows are task boundaries, not permission to broaden their allowed files. Each
+Rows are task boundaries, not permission to broaden their allowed files. Shared resource/registry, Included Files monolith and GML dispatcher edits are explicitly serialized; independent branches never own the same file concurrently. Each
 resource family is a separate review. Later discovery outside these rows goes to
 a separate issue, except a demonstrated prerequisite blocking a listed guarantee.
 
@@ -140,7 +140,7 @@ a separate issue, except a demonstrated prerequisite blocking a listed guarantee
 | R03–R05 | Complete E4/E7, I, B lint cohorts without blanket suppressions | R02, serialized ownership |
 | D01 | Parse-only diagnostic ownership, reused by JSON models | R01 |
 | R10 | Validated recursive JSON and model/source ownership boundary | D01 |
-| R11–R24 | Project, paths, fonts, scripts, sounds, sprites, shaders, tilesets, objects, rooms/layers, sequences, timelines, curves, remaining resources | R10; one family per task |
+| R11–R26 | Project, paths, fonts, scripts, sounds, sprites, shaders, tilesets, objects, rooms/layers, sequences, timelines, curves, extensions, particles; retire the enumerated legacy aliases | R10; one family per task |
 | I01–I10 | Models/planning, POSIX, Windows, snapshots, journal, stage/publication, recovery/cleanup, facade/test split | N01; models first, coordinator last |
 | G01–G05 | Typed statement context/dispatch, value handlers, flow handlers, remaining handlers and stale adapters | R01; context before handlers |
 | E01 | Explicit event mapping imports; remove eager registry cycle | R01 |
@@ -169,6 +169,7 @@ a separate issue, except a demonstrated prerequisite blocking a listed guarantee
 - Each listed resource family has one authoritative typed parser, production
   consumers and malformed/missing/null/unknown-field tests. Agreed duplicate
   production paths disappear; models depend on no renderer/writer.
+- Compare identical-input base/candidate elapsed time and peak memory for shared parsing, discovery and orchestration; investigate material regressions before acceptance.
 - Record original and destination module/function sizes, complexity, cycles,
   API growth, removed duplication and helper/test growth per decomposition.
 - Maintainability checks compare a Git-resolved immutable parent. Reductions

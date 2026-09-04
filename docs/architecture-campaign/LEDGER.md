@@ -41,11 +41,11 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound sco
 | Task | State | Implementation owner | Independent reviewer | Evidence |
 | --- | --- | --- | --- | --- |
 | Initial audit/plan | verified | root | three read-only investigators | initial-metrics.json, issue/pr history, native-environment.json |
-| R02 | implementing | audit_transactions_cli, GM2Godot-080-policy | audit_policy_tests_docs + root | two reproduced bypasses |
+| R02 | integrated | audit_transactions_cli, GM2Godot-080-policy | audit_policy_tests_docs + root | two reproduced bypasses |
 | R01 | implementing | audit_gml_resources, GM2Godot-080-gml | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
 | Remaining contracts | planned | assigned at contract acceptance | independent owner + root | see contracts.json |
 
-No implementation task is integrated or verified in this checkpoint.
+R02 is integrated locally; native campaign CI verification follows through C01. Other implementation tasks remain unintegrated.
 
 Plan review requested explicit particles/extensions/alias-retirement rows, serialization edges, slice-specific G01 targets, pre-extraction I01 state inventory, complete G05 structured-family ownership and measured time/memory evidence. Root incorporated these findings; the finite roadmap now has 54 rows. R02 repairs may proceed independently.
 
@@ -61,3 +61,6 @@ Plan review requested explicit particles/extensions/alias-retirement rows, seria
 
 - R02 final implementation is under read-only review. Its bounded size helper and schema 2 are accepted; immutable bootstrap now records the original 1,014 entries unchanged plus 350 structural-size entries from the same old source. No new implementation allowance is accepted. Native full-suite proof is running.
 - R01 additional helper contracts accepted: typed manifest parsing stays in conversion_parity_contract; runtime/fixture identity moves to conversion_parity_inputs; output comparison stays in conversion_parity_snapshot with its own tests; facade contract checks move to gml_facade_contract_support and depend directly on the import scanner. Both test helpers remain forbidden application dependencies. Native receipt task N01 explicitly waits for the existing required-test runner from R01.
+
+- R02 approved by independent reviewer and root, committed as 3d2cfd0 and integrated as 50e86af. Pyright 0 errors/warnings, Ruff, 58 focused/documentation tests, full unittest 2,943 tests in 369.135s passed. Its 78 skips include 8 external-fixture skips compared with the initial fixture-enabled baseline; exact Godot was present. No claim of a zero-skip or fixture-enabled R02 full run. Integrated gate passes 1,364 entries against immutable 38b. Evidence: R02/README.md and raw receipts.
+- C01 implementation assigned to audit_transactions_cli in isolated GM2Godot-080-ci on dev/080-ci-aggregate. Accepted C01-ci-contract.md is authoritative. Root prepared verified official actionlint 1.7.12 darwin/arm64 tool in external evidence tools directory; no project dependency changes. Independent review and a real campaign PR are required before verification.

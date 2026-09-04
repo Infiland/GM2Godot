@@ -22,7 +22,7 @@ def _write_json(path: Path, data: dict[str, object]) -> None:
 
 
 class TestScriptTopLevelEnumGodotSmoke(unittest.TestCase):
-    def test_modern_script_after_enum_executes_on_exact_godot_4_7_1(self) -> None:
+    def test_modern_script_after_enum_executes_on_exact_godot_4_7_2(self) -> None:
         godot_binary = find_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
@@ -36,9 +36,9 @@ class TestScriptTopLevelEnumGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 

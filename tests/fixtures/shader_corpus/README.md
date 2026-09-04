@@ -6,5 +6,5 @@ Apache-2.0. `standard_color` is a GM2Godot regression pair authored for issue
 #708. The manifest records each pair's exact origin and exercised semantics.
 
 These are source `.vsh` + `.fsh` pairs, not expected Godot output. Tests convert
-every manifest case and require exact Godot 4.7.1 to load the resulting
+every manifest case and require exact Godot 4.7.2 to load the resulting
 `.gdshader`.

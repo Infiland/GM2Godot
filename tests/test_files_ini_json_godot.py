@@ -52,9 +52,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 
@@ -338,9 +338,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 
@@ -502,9 +502,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 
@@ -682,9 +682,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 
@@ -818,9 +818,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 
@@ -945,9 +945,9 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if not version_result.stdout.strip().startswith("4.7.1."):
+        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 

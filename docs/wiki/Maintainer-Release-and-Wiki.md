@@ -1,8 +1,8 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.68 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.69 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-03
+> **Last reviewed:** 2026-09-04
 
 This page documents the current maintainer path for a versioned release and for publishing the reviewed Wiki sources. It does not replace branch protection or repository settings.
 
@@ -56,7 +56,7 @@ Before opening the pull request:
 Before merging:
 
 - [ ] Confirm `refs/tags/v<version>` does not already exist on the GitHub remote; do not rely only on a local checkout's tag list.
-- [ ] Confirm all pull-request checks pass, including exact Godot 4.7.1 smoke and GameMaker LTS 2026 conversion gates.
+- [ ] Confirm all pull-request checks pass, including exact Godot 4.7.2 smoke and GameMaker LTS 2026 conversion gates.
 - [ ] Confirm Linux, macOS, and Windows build jobs produce non-empty artifacts.
 - [ ] Confirm the Linux build reports no unresolved shared libraries and its extracted-ZIP `qxcb` GUI smoke passes with the required Qt GUI/XCB runtime inventory and excluded TIFF plugin.
 - [ ] Confirm the macOS build verifies the exact bundle identifier and source release version in the `.app`, ZIP, and DMG before upload.

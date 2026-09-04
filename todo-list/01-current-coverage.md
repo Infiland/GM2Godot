@@ -73,7 +73,7 @@ This file records what the current codebase appears to support. Partial features
 
 - [x] Parse paired shader stages and convert the supported 2D attribute, varying, uniform, base-texture, and matrix subset into one `.gdshader`.
 - [x] Parse multi-line, array, and comma-separated declarations and fail unsupported constructs with source-linked diagnostics.
-- [x] Compile and load the provenance-pinned supported shader corpus under exact Godot 4.7.1.
+- [x] Compile and load the provenance-pinned supported shader corpus under exact Godot 4.7.2.
 - [ ] Partial: full GLSL ES to Godot shader language translation.
 - [ ] Partial: custom/normal vertex streams, macros, arbitrary clip-space and 3D transforms, mutable globals, multi-pass effects, renderer state, and visual parity.
 

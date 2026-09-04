@@ -1,8 +1,8 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.68 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.69 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-03
+> **Last reviewed:** 2026-09-04
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting)
 
@@ -49,14 +49,14 @@ Three separate platform questions are easy to confuse:
 | --- | --- |
 | **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
 | **What does `--target-platform` select?** | The CLI accepts `windows`, `macos`, or `linux`. This is a **GameMaker source/configuration filter** used for target-specific project options, conditional GML and macros, and capability-report context. It does not filter the project's resource inventory. It defaults from the conversion host. |
-| **Where can the generated game be exported?** | The generated project targets Godot 4.7.1, but GM2Godot does not certify a complete export for a platform. Godot export templates and presets, signing, permissions, SDKs, native extensions, store services, and target-device tests remain separate work. |
+| **Where can the generated game be exported?** | The generated project targets Godot 4.7.2, but GM2Godot does not certify a complete export for a platform. Godot export templates and presets, signing, permissions, SDKs, native extensions, store services, and target-device tests remain separate work. |
 
 Selecting `--target-platform windows`, for example, does **not** create or validate a production Windows export and does not make Steam, Xbox, native DLL, or other platform APIs available. Use the generated platform capability report and configure the required Godot plugins and export settings explicitly.
 
 ## Compatibility baseline
 
 - The source compatibility target is **[GameMaker LTS 2026](https://releases.gamemaker.io/release-notes/2026/0)** and its [version-specific manual](https://manual.gamemaker.io/lts/en/). Projects from newer monthly or beta releases may contain schema, syntax, APIs, or resource variants outside this baseline.
-- The output and automated smoke-test target is the official **[Godot 4.7.1](https://godotengine.org/article/maintenance-release-godot-4-7-1/)** build at commit `a13da4feb`. Other Godot versions may parse the project, but they are not the compatibility target for this release.
+- The output and automated smoke-test target is the official **[Godot 4.7.2](https://godotengine.org/article/maintenance-release-godot-4-7-2/)** build at commit `ed1daf0bf`. Other Godot versions may parse the project, but they are not the compatibility target for this release.
 - GM2Godot expects an editable GameMaker project with a `.yyp` and its `.yy`, GML, and asset files. Compiled executables are not supported input.
 - A generated project is a migration starting point. Keep the original GameMaker project, convert into a separate destination, and compare behavior before replacing any production workflow.
 
@@ -82,7 +82,7 @@ Version 0.7.43 adds that focused successful-rerun policy. Selected object, room,
 
 Version 0.7.44 makes bound-method context explicit. Generated method and constructor callables carry a declared hidden receiver count; Godot's standard/custom `Callable` category is no longer treated as an arity signal. A bound method keeps its rebound `self`, receives the calling scope's current `self` as invocation-time `other`, and propagates that context through nested calls, `method_call`, script dispatch, and array/struct callbacks. Direct script asset calls retain their existing caller scope, while `method(target, script_reference)` preserves the script's receiver metadata without shifting user arguments. Constructors inject the new struct once: an unbound script constructor receives the scope calling `new` as `other`, while a rebound constructor receives its documented bound scope. Unmarked custom Godot callables are rejected rather than guessed.
 
-This contract follows the official GameMaker LTS [Method Variables](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Method_Variables.htm), [`self`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/self.htm), [`other`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/other.htm), and [`method`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/method.htm) semantics. The generated implementation uses exact Godot 4.7.1 [`Callable`](https://docs.godotengine.org/en/4.7/classes/class_callable.html) and [GDScript lambda](https://docs.godotengine.org/en/4.7/tutorials/scripting/gdscript/gdscript_basics.html#lambda-functions) behavior. It does not claim unrelated #696 fidelity work such as precise collision masks, particles, sequences/timelines, or complete shader semantics.
+This contract follows the official GameMaker LTS [Method Variables](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Method_Variables.htm), [`self`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/self.htm), [`other`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Overview/Instance%20Keywords/other.htm), and [`method`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/method.htm) semantics. The generated implementation uses exact Godot 4.7.2 [`Callable`](https://docs.godotengine.org/en/4.7/classes/class_callable.html) and [GDScript lambda](https://docs.godotengine.org/en/4.7/tutorials/scripting/gdscript/gdscript_basics.html#lambda-functions) behavior. It does not claim unrelated #696 fidelity work such as precise collision masks, particles, sequences/timelines, or complete shader semantics.
 
 Version 0.7.45 implements the next #696 child without widening into those other areas. Imported GameMaker Precise masks use the alpha threshold and inclusive mask bounds from the sprite metadata. Static masks union all subimages; Precise Per Frame masks switch exact pixel geometry with the displayed frame. Origin and object transforms apply to both image and geometry, and generated collision events and query helpers consume the same active mask. Unsupported or inconsistent source data emits `GM2GD-SPRITE-PRECISE-MASK-FALLBACK` before using a valid rectangle fallback. Runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures are not implied.
 

@@ -692,7 +692,7 @@ def _invalid_project_file_error(
         "GM2GD-CONVERT-PROJECT-FILE-INVALID",
         f"Godot destination contains an invalid {GODOT_PROJECT_FILENAME}; {reason}: {project_path}",
         destination_path=destination,
-        workaround="Repair project.godot in Godot 4.7.1 or choose another destination.",
+        workaround="Repair project.godot in Godot 4.7.2 or choose another destination.",
     )
 
 

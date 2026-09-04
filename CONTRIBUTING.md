@@ -71,7 +71,7 @@ For a pip-family security proposal, use the source-only Dependabot pull request 
 
 Treat `pip` and `pip-tools` as one compatibility unit: review the two exact source pins together and commit all three native locks in the same maintainer pull request. Live consumers derive the expected pip version from that source after a fail-closed preflight rather than duplicating numeric literals. Successful main-branch native runs submit the three verified dependency graphs under stable platform correlators so transitive Dependabot alerts remain available even though generated `.lock` files are not editable manifests. Current install and compile commands reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. If a future path permits a source distribution, it must also pass an explicit reviewed `--build-constraint` for the isolated build environment; do not assume the runtime constraint governs build dependencies under pip 26.2 or later.
 
-Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.1 validation.
+Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.2 validation.
 
 ## Development Guidelines
 
@@ -239,7 +239,7 @@ For every versioned pull request:
 
 - Update `src/version.py`, `CHANGELOG.md`, the current source version in `README.md`, version examples in issue templates, and `tests/test_version.py`.
 - Review the version banners and user workflows under `docs/wiki/`; include any required Wiki changes in the same reviewable branch.
-- Confirm all required pull-request checks pass, including exact Godot 4.7.1 smoke and GameMaker LTS 2026 conversion gates.
+- Confirm all required pull-request checks pass, including exact Godot 4.7.2 smoke and GameMaker LTS 2026 conversion gates.
 - After merge, confirm the new tag points to the intended `main` commit and that the Linux, macOS zip/DMG, and Windows release assets are present and non-empty.
 - If Wiki sources changed, reference the documentation issue without an auto-closing keyword, publish the exact merged `docs/wiki/` pages, and verify live navigation before closing the issue.
 

@@ -523,7 +523,7 @@ class ProjectDestinationPreflightTests(unittest.TestCase):
                     project_bytes,
                 )
 
-    def test_accepts_empty_project_file_like_exact_godot_4_7_1(self) -> None:
+    def test_accepts_empty_project_file_like_exact_godot_4_7_2(self) -> None:
         destination = self.root / "empty-project"
         destination.mkdir()
         (destination / "project.godot").write_bytes(b"")

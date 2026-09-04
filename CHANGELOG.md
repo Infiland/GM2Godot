@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.69 - 2026-09-04
+
+- Retargeted generated output and runtime validation to exact Godot `4.7.2.stable.official.ed1daf0bf`, with the official Linux archive and SHA-256 pinned in both Godot workflows.
+- Made every workflow installation fail closed on the complete engine build string and updated live guards, assertions, diagnostics, policies, issue examples, and current documentation without changing the Godot 4.7 project feature.
+- Preserved generated GDScript/resource bytes, golden snapshots, GameMaker LTS 2026 fixture revisions, conversion counts, diagnostic codes/counts/semantics, resource loading, and runtime behavior; only required target-version labels now name 4.7.2, while prior 4.7.1 release records remain historical evidence.
+
 ## 0.7.68 - 2026-09-03
 
 - Bound dependency-receipt publication to the physical filesystem root and every output ancestor, creating missing parents only through retained descriptors or handles.

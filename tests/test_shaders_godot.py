@@ -55,7 +55,7 @@ def _find_godot_binary() -> str | None:
 
 
 class TestConvertedShaderGodotSmoke(unittest.TestCase):
-    def test_supported_corpus_compiles_and_loads_in_exact_godot_4_7_1(
+    def test_supported_corpus_compiles_and_loads_in_exact_godot_4_7_2(
         self,
     ) -> None:
         godot_binary = _find_godot_binary()
@@ -239,7 +239,7 @@ class TestConvertedShaderGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "Godot Engine v4.7.1.stable.official.a13da4feb",
+            "Godot Engine v4.7.2.stable.official.ed1daf0bf",
             result.stdout,
         )
         self.assertIn("SHADER_CORPUS_OK", result.stdout)
@@ -248,7 +248,7 @@ class TestConvertedShaderGodotSmoke(unittest.TestCase):
         self.assertNotIn("ERROR:", result.stdout)
         self.assertNotIn("SCRIPT ERROR:", result.stdout)
 
-    def test_dual_stage_shader_loads_in_exact_godot_4_7_1(self) -> None:
+    def test_dual_stage_shader_loads_in_exact_godot_4_7_2(self) -> None:
         godot_binary = _find_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
@@ -388,7 +388,10 @@ class TestConvertedShaderGodotSmoke(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Godot Engine v4.7.1.stable", result.stdout)
+        self.assertIn(
+            "Godot Engine v4.7.2.stable.official.ed1daf0bf",
+            result.stdout,
+        )
         self.assertIn("PAIRED_SHADER_OK", result.stdout)
         self.assertIn("PAIRED_SHADER_COMPILED:", result.stdout)
         self.assertNotIn("SHADER ERROR:", result.stdout)

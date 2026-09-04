@@ -187,7 +187,10 @@ class TestNamedConstructorInheritanceGodot(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("Godot Engine v4.7.1.stable", result.stdout)
+        self.assertIn(
+            "Godot Engine v4.7.2.stable.official.ed1daf0bf",
+            result.stdout,
+        )
         self.assertIn("NAMED_CONSTRUCTOR_INHERITANCE_OK", result.stdout)
         self.assertNotIn("SCRIPT ERROR:", result.stdout)
 

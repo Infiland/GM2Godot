@@ -419,7 +419,7 @@ def _normalize_asset_keyframes(
                         code="GM2GD-SEQUENCE-EFFECT-UNSUPPORTED",
                         message=(
                             "GameMaker text-track glow cannot be represented "
-                            "exactly by a Godot 4.7.1 Label."
+                            "exactly by a Godot 4.7.2 Label."
                         ),
                         manifest_entry=f"{key_path}.Channels[0].EnableGlow",
                         track_type=track_kind,
@@ -694,7 +694,7 @@ def _normalize_audio_effect_track(
                     code="GM2GD-SEQUENCE-EFFECT-UNSUPPORTED",
                     message=(
                         f"Audio effect {effect_type!r} property "
-                        f"{child_name or '<missing>'!r} has no exact Godot 4.7.1 mapping."
+                        f"{child_name or '<missing>'!r} has no exact Godot 4.7.2 mapping."
                     ),
                     manifest_entry=f"{path}.tracks[{child_index}]",
                     track_type=resource_type or "audio_effect",
@@ -727,7 +727,7 @@ def _normalize_audio_effect_track(
                 code="GM2GD-SEQUENCE-EFFECT-UNSUPPORTED",
                 message=(
                     f"Audio effect {effect_type!r} property "
-                    f"{property_name!r} has no exact Godot 4.7.1 mapping."
+                    f"{property_name!r} has no exact Godot 4.7.2 mapping."
                 ),
                 manifest_entry=f"{path}.{property_name}",
                 track_type=resource_type or "audio_effect",

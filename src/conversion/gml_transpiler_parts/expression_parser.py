@@ -12,8 +12,6 @@ from .constants import (
     RIGHT_ASSOCIATIVE,
     TERNARY_PRECEDENCE,
 )
-from .identifiers import _reject_asset_identifier_name, _validate_gml_identifier
-from .lexical import _decode_gml_verbatim_string_literal
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     ArrayRefAccess as _ArrayRefAccess,
@@ -40,19 +38,26 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
+from .lexical_api import (
+    decode_gml_string_literal,
+    decode_gml_verbatim_string_literal,
+    reject_asset_identifier_name,
+    split_template_string,
+    tokenize_gml_expression,
+    validate_gml_identifier,
+)
 from .shared_models import (
     GMLTranspileError,
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
 from .static_declarations import _collect_static_declarations, _static_scope_id
-from .tokens import (
-    _decode_gml_string_literal,
-    _expression_tokens,
-    _is_float_like_number,
-    _split_template_string,
-)
 from .utils import _normalize_scope_context, _strip_comments
+
+
+def _is_float_like_number(value: str) -> bool:
+    return "." in value
+
 
 class _ExpressionParser:
     def __init__(
@@ -193,14 +198,14 @@ class _ExpressionParser:
         if token.kind == "NUMBER":
             return _NumberLiteral(token.value, _is_float_like_number(token.value))
         if token.kind == "STRING":
-            decoded = _decode_gml_string_literal(token.value)
+            decoded = decode_gml_string_literal(token.value)
             emitted = json.dumps(decoded)
             if token.value.startswith("'"):
                 emitted = "'" + emitted[1:-1].replace('\\"', '"').replace("'", "\\'") + "'"
             return _StringLiteral(emitted)
         if token.kind == "VERBATIM_STRING":
             return _StringLiteral(
-                json.dumps(_decode_gml_verbatim_string_literal(token.value))
+                json.dumps(decode_gml_verbatim_string_literal(token.value))
             )
         if token.kind == "TEMPLATE_STRING":
             return self._parse_template_string(token.value)
@@ -239,7 +244,7 @@ class _ExpressionParser:
                                 line=field_token.line,
                                 column=field_token.column,
                             )
-                        field_name = _decode_gml_string_literal(field_token.value)
+                        field_name = decode_gml_string_literal(field_token.value)
                         if not field_name:
                             raise GMLTranspileError(
                                 "Struct field names cannot be empty",
@@ -275,7 +280,7 @@ class _ExpressionParser:
 
     def _parse_template_string(self, source: str) -> _TemplateStringLiteral:
         parts: list[str | _Expression] = []
-        for part_kind, part_source in _split_template_string(source):
+        for part_kind, part_source in split_template_string(source):
             if part_kind == "text":
                 parts.append(part_source)
                 continue
@@ -370,8 +375,8 @@ class _ExpressionParser:
         static_declarations = _collect_static_declarations(body_tokens)
         parameter_names = [parameter.name for parameter in parameters]
         for parameter_name in parameter_names:
-            _validate_gml_identifier(parameter_name)
-            _reject_asset_identifier_name(parameter_name, self.scope_context)
+            validate_gml_identifier(parameter_name)
+            reject_asset_identifier_name(parameter_name, self.scope_context)
         scope_context = self.scope_context
         static_scope_id = None
         static_scope_name = scope_context.static_scope
@@ -516,7 +521,7 @@ class _ExpressionParser:
                 column=token.column,
             )
         try:
-            _validate_gml_identifier(token.value)
+            validate_gml_identifier(token.value)
         except GMLTranspileError as exc:
             raise exc.with_location(token.line, token.column) from exc
         return token.value
@@ -567,7 +572,7 @@ def _parse_gml_expression(
     scope_context: _ScopeContext | None = None,
 ) -> _Expression:
     parser = _ExpressionParser(
-        _expression_tokens(source),
+        tokenize_gml_expression(source),
         enum_values=enum_values,
         enum_names=enum_names,
         scope_context=scope_context,

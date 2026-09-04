@@ -3,7 +3,7 @@ from __future__ import annotations
 from .shared_models import GMLTranspileError
 
 
-def _is_verbatim_string_start(source: str, index: int) -> bool:
+def is_verbatim_string_start(source: str, index: int) -> bool:
     return (
         0 <= index < len(source)
         and source[index] == "@"
@@ -12,7 +12,7 @@ def _is_verbatim_string_start(source: str, index: int) -> bool:
     )
 
 
-def _read_verbatim_string(source: str, start: int) -> str:
+def read_verbatim_string(source: str, start: int) -> str:
     """Read one documented GML @-prefixed string literal.
 
     Verbatim strings require a contiguous ``@`` and quote, can span lines, and
@@ -20,7 +20,7 @@ def _read_verbatim_string(source: str, start: int) -> str:
     always terminates the literal.
     """
 
-    if not _is_verbatim_string_start(source, start):
+    if not is_verbatim_string_start(source, start):
         raise GMLTranspileError(
             "Verbatim string literal must start with @ followed by a quote"
         )
@@ -32,14 +32,14 @@ def _read_verbatim_string(source: str, start: int) -> str:
     return source[start : end + 1]
 
 
-def _decode_gml_verbatim_string_literal(source: str) -> str:
-    literal = _read_verbatim_string(source, 0)
+def decode_gml_verbatim_string_literal(source: str) -> str:
+    literal = read_verbatim_string(source, 0)
     if len(literal) != len(source):
         raise GMLTranspileError("Unexpected text after verbatim string literal")
     return source[2:-1]
 
 
-def _read_ordinary_string(source: str, start: int) -> str:
+def read_ordinary_string(source: str, start: int) -> str:
     if start < 0 or start >= len(source) or source[start] not in "\"'":
         raise GMLTranspileError("String literal must start with a quote")
 
@@ -59,8 +59,8 @@ def _read_ordinary_string(source: str, start: int) -> str:
 
 
 __all__ = [
-    "_decode_gml_verbatim_string_literal",
-    "_is_verbatim_string_start",
-    "_read_ordinary_string",
-    "_read_verbatim_string",
+    "decode_gml_verbatim_string_literal",
+    "is_verbatim_string_start",
+    "read_ordinary_string",
+    "read_verbatim_string",
 ]

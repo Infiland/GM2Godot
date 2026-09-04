@@ -100,6 +100,8 @@ Version 0.7.70 makes every generated GML compatibility-evidence URL use one cano
 
 Version 0.7.71 publishes the exact 64-name GML language-metadata surface with static exports, `Final` annotations, read-only mapping proxies, frozen sets, and immutable registry values. Thirteen production consumers now use those public names; the architecture baseline falls from 209 to 135 private edges while all 60 production imports remain, and the sole remaining private constants edge is the frozen facade alias assigned to #820. Preprocessing, token values and locations, transpiled GDScript, source maps, diagnostics, parser errors, golden output, runtime bytes, top-level facade exports, and signatures remain unchanged.
 
+Version 0.7.72 publishes the exact 15-operation typed GML lexical phase API for tokenization, preprocessing, identifiers, and shared string/template scanning. Fifteen higher-level source modules now use that facade while the cycle-safe low-level owner cohort keeps only deliberate public direct imports; the architecture baseline falls from 135 to 96 private edges across 32 module pairs, all 60 production imports remain, private production import edges fall from 16 to 7, and tracked suppressions fall from 15 to 12. Preprocessed bytes/layout, token values and locations, identifier diagnostics, exception text/locations, source maps, transpiled GDScript, golden output, shared models, and all 74 top-level facade exports/signatures remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -120,7 +122,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.71`.
+Current source version: `0.7.72`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

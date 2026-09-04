@@ -5,11 +5,11 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, TypeAlias
 
-from .identifiers import _validate_gml_identifier
-from .lexical import _is_verbatim_string_start, _read_verbatim_string
+from .identifiers import validate_gml_identifier
+from .lexical import is_verbatim_string_start, read_verbatim_string
 from .result_models import GMLPreprocessResult, GMLPreprocessorDiagnostic
 from .shared_models import GMLTranspileError
-from .tokens import _read_template_string
+from .tokens import read_template_string
 from .utils import _join_macro_continuation_lines, _macro_configuration_matches, _strip_comments
 
 
@@ -78,15 +78,15 @@ def _preprocessor_source_views(source: str) -> tuple[str, str]:
             index += 1
             continue
 
-        if _is_verbatim_string_start(source, index):
-            literal = _read_verbatim_string(source, index)
+        if is_verbatim_string_start(source, index):
+            literal = read_verbatim_string(source, index)
             end = index + len(literal)
             _blank_layout_span(code_only, index, end)
             index = end
             continue
 
         if source.startswith('$"', index):
-            literal = _read_template_string(source, index)
+            literal = read_template_string(source, index)
             end = index + len(literal)
             _blank_layout_span(code_only, index, end)
             index = end
@@ -560,7 +560,7 @@ def _preprocess_define(
     name = match.group(1)
     value = (match.group(2) or "").strip()
     try:
-        _validate_gml_identifier(name)
+        validate_gml_identifier(name)
     except GMLTranspileError as exc:
         _add_diagnostic(diagnostics, line_number, "#define", str(exc), line)
         return ""

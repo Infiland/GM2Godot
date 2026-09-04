@@ -24,11 +24,11 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
+from .lexical_api import tokenize_gml_expression
 from .shared_models import (
     GMLTranspileError,
     Token as _Token,
 )
-from .tokens import _expression_tokens
 from .utils import _normalize_local_names, _tokens_to_source, _unwrap_grouped_expression
 
 def _evaluate_enum_value_tokens(
@@ -201,7 +201,7 @@ def _reject_constant_declaration_name(
 
 
 def _raw_identifier_target_name(target_source: str) -> str | None:
-    tokens = _expression_tokens(target_source)
+    tokens = tokenize_gml_expression(target_source)
     if len(tokens) == 2 and tokens[0].kind == "IDENT" and tokens[1].kind == "EOF":
         return tokens[0].value
     return None

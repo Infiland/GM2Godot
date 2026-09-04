@@ -28,11 +28,12 @@ from .enum_helpers import (
 )
 from .expression_parser import _parse_gml_expression
 from .expression_service import transpile_gml_expression
-from .identifiers import (
-    _is_plain_identifier,
-    _reject_asset_identifier_name,
-    _sanitize_gdscript_identifier,
-    _validate_gml_identifier,
+from .lexical_api import (
+    is_plain_identifier,
+    reject_asset_identifier_name,
+    sanitize_gdscript_identifier,
+    tokenize_gml_expression,
+    validate_gml_identifier,
 )
 from .expression_models import (
     ArrayRefAccess as _ArrayRefAccess,
@@ -53,7 +54,6 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .tokens import _expression_tokens
 from .utils import (
     _cache_assignment_part,
     _indent_lines,
@@ -243,7 +243,7 @@ def _transpile_statement(
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
-            _reject_asset_identifier_name(target_expr.value, scope_context)
+            reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
         if static_target is not None:
             static_scope, member_name = static_target
@@ -316,7 +316,7 @@ def _transpile_statement(
             raise GMLTranspileError("Increment target must be assignable")
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
-            _reject_asset_identifier_name(target_expr.value, scope_context)
+            reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
         if static_target is not None:
             static_scope, member_name = static_target
@@ -712,7 +712,7 @@ def _transpile_statement(
         _reject_enum_assignment_target(target_expr, enum_names)
         _reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
-            _reject_asset_identifier_name(target_expr.value, scope_context)
+            reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
         global_target = _global_scope_assignment_parts(
             target_expr,
@@ -1566,7 +1566,7 @@ def _scoped_instance_assignment_parts(
             name in BUILTIN_INSTANCE_VARIABLES
             and _uses_direct_builtin_instance_members(scope_context)
         )
-        or not _is_plain_identifier(name)
+        or not is_plain_identifier(name)
     ):
         return None
     return scope_context.instance_target, json.dumps(name)
@@ -1593,7 +1593,7 @@ def _dynamic_instance_assignment_parts(
             name in BUILTIN_INSTANCE_VARIABLES
             and _uses_direct_builtin_instance_members(scope_context)
         )
-        or not _is_plain_identifier(name)
+        or not is_plain_identifier(name)
     ):
         return None
     return scope_context.self_expression, json.dumps(name)
@@ -1622,7 +1622,7 @@ def _motion_current_value(
     scope_context = _normalize_scope_context(scope_context)
     if scope_context.instance_target is not None:
         return f"GMRuntime.gml_variable_instance_get({instance_target}, {json.dumps(member_name)})"
-    return _sanitize_gdscript_identifier(member_name)
+    return sanitize_gdscript_identifier(member_name)
 
 
 def _motion_assignment_lines(
@@ -1686,7 +1686,7 @@ def _record_instance_assignment(
     if instance_variables is None:
         return
 
-    tokens = _expression_tokens(target.strip())
+    tokens = tokenize_gml_expression(target.strip())
     if len(tokens) >= 4 and tokens[0].kind == "IDENT" and tokens[1].value == "[":
         name = tokens[0].value
         if name not in local_names and name not in BUILTIN_INSTANCE_VARIABLES:
@@ -1729,13 +1729,13 @@ def _transpile_var_statement(
         assignment = _split_assignment(declaration)
         if assignment is None:
             name = declaration.strip()
-            _validate_gml_identifier(name)
-            _reject_asset_identifier_name(name, scope_context)
+            validate_gml_identifier(name)
+            reject_asset_identifier_name(name, scope_context)
             _reject_constant_declaration_name(name, macro_values.keys())
             if name in enum_name_set:
                 raise GMLTranspileError("Cannot redeclare enum")
             declaration_prefix = "" if name in declared_local_names else "var "
-            lines.append(f"{declaration_prefix}{_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
+            lines.append(f"{declaration_prefix}{sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()")
             local_names.add(name)
             declared_local_names.add(name)
             continue
@@ -1743,8 +1743,8 @@ def _transpile_var_statement(
         if operator not in ("=", ":="):
             raise GMLTranspileError("Variable declarations only support simple assignments")
         name = name.strip()
-        _validate_gml_identifier(name)
-        _reject_asset_identifier_name(name, scope_context)
+        validate_gml_identifier(name)
+        reject_asset_identifier_name(name, scope_context)
         _reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
@@ -1782,7 +1782,7 @@ def _transpile_var_statement(
             )
             lines.extend(prelude_lines)
         declaration_prefix = "" if name in declared_local_names else "var "
-        lines.append(f"{declaration_prefix}{_sanitize_gdscript_identifier(name)} = {initial_value}")
+        lines.append(f"{declaration_prefix}{sanitize_gdscript_identifier(name)} = {initial_value}")
         local_names.add(name)
         declared_local_names.add(name)
     return lines
@@ -1901,7 +1901,7 @@ def _lower_simple_array_index_postincrement_target(
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
 ) -> tuple[list[str], str]:
-    tokens = [token for token in _expression_tokens(target) if token.kind != "EOF"]
+    tokens = [token for token in tokenize_gml_expression(target) if token.kind != "EOF"]
     if len(tokens) == 5:
         base, opener, index, increment, closer = tokens
     elif len(tokens) == 6 and tokens[2].value == "@":
@@ -1931,7 +1931,7 @@ def _lower_simple_array_index_postincrement_target(
 def _find_next_mutation_expression(
     source: str,
 ) -> tuple[int, int, str, _IncrementDelta, _IncrementMode] | None:
-    tokens = [token for token in _expression_tokens(source) if token.kind != "EOF"]
+    tokens = [token for token in tokenize_gml_expression(source) if token.kind != "EOF"]
     for index, token in enumerate(tokens):
         if token.value not in ("++", "--"):
             continue
@@ -2122,7 +2122,7 @@ def _parse_assignment_target(
     _reject_enum_assignment_target(target_expr, enum_names)
     _reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
-        _reject_asset_identifier_name(target_expr.value, scope_context)
+        reject_asset_identifier_name(target_expr.value, scope_context)
     return target_expr
 
 
@@ -2626,7 +2626,7 @@ def _transpile_assignment_to_emitted_value(
     _reject_enum_assignment_target(target_expr, enum_names)
     _reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
-        _reject_asset_identifier_name(target_expr.value, scope_context)
+        reject_asset_identifier_name(target_expr.value, scope_context)
     static_target = _static_scope_assignment_parts(target_expr, scope_context)
     if static_target is not None:
         static_scope, member_name = static_target

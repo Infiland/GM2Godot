@@ -9,10 +9,10 @@ from .emitter import _emit_instance_keyword_argument
 from .enum_helpers import _evaluate_enum_value_tokens
 from .expression_parser import _parse_gml_expression
 from .expression_service import transpile_gml_condition, transpile_gml_expression
-from .identifiers import (
-    _reject_asset_identifier_name,
-    _sanitize_gdscript_identifier,
-    _validate_gml_identifier,
+from .lexical_api import (
+    reject_asset_identifier_name,
+    sanitize_gdscript_identifier,
+    validate_gml_identifier,
 )
 from .shared_models import (
     GMLExtensionFunction,
@@ -74,7 +74,7 @@ class _StatementParser:
         )
         self.hoisted_local_names = _collect_hoisted_local_names(tokens)
         self._hoisted_local_declaration_lines = [
-            f"var {_sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()"
+            f"var {sanitize_gdscript_identifier(name)} = GMRuntime.gml_undefined()"
             for name in self.hoisted_local_names
             if name not in initial_local_names
         ]
@@ -207,8 +207,8 @@ class _StatementParser:
         self._consume_identifier("globalvar")
         while not self._at_end() and not self._check(";") and not self._check("\n"):
             name = self._consume_identifier_name()
-            _validate_gml_identifier(name)
-            _reject_asset_identifier_name(name, self.scope_context)
+            validate_gml_identifier(name)
+            reject_asset_identifier_name(name, self.scope_context)
             self.global_names.add(name)
             if not self._match(","):
                 break
@@ -230,7 +230,7 @@ class _StatementParser:
     def _parse_enum_statement(self) -> list[str]:
         self._consume_identifier("enum")
         enum_name = self._consume_identifier_name()
-        gdscript_enum_name = _sanitize_gdscript_identifier(enum_name)
+        gdscript_enum_name = sanitize_gdscript_identifier(enum_name)
         self._skip_newlines()
         self._consume("{")
 
@@ -734,7 +734,7 @@ class _StatementParser:
         ]
 
         if catch_lines is not None and catch_name is not None:
-            gdscript_catch_name = _sanitize_gdscript_identifier(catch_name)
+            gdscript_catch_name = sanitize_gdscript_identifier(catch_name)
             lines.extend([
                 f"if not GMRuntime.is_undefined({control_name}) and {control_name}[\"kind\"] == \"throw\":",
                 f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
@@ -762,7 +762,7 @@ class _StatementParser:
         if len(catch_tokens) != 1 or catch_tokens[0].kind != "IDENT":
             raise GMLTranspileError("catch requires a variable name")
         catch_name = catch_tokens[0].value
-        _validate_gml_identifier(catch_name)
+        validate_gml_identifier(catch_name)
         return catch_name
 
     def _read_switch_label_tokens(self) -> list[_Token]:
@@ -996,7 +996,7 @@ class _StatementParser:
                 column=token.column,
             )
         try:
-            _validate_gml_identifier(token.value)
+            validate_gml_identifier(token.value)
         except GMLTranspileError as exc:
             raise exc.with_location(token.line, token.column) from exc
         return token.value

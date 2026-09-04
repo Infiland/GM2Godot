@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.72 - 2026-09-04
+
+- Published the exact 15-operation typed GML lexical phase API for complete-source and expression tokenization, both preprocessing contracts, identifier operations, and the shared ordinary, verbatim, and template-string operations while keeping cursor, numeric, delimiter, newline-search, and template-expression mechanics private.
+- Migrated 15 higher-level source modules to the lexical facade and advanced the architecture baseline from 135 to 96 private edges across 32 module pairs, while keeping all 60 production imports and reducing private production import edges from 16 to 7 and tracked private-usage suppressions from 15 to 12.
+- Preserved preprocessed bytes and layout, exact token values and locations, identifier diagnostics, exception text and locations, source maps, transpiled GDScript, golden output, shared model identities, and all 74 top-level facade exports and signatures.
+
 ## 0.7.71 - 2026-09-04
 
 - Published the exact 64-name GML language-metadata surface with `Final` annotations, read-only mapping proxies, frozen sets, and immutable registry values, retaining only `_BUILTIN_VARIABLE_REGISTRY` as the private facade compatibility alias assigned to #820.

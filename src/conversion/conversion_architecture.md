@@ -47,6 +47,19 @@ These modules depend only on the standard library or another model module.
 `gml_transpiler_parts.model` is now only the frozen private-alias compatibility
 shim consumed by the top-level facade until #820.
 
+`gml_transpiler_parts.lexical_api` is the typed package-internal entry point for
+the lexical phase. Its exact 15-operation surface covers complete-source and
+expression tokenization, normal and layout-preserving preprocessing, identifier
+validation/sanitization/predicates, and the ordinary, verbatim, and template
+string operations shared with source analysis. It returns the canonical
+`shared_models.Token` and `result_models.GMLPreprocessResult` types rather than
+parallel lexical models. Higher-level phases and production collectors import
+those operations through `lexical_api`; the lexical owner cohort imports public
+owner definitions directly, including the exact cycle-safe `utils` dependencies
+needed by `preprocessor`. Cursor loops, numeric and character readers, delimiter
+mechanics, directive matching, newline-search helpers, and template-expression
+internals remain module-private.
+
 The GML transpiler has three explicit phase families:
 
 - Parser phase: `gml_transpiler_parts.tokens`,
@@ -65,19 +78,19 @@ expression emitter does not own the GameMaker API argument tables.
 ### Frozen transpiler boundary baseline
 
 `tests/test_gml_transpiler_architecture.py` is the machine-checked migration
-baseline for #794. It records 135 private imported-name edges across 53
+baseline for #794. It records 96 private imported-name edges across 32
 facade/phase module pairs and all 60 production imports from the facade or
-phase package, including the 16 remaining private production import edges.
+phase package, including the 7 remaining private production import edges.
 Every entry records its owner and consumer and is classified as the supported
 public facade, an intended package-internal phase API, or a module-private
 implementation that must move behind its owner.
 
 The same test freezes the 44 supported non-underscore facade exports and their
 signatures separately from the 30 underscore-prefixed legacy exports. It also
-permits exactly the current 14 phase-package `reportPrivateUsage=false`
+permits exactly the current 11 phase-package `reportPrivateUsage=false`
 directives plus the facade directive. New, missing, or unclassified imports,
-new private facade exports, signature drift, and added or broadened
-private-usage suppressions fail the test.
+new private facade exports, signature drift, lexical-owner bypasses, and added
+or broadened private-usage suppressions fail the test.
 
 The #816 model extraction removed exactly 120 internal private model edges and
 replaced four production private model imports with explicit typed exports.
@@ -85,9 +98,13 @@ The #861 language-metadata slice removed another 74 internal private edges,
 kept all 60 production imports while reducing their private import edges from
 22 to 16, and reduced private-usage suppressions from 17 to 15. Its sole
 remaining private constants edge is the frozen facade compatibility alias
-assigned to #820. The baseline is a migration allowlist, not a public-API
-declaration for private names. #817 continues the lexical/token boundary, #818
-owns expression parsing/lowering/emission, #819 the statement phase, and #820
-the legacy facade shim and final zero-private-edge assertion. Until those
-ordered children land, do not add an exception or expose an underscore name
-merely to make the baseline pass.
+assigned to #820. The #862 lexical slice removed another 39 internal private
+edges and 21 private owner/consumer pairs, routed the higher-level lexical
+consumers through the exact typed facade, kept all 60 production imports while
+reducing private production import edges from 16 to 7, and reduced tracked
+suppressions from 15 to 12. The baseline is a migration allowlist, not a
+public-API declaration for private names. #818 owns expression
+parsing/lowering/emission, #819 the statement phase, and #820 the legacy facade
+shim and final zero-private-edge assertion. Until those ordered children land,
+do not add an exception or expose an underscore name merely to make the
+baseline pass.

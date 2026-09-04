@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    preprocess_gml_source,
+    tokenize_gml_source,
+)
 from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
-from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.gml_transpiler_parts.utils import (
     _macro_configuration_matches,
     _tokens_to_source,
@@ -34,7 +36,7 @@ def collect_project_macro_values(
                 source,
                 macro_configuration=macro_configuration,
             )
-            token_streams.append(_tokenize(preprocessed.source))
+            token_streams.append(tokenize_gml_source(preprocessed.source))
         except (OSError, GMLTranspileError):
             # The owning resource converter reports malformed/unsupported GML.
             # Discovery should not prevent unrelated resources from converting.

@@ -11,6 +11,7 @@ import unittest
 
 import src.conversion.gml_transpiler as gml_transpiler
 from src.conversion.gml_transpiler_parts import constants as language_metadata
+from src.conversion.gml_transpiler_parts import lexical_api as lexical_phase_api
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,28 @@ PARTS_PACKAGE = "src.conversion.gml_transpiler_parts"
 FACADE_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler.py"
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"
 MODULE_IMPORT_NAME = "<module>"
+LEXICAL_API_MODULE = f"{PARTS_PACKAGE}.lexical_api"
+LEXICAL_IMPLEMENTATION_MODULES = frozenset(
+    {
+        f"{PARTS_PACKAGE}.identifiers",
+        f"{PARTS_PACKAGE}.lexical",
+        f"{PARTS_PACKAGE}.preprocessor",
+        f"{PARTS_PACKAGE}.tokens",
+    }
+)
+LEGACY_LEXICAL_FACADE_NAMES = frozenset({"_expression_tokens", "_tokenize"})
+LEGACY_LEXICAL_FACADE_ACCESS_BY_CONSUMER = {
+    "tests.test_gml_lexical_api": LEGACY_LEXICAL_FACADE_NAMES,
+}
+LOW_LEVEL_LEXICAL_IMPORTS_BY_CONSUMER = {
+    f"{PARTS_PACKAGE}.utils": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.lexical", "is_verbatim_string_start"),
+            (f"{PARTS_PACKAGE}.lexical", "read_verbatim_string"),
+            (f"{PARTS_PACKAGE}.tokens", "read_template_string"),
+        }
+    )
+}
 
 
 class BoundaryClassification(str, Enum):
@@ -266,23 +289,16 @@ EXPECTED_INTERNAL_PRIVATE_IMPORT_GROUPS = """
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.constants|_BUILTIN_VARIABLE_REGISTRY
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.expression_parser|_ExpressionParser,_parse_gml_expression
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.model|_ArrayLiteral,_Binary,_BuiltinVariableMetadata,_Call,_DSMapAccess,_Expression,_FunctionLiteral,_FunctionParameter,_Grouped,_Index,_Literal,_Member,_Name,_NameOf,_NewCall,_NumberLiteral,_ScopeContext,_StaticDeclaration,_StringLiteral,_StructAccess,_StructLiteral,_TemplateStringLiteral,_Ternary,_Token,_Unary
-src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.tokens|_expression_tokens,_tokenize
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.function_helpers|_emit_static_initialization_lines
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.tokens|_tokenize
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.utils|_prefix_multiline
-src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.identifiers|_is_plain_identifier,_sanitize_gdscript_identifier
 src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_prefix_multiline,_unwrap_grouped_expression
 src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.tokens|_expression_tokens
 src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_tokens_to_source,_unwrap_grouped_expression
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line,_emit_static_initialization_lines
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.identifiers|_reject_asset_identifier_name,_validate_gml_identifier
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.lexical|_decode_gml_verbatim_string_literal
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.tokens|_decode_gml_string_literal,_expression_tokens,_is_float_like_number,_split_template_string
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.utils|_normalize_scope_context,_strip_comments
 src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.emitter|_emit_expression,_emit_truthy_expression
 src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.enum_helpers|_reject_enum_mutation_expression
@@ -290,32 +306,18 @@ src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transp
 src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_scope_context_with_global_names
 src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.emitter|_emit_expression
 src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
-src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_verbatim_string
-src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.tokens|_read_template_string
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.utils|_join_macro_continuation_lines,_macro_configuration_matches,_strip_comments
-src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.identifiers|_sanitize_gdscript_identifier
-src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_ordinary_string,_read_verbatim_string
-src.conversion.gml_transpiler_parts.source_map|src.conversion.gml_transpiler_parts.tokens|_read_template_string
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.emitter|_emit_instance_keyword_argument
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.enum_helpers|_evaluate_enum_value_tokens
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.identifiers|_reject_asset_identifier_name,_sanitize_gdscript_identifier,_validate_gml_identifier
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.statements|_ControlFlowCapture,_control_flow_dispatch_lines,_transpile_statement
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.static_declarations|_read_static_declaration_tokens
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.utils|_indent_lines,_insert_lines_before_continue,_insert_until_check_before_continue,_macro_configuration_matches,_normalize_scope_context,_scope_context_with_global_names,_split_top_level_tokens,_tokens_to_source
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.emitter|_emit_expression,_emit_instance_keyword_argument,_is_alarm_array_access,_name_resolves_to_global,_uses_direct_builtin_instance_members,_uses_direct_member_access
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.enum_helpers|_reject_constant_assignment_target_name,_reject_constant_declaration_name,_reject_enum_assignment_target,_reject_readonly_builtin_assignment_target
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.identifiers|_is_plain_identifier,_reject_asset_identifier_name,_sanitize_gdscript_identifier,_validate_gml_identifier
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.tokens|_expression_tokens
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.utils|_cache_assignment_part,_indent_lines,_next_generated_name_from_counter,_normalize_scope_context,_split_assignment,_split_top_level,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
 src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level,_tokens_to_source
-src.conversion.gml_transpiler_parts.tokens|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
-src.conversion.gml_transpiler_parts.tokens|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_ordinary_string,_read_verbatim_string
-src.conversion.gml_transpiler_parts.utils|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_verbatim_string
-src.conversion.gml_transpiler_parts.utils|src.conversion.gml_transpiler_parts.tokens|_line_column,_read_template_string
 """
 
 EXPECTED_PRODUCTION_IMPORT_GROUPS = """
@@ -325,30 +327,24 @@ src.conversion.extension_registry|src.conversion.gml_transpiler_parts.extension_
 src.conversion.gml_runtime_parts.manifest|src.conversion.gml_transpiler_parts.gml_api_manifest|iter_gml_api_entries
 src.conversion.objects|src.conversion.gml_transpiler|GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,merge_gml_source_maps,transpile_gml_code_with_source_map,write_gml_source_map
 src.conversion.objects|src.conversion.gml_transpiler_parts.constants|ASSIGNMENT_OPERATORS,BUILTIN_GLOBAL_VARIABLES,BUILTIN_INSTANCE_VARIABLES,GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,GML_LITERAL_IDENTIFIERS
+src.conversion.objects|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
 src.conversion.objects|src.conversion.gml_transpiler_parts.shared_models|Token
-src.conversion.objects|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source
-src.conversion.objects|src.conversion.gml_transpiler_parts.tokens|_tokenize
 src.conversion.project_enums|src.conversion.gml_transpiler_parts.enum_helpers|_evaluate_enum_value_tokens
+src.conversion.project_enums|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
 src.conversion.project_enums|src.conversion.gml_transpiler_parts.shared_models|GMLTranspileError,Token
-src.conversion.project_enums|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source
-src.conversion.project_enums|src.conversion.gml_transpiler_parts.tokens|_tokenize
+src.conversion.project_macros|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
 src.conversion.project_macros|src.conversion.gml_transpiler_parts.shared_models|GMLTranspileError,Token
-src.conversion.project_macros|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source
-src.conversion.project_macros|src.conversion.gml_transpiler_parts.tokens|_tokenize
 src.conversion.project_macros|src.conversion.gml_transpiler_parts.utils|_macro_configuration_matches,_tokens_to_source
 src.conversion.rooms|src.conversion.gml_transpiler|GMLTranspileError,transpile_gml_code
 src.conversion.script_functions|src.conversion.gml_transpiler|GMLTranspileError
-src.conversion.script_functions|src.conversion.gml_transpiler_parts.identifiers|_validate_gml_identifier
-src.conversion.script_functions|src.conversion.gml_transpiler_parts.lexical|_is_verbatim_string_start,_read_verbatim_string
-src.conversion.script_functions|src.conversion.gml_transpiler_parts.preprocessor|preprocess_gml_source_preserving_layout
-src.conversion.script_functions|src.conversion.gml_transpiler_parts.tokens|_read_template_string
+src.conversion.script_functions|src.conversion.gml_transpiler_parts.lexical_api|is_verbatim_string_start,preprocess_gml_source_preserving_layout,read_template_string,read_verbatim_string,validate_gml_identifier
 src.conversion.script_functions|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level
-src.conversion.script_generator|src.conversion.gml_transpiler_parts.identifiers|_sanitize_gdscript_identifier
 src.conversion.script_generator|src.conversion.gml_transpiler_parts.constants|GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+src.conversion.script_generator|src.conversion.gml_transpiler_parts.lexical_api|sanitize_gdscript_identifier
 src.conversion.scripts|src.conversion.gml_transpiler|EXTENSION_FUNCTION_MAPPING_FILENAME,GMLExtensionFunction,GMLExtensionFunctionMapping,GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,load_gml_extension_function_mappings,merge_gml_source_maps,render_gml_source_header,transpile_gml_code_with_source_map,transpile_gml_expression,write_gml_source_map
 src.conversion.scripts|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.scripts|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line
-src.conversion.scripts|src.conversion.gml_transpiler_parts.identifiers|_sanitize_gdscript_identifier
+src.conversion.scripts|src.conversion.gml_transpiler_parts.lexical_api|sanitize_gdscript_identifier
 src.conversion.scripts|src.conversion.gml_transpiler_parts.shared_models|ScopeContext
 """
 
@@ -370,15 +366,13 @@ EXPECTED_PRODUCTION_IMPORTS = _parse_import_groups(EXPECTED_PRODUCTION_IMPORT_GR
 EXPECTED_ALL_IMPORTS = EXPECTED_INTERNAL_PRIVATE_IMPORTS | EXPECTED_PRODUCTION_IMPORTS
 
 
-# The six owner modules below contain shared data, language metadata, lexical
-# operations, or semantic operations that the named child issue makes explicit.
+# The four owner modules below contain shared data, language metadata, or
+# semantic operations that the named child issue makes explicit.
 ALL_PRIVATE_NAMES_ARE_INTENDED_INTERNAL = frozenset(
     {
         f"{PARTS_PACKAGE}.constants",
         f"{PARTS_PACKAGE}.enum_helpers",
         f"{PARTS_PACKAGE}.function_helpers",
-        f"{PARTS_PACKAGE}.identifiers",
-        f"{PARTS_PACKAGE}.lexical",
         f"{PARTS_PACKAGE}.model",
     }
 )
@@ -396,13 +390,6 @@ INTENDED_INTERNAL_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
     ),
     f"{PARTS_PACKAGE}.expression_parser": frozenset({"_parse_gml_expression"}),
     f"{PARTS_PACKAGE}.statements": frozenset({"_ControlFlowCapture"}),
-    f"{PARTS_PACKAGE}.tokens": frozenset(
-        {
-            "_expression_tokens",
-            "_read_template_string",
-            "_tokenize",
-        }
-    ),
     f"{PARTS_PACKAGE}.utils": frozenset(
         {
             "_macro_configuration_matches",
@@ -435,14 +422,6 @@ MODULE_PRIVATE_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
             "_static_scope_id",
         }
     ),
-    f"{PARTS_PACKAGE}.tokens": frozenset(
-        {
-            "_decode_gml_string_literal",
-            "_is_float_like_number",
-            "_line_column",
-            "_split_template_string",
-        }
-    ),
     f"{PARTS_PACKAGE}.utils": frozenset(
         {
             "_cache_assignment_part",
@@ -466,10 +445,6 @@ RETAINED_PACKAGE_INTERNAL_EXPORTS = frozenset(
 )
 
 MIGRATION_STAGE_BY_OWNER: dict[str, int] = {
-    f"{PARTS_PACKAGE}.constants": 817,
-    f"{PARTS_PACKAGE}.identifiers": 817,
-    f"{PARTS_PACKAGE}.lexical": 817,
-    f"{PARTS_PACKAGE}.tokens": 817,
     f"{PARTS_PACKAGE}.emitter": 818,
     f"{PARTS_PACKAGE}.enum_helpers": 818,
     f"{PARTS_PACKAGE}.expression_parser": 818,
@@ -498,6 +473,8 @@ def _disposition_for(edge: ImportEdge) -> BoundaryDisposition:
     if edge.name in EXPECTED_PUBLIC_FACADE_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.SUPPORTED_PUBLIC_FACADE, None)
     if edge.owner == f"{PARTS_PACKAGE}.constants" and edge.name in language_metadata.__all__:
+        return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
+    if edge.owner == LEXICAL_API_MODULE and edge.name in lexical_phase_api.__all__:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if (edge.owner, edge.name) in RETAINED_PACKAGE_INTERNAL_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
@@ -572,11 +549,6 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
             "# pyright: reportPrivateUsage=false",
         ),
         (
-            "src/conversion/gml_transpiler_parts/source_map.py",
-            1,
-            "# pyright: reportPrivateUsage=false",
-        ),
-        (
             "src/conversion/gml_transpiler_parts/statement_parser.py",
             1,
             "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
@@ -588,16 +560,6 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
         ),
         (
             "src/conversion/gml_transpiler_parts/static_declarations.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/tokens.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/utils.py",
             1,
             "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
         ),
@@ -667,6 +629,131 @@ def _imports_from_path(path: Path) -> frozenset[ImportEdge]:
         _module_name(path),
         package_module=path.name == "__init__.py",
     )
+
+
+def _lexical_boundary_bypasses_from_source(
+    source: str,
+    consumer: str,
+    *,
+    package_module: bool = False,
+) -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    for edge in _imports_from_source(
+        source,
+        consumer,
+        package_module=package_module,
+    ):
+        if edge.owner in LEXICAL_IMPLEMENTATION_MODULES:
+            bypasses.add(edge)
+            continue
+
+        imported_module = f"{edge.owner}.{edge.name}"
+        if imported_module in LEXICAL_IMPLEMENTATION_MODULES:
+            bypasses.add(
+                ImportEdge(
+                    consumer=consumer,
+                    owner=imported_module,
+                    name=MODULE_IMPORT_NAME,
+                )
+            )
+            continue
+
+        if edge.owner == FACADE_MODULE and (
+            edge.name in LEGACY_LEXICAL_FACADE_NAMES or edge.name == "*"
+        ):
+            bypasses.add(edge)
+
+    tree = ast.parse(source)
+    facade_bindings: set[tuple[str, ...]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported_module in node.names:
+                if imported_module.name != FACADE_MODULE:
+                    continue
+                if imported_module.asname is not None:
+                    facade_bindings.add((imported_module.asname,))
+                else:
+                    facade_bindings.add(tuple(FACADE_MODULE.split(".")))
+        elif isinstance(node, ast.ImportFrom):
+            owner = _resolve_import_owner(
+                consumer,
+                node,
+                package_module=package_module,
+            )
+            for imported_name in node.names:
+                if f"{owner}.{imported_name.name}" != FACADE_MODULE:
+                    continue
+                facade_bindings.add((imported_name.asname or imported_name.name,))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        name_parts = _attribute_name_parts(node)
+        if name_parts is None:
+            continue
+        for binding in facade_bindings:
+            if name_parts[: len(binding)] != binding or len(name_parts) <= len(binding):
+                continue
+            accessed_name = name_parts[len(binding)]
+            if accessed_name in LEGACY_LEXICAL_FACADE_NAMES:
+                bypasses.add(
+                    ImportEdge(
+                        consumer=consumer,
+                        owner=FACADE_MODULE,
+                        name=accessed_name,
+                    )
+                )
+    return frozenset(bypasses)
+
+
+def _attribute_name_parts(node: ast.expr) -> tuple[str, ...] | None:
+    if isinstance(node, ast.Name):
+        return (node.id,)
+    if not isinstance(node, ast.Attribute):
+        return None
+    parent = _attribute_name_parts(node.value)
+    if parent is None:
+        return None
+    return (*parent, node.attr)
+
+
+def _lexical_boundary_import_is_allowed(
+    consumer: str,
+    edge: ImportEdge,
+) -> bool:
+    if consumer in LEXICAL_IMPLEMENTATION_MODULES or consumer == LEXICAL_API_MODULE:
+        return (
+            edge.owner in LEXICAL_IMPLEMENTATION_MODULES
+            and edge.name != MODULE_IMPORT_NAME
+            and not edge.name.startswith("_")
+        )
+    if (edge.owner, edge.name) in LOW_LEVEL_LEXICAL_IMPORTS_BY_CONSUMER.get(
+        consumer,
+        frozenset(),
+    ):
+        return True
+    return (
+        edge.owner == FACADE_MODULE
+        and edge.name
+        in LEGACY_LEXICAL_FACADE_ACCESS_BY_CONSUMER.get(consumer, frozenset())
+    )
+
+
+def _actual_lexical_boundary_bypasses() -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    for source_root in (PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
+        for path in sorted(source_root.rglob("*.py")):
+            consumer = _module_name(path)
+            bypasses.update(
+                edge
+                for edge in _lexical_boundary_bypasses_from_source(
+                    path.read_text(encoding="utf-8"),
+                    consumer,
+                    package_module=path.name == "__init__.py",
+                )
+                if not _lexical_boundary_import_is_allowed(consumer, edge)
+            )
+    return frozenset(bypasses)
 
 
 def _internal_module_paths() -> tuple[Path, ...]:
@@ -768,6 +855,134 @@ import src.conversion.gml_transpiler_parts.api as phase_api
             ),
         )
 
+    def test_lexical_boundary_scanner_rejects_private_and_module_bypasses(
+        self,
+    ) -> None:
+        consumer = f"{PARTS_PACKAGE}.synthetic_consumer"
+        source = """
+from .tokens import (
+    _read_number as relative_parenthesized_alias,
+)
+from src.conversion.gml_transpiler_parts.identifiers import (
+    _validate_gml_identifier as absolute_parenthesized_alias,
+)
+from .lexical import _read_verbatim_string as relative_alias
+from src.conversion.gml_transpiler_parts.preprocessor import _source_line_spans
+from . import tokens as token_module
+from src.conversion.gml_transpiler_parts import identifiers as identifier_module
+import src.conversion.gml_transpiler_parts.lexical as lexical_module
+from src.conversion.gml_transpiler import _tokenize as legacy_facade_bypass
+from src.conversion.gml_transpiler import *
+import src.conversion.gml_transpiler as facade_module
+from src.conversion import gml_transpiler as package_facade
+
+facade_module._expression_tokens("value")
+package_facade._tokenize("value")
+"""
+
+        self.assertEqual(
+            _lexical_boundary_bypasses_from_source(source, consumer),
+            frozenset(
+                {
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.tokens",
+                        "_read_number",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.identifiers",
+                        "_validate_gml_identifier",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.lexical",
+                        "_read_verbatim_string",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.preprocessor",
+                        "_source_line_spans",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.tokens",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.identifiers",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.lexical",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "_tokenize",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "_expression_tokens",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "*",
+                    ),
+                }
+            ),
+        )
+        owner_consumer = f"{PARTS_PACKAGE}.tokens"
+        self.assertTrue(
+            _lexical_boundary_import_is_allowed(
+                owner_consumer,
+                ImportEdge(
+                    owner_consumer,
+                    f"{PARTS_PACKAGE}.lexical",
+                    "read_verbatim_string",
+                ),
+            )
+        )
+        self.assertFalse(
+            _lexical_boundary_import_is_allowed(
+                owner_consumer,
+                ImportEdge(
+                    owner_consumer,
+                    f"{PARTS_PACKAGE}.lexical",
+                    "_read_verbatim_string",
+                ),
+            )
+        )
+        compatibility_consumer = "tests.test_gml_lexical_api"
+        self.assertTrue(
+            _lexical_boundary_import_is_allowed(
+                compatibility_consumer,
+                ImportEdge(
+                    compatibility_consumer,
+                    FACADE_MODULE,
+                    "_tokenize",
+                ),
+            )
+        )
+        self.assertFalse(
+            _lexical_boundary_import_is_allowed(
+                owner_consumer,
+                ImportEdge(
+                    owner_consumer,
+                    f"{PARTS_PACKAGE}.lexical",
+                    MODULE_IMPORT_NAME,
+                ),
+            )
+        )
+
+    def test_lexical_implementation_modules_have_no_external_bypasses(self) -> None:
+        self.assertEqual(_actual_lexical_boundary_bypasses(), frozenset())
+
     def test_private_phase_and_production_import_inventory_is_exact(self) -> None:
         actual_internal = _actual_internal_private_imports()
         actual_production = _actual_production_imports()
@@ -776,11 +991,11 @@ import src.conversion.gml_transpiler_parts.api as phase_api
             actual_internal | actual_production,
         )
 
-        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 135)
+        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 96)
         self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 60)
         self.assertEqual(
             sum(edge.name.startswith("_") for edge in EXPECTED_PRODUCTION_IMPORTS),
-            16,
+            7,
         )
         self.assertEqual(
             actual_internal,
@@ -891,7 +1106,7 @@ import src.conversion.gml_transpiler_parts.api as phase_api
 
     def test_transitional_private_usage_suppressions_are_exact(self) -> None:
         actual = _actual_private_usage_suppressions()
-        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 15)
+        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 12)
         self.assertEqual(actual, EXPECTED_PRIVATE_USAGE_SUPPRESSIONS)
 
 

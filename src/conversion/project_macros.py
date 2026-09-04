@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
@@ -9,8 +8,8 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
 )
 from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
 from src.conversion.gml_transpiler_parts.utils import (
-    _macro_configuration_matches,
-    _tokens_to_source,
+    macro_configuration_matches,
+    tokens_to_source,
 )
 from src.conversion.project_source_paths import project_gml_source_paths
 from src.conversion.type_defs import StrPath
@@ -82,7 +81,7 @@ def _collect_macro_values(
                 index += 1
             if not value_tokens:
                 continue
-            if configuration is not None and not _macro_configuration_matches(
+            if configuration is not None and not macro_configuration_matches(
                 configuration,
                 macro_configuration,
             ):
@@ -90,7 +89,7 @@ def _collect_macro_values(
 
             priority = 1 if configuration is not None else 0
             if priority >= priorities.get(name, -1):
-                values[name] = _tokens_to_source(value_tokens)
+                values[name] = tokens_to_source(value_tokens)
                 priorities[name] = priority
     return values
 

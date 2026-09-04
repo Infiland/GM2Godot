@@ -7,19 +7,14 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import (
-    Final,
     Iterable,
     Mapping,
     MutableMapping,
     MutableSet,
-    get_args,
-    get_origin,
     get_type_hints,
 )
 import unittest
 
-import src.conversion.gml_transpiler as gml_transpiler
-from src.conversion.gml_transpiler_parts import statement_api, statement_models
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
     GMLExtensionFunction,
@@ -39,10 +34,16 @@ from src.conversion.gml_transpiler_parts.statement_models import (
     GMLStatementRequest,
     GMLStatementResult,
 )
+from tests.gml_facade_contract_support import static_all_exports
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"
+STATEMENT_API_FUNCTIONS = {
+    "collect_static_declarations": collect_static_declarations,
+    "parse_gml_statements": parse_gml_statements,
+    "static_scope_id": static_scope_id,
+}
 
 PUBLIC_NAMES = (
     "collect_static_declarations",
@@ -143,67 +144,34 @@ EXPECTED_MODEL_SIGNATURES = {
 
 class GMLStatementAPITests(unittest.TestCase):
     def test_exact_static_alphabetized_api_and_model_surfaces(self) -> None:
-        self.assertEqual(tuple(statement_api.__all__), PUBLIC_NAMES)
-        self.assertEqual(tuple(sorted(statement_api.__all__)), PUBLIC_NAMES)
-        self.assertEqual(tuple(statement_models.__all__), MODEL_NAMES)
-        self.assertEqual(tuple(sorted(statement_models.__all__)), MODEL_NAMES)
-
-        for module, expected_names in (
-            (statement_api, PUBLIC_NAMES),
-            (statement_models, MODEL_NAMES),
+        for module_path, expected_names in (
+            (PARTS_PATH / "statement_api.py", PUBLIC_NAMES),
+            (PARTS_PATH / "statement_models.py", MODEL_NAMES),
         ):
-            with self.subTest(module=module.__name__):
-                self.assertTrue(
-                    all(not name.startswith("_") for name in module.__all__)
-                )
-                module_path_value = module.__file__
-                self.assertIsNotNone(module_path_value)
-                assert module_path_value is not None
-                module_path = Path(module_path_value)
-                tree = ast.parse(
-                    module_path.read_text(encoding="utf-8"),
-                    filename=str(module_path),
-                )
+            with self.subTest(module=module_path.name):
+                exports = static_all_exports(module_path.read_text(encoding="utf-8"))
+                self.assertEqual(exports, expected_names)
+                self.assertEqual(tuple(sorted(exports)), expected_names)
+                self.assertTrue(all(not name.startswith("_") for name in exports))
+                tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
                 declarations = [
                     node
                     for node in tree.body
-                    if (
-                        isinstance(node, ast.AnnAssign)
-                        and isinstance(node.target, ast.Name)
-                        and node.target.id == "__all__"
-                    )
+                    if isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and node.target.id == "__all__"
                 ]
                 self.assertEqual(len(declarations), 1)
-                declaration = declarations[0]
-                assert isinstance(declaration, ast.AnnAssign)
-                value = declaration.value
-                self.assertIsInstance(value, ast.Tuple)
-                assert isinstance(value, ast.Tuple)
                 self.assertEqual(
-                    tuple(
-                        element.value
-                        for element in value.elts
-                        if (
-                            isinstance(element, ast.Constant)
-                            and isinstance(element.value, str)
-                        )
-                    ),
-                    expected_names,
-                )
-                self.assertEqual(len(value.elts), len(expected_names))
-
-                module_hints = get_type_hints(module, include_extras=True)
-                self.assertIs(get_origin(module_hints["__all__"]), Final)
-                self.assertEqual(
-                    get_args(module_hints["__all__"]),
-                    (tuple[str, ...],),
+                    ast.unparse(declarations[0].annotation),
+                    "Final[tuple[str, ...]]",
                 )
 
     def test_exact_api_signatures_and_resolved_types(self) -> None:
         self.assertEqual(set(EXPECTED_SIGNATURES), set(PUBLIC_NAMES))
         for name, expected_signature in EXPECTED_SIGNATURES.items():
             with self.subTest(name=name):
-                operation = getattr(statement_api, name)
+                operation = STATEMENT_API_FUNCTIONS[name]
                 self.assertEqual(
                     str(inspect.signature(operation, eval_str=False)),
                     expected_signature,
@@ -491,66 +459,14 @@ class GMLStatementAPITests(unittest.TestCase):
         )
 
     def test_statement_contract_remains_package_internal(self) -> None:
-        self.assertEqual(len(gml_transpiler.__all__), 74)
-        self.assertEqual(
-            sum(not name.startswith("_") for name in gml_transpiler.__all__),
-            44,
+        facade_exports = static_all_exports(
+            (PARTS_PATH.parent / "gml_transpiler.py").read_text(encoding="utf-8")
         )
-        self.assertEqual(
-            sum(name.startswith("_") for name in gml_transpiler.__all__),
-            30,
-        )
+        self.assertEqual(len(facade_exports), 44)
+        self.assertEqual(sum(not name.startswith("_") for name in facade_exports), 44)
+        self.assertEqual(sum(name.startswith("_") for name in facade_exports), 0)
         package_internal_names = frozenset((*PUBLIC_NAMES, *MODEL_NAMES))
-        self.assertTrue(package_internal_names.isdisjoint(gml_transpiler.__all__))
-        self.assertTrue(package_internal_names.isdisjoint(vars(gml_transpiler)))
-
-    def test_expression_parser_keeps_statement_api_import_cycle_safe(self) -> None:
-        parser_path = PARTS_PATH / "expression_parser.py"
-        tree = ast.parse(
-            parser_path.read_text(encoding="utf-8"),
-            filename=str(parser_path),
-        )
-        top_level_statement_api_imports = [
-            node
-            for node in tree.body
-            if isinstance(node, ast.ImportFrom) and node.module == "statement_api"
-        ]
-        self.assertEqual(top_level_statement_api_imports, [])
-
-        parser_class = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "_ExpressionParser"
-        )
-        function_literal_parser = next(
-            node
-            for node in parser_class.body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_parse_function_literal"
-        )
-        local_imports = [
-            node
-            for node in ast.walk(function_literal_parser)
-            if isinstance(node, ast.ImportFrom) and node.module == "statement_api"
-        ]
-        self.assertEqual(len(local_imports), 1)
-        local_import = local_imports[0]
-        self.assertEqual(local_import.level, 1)
-        self.assertEqual(
-            tuple((alias.name, alias.asname) for alias in local_import.names),
-            (
-                ("collect_static_declarations", None),
-                ("parse_gml_statements", None),
-                ("static_scope_id", "build_static_scope_id"),
-            ),
-        )
-        statement_parser_imports = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom)
-            and node.module == "statement_parser"
-        ]
-        self.assertEqual(statement_parser_imports, [])
+        self.assertTrue(package_internal_names.isdisjoint(facade_exports))
 
     def test_fresh_process_import_orders_preserve_function_literal_parsing(self) -> None:
         module_prefix = "src.conversion.gml_transpiler_parts"

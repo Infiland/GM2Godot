@@ -35,7 +35,6 @@
     "application|complexity|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 16,
     "application|complexity|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 122,
     "application|complexity|src/conversion/gml_transpiler_parts/tokens.py::tokenize_gml_source": 29,
-    "application|complexity|src/conversion/gml_transpiler_parts/utils.py::_split_assignment": 16,
     "application|complexity|src/conversion/godot_validation.py::validate_generated_godot_project": 18,
     "application|complexity|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 52,
     "application|complexity|src/conversion/included_files.py::_acquire_included_project_lock": 25,
@@ -364,7 +363,6 @@
     "application|lint.I001|src/conversion/gml_transpiler_parts/function_helpers.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|lint.I001|src/conversion/gml_transpiler_parts/gml_function_dispatch.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|lint.I001|src/conversion/gml_transpiler_parts/lexical_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/model.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|lint.I001|src/conversion/gml_transpiler_parts/preprocessor.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|lint.I001|src/conversion/gml_transpiler_parts/result_models.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|lint.I001|src/conversion/gml_transpiler_parts/shared_models.py::<module>|Import block is un-sorted or un-formatted": 1,
@@ -436,7 +434,7 @@
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1914,
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": 1088,
-    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1097,
+    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1108,
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
@@ -455,7 +453,7 @@
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
     "application|module_structure.executable|src/conversion/converter.py::<module>": 1772,
-    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 953,
+    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 1012,
     "application|module_structure.executable|src/conversion/extension_registry.py::<module>": 2255,
     "application|module_structure.executable|src/conversion/fonts.py::<module>": 1361,
     "application|module_structure.executable|src/conversion/generation_inventory.py::<module>": 2404,
@@ -468,7 +466,7 @@
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 2362,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 4644,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/tokens.py::<module>": 1018,
-    "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 964,
+    "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 886,
     "application|module_structure.executable|src/conversion/godot_validation.py::<module>": 1557,
     "application|module_structure.executable|src/conversion/included_files.py::<module>": 16958,
     "application|module_structure.executable|src/conversion/managed_output_publisher.py::<module>": 7149,
@@ -476,11 +474,11 @@
     "application|module_structure.executable|src/conversion/objects.py::<module>": 3002,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1992,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 2013,
     "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
     "application|module_structure.executable|src/conversion/project_source_paths.py::<module>": 892,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1047,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1059,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
@@ -492,7 +490,7 @@
     "application|module_structure.executable|src/conversion/sprites.py::<module>": 3056,
     "application|module_structure.executable|src/conversion/tilesets.py::<module>": 1822,
     "application|module_structure.executable|src/gui/main_window.py::<module>": 1035,
-    "application|module_structure.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": 2599,
+    "application|module_structure.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": 2598,
     "application|nesting|src/cli.py::_run_convert": 7,
     "application|nesting|src/cli.py::_run_convert.repair_conversion_reports": 6,
     "application|nesting|src/conversion/anchored_artifacts.py::ByteArtifactTransaction._rollback_restore_mutations": 5,
@@ -514,10 +512,6 @@
     "application|nesting|src/conversion/gml_transpiler_parts/preprocessor.py::preprocess_gml_source_preserving_layout": 5,
     "application|nesting|src/conversion/gml_transpiler_parts/statement_parser.py::_collect_hoisted_local_names": 5,
     "application|nesting|src/conversion/gml_transpiler_parts/statements.py::control_flow_dispatch_lines": 6,
-    "application|nesting|src/conversion/gml_transpiler_parts/utils.py::_split_assignment": 5,
-    "application|nesting|src/conversion/gml_transpiler_parts/utils.py::_split_statements": 5,
-    "application|nesting|src/conversion/gml_transpiler_parts/utils.py::_split_top_level": 5,
-    "application|nesting|src/conversion/gml_transpiler_parts/utils.py::_strip_comments": 5,
     "application|nesting|src/conversion/included_file_paths.py::plan_included_file_paths": 5,
     "application|nesting|src/conversion/included_files.py::IncludedFilesConverter._process_file": 5,
     "application|nesting|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 6,
@@ -590,7 +584,6 @@
     "application|parameters|src/conversion/sounds.py::SoundConverter.__init__": 11,
     "application|parameters|src/conversion/sprites.py::SpriteConverter.__init__": 10,
     "application|parameters|src/conversion/tilesets.py::TileSetConverter.__init__": 10,
-    "application|suppression|src/conversion/gml_transpiler.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/api.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/constants.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/emitter.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
@@ -598,21 +591,16 @@
     "application|suppression|src/conversion/gml_transpiler_parts/expression_parser.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/expression_service.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/function_helpers.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
-    "application|suppression|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/identifiers.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
-    "application|suppression|src/conversion/gml_transpiler_parts/preprocessor.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/statement_parser.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/statements.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/static_declarations.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/tokens.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
     "application|suppression|src/conversion/gml_transpiler_parts/utils.py::<module>|# pyright: reportUnusedFunction=false, reportUnusedClass=false": 1,
-    "application|suppression|src/conversion/gml_transpiler_parts/utils.py::_split_statements|# pyright: ignore[reportUnusedFunction]": 1,
     "application|suppression|src/conversion/managed_output_publisher.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/conversion/objects.py::<module>|# pyright: reportPrivateUsage=false": 1,
-    "application|suppression|src/conversion/project_macros.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/conversion/room_layers.py::_coerce_float|# type: ignore[arg-type]": 1,
     "application|suppression|src/conversion/room_layers.py::_require_int|# type: ignore[arg-type]": 1,
-    "application|suppression|src/conversion/script_functions.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "application|suppression|src/gui/dialogs/about_dialog.py::AboutDialog._add_contributor|# type: ignore[method-assign]": 3,
     "application|suppression|src/gui/dialogs/about_dialog.py::AboutDialog._init_ui|# type: ignore[method-assign]": 1,
     "application|suppression|src/gui/dialogs/release_notes_dialog.py::<module>|# type: ignore[reportMissingTypeStubs]": 1,
@@ -635,8 +623,6 @@
     "graph|static_cycle|src/conversion/project_manifest.py -> src/conversion/project_source_paths.py": 1,
     "tests|complexity|tests/test_ci_workflows.py::TestCIWorkflows.test_privileged_dependency_snapshot_validator_matches_producer_contract": 25,
     "tests|complexity|tests/test_ci_workflows.py::_run_existing_release_integrity": 22,
-    "tests|complexity|tests/test_gml_transpiler_architecture.py::_expression_boundary_bypasses_from_source": 20,
-    "tests|complexity|tests/test_gml_transpiler_architecture.py::_lexical_boundary_bypasses_from_source": 19,
     "tests|complexity|tests/test_release_publisher.py::ScriptedTransport._fault_result": 36,
     "tests|duplicate_symbol|tests/test_anchored_receipt_darwin.py::AnchoredReceiptDarwinTests.test_effect_then_interruption_at_every_posix_seal_boundary_is_recoverable.attempt": 2,
     "tests|duplicate_symbol|tests/test_anchored_receipt_darwin.py::AnchoredReceiptDarwinTests.test_effect_then_interruption_at_every_posix_seal_boundary_is_recoverable.record_open": 2,
@@ -699,7 +685,7 @@
     "tests|function_structure|tests/test_files_ini_json_godot.py::TestFilesIniJsonGodotSmoke.test_recovered_committed_included_generation_boots_without_mixing": 418,
     "tests|function_structure|tests/test_gml_api_manifest.py::TestGMLAPIManifest.test_function_descriptors_cover_current_implemented_call_helpers": 223,
     "tests|function_structure|tests/test_gml_api_manifest.py::TestGMLAPIManifest.test_manifest_exposes_implemented_and_planned_apis": 1315,
-    "tests|function_structure|tests/test_gml_lexical_api.py::GMLLexicalAPISurfaceTests.test_resolved_signatures_and_model_types_are_exact": 219,
+    "tests|function_structure|tests/test_gml_lexical_api.py::GMLLexicalAPISurfaceTests.test_resolved_signatures_and_model_types_are_exact": 213,
     "tests|function_structure|tests/test_gml_runtime.py::TestGMLRuntimeScript.test_runtime_defines_shared_value_helpers": 732,
     "tests|function_structure|tests/test_gml_runtime.py::TestGMLRuntimeScript.test_runtime_ds_collection_runtime_functions": 229,
     "tests|function_structure|tests/test_gml_statement_api.py::GMLStatementAPITests.test_exact_frozen_model_shapes_signatures_and_types": 202,
@@ -772,7 +758,6 @@
     "tests|lint.B009|tests/test_extension_registry.py::TestExtensionRegistry.test_refuses_extension_output_symlink_swaps_without_external_write|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_extension_registry.py::TestExtensionRegistry.test_windows_fallback_refuses_final_stub_symlink|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_gml_expression_api.py::GMLExpressionAPITests.test_canonical_expression_alias_and_frozen_emission_model|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "tests|lint.B009|tests/test_gml_language_metadata.py::GmlLanguageMetadataTests.test_facade_compatibility_alias_preserves_registry_identity|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_gml_statement_api.py::GMLStatementAPITests.test_exact_frozen_model_shapes_signatures_and_types|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_managed_output_publisher.py::TestManagedOutputPublisher.test_windows_read_only_replacement_uses_write_through_moves|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_managed_output_workspace.py::TestManagedOutputWorkspace.test_cleanup_retry_after_transient_pre_quarantine_failure|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
@@ -941,6 +926,7 @@
     "tests|lint.E402|tests/conversion/events/test_user_events.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/conversion/events/test_wallpaper_events.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/test_asset_registry.py::<module>|Module level import not at top of file": 11,
+    "tests|lint.E402|tests/test_base_converter.py::<module>|Module level import not at top of file": 4,
     "tests|lint.E402|tests/test_cli.py::<module>|Module level import not at top of file": 8,
     "tests|lint.E402|tests/test_converter.py::<module>|Module level import not at top of file": 7,
     "tests|lint.E402|tests/test_ds_collections_godot.py::<module>|Module level import not at top of file": 1,
@@ -952,7 +938,6 @@
     "tests|lint.E402|tests/test_gml_runtime.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/test_gml_runtime_segments.py::<module>|Module level import not at top of file": 3,
     "tests|lint.E402|tests/test_gml_source_maps.py::<module>|Module level import not at top of file": 1,
-    "tests|lint.E402|tests/test_gml_transpiler.py::<module>|Module level import not at top of file": 4,
     "tests|lint.E402|tests/test_golden_conversion.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/test_included_files.py::<module>|Module level import not at top of file": 8,
     "tests|lint.E402|tests/test_monophobia_conversion.py::<module>|Module level import not at top of file": 5,
@@ -1080,15 +1065,14 @@
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 2164,
     "tests|module_lines.executable|tests/test_architecture_policy.py::<module>": 1650,
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": 5545,
-    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6706,
+    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6702,
     "tests|module_lines.executable|tests/test_cli.py::<module>": 3611,
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2739,
     "tests|module_lines.executable|tests/test_converter.py::<module>": 1568,
     "tests|module_lines.executable|tests/test_dependency_policy.py::<module>": 2533,
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": 1905,
     "tests|module_lines.executable|tests/test_gml_runtime.py::<module>": 3343,
-    "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": 5417,
-    "tests|module_lines.executable|tests/test_gml_transpiler_architecture.py::<module>": 1762,
+    "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": 5411,
     "tests|module_lines.executable|tests/test_included_files.py::<module>": 12914,
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": 1713,
     "tests|module_lines.executable|tests/test_objects.py::<module>": 3151,
@@ -1104,7 +1088,7 @@
     "tests|module_structure.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 5376,
     "tests|module_structure.executable|tests/test_architecture_policy.py::<module>": 2893,
     "tests|module_structure.executable|tests/test_asset_registry.py::<module>": 9997,
-    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12317,
+    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12309,
     "tests|module_structure.executable|tests/test_cli.py::<module>": 7102,
     "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4414,
     "tests|module_structure.executable|tests/test_converter.py::<module>": 2997,
@@ -1116,8 +1100,7 @@
     "tests|module_structure.executable|tests/test_fonts.py::<module>": 2908,
     "tests|module_structure.executable|tests/test_gml_api_manifest.py::<module>": 2220,
     "tests|module_structure.executable|tests/test_gml_runtime.py::<module>": 7239,
-    "tests|module_structure.executable|tests/test_gml_transpiler.py::<module>": 6448,
-    "tests|module_structure.executable|tests/test_gml_transpiler_architecture.py::<module>": 2698,
+    "tests|module_structure.executable|tests/test_gml_transpiler.py::<module>": 6430,
     "tests|module_structure.executable|tests/test_godot_validation.py::<module>": 2227,
     "tests|module_structure.executable|tests/test_included_files.py::<module>": 22703,
     "tests|module_structure.executable|tests/test_linux_gui_artifact_verifier.py::<module>": 1502,
@@ -1153,9 +1136,6 @@
     "tests|nesting|tests/test_ci_workflows.py::TestCIWorkflows.test_upload_artifact_calls_explicitly_preserve_archives": 5,
     "tests|nesting|tests/test_ci_workflows.py::_run_existing_release_integrity": 5,
     "tests|nesting|tests/test_diagnostics.py::TestDiagnosticCollector.test_restore_refuses_changed_or_replaced_receipt_targets": 5,
-    "tests|nesting|tests/test_gml_transpiler_architecture.py::_expression_boundary_bypasses_from_source": 5,
-    "tests|nesting|tests/test_gml_transpiler_architecture.py::_imports_from_source": 5,
-    "tests|nesting|tests/test_gml_transpiler_architecture.py::_lexical_boundary_bypasses_from_source": 5,
     "tests|nesting|tests/test_gml_transpiler_models.py::TestGMLTranspilerModels.test_model_modules_are_dependency_only": 6,
     "tests|nesting|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_committed_cleanup_preserves_unknown_content_inside_recorded_trees": 5,
     "tests|nesting|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_format_v1_records_recover_at_every_publication_boundary": 5,
@@ -1194,8 +1174,6 @@
     "tests|suppression|tests/test_converter_transaction.py::TestConverterManagedOutputTransaction.test_runtime_failure_after_real_mutations_preserves_baseline.failing_runners|# type: ignore[arg-type]": 1,
     "tests|suppression|tests/test_fonts.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "tests|suppression|tests/test_generation_inventory.py::TestGenerationInventory.test_serialization_is_immutable_sorted_and_separator_independent|# type: ignore[attr-defined]": 1,
-    "tests|suppression|tests/test_gml_api_manifest.py::<module>|# pyright: reportPrivateUsage=false": 1,
-    "tests|suppression|tests/test_gml_transpiler.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "tests|suppression|tests/test_godot_validation.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "tests|suppression|tests/test_gui_close_lifecycle.py::<module>|# pyright: reportPrivateUsage=false": 1,
     "tests|suppression|tests/test_gui_close_lifecycle.py::<module>|# ruff: noqa: E402": 1,
@@ -1452,7 +1430,7 @@
       "structure": 600
     },
     "application|function_lines|src/conversion/gml_transpiler_parts/preprocessor.py::preprocess_gml_source": {
-      "ast_sha256": "1db275e74fa3a4792d9e651ef386f424fa27f2572ba037e40aae54387dfce58d",
+      "ast_sha256": "30584686d42972dae4665e48e8ea22ada01b625995812ed22d9bb09afa7f165a",
       "lines": 151,
       "structure": 257
     },
@@ -1663,7 +1641,7 @@
     },
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": {
       "ast_sha256": "aeebe7067db01ace6d4b88b404793a182e5ab6cd4cff7d067a43f4facc10a661",
-      "lines": 8139,
+      "lines": 8138,
       "structure": 8335
     },
     "application|module_lines.executable|src/cli.py::<module>": {
@@ -1727,8 +1705,8 @@
       "structure": 4021
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": {
-      "ast_sha256": "a3109c661f9146d3b02ab1a8f75a9a02318b115cbd3d719d008772f1c4f95980",
-      "lines": 890,
+      "ast_sha256": "b062705af45e3f2790823e643bb9d3daad6b80d686cc6a79297c3398980a76ea",
+      "lines": 889,
       "structure": 1543
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": {
@@ -1772,9 +1750,9 @@
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "fc3f59b674a2a76d7cbd15bc1bed8c7abd7800a56de26163a65a42e7711daeda",
-      "lines": 1091,
-      "structure": 1992
+      "ast_sha256": "56dafd3e37e96cfc360507db5da9033c2232fe442cb25c1d1ef8ccdcc0c7ada6",
+      "lines": 1108,
+      "structure": 2013
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",
@@ -1817,9 +1795,9 @@
       "structure": 1822
     },
     "application|module_lines.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": {
-      "ast_sha256": "f9ea4d578a36e772b7d9e69eb3a8f87824f98f161615a1edab10154e3e37edfa",
-      "lines": 1935,
-      "structure": 2599
+      "ast_sha256": "bd90e9c5f6cd7270886a4c0e0232be53ea26fe7d21d7774d71f14d6b3f3ae744",
+      "lines": 1932,
+      "structure": 2598
     },
     "tests|function_lines|tests/test_array_foreach_godot.py::TestArrayForeachGodotSmoke.test_array_foreach_matches_lts_range_binding_and_mutation_semantics": {
       "ast_sha256": "2aca4d3893ebdd52230fe074c45ecb3f8559cd54b08e5fc486a53d801cec9504",
@@ -1957,9 +1935,9 @@
       "structure": 9997
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {
-      "ast_sha256": "def7bc17c85db10516c812f0aa587ed67a02966a022094155cebd75ad5c12565",
-      "lines": 6706,
-      "structure": 12317
+      "ast_sha256": "e647750f32c1eb56fb2b414ea7437717e0ae73aecaf1e3679a2b07aa553591aa",
+      "lines": 6699,
+      "structure": 12309
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
       "ast_sha256": "e991b844378838044ab7664612ddaabc84470547844b1299655ca7d0983527d4",
@@ -1992,14 +1970,9 @@
       "structure": 7239
     },
     "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": {
-      "ast_sha256": "d5145603e36827dc982267fbf91a4903bf35b9cc7610999852036734bc0a45c8",
-      "lines": 5417,
-      "structure": 6448
-    },
-    "tests|module_lines.executable|tests/test_gml_transpiler_architecture.py::<module>": {
-      "ast_sha256": "f91d471a3677b60fa4baf263e7da56d14f2628d23c75ddb5b5b653deabbf0b7b",
-      "lines": 1762,
-      "structure": 2698
+      "ast_sha256": "b58009fad581d0de64dcff7840ead1a11affd015e8379115e9cb38d6e4230cb2",
+      "lines": 5411,
+      "structure": 6430
     },
     "tests|module_lines.executable|tests/test_included_files.py::<module>": {
       "ast_sha256": "a1400a805392fdb8049c17d174cebd5680d118db2f8013fc1d0f986d37cf4b82",

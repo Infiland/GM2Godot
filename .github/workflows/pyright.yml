@@ -1,10 +1,7 @@
 name: Pyright
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
 
 jobs:
   pyright:
@@ -64,3 +61,28 @@ jobs:
 
       - name: Run pyright
         run: python -m pyright --warnings
+
+  workflow-success:
+    name: workflow-success
+    if: always()
+    needs: [pyright]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      REQUIRED_JOBS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require successful validation jobs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {
+              "pyright": "success",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
+          if actual != expected:
+              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
+          PY

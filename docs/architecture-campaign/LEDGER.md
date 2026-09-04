@@ -15,8 +15,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
-- No external blocker. N01 and R10 contracts are under read-only review; their
-  implementation has not started. The remaining planned rows need bounded
+- No external blocker. N01 is under read-only contract review. R10 starts from the frozen, reviewed
+  D01 integration candidate; integration remains in dependency order. The remaining planned rows need bounded
   contract acceptance before implementation.
 
 ## Ownership and progress
@@ -29,7 +29,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | C01 aggregate CI | approved | audit_transactions_cli, `8a76561` | audit_gml_resources and root approved | `C01/README.md`, `C01/independent-gml-review.json`; live CI pending |
 | D01 diagnostic models | approved | audit_policy_tests_docs, `a679a2f` | audit_transactions_cli and root approved | `D01/commit-receipt.json`, `D01/independent-review.md`; integration pending |
 | N01 native receipts | planned | Root reviewing finite proposal | Read-only contract review underway | `N01-contract-refinement.md` |
-| R10 recursive JSON | planned | Root reviewing finite proposal | Read-only contract review underway | `r10-contract-proposal.md` |
+| R10 recursive JSON | implementing | audit_gml_resources, GM2Godot-080-json | Contract approved independently and by root; code review pending | `R10-json-contract.md` |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

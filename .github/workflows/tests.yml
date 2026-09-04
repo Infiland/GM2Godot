@@ -1,10 +1,7 @@
 name: Tests
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
 
 jobs:
   test:
@@ -50,13 +47,15 @@ jobs:
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.lock \
             coverage==7.15.2 \
-            packaging==26.2
+            packaging==26.2 \
+            ruff==0.15.22
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require coverage \
             --require packaging \
+            --require ruff \
             --require Pillow \
             --require markdown2 \
             --require requests \
@@ -393,3 +392,32 @@ jobs:
           python -m unittest -v
           tests.test_managed_output_crash_recovery
           tests.test_gui_conversion_outcomes
+
+  workflow-success:
+    name: workflow-success
+    if: always()
+    needs: [test, macos-managed-output-transactions, windows-artifact-transactions, windows-included-files-scale, windows-managed-output-crash-recovery]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      REQUIRED_JOBS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require successful validation jobs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {
+              "test": "success",
+              "macos-managed-output-transactions": "success",
+              "windows-artifact-transactions": "success",
+              "windows-included-files-scale": "success",
+              "windows-managed-output-crash-recovery": "success",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
+          if actual != expected:
+              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
+          PY

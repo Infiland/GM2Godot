@@ -1,72 +1,91 @@
 # v0.8.0 campaign ledger
 
 States: planned, implementing, reviewing, changes requested, approved, integrated,
-verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound scope.
+verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
+54-task campaign. Historical review iterations remain in Git history.
 
 ## Current checkpoint
 
-- Campaign baseline: main/remote `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration worktree: `GM2Godot-080`, branch `dev/080-architecture-campaign`.
-- Initial audit complete across history, ownership, graphs, complexity, GML,
-  resources, transactions, CLI, diagnostics, tests/runtime, packaging, CI/release
-  and documentation. Three independent read-only investigators contributed.
-- Main's 11 dirty policy files and four unrelated worktrees remain preserved.
-- Environment: native CPython 3.12.10 arm64 complete dependency receipt passed;
-  Godot exact 4.7.2 build verified. Primary checkout's Python 3.14 is not release
-  evidence.
-- R02 initial verdict: REQUEST CHANGES. Embedded comment suppressions bypass the
-  scanner; equivalent AST line packing erases size debt. Current 32 tests and
-  1,014-entry gate pass, demonstrating missing assertions rather than acceptance.
-- R01 GML review: APPROVE at preserved `6e86c3f`; 44 exports and exact parity
-  evidence verified. Integration verdict: REQUEST CHANGES for 14 newly measured
-  debt entries (including legitimate renamed function keys, helper lint/nesting
-  and preprocessor size). No separate 0.7.75 release.
-- Latest release remains v0.7.74. No v0.8.0 tag or release has been created.
+- Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
+- Integration branch: `dev/080-architecture-campaign`, through reviewed R01 at
+  `edfe6df`. C01 has passed both reviews and local proof; live PR proof is next.
+- Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
+  847/852/854/855 remain untouched.
+- Approved local environment: native CPython 3.12.10 arm64 and exact Godot
+  `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
+- Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
+  campaign intermediate. Root will coordinate the single final v0.8.0 release.
+- No external blocker. N01 and R10 contracts are under read-only review; their
+  implementation has not started. The remaining planned rows need bounded
+  contract acceptance before implementation.
 
-## Decisions
+## Ownership and progress
 
-1. Reuse and repair existing R02 policy; do not create another framework.
-2. Preserve #820 as provenance; implement integration corrections in a new
-   worktree. Root alone reconciles its unpublished version surfaces.
-3. Native receipt #860 is an explicit prerequisite, not assumed complete from
-   earlier transaction CI. Unrelated 847/852/854/855 work stays with its owner.
-4. Keep existing structured diagnostics and explicit phase APIs. No new generic
-   registries, reflective dispatch or general Python name-resolution engine.
-5. Accept R01 and R02 task contracts for implementation after initial package
-   publication. Remaining contracts are planned and receive a bounded refresh
-   and explicit upper acceptance immediately before their owner starts.
-
-## Task progress
-
-| Task | State | Implementation owner | Independent reviewer | Evidence |
+| Task | State | Owner / candidate | Independent review | Evidence |
 | --- | --- | --- | --- | --- |
-| Initial audit/plan | verified | root | three read-only investigators | initial-metrics.json, issue/pr history, native-environment.json |
-| R02 | integrated | audit_transactions_cli, GM2Godot-080-policy | audit_policy_tests_docs + root | two reproduced bypasses |
-| R01 | integrated | audit_gml_resources, GM2Godot-080-gml | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
-| Remaining contracts | planned | assigned at contract acceptance | independent owner + root | see contracts.json |
+| Initial audit and plan | verified | root | Three read-only investigators | Initial metrics, history and native environment receipts |
+| R02 shrinking policy | integrated | audit_transactions_cli, `3d2cfd0`; integrated `50e86af` | audit_policy_tests_docs and root approved | `R02/README.md` |
+| R01 GML boundaries | integrated | audit_gml_resources, `68dbf847`; integrated `edfe6df` | Independent semantic/structural review and root approved | `r01-corrections-final-index.json`, `r01-integrated-required.json` |
+| C01 aggregate CI | approved | audit_transactions_cli, `8a76561` | audit_gml_resources and root approved | `C01/README.md`, `C01/independent-gml-review.json`; live CI pending |
+| D01 diagnostic models | approved | audit_policy_tests_docs, `a679a2f` | audit_transactions_cli and root approved | `D01/commit-receipt.json`, `D01/independent-review.md`; integration pending |
+| N01 native receipts | planned | Root reviewing finite proposal | Read-only contract review underway | `N01-contract-refinement.md` |
+| R10 recursive JSON | planned | Root reviewing finite proposal | Read-only contract review underway | `r10-contract-proposal.md` |
+| Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
-R02 is integrated locally; native campaign CI verification follows through C01. Other implementation tasks remain unintegrated.
+Raw evidence is retained outside the worktrees at
+`/Users/infi/Documents/Github/.gm2godot-v080-evidence`.
 
-Plan review requested explicit particles/extensions/alias-retirement rows, serialization edges, slice-specific G01 targets, pre-extraction I01 state inventory, complete G05 structured-family ownership and measured time/memory evidence. Root incorporated these findings; the finite roadmap now has 54 rows. R02 repairs may proceed independently.
+## Accepted decisions
+
+1. Repair the existing policy rather than introduce another framework. Schema 2
+   preserves the original 1,014 debt entries and measures 350 structural entries
+   from the same immutable baseline. Parent Git evidence, structural vocabulary,
+   suppression detection and proportional physical allowances prevent packing,
+   relocation and incremental baseline laundering. No new allowance is accepted.
+2. Preserve #820 as provenance. R01 integrates its behavior with the newer policy;
+   it does not publish 0.7.75. Its helper split has explicit direct imports and
+   keeps all fourteen parity fields. Test helpers cannot become app dependencies.
+3. C01 uses seven unconditional same-commit reusable calls and explicit terminal
+   result inventories. Existing native jobs, pins, submission guard and coverage
+   remain intact. A real campaign PR must prove the aggregate before verification.
+4. D01 moves four immutable records into one stdlib-only leaf without changing
+   constructors, report bytes, messages, mapping or deduplication. Three temporary
+   exports have named family/Included Files/CLI consumers and retire by R26.
+   Removing the obsolete bootstrap from `test_base_converter` avoids adding lint
+   debt when its import moves to the canonical owner.
+5. Native receipt #860 remains a prerequisite for Included Files decomposition.
+   Modeled Windows tests do not establish NTFS proof. Existing safety ownership
+   and platform durability guarantees remain explicit.
+6. R26 waits for all family migrations, I10, E01 and L03. New unrelated findings
+   receive separate issues; they do not expand this finite roadmap.
 
 ## Validation checkpoint
 
-- Fresh unchanged-production baseline at planning commit 7141a27: full unittest passed, 2,897 tests in 409.879 seconds, 70 recorded platform/optional skips, using exact Godot and pinned SNAP/Adding/SimpleTopDown fixtures. Receipt: baseline-full-unittest.log.
-- R01 initial correction review approved semantics: independent 59-test cohort and 16,011 base/candidate lexical comparisons passed. The owner is refining a measured split_top_level performance regression before freezing the final candidate. This review is not final integrated acceptance.
-- R02 v2 design accepted: formatting-independent size evidence, retained effective physical allowance where structure does not shrink, immutable bootstrap, and structural debt for packed new destinations. Comment/import-only shortening is allowed but receives no structural improvement credit.
-- C01 exact job/permission/concurrency contract accepted at C01-ci-contract.md; implementation waits for R02.
+- Initial unchanged-production baseline at `7141a27`: 2,897 tests passed in
+  409.879 seconds with exact Godot and pinned SNAP, Adding and SimpleTopDown;
+  70 platform or optional-corpus skips were recorded.
+- R02: Pyright 0 errors/warnings, Ruff, 58 focused/documentation tests and full
+  2,943-test suite passed. Its 78 skips include eight unavailable external-fixture
+  skips beyond the baseline. Gate passed 1,364 exact entries.
+- R01 at immutable `68dbf847`: 594 required tests passed with zero skips; full
+  2,932-test suite passed with 70 classified platform/optional-corpus skips.
+  Main-to-candidate and same-ref comparisons matched across five fixtures and all
+  fourteen fields; all 44 public exports were preserved. Root verified 19 evidence
+  hashes and integrated source identity, then reran Pyright, Ruff, 60 policy/doc/
+  version tests and 594 required tests with zero skips. Debt fell to 1,341 entries.
+- R01's bounded utility benchmark used 50 SNAP sources and recorded every sample,
+  input hash and peak RSS. Median changes were comments +3.18%, assignment -7.43%,
+  split +3.86%; RSS was 24.33/24.23 MB. This is not a converter performance claim.
+- C01 at immutable `8a76561`: Pyright 0/0, Ruff, actionlint, 94 focused tests and
+  all 2,950 full-suite tests passed. All five pinned external projects ran;
+  44 skips were platform/filesystem-specific. All 15 prior validation job bodies
+  were unchanged. Independent adversarial aggregate tests passed.
+- D01 at immutable `a679a2f`: Pyright 0/0, Ruff, 117 focused tests and 2,951 full
+  tests passed. All five pinned external projects ran; 44 skips were platform/
+  filesystem-specific. Four moved records have exact AST equivalence and existing
+  JSON/Markdown report bytes match. Candidate file hashes stayed frozen throughout.
+- The earlier exploratory TCC/Monophobia run overlapped root source edits and is
+  not immutable baseline evidence; its explicit caveat remains with the raw log.
 
-- R01 lexical overhead fixed; final bounded50-source benchmark has per-sample timings/input hashes and peak memory: medians comments+3.18%, assignment-7.43%, split+3.86%, RSS24.33/24.23MB. This is a utility microbenchmark, not a converter speed claim. Root accepted one cohesive output-snapshot helper extraction to meet R02 structural budget; normalization and all fourteen comparison fields remain frozen.
-- R02 independent trust review additionally required packed expression relocation coverage; the structural vocabulary now includes expression operations/comprehension clauses. Integration remains pending review.
-
-- R02 final implementation is under read-only review. Its bounded size helper and schema 2 are accepted; immutable bootstrap now records the original 1,014 entries unchanged plus 350 structural-size entries from the same old source. No new implementation allowance is accepted. Native full-suite proof is running.
-- R01 additional helper contracts accepted: typed manifest parsing stays in conversion_parity_contract; runtime/fixture identity moves to conversion_parity_inputs; output comparison stays in conversion_parity_snapshot with its own tests; facade contract checks move to gml_facade_contract_support and depend directly on the import scanner. Both test helpers remain forbidden application dependencies. Native receipt task N01 explicitly waits for the existing required-test runner from R01.
-
-- R02 approved by independent reviewer and root, committed as 3d2cfd0 and integrated as 50e86af. Pyright 0 errors/warnings, Ruff, 58 focused/documentation tests, full unittest 2,943 tests in 369.135s passed. Its 78 skips include 8 external-fixture skips compared with the initial fixture-enabled baseline; exact Godot was present. No claim of a zero-skip or fixture-enabled R02 full run. Integrated gate passes 1,364 entries against immutable 38b. Evidence: R02/README.md and raw receipts.
-- C01 implementation assigned to audit_transactions_cli in isolated GM2Godot-080-ci on dev/080-ci-aggregate. Accepted C01-ci-contract.md is authoritative. Root prepared verified official actionlint 1.7.12 darwin/arm64 tool in external evidence tools directory; no project dependency changes. Independent review and a real campaign PR are required before verification.
-
-- R01 final correction code independently and root APPROVED, committed68dbf847. Required gate at that fixed revision passed594 tests with zero skips. Full suite and five-fixture base/head plus same-ref parity are running; integration remains pending.
-- D01 precise eight-file contract accepted and assigned to audit_policy_tests_docs in GM2Godot-080-diagnostics. Distinct immutable diagnostic/location records move to one stdlib-only leaf; only three one-hop exports remain for named oversize consumers until R26 (now also depends on L03). Its owners are unchanged by R01, so implementation may overlap immutable R01 validation; integration stays in dependency order.
-
-- R01 complete immutable proof at68dbf847:594required/zero skips;2932fulltests/70 classifiedhost-or-optionalcorpus skips;38b→candidate andcandidate→samecandidate fivefixtures×fourteenfields allmatch,44publicexports preserved. Root verifiedall19evidencehashes and27integratedPythonfilesbyte-identical plusremovedmodelabsent. RootcombinedR01withpolicy andreranPyright0/0,Ruff,60policy/doc/versiontests and594requiredtests/zero skips. Ratchetshrinks1364→1341. Evidence:r01-corrections-final-index.json, r01-integrated-required.json.
-- The inherited0.7.75metadata remains an unpublished campaign intermediate; no0.7.75tag/releaseexists. Rootwillreplacecurrentversion/noteswithcoordinated0.8.0onlyatfinalrelease. Maincheckoutandoriginaldirtypolicyfilesremainuntouched.
+Full-suite times from concurrent validation are not performance comparisons.
+Windows and Linux claims require their actual native CI receipts.

@@ -1,12 +1,7 @@
 name: Release Action Smoke
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/release.yml'
-      - '.github/workflows/release-action-smoke.yml'
-      - 'scripts/release_publisher.py'
+  workflow_call:
 
 permissions: {}
 
@@ -168,4 +163,31 @@ jobs:
               raise SystemExit("publisher startup receipt recorded the wrong phase")
           if receipt.get("mutation_intents") != []:
               raise SystemExit("publisher attempted a mutation before local rejection")
+          PY
+
+  workflow-success:
+    name: workflow-success
+    if: always()
+    needs: [upload-sentinel, verify-sentinel, publisher-startup]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      REQUIRED_JOBS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require successful validation jobs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {
+              "upload-sentinel": "success",
+              "verify-sentinel": "success",
+              "publisher-startup": "success",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
+          if actual != expected:
+              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
           PY

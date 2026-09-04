@@ -1,10 +1,7 @@
 name: Dependency Locks
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
     inputs:
       refresh:
@@ -25,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dependency-locks-${{ github.workflow }}-${{ github.ref }}
+  group: gm2godot-ci-dependencies-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -1485,3 +1482,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
           archive: true
+
+  workflow-success:
+    name: workflow-success
+    if: always()
+    needs: [generate, submit-dependency-graphs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      REQUIRED_JOBS: ${{ toJSON(needs) }}
+      SUBMISSION_REQUIRED: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.deleted == false && github.sha == github.event.after }}
+    steps:
+      - name: Require successful validation jobs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {
+              "generate": "success",
+              "submit-dependency-graphs": "success",
+          }
+          if os.environ["SUBMISSION_REQUIRED"] == "false":
+              expected["submit-dependency-graphs"] = "skipped"
+          elif os.environ["SUBMISSION_REQUIRED"] != "true":
+              raise SystemExit("Invalid dependency submission condition")
+          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
+          if actual != expected:
+              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
+          PY

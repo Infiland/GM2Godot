@@ -287,7 +287,7 @@ class TestDocumentationHealth(unittest.TestCase):
             )
 
         self.assertEqual(ruff_config, EXPECTED_RUFF_CONFIG)
-        self.assertTrue(workflow.endswith(EXPECTED_RUFF_LINT_STEPS))
+        self.assertTrue(workflow.partition("\n  workflow-success:\n")[0].endswith(EXPECTED_RUFF_LINT_STEPS))
 
     def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
         required_guidance = (

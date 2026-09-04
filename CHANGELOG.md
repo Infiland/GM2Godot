@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.71 - 2026-09-04
+
+- Published the exact 64-name GML language-metadata surface with `Final` annotations, read-only mapping proxies, frozen sets, and immutable registry values, retaining only `_BUILTIN_VARIABLE_REGISTRY` as the private facade compatibility alias assigned to #820.
+- Migrated all 13 production consumers to the public names and advanced the architecture baseline from 209 to 135 private edges across 53 module pairs, while keeping 60 production imports and reducing private production names from 22 to 16 and private-usage suppressions from 17 to 15.
+- Preserved preprocessed source, token values and locations, transpiled GDScript, source-map JSON, diagnostics, parser errors, golden output, runtime bytes, top-level facade exports, and signatures while making the shared metadata immutable.
+
 ## 0.7.70 - 2026-09-04
 
 - Replaced the mutable GameMaker monthly-manual root in generated GML compatibility evidence with one canonical `https://manual.gamemaker.io/lts/en/` source shared by API entries, manual-scope entries, function descriptors, and the runtime API index.

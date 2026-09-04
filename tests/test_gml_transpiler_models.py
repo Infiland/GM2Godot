@@ -7,7 +7,6 @@ import unittest
 
 import src.conversion.gml_transpiler as gml_transpiler
 import src.conversion.gml_transpiler_parts.extension_functions as extension_functions
-import src.conversion.gml_transpiler_parts.preprocessor as preprocessor
 import src.conversion.gml_transpiler_parts.source_map as source_map
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
@@ -347,8 +346,6 @@ class TestGMLTranspilerModels(unittest.TestCase):
         )
         self.assertIs(gml_transpiler.GMLPreprocessResult, GMLPreprocessResult)
         self.assertIs(gml_transpiler.GMLPreprocessorDiagnostic, GMLPreprocessorDiagnostic)
-        self.assertIs(preprocessor.GMLPreprocessResult, GMLPreprocessResult)
-        self.assertIs(preprocessor.GMLPreprocessorDiagnostic, GMLPreprocessorDiagnostic)
         self.assertIs(gml_transpiler.GMLSourceDiagnostic, GMLSourceDiagnostic)
         self.assertIs(gml_transpiler.GMLSourceMap, GMLSourceMap)
         self.assertIs(gml_transpiler.GMLSourceMapEntry, GMLSourceMapEntry)

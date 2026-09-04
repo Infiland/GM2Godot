@@ -13,12 +13,14 @@ from src.conversion.gml_transpiler import (
     _BUILTIN_VARIABLE_REGISTRY,
     GMLTranspileError,
     _ExpressionParser,
-    _expression_tokens,
-    _tokenize,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
+)
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    tokenize_gml_expression,
+    tokenize_gml_source,
 )
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
@@ -97,8 +99,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 )
 
     def test_preserves_numeric_literal_float_metadata(self):
-        integer_literal = _ExpressionParser(_expression_tokens("42")).parse()
-        decimal_literal = _ExpressionParser(_expression_tokens("3.5")).parse()
+        integer_literal = _ExpressionParser(tokenize_gml_expression("42")).parse()
+        decimal_literal = _ExpressionParser(tokenize_gml_expression("3.5")).parse()
 
         self.assertIsInstance(integer_literal, NumberLiteral)
         self.assertIsInstance(decimal_literal, NumberLiteral)
@@ -238,7 +240,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                     transpile_gml_expression(source)
 
     def test_preserves_string_literal_metadata(self):
-        literal = _ExpressionParser(_expression_tokens('"hello"')).parse()
+        literal = _ExpressionParser(tokenize_gml_expression('"hello"')).parse()
 
         self.assertIsInstance(literal, StringLiteral)
         assert isinstance(literal, StringLiteral)
@@ -295,7 +297,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
     def test_tokenizes_template_string_as_one_literal(self):
         source = '$"Hello {name}!" + 1'
-        tokens = _tokenize(source)
+        tokens = tokenize_gml_source(source)
 
         self.assertEqual(tokens[0].kind, "TEMPLATE_STRING")
         self.assertEqual(tokens[0].value, '$"Hello {name}!"')
@@ -303,7 +305,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(tokens[0].column, 1)
         self.assertEqual(tokens[1].value, "+")
 
-        literal = _ExpressionParser(_expression_tokens('$"Hello {name}!"')).parse()
+        literal = _ExpressionParser(tokenize_gml_expression('$"Hello {name}!"')).parse()
         self.assertIsInstance(literal, TemplateStringLiteral)
         assert isinstance(literal, TemplateStringLiteral)
         self.assertEqual(literal.parts[0], "Hello ")
@@ -1507,7 +1509,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_preserves_array_literal_metadata(self):
-        literal = _ExpressionParser(_expression_tokens("[1, [2]]")).parse()
+        literal = _ExpressionParser(tokenize_gml_expression("[1, [2]]")).parse()
 
         self.assertIsInstance(literal, ArrayLiteral)
         assert isinstance(literal, ArrayLiteral)
@@ -1541,7 +1543,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
         literal = _ExpressionParser(
-            _expression_tokens(r'{"line\nname": 1, "Unicode 鍵": 2}')
+            tokenize_gml_expression(r'{"line\nname": 1, "Unicode 鍵": 2}')
         ).parse()
         self.assertIsInstance(literal, StructLiteral)
         assert isinstance(literal, StructLiteral)
@@ -1584,7 +1586,9 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_preserves_struct_literal_metadata(self):
-        literal = _ExpressionParser(_expression_tokens("{a: 1, child: {b: 2}, shorthand}")).parse()
+        literal = _ExpressionParser(
+            tokenize_gml_expression("{a: 1, child: {b: 2}, shorthand}")
+        ).parse()
 
         self.assertIsInstance(literal, StructLiteral)
         assert isinstance(literal, StructLiteral)
@@ -2307,7 +2311,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
 class TestGMLStatementTranspiler(unittest.TestCase):
     def test_tokenizes_begin_end_as_block_delimiters(self):
-        tokens = _tokenize("if ready begin score = 1; end")
+        tokens = tokenize_gml_source("if ready begin score = 1; end")
         values = [token.value for token in tokens]
         kinds = [token.kind for token in tokens]
 

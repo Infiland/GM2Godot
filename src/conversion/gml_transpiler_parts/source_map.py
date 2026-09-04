@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import json
@@ -8,18 +7,18 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from .constants import GDSCRIPT_RESERVED_IDENTIFIERS
-from .identifiers import _sanitize_gdscript_identifier
-from .lexical import (
-    _is_verbatim_string_start,
-    _read_ordinary_string,
-    _read_verbatim_string,
+from .lexical_api import (
+    is_verbatim_string_start,
+    read_ordinary_string,
+    read_template_string,
+    read_verbatim_string,
+    sanitize_gdscript_identifier,
 )
 from .result_models import (
     GMLSourceDiagnostic,
     GMLSourceMap,
     GMLSourceMapEntry,
 )
-from .tokens import _read_template_string
 
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 _DECLARATION_RE = re.compile(r"\b(?:var|globalvar|static)\s+([^;\n]+)")
@@ -181,7 +180,7 @@ def analyze_gml_source_identifiers(source: str) -> tuple[GMLSourceDiagnostic, ..
     diagnostics: list[GMLSourceDiagnostic] = []
     declarations = _declared_identifier_locations(source)
     for identifier, line, column in declarations:
-        suggested_name = _sanitize_gdscript_identifier(identifier)
+        suggested_name = sanitize_gdscript_identifier(identifier)
         if suggested_name != identifier and identifier in GDSCRIPT_RESERVED_IDENTIFIERS:
             diagnostics.append(
                 GMLSourceDiagnostic(
@@ -249,8 +248,8 @@ def _source_lexical_views(source: str) -> tuple[str, str, str]:
     strings_masked = list(source)
     index = 0
     while index < len(source):
-        if _is_verbatim_string_start(source, index):
-            literal = _read_verbatim_string(source, index)
+        if is_verbatim_string_start(source, index):
+            literal = read_verbatim_string(source, index)
             end = index + len(literal)
             _blank_source_span(code_only, index, end)
             _blank_source_span(strings_masked, index, end)
@@ -258,7 +257,7 @@ def _source_lexical_views(source: str) -> tuple[str, str, str]:
             continue
 
         if source.startswith('$"', index):
-            literal = _read_template_string(source, index)
+            literal = read_template_string(source, index)
             end = index + len(literal)
             _blank_source_span(code_only, index, end)
             _blank_source_span(strings_masked, index, end)
@@ -267,7 +266,7 @@ def _source_lexical_views(source: str) -> tuple[str, str, str]:
 
         char = source[index]
         if char in ("'", '"'):
-            literal = _read_ordinary_string(source, index)
+            literal = read_ordinary_string(source, index)
             end = index + len(literal)
             _blank_source_span(code_only, index, end)
             _blank_source_span(strings_masked, index, end)
@@ -423,4 +422,4 @@ def _identifier_locations(source: str) -> tuple[tuple[str, int, int], ...]:
 
 def _case_collision_suggestion(name: str, names: list[str]) -> str:
     suffix = names.index(name) + 1
-    return f"{_sanitize_gdscript_identifier(name)}_{suffix}"
+    return f"{sanitize_gdscript_identifier(name)}_{suffix}"

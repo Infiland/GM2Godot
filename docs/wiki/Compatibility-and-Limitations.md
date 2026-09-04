@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.7.71 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.7.72 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-04
 

@@ -10,7 +10,7 @@ from .extension_functions import (
     normalize_extension_functions,
 )
 from .function_helpers import _emit_static_initialization_lines
-from .preprocessor import preprocess_gml_source
+from .lexical_api import preprocess_gml_source, tokenize_gml_source
 from .result_models import GMLTranspileResult
 from .shared_models import ScopeContext as _ScopeContext
 from .source_map import (
@@ -19,7 +19,6 @@ from .source_map import (
 )
 from .statement_parser import _StatementParser
 from .static_declarations import _collect_static_declarations, _static_scope_id
-from .tokens import _tokenize
 from .utils import _prefix_multiline
 
 
@@ -113,7 +112,7 @@ def transpile_gml_code_with_source_map(
         macro_configuration=macro_configuration,
         active_symbols=active_preprocessor_symbols,
     )
-    tokens = _tokenize(preprocessed.source)
+    tokens = tokenize_gml_source(preprocessed.source)
     known_enum_values = {
         name: dict(members)
         for name, members in (enum_values or {}).items()

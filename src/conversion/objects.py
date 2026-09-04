@@ -38,9 +38,11 @@ from src.conversion.gml_transpiler_parts.constants import (
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
     GML_LITERAL_IDENTIFIERS,
 )
-from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    preprocess_gml_source,
+    tokenize_gml_source,
+)
 from src.conversion.gml_transpiler_parts.shared_models import Token
-from src.conversion.gml_transpiler_parts.tokens import _tokenize
 from src.conversion.project_source_paths import (
     is_safe_project_source_component,
     ProjectSourcePathError,
@@ -178,7 +180,7 @@ def _script_assigned_instance_variable_names(
     macro_configuration: str | None = None,
 ) -> set[str]:
     try:
-        tokens = _tokenize(
+        tokens = tokenize_gml_source(
             preprocess_gml_source(
                 source,
                 macro_configuration=macro_configuration,

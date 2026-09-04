@@ -45,15 +45,13 @@ from src.conversion.script_functions import (
     modern_script_structure,
     render_script_top_level_source,
 )
-from src.conversion.gml_transpiler_parts.identifiers import (
-    _sanitize_gdscript_identifier,
-)
 from src.conversion.gml_transpiler_parts.expression_parser import (
     _parse_gml_expression,
 )
 from src.conversion.gml_transpiler_parts.function_helpers import (
     _emit_constructor_inheritance_line,
 )
+from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
@@ -127,7 +125,7 @@ def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_
     args = [
         "self",
         "self",
-        *(_sanitize_gdscript_identifier(parameter.name) for parameter in declaration.parameters),
+        *(sanitize_gdscript_identifier(parameter.name) for parameter in declaration.parameters),
     ]
     return f"\treturn {scoped_call_method}({', '.join(args)})\n"
 
@@ -140,7 +138,7 @@ def _script_callable_names(declaration_name: str, *, use_default_names: bool) ->
             callable_accessor="gm2godot_callable",
             scoped_callable_accessor="gm2godot_scoped_callable",
         )
-    suffix = _sanitize_gdscript_identifier(declaration_name)
+    suffix = sanitize_gdscript_identifier(declaration_name)
     return _ScriptCallableNames(
         call_method=f"_gm_script_call_{suffix}",
         scoped_call_method=f"_gm_script_call_scoped_{suffix}",
@@ -527,7 +525,7 @@ class ScriptConverter(BaseConverter):
         )
         lines: list[str] = [] if declaration.is_constructor else _script_scope_lines()
         for parameter in declaration.parameters:
-            parameter_name = _sanitize_gdscript_identifier(parameter.name)
+            parameter_name = sanitize_gdscript_identifier(parameter.name)
             if parameter.default is None:
                 lines.append(f"\tif {parameter_name} == null: {parameter_name} = GMRuntime.gml_undefined()")
                 continue
@@ -656,12 +654,12 @@ class ScriptConverter(BaseConverter):
                     use_default_names=use_default_names,
                 )
                 parameter_declarations = [
-                    f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+                    f"{sanitize_gdscript_identifier(parameter.name)} = null"
                     for parameter in declaration.parameters
                 ]
                 constructor_value: str | None = None
                 if declaration.is_constructor:
-                    constructor_suffix = _sanitize_gdscript_identifier(declaration.name)
+                    constructor_suffix = sanitize_gdscript_identifier(declaration.name)
                     constructor_value = f"_gm_constructor_{constructor_suffix}"
                     constructor_params = ", ".join(
                         [

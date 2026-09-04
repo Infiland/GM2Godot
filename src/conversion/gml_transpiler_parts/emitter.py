@@ -66,7 +66,7 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
-from .identifiers import _is_plain_identifier, _sanitize_gdscript_identifier
+from .lexical_api import is_plain_identifier, sanitize_gdscript_identifier
 from .shared_models import (
     GMLTranspileError,
     ScopeContext as _ScopeContext,
@@ -136,9 +136,9 @@ def _emit_name(
         legacy_argument = _legacy_argument_replacement(value)
         if legacy_argument is not None:
             return legacy_argument, POSTFIX_PRECEDENCE
-        if value.startswith("audiogroup_") and _is_plain_identifier(value):
+        if value.startswith("audiogroup_") and is_plain_identifier(value):
             return json.dumps(value), PRIMARY_PRECEDENCE
-        if value in scope_context.asset_names and _is_plain_identifier(value):
+        if value in scope_context.asset_names and is_plain_identifier(value):
             if value in scope_context.global_names:
                 raise GMLTranspileError(
                     f"Unscoped identifier '{value}' collides with a global and asset name; "
@@ -154,22 +154,22 @@ def _emit_name(
         if value in INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
             return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
         if value in BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
-            return _sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
+            return sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
         if _is_gdscript_constant_identifier(value):
             return value, PRIMARY_PRECEDENCE
         if value in scope_context.direct_instance_names:
-            return _sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
-        if value in scope_context.dynamic_instance_names and _is_plain_identifier(value):
+            return sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
+        if value in scope_context.dynamic_instance_names and is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.self_expression}, {json.dumps(value)})"
             ), POSTFIX_PRECEDENCE
-        if scope_context.instance_target is not None and _is_plain_identifier(value):
+        if scope_context.instance_target is not None and is_plain_identifier(value):
             return (
                 "GMRuntime.gml_variable_instance_get("
                 f"{scope_context.instance_target}, {json.dumps(value)})"
             ), POSTFIX_PRECEDENCE
-    value = _sanitize_gdscript_identifier(value)
+    value = sanitize_gdscript_identifier(value)
     return value, PRIMARY_PRECEDENCE
 
 
@@ -194,7 +194,7 @@ def _name_resolves_to_global(
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> bool:
-    if name in local_names or not _is_plain_identifier(name):
+    if name in local_names or not is_plain_identifier(name):
         return False
     if name in GML_LITERAL_IDENTIFIERS:
         return False
@@ -446,7 +446,7 @@ def _emit_expression(
             local_names=local_names,
             scope_context=scope_context,
         )
-        return f"{target}.{_sanitize_gdscript_identifier(expr.member)}", POSTFIX_PRECEDENCE
+        return f"{target}.{sanitize_gdscript_identifier(expr.member)}", POSTFIX_PRECEDENCE
     target = _emit_instance_keyword_argument(
         expr.target,
         local_names,
@@ -514,10 +514,10 @@ def _emit_function_literal(
     scope_context: _ScopeContext | None = None,
 ) -> str:
     scope_context = _normalize_scope_context(scope_context)
-    name = f" {_sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
+    name = f" {sanitize_gdscript_identifier(expr.name)}" if expr.name is not None else ""
     parameter_names = [parameter.name for parameter in expr.parameters]
     emitted_parameters = [
-        f"{_sanitize_gdscript_identifier(parameter.name)} = null"
+        f"{sanitize_gdscript_identifier(parameter.name)} = null"
         for parameter in expr.parameters
     ]
     if expr.is_constructor:
@@ -601,7 +601,7 @@ def _emit_function_parameter_default_lines(
 ) -> list[str]:
     default_lines: list[str] = []
     for parameter in parameters:
-        parameter_name = _sanitize_gdscript_identifier(parameter.name)
+        parameter_name = sanitize_gdscript_identifier(parameter.name)
         if parameter.default is None:
             default_lines.append(f"if {parameter_name} == null: {parameter_name} = GMRuntime.gml_undefined()")
             continue

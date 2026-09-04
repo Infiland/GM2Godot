@@ -72,7 +72,11 @@ from src.conversion.gml_transpiler_parts.model import (
     _Token,
     _Unary,
 )
-from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    preprocess_gml_source,
+    tokenize_gml_expression as _tokenize_gml_expression,
+    tokenize_gml_source as _tokenize_gml_source,
+)
 from src.conversion.gml_transpiler_parts.result_models import (
     GMLPreprocessResult,
     GMLPreprocessorDiagnostic,
@@ -93,7 +97,15 @@ from src.conversion.gml_transpiler_parts.source_map import (
     render_gml_source_header,
     write_gml_source_map,
 )
-from src.conversion.gml_transpiler_parts.tokens import _expression_tokens, _tokenize
+
+
+def _expression_tokens(source: str) -> list[_Token]:
+    return _tokenize_gml_expression(source)
+
+
+def _tokenize(source: str) -> list[_Token]:
+    return _tokenize_gml_source(source)
+
 
 __all__ = [
     "GMLTranspileError",

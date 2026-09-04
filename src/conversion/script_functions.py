@@ -6,15 +6,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from src.conversion.gml_transpiler import GMLTranspileError
-from src.conversion.gml_transpiler_parts.identifiers import _validate_gml_identifier
-from src.conversion.gml_transpiler_parts.lexical import (
-    _is_verbatim_string_start,
-    _read_verbatim_string,
-)
-from src.conversion.gml_transpiler_parts.preprocessor import (
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    is_verbatim_string_start,
     preprocess_gml_source_preserving_layout,
+    read_template_string,
+    read_verbatim_string,
+    validate_gml_identifier,
 )
-from src.conversion.gml_transpiler_parts.tokens import _read_template_string
 from src.conversion.gml_transpiler_parts.utils import (
     _split_assignment,
     _split_top_level,
@@ -69,8 +67,8 @@ def find_matching_delimiter(source: str, start: int, opener: str, closer: str) -
                 quote = None
             index += 1
             continue
-        if _is_verbatim_string_start(source, index):
-            index += len(_read_verbatim_string(source, index))
+        if is_verbatim_string_start(source, index):
+            index += len(read_verbatim_string(source, index))
             continue
         if char in ("'", '"'):
             quote = char
@@ -101,7 +99,7 @@ def parse_script_function_parameters(params_text: str) -> tuple[ScriptFunctionPa
             if operator != "=":
                 raise GMLTranspileError("Script function parameters only support simple defaults")
         name = name.strip()
-        _validate_gml_identifier(name)
+        validate_gml_identifier(name)
         parameters.append(
             ScriptFunctionParameter(
                 name=name,
@@ -179,8 +177,8 @@ def _find_function_body_start(source: str, start: int) -> int | None:
                 quote = None
             index += 1
             continue
-        if _is_verbatim_string_start(source, index):
-            index += len(_read_verbatim_string(source, index))
+        if is_verbatim_string_start(source, index):
+            index += len(read_verbatim_string(source, index))
             continue
         if char in ("'", '"'):
             quote = char
@@ -240,11 +238,11 @@ def _mask_comments_preserving_layout(source: str) -> str:
                 quote = None
             index += 1
             continue
-        if _is_verbatim_string_start(source, index):
-            index += len(_read_verbatim_string(source, index))
+        if is_verbatim_string_start(source, index):
+            index += len(read_verbatim_string(source, index))
             continue
         if source.startswith('$"', index):
-            index += len(_read_template_string(source, index))
+            index += len(read_template_string(source, index))
             continue
         if char in ("'", '"'):
             quote = char

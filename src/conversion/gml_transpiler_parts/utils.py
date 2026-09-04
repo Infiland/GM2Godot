@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 from typing import Iterable, Mapping
@@ -23,7 +23,7 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
-from .lexical import _is_verbatim_string_start, _read_verbatim_string
+from .lexical import is_verbatim_string_start, read_verbatim_string
 from .shared_models import (
     AssignmentOperator as _AssignmentOperator,
     DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
@@ -33,7 +33,16 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .tokens import _line_column, _read_template_string
+from .tokens import read_template_string
+
+
+def _line_column(source: str, index: int) -> tuple[int, int]:
+    line = source.count("\n", 0, index) + 1
+    line_start = source.rfind("\n", 0, index)
+    if line_start == -1:
+        return line, index + 1
+    return line, index - line_start
+
 
 def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
     return frozenset(local_names or [])
@@ -238,9 +247,9 @@ def _strip_comments(source: str) -> str:
             index += 1
             continue
 
-        if _is_verbatim_string_start(source, index):
+        if is_verbatim_string_start(source, index):
             try:
-                verbatim = _read_verbatim_string(source, index)
+                verbatim = read_verbatim_string(source, index)
             except GMLTranspileError as exc:
                 line, column = _line_column(source, index)
                 raise exc.with_location(line, column) from exc
@@ -250,7 +259,7 @@ def _strip_comments(source: str) -> str:
 
         if source.startswith('$"', index):
             try:
-                template = _read_template_string(source, index)
+                template = read_template_string(source, index)
             except GMLTranspileError as exc:
                 line, column = _line_column(source, index)
                 raise exc.with_location(line, column) from exc
@@ -319,12 +328,12 @@ def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnused
             index += 1
             continue
 
-        if _is_verbatim_string_start(source, index):
-            index += len(_read_verbatim_string(source, index))
+        if is_verbatim_string_start(source, index):
+            index += len(read_verbatim_string(source, index))
             continue
 
         if source.startswith('$"', index):
-            index += len(_read_template_string(source, index))
+            index += len(read_template_string(source, index))
             continue
 
         if char == '"' or char == "'":
@@ -367,12 +376,12 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
             index += 1
             continue
 
-        if _is_verbatim_string_start(statement, index):
-            index += len(_read_verbatim_string(statement, index))
+        if is_verbatim_string_start(statement, index):
+            index += len(read_verbatim_string(statement, index))
             continue
 
         if statement.startswith('$"', index):
-            index += len(_read_template_string(statement, index))
+            index += len(read_template_string(statement, index))
             continue
 
         if char == '"' or char == "'":
@@ -427,12 +436,12 @@ def _split_top_level(source: str, separator: str) -> list[str]:
             index += 1
             continue
 
-        if _is_verbatim_string_start(source, index):
-            index += len(_read_verbatim_string(source, index))
+        if is_verbatim_string_start(source, index):
+            index += len(read_verbatim_string(source, index))
             continue
 
         if source.startswith('$"', index):
-            index += len(_read_template_string(source, index))
+            index += len(read_template_string(source, index))
             continue
 
         if char == '"' or char == "'":

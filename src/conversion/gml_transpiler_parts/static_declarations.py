@@ -5,7 +5,7 @@ import hashlib
 
 from typing import Iterable
 
-from .identifiers import _validate_gml_identifier
+from .lexical_api import validate_gml_identifier
 from .shared_models import (
     GMLTranspileError,
     StaticDeclaration as _StaticDeclaration,
@@ -160,6 +160,6 @@ def _parse_static_declarations(source: str) -> list[_StaticDeclaration]:
                 raise GMLTranspileError("Static declarations only support simple assignments")
             name = name.strip()
             value_source = value_source.strip()
-        _validate_gml_identifier(name)
+        validate_gml_identifier(name)
         declarations.append(_StaticDeclaration(name, value_source))
     return declarations

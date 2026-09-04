@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -10,7 +9,7 @@ from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
 from src.conversion.gml_transpiler_parts.constants import GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
-from src.conversion.gml_transpiler_parts.identifiers import _sanitize_gdscript_identifier
+from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.type_defs import JsonDict
 
 
@@ -718,7 +717,7 @@ def generate_script_content(
             declare_members=base_script_path is None,
         )
     for variable_name in _valid_instance_variables(instance_variables):
-        lines.append(f"\n\nvar {_sanitize_gdscript_identifier(variable_name)}\n")
+        lines.append(f"\n\nvar {sanitize_gdscript_identifier(variable_name)}\n")
 
     for func in unique_functions:
         body = _get_function_body(func, effective_code_bodies)

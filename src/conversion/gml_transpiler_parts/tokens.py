@@ -1,17 +1,17 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 from bisect import bisect_left
 from collections.abc import Sequence
 
 from .constants import BLOCK_DELIMITER_REPLACEMENTS, MULTI_CHAR_OPERATORS
-from .identifiers import _validate_gml_identifier
+from .identifiers import validate_gml_identifier
 from .lexical import (
-    _is_verbatim_string_start,
-    _read_ordinary_string,
-    _read_verbatim_string,
+    is_verbatim_string_start,
+    read_ordinary_string,
+    read_verbatim_string,
 )
-from .shared_models import GMLTranspileError, Token as _Token
+from .shared_models import GMLTranspileError, Token
 
 
 _GML_SIMPLE_ESCAPES = {
@@ -31,8 +31,8 @@ _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 _OCTAL_DIGITS = frozenset("01234567")
 
 
-def _tokenize(source: str) -> list[_Token]:
-    tokens: list[_Token] = []
+def tokenize_gml_source(source: str) -> list[Token]:
+    tokens: list[Token] = []
     newline_positions = [
         position for position, char in enumerate(source) if char == "\n"
     ]
@@ -47,7 +47,7 @@ def _tokenize(source: str) -> list[_Token]:
         if char in "\r\n":
             if char == "\r" and index + 1 < len(source) and source[index + 1] == "\n":
                 index += 1
-            tokens.append(_Token("NEWLINE", "\n", line=line, column=column, index=index))
+            tokens.append(Token("NEWLINE", "\n", line=line, column=column, index=index))
             index += 1
             continue
 
@@ -55,13 +55,13 @@ def _tokenize(source: str) -> list[_Token]:
             index += 1
             continue
 
-        if _is_verbatim_string_start(source, index):
+        if is_verbatim_string_start(source, index):
             try:
-                verbatim = _read_verbatim_string(source, index)
+                verbatim = read_verbatim_string(source, index)
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
             tokens.append(
-                _Token(
+                Token(
                     "VERBATIM_STRING",
                     verbatim,
                     line=line,
@@ -77,13 +77,13 @@ def _tokenize(source: str) -> list[_Token]:
                 number_end = _read_number(source, index)
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
-            tokens.append(_Token("NUMBER", source[index:number_end].replace("_", ""), line=line, column=column, index=index))
+            tokens.append(Token("NUMBER", source[index:number_end].replace("_", ""), line=line, column=column, index=index))
             index = number_end
             continue
 
         if char == '"' or char == "'":
             try:
-                tokens.append(_Token("STRING", _read_string(source, index), line=line, column=column, index=index))
+                tokens.append(Token("STRING", _read_string(source, index), line=line, column=column, index=index))
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
             index += len(tokens[-1].value)
@@ -92,11 +92,11 @@ def _tokenize(source: str) -> list[_Token]:
         if char == "$":
             if source.startswith('$"', index):
                 try:
-                    template = _read_template_string(source, index)
+                    template = read_template_string(source, index)
                 except GMLTranspileError as exc:
                     raise exc.with_location(line, column) from exc
                 tokens.append(
-                    _Token(
+                    Token(
                         "TEMPLATE_STRING",
                         template,
                         line=line,
@@ -112,30 +112,30 @@ def _tokenize(source: str) -> list[_Token]:
                     hex_end = _read_hex_number(source, index + 1)
                 except GMLTranspileError as exc:
                     raise exc.with_location(line, column) from exc
-                tokens.append(_Token("NUMBER", f"0x{source[index + 1:hex_end].replace('_', '')}", line=line, column=column, index=index))
+                tokens.append(Token("NUMBER", f"0x{source[index + 1:hex_end].replace('_', '')}", line=line, column=column, index=index))
                 index = hex_end
             else:
-                tokens.append(_Token("OP", char, line=line, column=column, index=index))
+                tokens.append(Token("OP", char, line=line, column=column, index=index))
                 index += 1
             continue
 
         if char == "#":
             if _source_startswith_directive(source, index, "#macro"):
-                tokens.append(_Token("DIRECTIVE", "#macro", line=line, column=column, index=index))
+                tokens.append(Token("DIRECTIVE", "#macro", line=line, column=column, index=index))
                 index += len("#macro")
                 continue
             previous_index = index - 1
             while previous_index >= 0 and source[previous_index].isspace():
                 previous_index -= 1
             if previous_index >= 0 and source[previous_index] == "[":
-                tokens.append(_Token("OP", char, line=line, column=column, index=index))
+                tokens.append(Token("OP", char, line=line, column=column, index=index))
                 index += 1
                 continue
             try:
                 color_literal, color_end = _read_hash_color_literal(source, index)
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
-            tokens.append(_Token("NUMBER", color_literal, line=line, column=column, index=index))
+            tokens.append(Token("NUMBER", color_literal, line=line, column=column, index=index))
             index = color_end
             continue
 
@@ -146,14 +146,14 @@ def _tokenize(source: str) -> list[_Token]:
                 index += 1
             identifier = source[start:index]
             try:
-                _validate_gml_identifier(identifier)
+                validate_gml_identifier(identifier)
             except GMLTranspileError as exc:
                 raise exc.with_location(line, column) from exc
             block_delimiter = BLOCK_DELIMITER_REPLACEMENTS.get(identifier)
             if block_delimiter is not None:
-                tokens.append(_Token("OP", block_delimiter, line=line, column=column, index=start))
+                tokens.append(Token("OP", block_delimiter, line=line, column=column, index=start))
             else:
-                tokens.append(_Token("IDENT", identifier, line=line, column=column, index=start))
+                tokens.append(Token("IDENT", identifier, line=line, column=column, index=start))
             continue
 
         matched_operator = None
@@ -162,12 +162,12 @@ def _tokenize(source: str) -> list[_Token]:
                 matched_operator = operator
                 break
         if matched_operator is not None:
-            tokens.append(_Token("OP", matched_operator, line=line, column=column, index=index))
+            tokens.append(Token("OP", matched_operator, line=line, column=column, index=index))
             index += len(matched_operator)
             continue
 
         if char in "+-*/%&|^~!=<>()[]{}?:,.;.@":
-            tokens.append(_Token("OP", char, line=line, column=column, index=index))
+            tokens.append(Token("OP", char, line=line, column=column, index=index))
             index += 1
             continue
 
@@ -177,16 +177,8 @@ def _tokenize(source: str) -> list[_Token]:
         newline_positions,
         len(source),
     )
-    tokens.append(_Token("EOF", "", line=eof_line, column=eof_column, index=len(source)))
+    tokens.append(Token("EOF", "", line=eof_line, column=eof_column, index=len(source)))
     return tokens
-
-
-def _line_column(source: str, index: int) -> tuple[int, int]:
-    line = source.count("\n", 0, index) + 1
-    line_start = source.rfind("\n", 0, index)
-    if line_start == -1:
-        return line, index + 1
-    return line, index - line_start
 
 
 def _line_column_from_newline_positions(
@@ -209,8 +201,10 @@ def _source_startswith_directive(source: str, index: int, directive: str) -> boo
     return not (next_char.isalnum() or next_char == "_")
 
 
-def _expression_tokens(source: str) -> list[_Token]:
-    return [token for token in _tokenize(source) if token.kind != "NEWLINE"]
+def tokenize_gml_expression(source: str) -> list[Token]:
+    return [
+        token for token in tokenize_gml_source(source) if token.kind != "NEWLINE"
+    ]
 
 
 def _read_number(source: str, start: int) -> int:
@@ -345,15 +339,11 @@ def _read_separated_digits(
     return index, saw_digit
 
 
-def _is_float_like_number(value: str) -> bool:
-    return "." in value
-
-
 def _read_string(source: str, start: int) -> str:
-    return _read_ordinary_string(source, start)
+    return read_ordinary_string(source, start)
 
 
-def _decode_gml_string_literal(source: str) -> str:
+def decode_gml_string_literal(source: str) -> str:
     if len(source) < 2 or source[0] not in "\"'" or source[-1] != source[0]:
         raise GMLTranspileError("Invalid string literal")
 
@@ -371,12 +361,12 @@ def _decode_gml_string_literal(source: str) -> str:
     return "".join(decoded)
 
 
-def _read_template_string(source: str, start: int) -> str:
+def read_template_string(source: str, start: int) -> str:
     end, _parts = _scan_template_string(source, start)
     return source[start:end]
 
 
-def _split_template_string(source: str) -> tuple[tuple[str, str], ...]:
+def split_template_string(source: str) -> tuple[tuple[str, str], ...]:
     end, parts = _scan_template_string(source, 0)
     if end != len(source):
         raise GMLTranspileError("Unexpected text after template string literal")
@@ -491,13 +481,13 @@ def _read_template_expression(source: str, start: int) -> int:
     index = start
     while index < len(source):
         if source.startswith('$"', index):
-            nested_template = _read_template_string(source, index)
+            nested_template = read_template_string(source, index)
             index += len(nested_template)
             continue
 
-        if _is_verbatim_string_start(source, index):
+        if is_verbatim_string_start(source, index):
             try:
-                nested_verbatim = _read_verbatim_string(source, index)
+                nested_verbatim = read_verbatim_string(source, index)
             except GMLTranspileError as exc:
                 raise GMLTranspileError(
                     "Unterminated template string interpolation"

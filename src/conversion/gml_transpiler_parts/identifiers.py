@@ -6,10 +6,11 @@ from .constants import (
     GENERATED_IDENTIFIER_PREFIX,
     GML_IDENTIFIER_MAX_LENGTH,
 )
-from .shared_models import GMLTranspileError, ScopeContext as _ScopeContext
+from .shared_models import GMLTranspileError, ScopeContext
 
-def _sanitize_gdscript_identifier(name: str) -> str:
-    if not _is_plain_identifier(name):
+
+def sanitize_gdscript_identifier(name: str) -> str:
+    if not is_plain_identifier(name):
         return name
     if name in GDSCRIPT_RESERVED_IDENTIFIERS:
         return f"{name}_"
@@ -18,7 +19,7 @@ def _sanitize_gdscript_identifier(name: str) -> str:
     return name
 
 
-def _is_plain_identifier(name: str) -> bool:
+def is_plain_identifier(name: str) -> bool:
     if not name:
         return False
     return (name[0].isalpha() or name[0] == "_") and all(
@@ -26,7 +27,7 @@ def _is_plain_identifier(name: str) -> bool:
     )
 
 
-def _validate_gml_identifier(name: str) -> None:
+def validate_gml_identifier(name: str) -> None:
     if not name:
         raise GMLTranspileError("Expected identifier name")
     if len(name) > GML_IDENTIFIER_MAX_LENGTH:
@@ -37,6 +38,6 @@ def _validate_gml_identifier(name: str) -> None:
         raise GMLTranspileError("GML identifier can only contain letters, numbers, and underscores")
 
 
-def _reject_asset_identifier_name(name: str, scope_context: _ScopeContext) -> None:
+def reject_asset_identifier_name(name: str, scope_context: ScopeContext) -> None:
     if name in scope_context.asset_names:
         raise GMLTranspileError(f"Unscoped identifier '{name}' collides with an asset name")

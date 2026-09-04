@@ -104,6 +104,8 @@ Version 0.7.72 publishes the exact 15-operation typed GML lexical phase API for 
 
 Version 0.7.73 publishes the exact 17-operation typed package-internal GML expression API for parsing, normal and truthiness-aware emission, instance/constructor/static lowering, enum and constant validation, and direct-member/name-resolution queries. Cross-phase emission now uses the frozen `GMLExpressionEmission` result while `GMLExpression` remains an alias of the canonical #816 AST union; recursive parser/emitter mechanics stay private. The architecture baseline falls from 96 to 60 private edges across 14 module pairs, all 60 production imports remain, private production import edges fall from 7 to 4, and tracked suppressions fall from 12 to 8. Emitted expression/script/resource bytes, precedence, diagnostics and locations, source maps, static IDs, golden output, and all 74 top-level facade exports/signatures remain unchanged.
 
+Version 0.7.74 publishes the exact three-operation typed package-internal GML statement API: `collect_static_declarations`, `parse_gml_statements`, and `static_scope_id`. Its frozen `GMLStatementRequest` and `GMLStatementResult` make the statement-phase input and emitted/final state contract explicit, while the frozen `ControlFlowCapture` replaces private cross-module control-flow state; parser cursors, matching, generated-name counters, recursive lowering, and static-declaration mechanics remain private. Top-level orchestration and nested expression function bodies now use the cycle-safe statement boundary. The architecture baseline falls from 60 to 31 private edges and from 14 to 4 module pairs, all 60 production imports and the 4 remaining private production import edges stay unchanged, and tracked suppressions fall from 8 to 3. Transpiled GDScript, ordering and indentation, source-map JSON, diagnostics and parser locations, static scope IDs, mutable instance-variable effects, enum/macro propagation, golden output, and all 74 top-level facade exports/signatures remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -124,7 +126,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.73`.
+Current source version: `0.7.74`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

@@ -13,6 +13,7 @@ import src.conversion.gml_transpiler as gml_transpiler
 from src.conversion.gml_transpiler_parts import constants as language_metadata
 from src.conversion.gml_transpiler_parts import expression_api as expression_phase_api
 from src.conversion.gml_transpiler_parts import lexical_api as lexical_phase_api
+from src.conversion.gml_transpiler_parts import statement_api as statement_phase_api
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -162,6 +163,92 @@ EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER = {
         {
             (f"{PARTS_PACKAGE}.emitter", "emit_gml_expression"),
             (f"{PARTS_PACKAGE}.expression_parser", "parse_gml_expression"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.statement_parser": frozenset(
+        {
+            (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "scope_context_with_global_names"),
+            (EXPRESSION_UTILITY_MODULE, "tokens_to_source"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.statements": frozenset(
+        {
+            (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "unwrap_grouped_expression"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.static_declarations": frozenset(
+        {
+            (EXPRESSION_UTILITY_MODULE, "tokens_to_source"),
+        }
+    ),
+}
+STATEMENT_API_MODULE = f"{PARTS_PACKAGE}.statement_api"
+STATEMENT_MODELS_MODULE = f"{PARTS_PACKAGE}.statement_models"
+STATEMENT_IMPLEMENTATION_MODULES = frozenset(
+    {
+        f"{PARTS_PACKAGE}.statement_parser",
+        f"{PARTS_PACKAGE}.statements",
+        f"{PARTS_PACKAGE}.static_declarations",
+    }
+)
+STATEMENT_UTILITY_MODULE = f"{PARTS_PACKAGE}.utils"
+STATEMENT_DIRECT_IMPORTS_BY_CONSUMER = {
+    f"{PARTS_PACKAGE}.api": frozenset(
+        {
+            (STATEMENT_UTILITY_MODULE, "prefix_multiline"),
+        }
+    ),
+    STATEMENT_API_MODULE: frozenset(
+        {
+            (f"{PARTS_PACKAGE}.statement_parser", "parse_gml_statements"),
+            (f"{PARTS_PACKAGE}.static_declarations", "collect_static_declarations"),
+            (f"{PARTS_PACKAGE}.static_declarations", "static_scope_id"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.statement_parser": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.statements", "control_flow_dispatch_lines"),
+            (f"{PARTS_PACKAGE}.statements", "transpile_statement"),
+            (f"{PARTS_PACKAGE}.static_declarations", "read_static_declaration_tokens"),
+            (STATEMENT_UTILITY_MODULE, "indent_lines"),
+            (STATEMENT_UTILITY_MODULE, "insert_lines_before_continue"),
+            (STATEMENT_UTILITY_MODULE, "insert_until_check_before_continue"),
+            (STATEMENT_UTILITY_MODULE, "macro_configuration_matches"),
+            (STATEMENT_UTILITY_MODULE, "normalize_scope_context"),
+            (STATEMENT_UTILITY_MODULE, "scope_context_with_global_names"),
+            (STATEMENT_UTILITY_MODULE, "split_top_level_tokens"),
+            (STATEMENT_UTILITY_MODULE, "tokens_to_source"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.statements": frozenset(
+        {
+            (STATEMENT_UTILITY_MODULE, "cache_assignment_part"),
+            (STATEMENT_UTILITY_MODULE, "indent_lines"),
+            (STATEMENT_UTILITY_MODULE, "next_generated_name_from_counter"),
+            (STATEMENT_UTILITY_MODULE, "normalize_scope_context"),
+            (STATEMENT_UTILITY_MODULE, "split_assignment"),
+            (STATEMENT_UTILITY_MODULE, "split_top_level"),
+            (STATEMENT_UTILITY_MODULE, "unwrap_grouped_expression"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.static_declarations": frozenset(
+        {
+            (STATEMENT_UTILITY_MODULE, "split_assignment"),
+            (STATEMENT_UTILITY_MODULE, "split_top_level"),
+            (STATEMENT_UTILITY_MODULE, "tokens_to_source"),
+        }
+    ),
+    "tests.test_gml_statement_api": frozenset(
+        {
+            (STATEMENT_API_MODULE, MODULE_IMPORT_NAME),
+            (STATEMENT_MODELS_MODULE, MODULE_IMPORT_NAME),
+        }
+    ),
+    "tests.test_gml_transpiler_architecture": frozenset(
+        {
+            (STATEMENT_API_MODULE, MODULE_IMPORT_NAME),
         }
     ),
 }
@@ -412,17 +499,7 @@ EXPECTED_INTERNAL_PRIVATE_IMPORT_GROUPS = """
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.constants|_BUILTIN_VARIABLE_REGISTRY
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.expression_parser|_ExpressionParser,_parse_gml_expression
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.model|_ArrayLiteral,_Binary,_BuiltinVariableMetadata,_Call,_DSMapAccess,_Expression,_FunctionLiteral,_FunctionParameter,_Grouped,_Index,_Literal,_Member,_Name,_NameOf,_NewCall,_NumberLiteral,_ScopeContext,_StaticDeclaration,_StringLiteral,_StructAccess,_StructLiteral,_TemplateStringLiteral,_Ternary,_Token,_Unary
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.utils|_prefix_multiline
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.utils|_join_macro_continuation_lines,_macro_configuration_matches,_strip_comments
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.statements|_ControlFlowCapture,_control_flow_dispatch_lines,_transpile_statement
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.static_declarations|_read_static_declaration_tokens
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.utils|_indent_lines,_insert_lines_before_continue,_insert_until_check_before_continue,_macro_configuration_matches,_normalize_scope_context,_scope_context_with_global_names,_split_top_level_tokens,_tokens_to_source
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.utils|_cache_assignment_part,_indent_lines,_next_generated_name_from_counter,_normalize_scope_context,_split_assignment,_split_top_level,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level,_tokens_to_source
 """
 
 EXPECTED_PRODUCTION_IMPORT_GROUPS = """
@@ -481,50 +558,20 @@ ALL_PRIVATE_NAMES_ARE_INTENDED_INTERNAL = frozenset(
 
 INTENDED_INTERNAL_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
     f"{PARTS_PACKAGE}.expression_parser": frozenset({"_parse_gml_expression"}),
-    f"{PARTS_PACKAGE}.statements": frozenset({"_ControlFlowCapture"}),
     f"{PARTS_PACKAGE}.utils": frozenset(
         {
             "_macro_configuration_matches",
-            "_normalize_local_names",
-            "_normalize_scope_context",
-            "_scope_context_with_global_names",
             "_split_assignment",
             "_split_top_level",
             "_strip_comments",
             "_tokens_to_source",
-            "_unwrap_grouped_expression",
         }
     ),
 }
 
 MODULE_PRIVATE_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
     f"{PARTS_PACKAGE}.expression_parser": frozenset({"_ExpressionParser"}),
-    f"{PARTS_PACKAGE}.statement_parser": frozenset({"_StatementParser"}),
-    f"{PARTS_PACKAGE}.statements": frozenset(
-        {
-            "_control_flow_dispatch_lines",
-            "_transpile_statement",
-        }
-    ),
-    f"{PARTS_PACKAGE}.static_declarations": frozenset(
-        {
-            "_collect_static_declarations",
-            "_read_static_declaration_tokens",
-            "_static_scope_id",
-        }
-    ),
-    f"{PARTS_PACKAGE}.utils": frozenset(
-        {
-            "_cache_assignment_part",
-            "_indent_lines",
-            "_insert_lines_before_continue",
-            "_insert_until_check_before_continue",
-            "_join_macro_continuation_lines",
-            "_next_generated_name_from_counter",
-            "_prefix_multiline",
-            "_split_top_level_tokens",
-        }
-    ),
+    f"{PARTS_PACKAGE}.utils": frozenset({"_join_macro_continuation_lines"}),
 }
 
 RETAINED_PACKAGE_INTERNAL_EXPORTS = frozenset(
@@ -535,20 +582,12 @@ RETAINED_PACKAGE_INTERNAL_EXPORTS = frozenset(
     }
 )
 
-MIGRATION_STAGE_BY_OWNER: dict[str, int] = {
-    f"{PARTS_PACKAGE}.statement_parser": 819,
-    f"{PARTS_PACKAGE}.statements": 819,
-    f"{PARTS_PACKAGE}.static_declarations": 819,
-}
+MIGRATION_STAGE_BY_OWNER: dict[str, int] = {}
 
 UTILS_STAGE_BY_CONSUMER: dict[str, int] = {
     f"{PARTS_PACKAGE}.preprocessor": 817,
     "src.conversion.project_macros": 817,
     "src.conversion.script_functions": 817,
-    f"{PARTS_PACKAGE}.api": 819,
-    f"{PARTS_PACKAGE}.statement_parser": 819,
-    f"{PARTS_PACKAGE}.statements": 819,
-    f"{PARTS_PACKAGE}.static_declarations": 819,
 }
 
 
@@ -560,6 +599,8 @@ def _disposition_for(edge: ImportEdge) -> BoundaryDisposition:
     if edge.owner == LEXICAL_API_MODULE and edge.name in lexical_phase_api.__all__:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if edge.owner == EXPRESSION_API_MODULE and edge.name in expression_phase_api.__all__:
+        return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
+    if edge.owner == STATEMENT_API_MODULE and edge.name in statement_phase_api.__all__:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if (edge.owner, edge.name) in RETAINED_PACKAGE_INTERNAL_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
@@ -594,16 +635,6 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
     {
         ("src/conversion/gml_transpiler.py", 1, "# pyright: reportPrivateUsage=false"),
         (
-            "src/conversion/gml_transpiler_parts/api.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/expression_parser.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
             "src/conversion/gml_transpiler_parts/gml_api_manifest.py",
             1,
             "# pyright: reportPrivateUsage=false",
@@ -612,21 +643,6 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
             "src/conversion/gml_transpiler_parts/preprocessor.py",
             1,
             "# pyright: reportPrivateUsage=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/statement_parser.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/statements.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/static_declarations.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
         ),
     }
 )
@@ -889,6 +905,92 @@ def _actual_expression_boundary_bypasses() -> frozenset[ImportEdge]:
                     package_module=path.name == "__init__.py",
                 )
                 if not _expression_boundary_import_is_allowed(consumer, edge)
+            )
+    return frozenset(bypasses)
+
+
+def _statement_boundary_bypasses_from_source(
+    source: str,
+    consumer: str,
+    *,
+    package_module: bool = False,
+) -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    for edge in _imports_from_source(
+        source,
+        consumer,
+        package_module=package_module,
+    ):
+        if edge.owner in STATEMENT_IMPLEMENTATION_MODULES:
+            bypasses.add(edge)
+            continue
+
+        imported_module = f"{edge.owner}.{edge.name}"
+        if imported_module in STATEMENT_IMPLEMENTATION_MODULES:
+            bypasses.add(
+                ImportEdge(
+                    consumer=consumer,
+                    owner=imported_module,
+                    name=MODULE_IMPORT_NAME,
+                )
+            )
+            continue
+
+        if edge.owner in {STATEMENT_API_MODULE, STATEMENT_MODELS_MODULE} and edge.name in {
+            MODULE_IMPORT_NAME,
+            "*",
+        }:
+            bypasses.add(edge)
+            continue
+
+        if edge.owner == STATEMENT_UTILITY_MODULE and (
+            not edge.name.startswith("_") or edge.name in {MODULE_IMPORT_NAME, "*"}
+        ):
+            bypasses.add(edge)
+            continue
+
+        if imported_module in {
+            STATEMENT_API_MODULE,
+            STATEMENT_MODELS_MODULE,
+            STATEMENT_UTILITY_MODULE,
+        }:
+            bypasses.add(
+                ImportEdge(
+                    consumer=consumer,
+                    owner=imported_module,
+                    name=MODULE_IMPORT_NAME,
+                )
+            )
+    return frozenset(bypasses)
+
+
+def _statement_boundary_import_is_allowed(
+    consumer: str,
+    edge: ImportEdge,
+) -> bool:
+    owner_and_name = (edge.owner, edge.name)
+    return owner_and_name in STATEMENT_DIRECT_IMPORTS_BY_CONSUMER.get(
+        consumer,
+        frozenset(),
+    ) or owner_and_name in EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER.get(
+        consumer,
+        frozenset(),
+    )
+
+
+def _actual_statement_boundary_bypasses() -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    for source_root in (PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
+        for path in sorted(source_root.rglob("*.py")):
+            consumer = _module_name(path)
+            bypasses.update(
+                edge
+                for edge in _statement_boundary_bypasses_from_source(
+                    path.read_text(encoding="utf-8"),
+                    consumer,
+                    package_module=path.name == "__init__.py",
+                )
+                if not _statement_boundary_import_is_allowed(consumer, edge)
             )
     return frozenset(bypasses)
 
@@ -1307,6 +1409,218 @@ package_facade._Binary(None, "+", None)
     def test_expression_implementation_modules_have_no_external_bypasses(self) -> None:
         self.assertEqual(_actual_expression_boundary_bypasses(), frozenset())
 
+    def test_statement_boundary_scanner_rejects_every_bypass_form(self) -> None:
+        consumer = f"{PARTS_PACKAGE}.synthetic_consumer"
+        source = """
+from .statement_parser import (
+    _StatementParser as relative_parenthesized_alias,
+)
+from src.conversion.gml_transpiler_parts.statements import (
+    transpile_statement as absolute_parenthesized_alias,
+)
+from .static_declarations import *
+from .utils import indent_lines as utility_alias
+from .utils import brand_new_statement_helper
+from . import statement_parser as parser_module
+from . import statement_api as gateway_module
+from src.conversion.gml_transpiler_parts import statements as statements_module
+import src.conversion.gml_transpiler_parts.static_declarations as static_module
+from . import utils as utility_module
+import src.conversion.gml_transpiler_parts.utils as absolute_utility_module
+"""
+
+        self.assertEqual(
+            _statement_boundary_bypasses_from_source(source, consumer),
+            frozenset(
+                {
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.statement_parser",
+                        "_StatementParser",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.statements",
+                        "transpile_statement",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.static_declarations",
+                        "*",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        STATEMENT_UTILITY_MODULE,
+                        "indent_lines",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        STATEMENT_UTILITY_MODULE,
+                        "brand_new_statement_helper",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.statement_parser",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.statements",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.static_declarations",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        STATEMENT_UTILITY_MODULE,
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        STATEMENT_API_MODULE,
+                        MODULE_IMPORT_NAME,
+                    ),
+                }
+            ),
+        )
+
+        statement_api_consumer = STATEMENT_API_MODULE
+        self.assertTrue(
+            _statement_boundary_import_is_allowed(
+                statement_api_consumer,
+                ImportEdge(
+                    statement_api_consumer,
+                    f"{PARTS_PACKAGE}.statement_parser",
+                    "parse_gml_statements",
+                ),
+            )
+        )
+        statement_parser_consumer = f"{PARTS_PACKAGE}.statement_parser"
+        self.assertTrue(
+            _statement_boundary_import_is_allowed(
+                statement_parser_consumer,
+                ImportEdge(
+                    statement_parser_consumer,
+                    STATEMENT_UTILITY_MODULE,
+                    "indent_lines",
+                ),
+            )
+        )
+        self.assertFalse(
+            _statement_boundary_import_is_allowed(
+                statement_parser_consumer,
+                ImportEdge(
+                    statement_parser_consumer,
+                    STATEMENT_UTILITY_MODULE,
+                    "prefix_multiline",
+                ),
+            )
+        )
+        self.assertFalse(
+            _statement_boundary_import_is_allowed(
+                consumer,
+                ImportEdge(
+                    consumer,
+                    f"{PARTS_PACKAGE}.statement_parser",
+                    "parse_gml_statements",
+                ),
+            )
+        )
+
+    def test_statement_boundary_allowances_are_exact_and_have_no_bypasses(self) -> None:
+        self.assertEqual(
+            set(STATEMENT_DIRECT_IMPORTS_BY_CONSUMER),
+            {
+                f"{PARTS_PACKAGE}.api",
+                STATEMENT_API_MODULE,
+                f"{PARTS_PACKAGE}.statement_parser",
+                f"{PARTS_PACKAGE}.statements",
+                f"{PARTS_PACKAGE}.static_declarations",
+                "tests.test_gml_statement_api",
+                "tests.test_gml_transpiler_architecture",
+            },
+        )
+        for consumer, expected_imports in STATEMENT_DIRECT_IMPORTS_BY_CONSUMER.items():
+            with self.subTest(consumer=consumer):
+                module_path = PROJECT_ROOT.joinpath(*consumer.split(".")).with_suffix(".py")
+                actual = _statement_boundary_bypasses_from_source(
+                    module_path.read_text(encoding="utf-8"),
+                    consumer,
+                )
+                expected = frozenset(
+                    ImportEdge(consumer, owner, name)
+                    for owner, name in expected_imports
+                )
+                self.assertEqual(actual, expected)
+
+        self.assertEqual(_actual_statement_boundary_bypasses(), frozenset())
+
+    def test_statement_orchestration_uses_only_cycle_safe_phase_gateway(self) -> None:
+        expected_gateway_imports = frozenset(
+            {
+                (STATEMENT_API_MODULE, "collect_static_declarations"),
+                (STATEMENT_API_MODULE, "parse_gml_statements"),
+                (STATEMENT_API_MODULE, "static_scope_id"),
+                (STATEMENT_MODELS_MODULE, "GMLStatementRequest"),
+            }
+        )
+        orchestration_modules = (
+            f"{PARTS_PACKAGE}.api",
+            f"{PARTS_PACKAGE}.expression_parser",
+        )
+        statement_surface_owners = STATEMENT_IMPLEMENTATION_MODULES | frozenset(
+            {STATEMENT_API_MODULE, STATEMENT_MODELS_MODULE}
+        )
+        for consumer in orchestration_modules:
+            with self.subTest(consumer=consumer):
+                module_path = PROJECT_ROOT.joinpath(*consumer.split(".")).with_suffix(".py")
+                actual = frozenset(
+                    (edge.owner, edge.name)
+                    for edge in _imports_from_path(module_path)
+                    if edge.owner in statement_surface_owners
+                )
+                self.assertEqual(actual, expected_gateway_imports)
+
+        expression_parser_path = PARTS_PATH / "expression_parser.py"
+        expression_parser_tree = ast.parse(
+            expression_parser_path.read_text(encoding="utf-8")
+        )
+        top_level_statement_imports = [
+            node
+            for node in expression_parser_tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.level == 1
+            and node.module == "statement_api"
+        ]
+        self.assertEqual(top_level_statement_imports, [])
+        nested_statement_imports = [
+            node
+            for node in ast.walk(expression_parser_tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.level == 1
+            and node.module == "statement_api"
+        ]
+        self.assertEqual(len(nested_statement_imports), 1)
+        self.assertEqual(
+            {imported.name for imported in nested_statement_imports[0].names},
+            {
+                "collect_static_declarations",
+                "parse_gml_statements",
+                "static_scope_id",
+            },
+        )
+        self.assertEqual(
+            tuple(statement_phase_api.__all__),
+            (
+                "collect_static_declarations",
+                "parse_gml_statements",
+                "static_scope_id",
+            ),
+        )
+
     def test_private_phase_and_production_import_inventory_is_exact(self) -> None:
         actual_internal = _actual_internal_private_imports()
         actual_production = _actual_production_imports()
@@ -1315,7 +1629,7 @@ package_facade._Binary(None, "+", None)
             actual_internal | actual_production,
         )
 
-        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 60)
+        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 31)
         self.assertEqual(
             len(
                 {
@@ -1323,7 +1637,7 @@ package_facade._Binary(None, "+", None)
                     for edge in EXPECTED_INTERNAL_PRIVATE_IMPORTS
                 }
             ),
-            14,
+            4,
         )
         self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 60)
         self.assertEqual(
@@ -1362,6 +1676,7 @@ package_facade._Binary(None, "+", None)
                 f"{PARTS_PACKAGE}.expression_models",
                 f"{PARTS_PACKAGE}.result_models",
                 f"{PARTS_PACKAGE}.shared_models",
+                f"{PARTS_PACKAGE}.statement_models",
             }
         )
         production_edges = _actual_internal_private_imports() | _actual_production_imports()
@@ -1399,7 +1714,7 @@ package_facade._Binary(None, "+", None)
                 for edge, disposition in dispositions.items()
                 if edge.name.startswith("_")
             },
-            {817, 819, 820},
+            {817, 820},
         )
         self.assertEqual(
             {
@@ -1439,7 +1754,7 @@ package_facade._Binary(None, "+", None)
 
     def test_transitional_private_usage_suppressions_are_exact(self) -> None:
         actual = _actual_private_usage_suppressions()
-        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 8)
+        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 3)
         self.assertEqual(actual, EXPECTED_PRIVATE_USAGE_SUPPRESSIONS)
 
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.74 - 2026-09-04
+
+- Published the exact three-operation typed package-internal GML statement API: `collect_static_declarations`, `parse_gml_statements`, and `static_scope_id`. The frozen `GMLStatementRequest` names every orchestration input, the frozen `GMLStatementResult` makes emitted lines and final local, instance, scope, enum, and macro state explicit, and the frozen `ControlFlowCapture` replaces private cross-module control-flow state.
+- Routed top-level orchestration and nested expression function bodies through the cycle-safe statement boundary while keeping parser cursors and matching, generated-name counters, recursive statement lowering, and static-declaration mechanics private. Mutable caller-visible instance-variable effects and shared enum/macro propagation retain their existing identities and behavior without adding a top-level facade export.
+- Advanced the architecture baseline from 60 to 31 private edges and from 14 to 4 owner/consumer pairs while keeping all 60 production imports and all 4 remaining private production import edges, and reduced tracked private-usage suppressions from 8 to 3. Transpiled GDScript, ordering and indentation, source-map JSON, diagnostics and parser locations, static scope IDs, golden output, and all 74 facade exports/signatures remain unchanged.
+
 ## 0.7.73 - 2026-09-04
 
 - Published the exact 17-operation typed package-internal GML expression API for parsing, normal and truthiness-aware emission, instance/constructor/static lowering, enum and constant validation, and direct-member/name-resolution queries while keeping recursive parser and emitter mechanics private.

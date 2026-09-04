@@ -26,6 +26,7 @@ from .expression_models import (
 )
 from .lexical import is_verbatim_string_start, read_verbatim_string
 from .shared_models import (
+    AssignmentOperator,
     AssignmentOperator as _AssignmentOperator,
     DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
     GMLTranspileError,
@@ -89,12 +90,26 @@ def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[li
     return parts
 
 
+def split_top_level_tokens(
+    tokens: Iterable[Token], separator: str
+) -> list[list[Token]]:
+    return _split_top_level_tokens(tokens, separator)
+
+
 def _indent_lines(lines: Iterable[str]) -> list[str]:
     return [_prefix_multiline(line, "\t") if line else "" for line in lines]
 
 
+def indent_lines(lines: Iterable[str]) -> list[str]:
+    return _indent_lines(lines)
+
+
 def _prefix_multiline(text: str, prefix: str) -> str:
     return "\n".join(f"{prefix}{line}" if line else "" for line in text.split("\n"))
+
+
+def prefix_multiline(text: str, prefix: str) -> str:
+    return _prefix_multiline(text, prefix)
 
 
 def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable[str]) -> list[str]:
@@ -109,6 +124,13 @@ def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable
     return result
 
 
+def insert_lines_before_continue(
+    lines: Iterable[str],
+    inserted_lines: Iterable[str],
+) -> list[str]:
+    return _insert_lines_before_continue(lines, inserted_lines)
+
+
 def _insert_until_check_before_continue(lines: Iterable[str], condition: str) -> list[str]:
     result: list[str] = []
     for line in lines:
@@ -121,10 +143,20 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
     return result
 
 
+def insert_until_check_before_continue(
+    lines: Iterable[str], condition: str
+) -> list[str]:
+    return _insert_until_check_before_continue(lines, condition)
+
+
 def _next_generated_name_from_counter(generated_counter: list[int], prefix: str) -> str:
     index = generated_counter[0]
     generated_counter[0] += 1
     return f"{prefix}_{index}"
+
+
+def next_generated_name_from_counter(generated_counter: list[int], prefix: str) -> str:
+    return _next_generated_name_from_counter(generated_counter, prefix)
 
 
 def _expression_needs_assignment_cache(expr: _Expression) -> bool:
@@ -202,6 +234,22 @@ def _cache_assignment_part(
     return temp_name
 
 
+def cache_assignment_part(
+    prelude_lines: list[str],
+    expr: GMLExpression,
+    emitted: str,
+    generated_counter: list[int],
+    prefix: str,
+) -> str:
+    return _cache_assignment_part(
+        prelude_lines,
+        expr,
+        emitted,
+        generated_counter,
+        prefix,
+    )
+
+
 def _normalize_scope_context(scope_context: _ScopeContext | None) -> _ScopeContext:
     return scope_context if scope_context is not None else _DEFAULT_SCOPE_CONTEXT
 
@@ -268,6 +316,12 @@ def _macro_configuration_matches(configuration: str, active_configuration: str |
     if active_configuration is None:
         return False
     return configuration.casefold() == active_configuration.casefold()
+
+def macro_configuration_matches(
+    configuration: str, active_configuration: str | None
+) -> bool:
+    return _macro_configuration_matches(configuration, active_configuration)
+
 
 def _strip_comments(source: str) -> str:
     result: list[str] = []
@@ -455,6 +509,10 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
     return None
 
 
+def split_assignment(statement: str) -> tuple[str, AssignmentOperator, str] | None:
+    return _split_assignment(statement)
+
+
 def _is_comparison_assignment_false_positive(statement: str, index: int) -> bool:
     previous_char = statement[index - 1] if index > 0 else ""
     next_char = statement[index + 1] if index + 1 < len(statement) else ""
@@ -508,3 +566,7 @@ def _split_top_level(source: str, separator: str) -> list[str]:
 
     parts.append(source[start:])
     return parts
+
+
+def split_top_level(source: str, separator: str) -> list[str]:
+    return _split_top_level(source, separator)

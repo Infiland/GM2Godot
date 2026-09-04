@@ -1,8 +1,7 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet, TypeGuard
 
 from .constants import (
@@ -51,14 +50,15 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
+from .statement_models import ControlFlowCapture
 from .utils import (
-    _cache_assignment_part,
-    _indent_lines,
-    _next_generated_name_from_counter,
-    _normalize_scope_context,
-    _split_assignment,
-    _split_top_level,
-    _unwrap_grouped_expression,
+    cache_assignment_part,
+    indent_lines,
+    next_generated_name_from_counter,
+    normalize_scope_context,
+    split_assignment,
+    split_top_level,
+    unwrap_grouped_expression,
 )
 
 _MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
@@ -97,19 +97,7 @@ def _alarm_array_set(scope_context: _ScopeContext, index: str, value: str) -> st
     return f"GMRuntime.gml_alarm_set({scope_context.self_expression}, {index}, {value})"
 
 
-@dataclass(frozen=True)
-class _ControlFlowCapture:
-    variable_name: str
-    loop_depth: int
-    continue_depth: int
-    capture_return: bool = False
-    capture_exit: bool = False
-    capture_throw: bool = False
-    capture_break: bool = False
-    capture_continue: bool = False
-
-
-def _transpile_statement(
+def transpile_statement(
     statement: str,
     local_names: MutableSet[str] | None = None,
     declared_local_names: MutableSet[str] | None = None,
@@ -124,7 +112,7 @@ def _transpile_statement(
     inherited_event_call: str | None = None,
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
-    control_flow_capture: _ControlFlowCapture | None = None,
+    control_flow_capture: ControlFlowCapture | None = None,
 ) -> list[str]:
     if not statement:
         return []
@@ -133,7 +121,7 @@ def _transpile_statement(
         local_names = set()
     if declared_local_names is None:
         declared_local_names = set()
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
 
@@ -384,7 +372,7 @@ def _transpile_statement(
         if _is_alarm_array_access(target_expr, local_names):
             index = _alarm_array_index(target_expr, local_names, scope_context)
             prelude_lines: list[str] = []
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -409,14 +397,14 @@ def _transpile_statement(
             container, key = selector_target
             prelude_lines: list[str] = []
             if isinstance(target_expr, _Member):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_selector_target",
                 )
-            current_value = _next_generated_name_from_counter(
+            current_value = next_generated_name_from_counter(
                 generated_counter,
                 "_gml_selector_value",
             )
@@ -437,14 +425,14 @@ def _transpile_statement(
                 scope_context=scope_context,
             ).text
             prelude_lines: list[str] = []
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_array_target",
             )
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -469,14 +457,14 @@ def _transpile_statement(
                 scope_context=scope_context,
             ).text
             prelude_lines: list[str] = []
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_array_target",
             )
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -498,14 +486,14 @@ def _transpile_statement(
             container, key = struct_target
             prelude_lines: list[str] = []
             if isinstance(target_expr, _StructAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_struct_target",
                 )
-                key = _cache_assignment_part(
+                key = cache_assignment_part(
                     prelude_lines,
                     target_expr.key,
                     key,
@@ -513,7 +501,7 @@ def _transpile_statement(
                     "_gml_struct_key",
                 )
             elif isinstance(target_expr, _Member):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
@@ -535,14 +523,14 @@ def _transpile_statement(
             container, key = ds_map_target
             prelude_lines = []
             if isinstance(target_expr, _DSMapAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_map_target",
                 )
-                key = _cache_assignment_part(
+                key = cache_assignment_part(
                     prelude_lines,
                     target_expr.key,
                     key,
@@ -564,14 +552,14 @@ def _transpile_statement(
             container, index = ds_list_target
             prelude_lines = []
             if isinstance(target_expr, _DSListAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_list_target",
                 )
-                index = _cache_assignment_part(
+                index = cache_assignment_part(
                     prelude_lines,
                     target_expr.index,
                     index,
@@ -593,21 +581,21 @@ def _transpile_statement(
             container, x_index, y_index = ds_grid_target
             prelude_lines = []
             if isinstance(target_expr, _DSGridAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_grid_target",
                 )
-                x_index = _cache_assignment_part(
+                x_index = cache_assignment_part(
                     prelude_lines,
                     target_expr.x_index,
                     x_index,
                     generated_counter,
                     "_gml_grid_x",
                 )
-                y_index = _cache_assignment_part(
+                y_index = cache_assignment_part(
                     prelude_lines,
                     target_expr.y_index,
                     y_index,
@@ -623,7 +611,7 @@ def _transpile_statement(
         target = emit_gml_expression(target_expr, local_names, scope_context=scope_context).text
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
-    assignment = _split_assignment(statement)
+    assignment = split_assignment(statement)
     if assignment is not None:
         target, operator, value = assignment
         target_prelude_lines, target = _lower_simple_array_index_postincrement_target(
@@ -636,7 +624,7 @@ def _transpile_statement(
             macro_values=macro_values,
             generated_counter=generated_counter,
         )
-        if _split_assignment(value) is not None:
+        if split_assignment(value) is not None:
             if operator not in ("=", ":="):
                 raise GMLTranspileError("Chained compound assignments are not supported")
             assignment_lines, _assigned_value = _transpile_assignment_expression_to_temp(
@@ -671,14 +659,14 @@ def _transpile_statement(
             prelude_lines: list[str] = []
             assigned_value = increment_value_text
             if increment_mode == "postfix":
-                assigned_value = _next_generated_name_from_counter(
+                assigned_value = next_generated_name_from_counter(
                     generated_counter,
                     "_gml_increment_value",
                 )
                 prelude_lines.append(f"var {assigned_value} = {increment_value_text}")
                 local_names.add(assigned_value)
             suffix = "++" if increment_delta > 0 else "--"
-            increment_lines = _transpile_statement(
+            increment_lines = transpile_statement(
                 f"{increment_target}{suffix}",
                 local_names,
                 declared_local_names,
@@ -881,7 +869,7 @@ def _transpile_statement(
             index = _alarm_array_index(target_expr, local_names, scope_context)
             if operator in ("=", ":="):
                 return [*prelude_lines, _alarm_array_set(scope_context, index, value)]
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -935,14 +923,14 @@ def _transpile_statement(
             ).text
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_array_target",
             )
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -978,14 +966,14 @@ def _transpile_statement(
             ).text
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_array_target",
             )
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -1018,14 +1006,14 @@ def _transpile_statement(
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_ds_map_set({container}, {key}, {value})"]
             if isinstance(target_expr, _DSMapAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_map_target",
                 )
-                key = _cache_assignment_part(
+                key = cache_assignment_part(
                     prelude_lines,
                     target_expr.key,
                     key,
@@ -1059,14 +1047,14 @@ def _transpile_statement(
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_ds_list_set({container}, {index}, {value})"]
             if isinstance(target_expr, _DSListAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_list_target",
                 )
-                index = _cache_assignment_part(
+                index = cache_assignment_part(
                     prelude_lines,
                     target_expr.index,
                     index,
@@ -1099,21 +1087,21 @@ def _transpile_statement(
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, {value})"]
             if isinstance(target_expr, _DSGridAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_grid_target",
                 )
-                x_index = _cache_assignment_part(
+                x_index = cache_assignment_part(
                     prelude_lines,
                     target_expr.x_index,
                     x_index,
                     generated_counter,
                     "_gml_grid_x",
                 )
-                y_index = _cache_assignment_part(
+                y_index = cache_assignment_part(
                     prelude_lines,
                     target_expr.y_index,
                     y_index,
@@ -1148,7 +1136,7 @@ def _transpile_statement(
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_selector_set({container}, {key}, {value})"]
             if isinstance(target_expr, _Member):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
@@ -1157,7 +1145,7 @@ def _transpile_statement(
                 )
             if operator == "??=":
                 if value_prelude_lines:
-                    current_value = _next_generated_name_from_counter(
+                    current_value = next_generated_name_from_counter(
                         generated_counter,
                         "_gml_selector_value",
                     )
@@ -1177,7 +1165,7 @@ def _transpile_statement(
                 ]
             if operator in COMPOUND_RUNTIME_FUNCTIONS:
                 helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
-                current_value = _next_generated_name_from_counter(
+                current_value = next_generated_name_from_counter(
                     generated_counter,
                     "_gml_selector_value",
                 )
@@ -1197,14 +1185,14 @@ def _transpile_statement(
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
             if isinstance(target_expr, _StructAccess):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
                     generated_counter,
                     "_gml_struct_target",
                 )
-                key = _cache_assignment_part(
+                key = cache_assignment_part(
                     prelude_lines,
                     target_expr.key,
                     key,
@@ -1212,7 +1200,7 @@ def _transpile_statement(
                     "_gml_struct_key",
                 )
             elif isinstance(target_expr, _Member):
-                container = _cache_assignment_part(
+                container = cache_assignment_part(
                     prelude_lines,
                     target_expr.target,
                     container,
@@ -1327,7 +1315,7 @@ def _delete_target_lines(
 
 
 def _captured_control_flow_lines(
-    capture: _ControlFlowCapture,
+    capture: ControlFlowCapture,
     kind: str,
     value: str = "GMRuntime.gml_undefined()",
 ) -> list[str]:
@@ -1337,10 +1325,10 @@ def _captured_control_flow_lines(
     ]
 
 
-def _control_flow_dispatch_lines(
+def control_flow_dispatch_lines(
     control_name: str,
-    source_capture: _ControlFlowCapture,
-    parent_capture: _ControlFlowCapture | None = None,
+    source_capture: ControlFlowCapture,
+    parent_capture: ControlFlowCapture | None = None,
     *,
     return_value_allowed: bool = True,
 ) -> list[str]:
@@ -1354,7 +1342,7 @@ def _control_flow_dispatch_lines(
         )
         if parent_capture is not None and _capture_handles_kind(parent_capture, kind):
             lines.extend(
-                _indent_lines(
+                indent_lines(
                     _captured_control_flow_lines(
                         parent_capture,
                         kind,
@@ -1384,7 +1372,7 @@ def _control_flow_dispatch_lines(
     return lines
 
 
-def _capture_handles_kind(capture: _ControlFlowCapture, kind: str) -> bool:
+def _capture_handles_kind(capture: ControlFlowCapture, kind: str) -> bool:
     if kind == "return":
         return capture.capture_return
     if kind == "exit":
@@ -1407,8 +1395,8 @@ def _nullish_assignment_lines(
     return [
         *prelude_lines,
         f"if GMRuntime.gml_is_nullish({current_value}):",
-        *_indent_lines(value_prelude_lines),
-        *_indent_lines(assignment_lines),
+        *indent_lines(value_prelude_lines),
+        *indent_lines(assignment_lines),
     ]
 
 
@@ -1420,7 +1408,7 @@ def _transpile_event_inherited_statement(
         return None
 
     expr = parse_gml_expression(statement)
-    expr = _unwrap_grouped_expression(expr)
+    expr = unwrap_grouped_expression(expr)
     if not (
         isinstance(expr, _Call)
         and isinstance(expr.callee, _Name)
@@ -1441,7 +1429,7 @@ def _struct_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if isinstance(target_expr, _StructAccess):
         container = emit_gml_expression(
             target_expr.target,
@@ -1472,7 +1460,7 @@ def _ds_map_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSMapAccess):
         container = emit_gml_expression(
             target_expr.target,
@@ -1493,7 +1481,7 @@ def _ds_list_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSListAccess):
         container = emit_gml_expression(
             target_expr.target,
@@ -1514,7 +1502,7 @@ def _array_ref_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if isinstance(target_expr, _ArrayRefAccess):
         container = emit_gml_expression(
             target_expr.target,
@@ -1535,7 +1523,7 @@ def _ds_grid_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSGridAccess):
         container = emit_gml_expression(
             target_expr.target,
@@ -1561,7 +1549,7 @@ def _scoped_instance_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if scope_context.instance_target is None or not isinstance(target_expr, _Name):
         return None
 
@@ -1587,7 +1575,7 @@ def _dynamic_instance_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if not isinstance(target_expr, _Name):
         return None
 
@@ -1614,7 +1602,7 @@ def _motion_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if not isinstance(target_expr, _Name):
         return None
     name = target_expr.value
@@ -1629,7 +1617,7 @@ def _motion_current_value(
     member_name: str,
     scope_context: _ScopeContext | None = None,
 ) -> str:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if scope_context.instance_target is not None:
         return f"GMRuntime.gml_variable_instance_get({instance_target}, {json.dumps(member_name)})"
     return sanitize_gdscript_identifier(member_name)
@@ -1663,7 +1651,7 @@ def _static_scope_assignment_parts(
     target_expr: _Expression,
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if scope_context.static_scope is None or not isinstance(target_expr, _Name):
         return None
     name = target_expr.value
@@ -1677,7 +1665,7 @@ def _global_scope_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if not isinstance(target_expr, _Name):
         return None
     name = target_expr.value
@@ -1728,15 +1716,15 @@ def _transpile_var_statement(
         local_names = set()
     if declared_local_names is None:
         declared_local_names = set()
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     enum_name_set = frozenset(enum_names or [])
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
-    for declaration in _split_top_level(statement, ","):
+    for declaration in split_top_level(statement, ","):
         declaration = declaration.strip()
         if not declaration:
             continue
-        assignment = _split_assignment(declaration)
+        assignment = split_assignment(declaration)
         if assignment is None:
             name = declaration.strip()
             validate_gml_identifier(name)
@@ -1758,7 +1746,7 @@ def _transpile_var_statement(
         reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
-        nested_assignment = _split_assignment(value)
+        nested_assignment = split_assignment(value)
         if nested_assignment is not None:
             prelude_lines, initial_value = _transpile_assignment_expression_to_temp(
                 value,
@@ -1801,22 +1789,22 @@ def _parse_increment_statement(statement: str) -> tuple[str, _IncrementDelta] | 
     stripped = statement.strip()
     if stripped.endswith("++"):
         target = stripped[:-2].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, 1
     if stripped.endswith("--"):
         target = stripped[:-2].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, -1
     if stripped.startswith("++"):
         target = stripped[2:].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, 1
     if stripped.startswith("--"):
         target = stripped[2:].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, -1
     return None
@@ -1826,22 +1814,22 @@ def _parse_increment_expression(statement: str) -> tuple[str, _IncrementDelta, _
     stripped = statement.strip()
     if stripped.endswith("++"):
         target = stripped[:-2].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, 1, "postfix"
     if stripped.endswith("--"):
         target = stripped[:-2].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, -1, "postfix"
     if stripped.startswith("++"):
         target = stripped[2:].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, 1, "prefix"
     if stripped.startswith("--"):
         target = stripped[2:].strip()
-        if _split_assignment(target) is not None:
+        if split_assignment(target) is not None:
             return None
         return target, -1, "prefix"
     return None
@@ -1871,7 +1859,7 @@ def _lower_mutation_expressions(
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
 ) -> tuple[list[str], str]:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
     prelude_lines: list[str] = []
@@ -2055,7 +2043,7 @@ def _transpile_increment_expression_to_value(
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
 ) -> tuple[list[str], str]:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
     target_expr = _parse_assignment_target(
@@ -2104,7 +2092,7 @@ def _next_expression_generated_name(
     local_names: MutableSet[str],
 ) -> str:
     while True:
-        candidate = _next_generated_name_from_counter(generated_counter, prefix)
+        candidate = next_generated_name_from_counter(generated_counter, prefix)
         if candidate not in local_names:
             local_names.add(candidate)
             return candidate
@@ -2118,7 +2106,7 @@ def _parse_assignment_target(
     scope_context: _ScopeContext | None = None,
     macro_values: Mapping[str, str] | None = None,
 ) -> _Expression:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     reject_constant_assignment_target_name(target, macro_values.keys())
     target_expr = parse_gml_expression(
@@ -2128,7 +2116,7 @@ def _parse_assignment_target(
         macro_values=macro_values,
         scope_context=scope_context,
     )
-    target_expr = _unwrap_grouped_expression(target_expr)
+    target_expr = unwrap_grouped_expression(target_expr)
     reject_enum_assignment_target(target_expr, enum_names)
     reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
@@ -2202,7 +2190,7 @@ def _assignment_target_reader_writer(
 
     if _is_alarm_array_access(target_expr, local_names):
         index = _alarm_array_index(target_expr, local_names, scope_context)
-        index = _cache_assignment_part(
+        index = cache_assignment_part(
             prelude_lines,
             target_expr.index,
             index,
@@ -2226,14 +2214,14 @@ def _assignment_target_reader_writer(
             local_names,
             scope_context=scope_context,
         ).text
-        container = _cache_assignment_part(
+        container = cache_assignment_part(
             prelude_lines,
             target_expr.target,
             container,
             generated_counter,
             "_gml_array_target",
         )
-        index = _cache_assignment_part(
+        index = cache_assignment_part(
             prelude_lines,
             target_expr.index,
             index,
@@ -2253,14 +2241,14 @@ def _assignment_target_reader_writer(
     if ds_map_target is not None:
         container, key = ds_map_target
         if isinstance(target_expr, _DSMapAccess):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_map_target",
             )
-            key = _cache_assignment_part(
+            key = cache_assignment_part(
                 prelude_lines,
                 target_expr.key,
                 key,
@@ -2280,14 +2268,14 @@ def _assignment_target_reader_writer(
     if ds_list_target is not None:
         container, index = ds_list_target
         if isinstance(target_expr, _DSListAccess):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_list_target",
             )
-            index = _cache_assignment_part(
+            index = cache_assignment_part(
                 prelude_lines,
                 target_expr.index,
                 index,
@@ -2307,21 +2295,21 @@ def _assignment_target_reader_writer(
     if ds_grid_target is not None:
         container, x_index, y_index = ds_grid_target
         if isinstance(target_expr, _DSGridAccess):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_grid_target",
             )
-            x_index = _cache_assignment_part(
+            x_index = cache_assignment_part(
                 prelude_lines,
                 target_expr.x_index,
                 x_index,
                 generated_counter,
                 "_gml_grid_x",
             )
-            y_index = _cache_assignment_part(
+            y_index = cache_assignment_part(
                 prelude_lines,
                 target_expr.y_index,
                 y_index,
@@ -2343,7 +2331,7 @@ def _assignment_target_reader_writer(
     if selector_target is not None:
         container, key = selector_target
         if isinstance(target_expr, _Member):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
@@ -2363,14 +2351,14 @@ def _assignment_target_reader_writer(
     if struct_target is not None:
         container, key = struct_target
         if isinstance(target_expr, _StructAccess):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
                 generated_counter,
                 "_gml_struct_target",
             )
-            key = _cache_assignment_part(
+            key = cache_assignment_part(
                 prelude_lines,
                 target_expr.key,
                 key,
@@ -2378,7 +2366,7 @@ def _assignment_target_reader_writer(
                 "_gml_struct_key",
             )
         elif isinstance(target_expr, _Member):
-            container = _cache_assignment_part(
+            container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
                 container,
@@ -2434,14 +2422,14 @@ def _member_backed_array_assignment_lines(
         local_names,
         scope_context=scope_context,
     ).text
-    index = _cache_assignment_part(
+    index = cache_assignment_part(
         prelude_lines,
         target_expr.index,
         index,
         generated_counter,
         "_gml_array_index",
     )
-    container_name = _next_generated_name_from_counter(generated_counter, "_gml_array_target")
+    container_name = next_generated_name_from_counter(generated_counter, "_gml_array_target")
     setup_lines = [
         *prelude_lines,
         f"var {container_name} = {container_reader}",
@@ -2483,10 +2471,10 @@ def _transpile_assignment_expression_to_temp(
     generated_counter: list[int] | None = None,
     result_required: bool = True,
 ) -> tuple[list[str], str]:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
-    assignment = _split_assignment(source)
+    assignment = split_assignment(source)
     if assignment is None:
         prelude_lines, value_source = _lower_mutation_expressions(
             source,
@@ -2545,7 +2533,7 @@ def _transpile_assignment_expression_to_temp(
                 *rhs_lines,
                 *write_value(rhs_value),
             ], rhs_value
-        result_name = _next_generated_name_from_counter(
+        result_name = next_generated_name_from_counter(
             generated_counter,
             "_gml_assignment_value",
         )
@@ -2558,7 +2546,7 @@ def _transpile_assignment_expression_to_temp(
         ], result_name
 
     if operator == "??=":
-        result_name = _next_generated_name_from_counter(
+        result_name = next_generated_name_from_counter(
             generated_counter,
             "_gml_assignment_value",
         )
@@ -2578,9 +2566,9 @@ def _transpile_assignment_expression_to_temp(
             *prelude_lines,
             f"var {result_name} = {current_value}",
             f"if GMRuntime.gml_is_nullish({result_name}):",
-            *_indent_lines(rhs_lines),
+            *indent_lines(rhs_lines),
             f"\t{result_name} = {rhs_value}",
-            *_indent_lines(write_value(result_name)),
+            *indent_lines(write_value(result_name)),
         ], result_name
 
     if operator in COMPOUND_RUNTIME_FUNCTIONS:
@@ -2596,7 +2584,7 @@ def _transpile_assignment_expression_to_temp(
             result_required=True,
         )
         helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
-        result_name = _next_generated_name_from_counter(
+        result_name = next_generated_name_from_counter(
             generated_counter,
             "_gml_assignment_value",
         )
@@ -2622,7 +2610,7 @@ def _transpile_assignment_to_emitted_value(
     macro_values: Mapping[str, str] | None = None,
     generated_counter: list[int] | None = None,
 ) -> list[str]:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
     reject_constant_assignment_target_name(target, macro_values.keys())
@@ -2769,7 +2757,7 @@ def _selector_assignment_parts(
     local_names: Iterable[str],
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
-    scope_context = _normalize_scope_context(scope_context)
+    scope_context = normalize_scope_context(scope_context)
     if not isinstance(target_expr, _Member) or uses_direct_member_access(
         target_expr,
         scope_context=scope_context,

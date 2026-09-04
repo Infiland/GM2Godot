@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 import hashlib
@@ -53,7 +53,7 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .static_declarations import _collect_static_declarations, _static_scope_id
+from .statement_models import GMLStatementRequest
 from .utils import (
     normalize_scope_context as _normalize_scope_context,
     strip_comments as _strip_comments,
@@ -357,6 +357,12 @@ class _ExpressionParser:
         return name
 
     def _parse_function_literal(self) -> _Expression:
+        from .statement_api import (
+            collect_static_declarations,
+            parse_gml_statements,
+            static_scope_id as build_static_scope_id,
+        )
+
         name = None
         if self._peek().kind == "IDENT":
             name = self._consume_identifier()
@@ -377,7 +383,7 @@ class _ExpressionParser:
         is_constructor = self._match_identifier("constructor")
         self._consume("{")
         body_tokens = self._read_balanced_tokens("{", "}")
-        static_declarations = _collect_static_declarations(body_tokens)
+        static_declarations = collect_static_declarations(body_tokens)
         parameter_names = [parameter.name for parameter in parameters]
         for parameter_name in parameter_names:
             validate_gml_identifier(parameter_name)
@@ -387,7 +393,7 @@ class _ExpressionParser:
         static_scope_name = scope_context.static_scope
         static_prefix = scope_context.static_prefix
         if static_declarations:
-            static_scope_id = _static_scope_id(static_prefix, name, self.position, body_tokens)
+            static_scope_id = build_static_scope_id(static_prefix, name, self.position, body_tokens)
             static_scope_name = (
                 f"_gml_static_scope_{hashlib.sha1(static_scope_id.encode('utf-8')).hexdigest()[:12]}"
             )
@@ -432,19 +438,19 @@ class _ExpressionParser:
                 extension_functions=scope_context.extension_functions,
                 extension_function_mappings=scope_context.extension_function_mappings,
             )
-        from .statement_parser import _StatementParser
-
-        body_parser = _StatementParser(
-            body_tokens,
-            local_names=parameter_names,
-            return_depth=1,
-            enum_values=self.enum_values,
-            enum_names=self.enum_names,
-            scope_context=scope_context,
-            macro_values=self.macro_values,
-            global_names=scope_context.global_names,
+        statement_result = parse_gml_statements(
+            GMLStatementRequest(
+                tokens=tuple(body_tokens),
+                local_names=frozenset(parameter_names),
+                return_depth=1,
+                enum_values=self.enum_values,
+                enum_names=frozenset(self.enum_names),
+                scope_context=scope_context,
+                macro_values=self.macro_values,
+                global_names=scope_context.global_names,
+            )
         )
-        body_lines = body_parser.parse()
+        body_lines = list(statement_result.lines)
         prelude_lines: list[str] = []
         if parent_constructor is not None:
             if not is_constructor:

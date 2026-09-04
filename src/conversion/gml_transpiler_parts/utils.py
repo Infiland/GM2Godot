@@ -27,7 +27,6 @@ from .expression_models import (
 from .lexical import is_verbatim_string_start, read_verbatim_string
 from .shared_models import (
     AssignmentOperator,
-    AssignmentOperator as _AssignmentOperator,
     DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
     GMLTranspileError,
     GMLExtensionFunction,
@@ -312,18 +311,14 @@ def scope_context_with_global_names(
     )
 
 
-def _macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
+def macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
     if active_configuration is None:
         return False
     return configuration.casefold() == active_configuration.casefold()
 
-def macro_configuration_matches(
-    configuration: str, active_configuration: str | None
-) -> bool:
-    return _macro_configuration_matches(configuration, active_configuration)
 
 
-def _strip_comments(source: str) -> str:
+def strip_comments(source: str) -> str:
     result: list[str] = []
     index = 0
     in_string: str | None = None
@@ -333,12 +328,7 @@ def _strip_comments(source: str) -> str:
 
         if in_string is not None:
             result.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == in_string:
-                in_string = None
+            in_string, escaped = _quoted_string_state(char, in_string, escaped)
             index += 1
             continue
 
@@ -386,11 +376,9 @@ def _strip_comments(source: str) -> str:
     return "".join(result)
 
 
-def strip_comments(source: str) -> str:
-    return _strip_comments(source)
 
 
-def _join_macro_continuation_lines(source: str) -> str:
+def join_macro_continuation_lines(source: str) -> str:
     lines: list[str] = []
     pending_macro: str | None = None
     for line in source.splitlines():
@@ -407,57 +395,7 @@ def _join_macro_continuation_lines(source: str) -> str:
     return "\n".join(lines)
 
 
-def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnusedFunction]
-    statements: list[str] = []
-    start = 0
-    depth = 0
-    in_string: str | None = None
-    escaped = False
-
-    index = 0
-    while index < len(source):
-        char = source[index]
-        if in_string is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == in_string:
-                in_string = None
-            index += 1
-            continue
-
-        if is_verbatim_string_start(source, index):
-            index += len(read_verbatim_string(source, index))
-            continue
-
-        if source.startswith('$"', index):
-            index += len(read_template_string(source, index))
-            continue
-
-        if char == '"' or char == "'":
-            in_string = char
-            index += 1
-            continue
-        if char in "([{":
-            depth += 1
-            index += 1
-            continue
-        if char in ")]}" and depth > 0:
-            depth -= 1
-            index += 1
-            continue
-        if char == ";" and depth == 0:
-            statements.append(source[start:index])
-            start = index + 1
-        index += 1
-
-    trailing = source[start:].strip()
-    if trailing:
-        statements.append(trailing)
-    return [statement for statement in statements if statement.strip()]
-
-def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | None:
+def split_assignment(statement: str) -> tuple[str, AssignmentOperator, str] | None:
     depth = 0
     in_string: str | None = None
     escaped = False
@@ -466,12 +404,7 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
     while index < len(statement):
         char = statement[index]
         if in_string is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == in_string:
-                in_string = None
+            in_string, escaped = _quoted_string_state(char, in_string, escaped)
             index += 1
             continue
 
@@ -497,20 +430,40 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
             continue
 
         if depth == 0:
-            for operator in ASSIGNMENT_OPERATORS:
-                if statement.startswith(operator, index):
-                    if operator == "=" and _is_comparison_assignment_false_positive(statement, index):
-                        continue
-                    left = statement[:index].strip()
-                    right = statement[index + len(operator):].strip()
-                    if left and right:
-                        return left, operator, right
+            assignment = _assignment_at(statement, index)
+            if assignment is not None:
+                return assignment
         index += 1
     return None
 
 
-def split_assignment(statement: str) -> tuple[str, AssignmentOperator, str] | None:
-    return _split_assignment(statement)
+
+
+def _quoted_string_state(
+    char: str,
+    delimiter: str,
+    escaped: bool,
+) -> tuple[str | None, bool]:
+    if escaped:
+        return delimiter, False
+    if char == "\\":
+        return delimiter, True
+    if char == delimiter:
+        return None, False
+    return delimiter, False
+
+
+def _assignment_at(statement: str, index: int) -> tuple[str, AssignmentOperator, str] | None:
+    for operator in ASSIGNMENT_OPERATORS:
+        if not statement.startswith(operator, index):
+            continue
+        if operator == "=" and _is_comparison_assignment_false_positive(statement, index):
+            continue
+        left = statement[:index].strip()
+        right = statement[index + len(operator):].strip()
+        if left and right:
+            return left, operator, right
+    return None
 
 
 def _is_comparison_assignment_false_positive(statement: str, index: int) -> bool:
@@ -519,7 +472,7 @@ def _is_comparison_assignment_false_positive(statement: str, index: int) -> bool
     return previous_char in "!<>=?" or next_char == "="
 
 
-def _split_top_level(source: str, separator: str) -> list[str]:
+def split_top_level(source: str, separator: str) -> list[str]:
     parts: list[str] = []
     start = 0
     depth = 0
@@ -530,12 +483,7 @@ def _split_top_level(source: str, separator: str) -> list[str]:
     while index < len(source):
         char = source[index]
         if in_string is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == in_string:
-                in_string = None
+            in_string, escaped = _quoted_string_state(char, in_string, escaped)
             index += 1
             continue
 
@@ -566,7 +514,3 @@ def _split_top_level(source: str, separator: str) -> list[str]:
 
     parts.append(source[start:])
     return parts
-
-
-def split_top_level(source: str, separator: str) -> list[str]:
-    return _split_top_level(source, separator)

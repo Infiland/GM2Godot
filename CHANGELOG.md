@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.75 - 2026-09-04
+
+- Slimmed the top-level GML transpiler facade from 74 exports to the exact 44 supported non-underscore exports, preserving their order, identities, and callable signatures while removing all 30 legacy private exports—the 28 imported aliases and two local tokenizer wrappers—and every underscore-prefixed facade import.
+- Migrated repository tests and production consumers to explicit package-internal phase, model, language-metadata, and utility APIs; removed seven related file-level private-usage suppressions—the final three tracked facade/phase directives plus four now-obsolete consumer/test directives—and replaced the staged migration allowlist with a zero-violation architecture gate that rejects cross-module private imports, private or dynamic facade exports, and production test-support dependencies.
+- Advanced the tracked internal facade/phase inventory from 31 to zero private imported-name edges and from 4 to zero owner/consumer pairs, with every remaining production consumer using explicit non-underscore owners. Transpiled GDScript, ordering and indentation, source-map JSON, diagnostics and parser error locations, static scope IDs, golden output, generated project bytes, and the complete supported public facade remain unchanged.
+
 ## 0.7.74 - 2026-09-04
 
 - Published the exact three-operation typed package-internal GML statement API: `collect_static_declarations`, `parse_gml_statements`, and `static_scope_id`. The frozen `GMLStatementRequest` names every orchestration input, the frozen `GMLStatementResult` makes emitted lines and final local, instance, scope, enum, and macro state explicit, and the frozen `ControlFlowCapture` replaces private cross-module control-flow state.

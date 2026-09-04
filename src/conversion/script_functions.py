@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import re
@@ -14,8 +13,8 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     validate_gml_identifier,
 )
 from src.conversion.gml_transpiler_parts.utils import (
-    _split_assignment,
-    _split_top_level,
+    split_assignment,
+    split_top_level,
 )
 
 
@@ -86,11 +85,11 @@ def parse_script_function_parameters(params_text: str) -> tuple[ScriptFunctionPa
     if not params_text.strip():
         return ()
     parameters: list[ScriptFunctionParameter] = []
-    for raw_param in _split_top_level(params_text, ","):
+    for raw_param in split_top_level(params_text, ","):
         raw_param = raw_param.strip()
         if not raw_param:
             continue
-        assignment = _split_assignment(raw_param)
+        assignment = split_assignment(raw_param)
         if assignment is None:
             name = raw_param
             default = None

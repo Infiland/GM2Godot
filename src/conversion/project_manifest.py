@@ -4,8 +4,11 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Literal, Mapping, cast
+from typing import Callable, Iterable, Mapping, cast
 
+# D01 compatibility export for deferred resource consumers; retired by R26.
+from src.conversion.diagnostic_models import ProjectManifestDiagnostic as ProjectManifestDiagnostic
+from src.conversion.diagnostic_models import ProjectSourceLocation
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
@@ -14,8 +17,6 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.type_defs import JsonDict, JsonList
 
-
-ProjectManifestSeverity = Literal["info", "warning", "error"]
 
 _RESOURCE_TYPE_KIND = {
     "GMAnimationCurve": "animcurves",
@@ -71,24 +72,6 @@ _MISSING_RESOURCE_PATH = object()
 
 def _empty_json_dict() -> JsonDict:
     return cast(JsonDict, {})
-
-
-@dataclass(frozen=True)
-class ProjectSourceLocation:
-    path: str
-    line: int
-    field_path: str = ""
-
-
-@dataclass(frozen=True)
-class ProjectManifestDiagnostic:
-    severity: ProjectManifestSeverity
-    code: str
-    message: str
-    source: ProjectSourceLocation | None = None
-    resource: str | None = None
-    resource_type: str | None = None
-    resource_kind: str | None = None
 
 
 @dataclass(frozen=True)

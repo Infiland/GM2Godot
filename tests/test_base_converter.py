@@ -4,23 +4,19 @@ from __future__ import annotations
 
 import os
 import shutil
-import sys
 import tempfile
 import threading
 import unittest
 
-# Ensure project root is on sys.path so "src.*" imports work
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
 from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.diagnostic_models import (
+    ProjectManifestDiagnostic,
+    ProjectSourceLocation,
+)
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
-    ProjectManifestDiagnostic,
-    ProjectSourceLocation,
     load_gamemaker_project_manifest,
 )
 

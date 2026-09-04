@@ -1,8 +1,8 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 import json
-from typing import Iterable, MutableMapping, MutableSet
+from typing import Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import BINARY_PRECEDENCE, EOF
 from .expression_api import (
@@ -24,21 +24,25 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .statements import (
-    _ControlFlowCapture,
-    _control_flow_dispatch_lines,
-    _transpile_statement,
+from .statement_models import (
+    ControlFlowCapture,
+    GMLStatementRequest,
+    GMLStatementResult,
 )
-from .static_declarations import _read_static_declaration_tokens
+from .statements import (
+    control_flow_dispatch_lines,
+    transpile_statement,
+)
+from .static_declarations import read_static_declaration_tokens
 from .utils import (
-    _indent_lines,
-    _insert_lines_before_continue,
-    _insert_until_check_before_continue,
-    _macro_configuration_matches,
-    _normalize_scope_context,
-    _scope_context_with_global_names,
-    _split_top_level_tokens,
-    _tokens_to_source,
+    indent_lines,
+    insert_lines_before_continue,
+    insert_until_check_before_continue,
+    macro_configuration_matches,
+    normalize_scope_context,
+    scope_context_with_global_names,
+    split_top_level_tokens,
+    tokens_to_source,
 )
 
 class _StatementParser:
@@ -64,9 +68,9 @@ class _StatementParser:
         global_names: Iterable[str] | None = None,
         asset_names: Iterable[str] | None = None,
         static_scope_prefix: str | None = None,
-        extension_functions: dict[str, GMLExtensionFunction] | None = None,
-        extension_function_mappings: dict[str, GMLExtensionFunctionMapping] | None = None,
-        control_flow_capture: _ControlFlowCapture | None = None,
+        extension_functions: Mapping[str, GMLExtensionFunction] | None = None,
+        extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
+        control_flow_capture: ControlFlowCapture | None = None,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -98,8 +102,8 @@ class _StatementParser:
         )
         self.enum_names: set[str] = set(enum_names or [])
         self.global_names: set[str] = set(global_names or [])
-        self.scope_context = _scope_context_with_global_names(
-            _normalize_scope_context(scope_context),
+        self.scope_context = scope_context_with_global_names(
+            normalize_scope_context(scope_context),
             self.global_names,
             top_level_global_scope=top_level_global_scope,
             asset_names=asset_names,
@@ -162,8 +166,8 @@ class _StatementParser:
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []
-        return _transpile_statement(
-            _tokens_to_source(statement_tokens),
+        return transpile_statement(
+            tokens_to_source(statement_tokens),
             self.local_names,
             self.declared_local_names,
             self.instance_variables,
@@ -190,13 +194,13 @@ class _StatementParser:
             name = self._consume_identifier_name()
 
         value_tokens = self._read_macro_value_tokens()
-        value_source = _tokens_to_source(value_tokens)
+        value_source = tokens_to_source(value_tokens)
         if not value_source:
             raise GMLTranspileError("Expected macro value")
 
         priority = 0
         if configuration is not None:
-            if not _macro_configuration_matches(configuration, self.macro_configuration):
+            if not macro_configuration_matches(configuration, self.macro_configuration):
                 return []
             priority = 1
 
@@ -217,7 +221,7 @@ class _StatementParser:
                 break
         self._match(";")
         self._match("\n")
-        self.scope_context = _scope_context_with_global_names(
+        self.scope_context = scope_context_with_global_names(
             self.scope_context,
             self.global_names,
         )
@@ -225,7 +229,7 @@ class _StatementParser:
 
     def _parse_static_statement(self) -> list[str]:
         self._consume_identifier("static")
-        _, self.position = _read_static_declaration_tokens(self.tokens, self.position)
+        _, self.position = read_static_declaration_tokens(self.tokens, self.position)
         if self.scope_context.static_scope is None:
             raise GMLTranspileError("static declarations are only supported inside functions")
         return []
@@ -275,7 +279,7 @@ class _StatementParser:
             raise GMLTranspileError("Expected if condition")
 
         condition = transpile_gml_condition(
-            _tokens_to_source(condition_tokens),
+            tokens_to_source(condition_tokens),
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -284,7 +288,7 @@ class _StatementParser:
         )
         body_lines = self._parse_body()
         lines = [f"if {condition}:"]
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
 
         self._skip_newlines()
         if self._match_identifier("else"):
@@ -295,7 +299,7 @@ class _StatementParser:
             else:
                 else_body_lines = self._parse_body()
                 lines.append("else:")
-                lines.extend(_indent_lines(else_body_lines or ["pass"]))
+                lines.extend(indent_lines(else_body_lines or ["pass"]))
 
         return lines
 
@@ -306,7 +310,7 @@ class _StatementParser:
             raise GMLTranspileError("Expected with target")
 
         target_expr = parse_gml_expression(
-            _tokens_to_source(target_tokens),
+            tokens_to_source(target_tokens),
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             macro_values=self.macro_values,
@@ -348,7 +352,7 @@ class _StatementParser:
             f"GMRuntime.gml_with_targets({target}, "
             f"{outer_scope_context.self_expression}, {outer_scope_context.other_expression}):"
         ]
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_while_statement(self) -> list[str]:
@@ -358,7 +362,7 @@ class _StatementParser:
             raise GMLTranspileError("Expected while condition")
 
         condition = transpile_gml_condition(
-            _tokens_to_source(condition_tokens),
+            tokens_to_source(condition_tokens),
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -373,7 +377,7 @@ class _StatementParser:
             self.loop_depth -= 1
             self.continue_depth -= 1
         lines = [f"while {condition}:"]
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_repeat_statement(self) -> list[str]:
@@ -383,7 +387,7 @@ class _StatementParser:
             raise GMLTranspileError("Expected repeat count")
 
         count = transpile_gml_expression(
-            _tokens_to_source(count_tokens),
+            tokens_to_source(count_tokens),
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -400,25 +404,25 @@ class _StatementParser:
 
         repeat_index = self._next_generated_name("_gml_repeat_index")
         lines = [f"for {repeat_index} in range(GMRuntime.gml_repeat_count({count})):"]
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_for_statement(self) -> list[str]:
         self._consume_identifier("for")
         self._consume("(")
         header_tokens = self._read_balanced_tokens("(", ")")
-        header_parts = _split_top_level_tokens(header_tokens, ";")
+        header_parts = split_top_level_tokens(header_tokens, ";")
         if len(header_parts) != 3:
             raise GMLTranspileError("Expected for initializer, condition, and operation clauses")
 
-        initializer = _tokens_to_source(header_parts[0])
-        condition_source = _tokens_to_source(header_parts[1])
-        operation = _tokens_to_source(header_parts[2])
+        initializer = tokens_to_source(header_parts[0])
+        condition_source = tokens_to_source(header_parts[1])
+        operation = tokens_to_source(header_parts[2])
 
         lines: list[str] = []
         if initializer:
             lines.extend(
-                _transpile_statement(
+                transpile_statement(
                     initializer,
                     self.local_names,
                     self.declared_local_names,
@@ -449,7 +453,7 @@ class _StatementParser:
             else "true"
         )
         operation_lines = (
-            _transpile_statement(
+            transpile_statement(
                 operation,
                 self.local_names,
                 self.declared_local_names,
@@ -478,11 +482,11 @@ class _StatementParser:
             self.continue_depth -= 1
 
         if operation_lines:
-            body_lines = _insert_lines_before_continue(body_lines, operation_lines)
+            body_lines = insert_lines_before_continue(body_lines, operation_lines)
             body_lines.extend(operation_lines)
 
         lines.append(f"while {condition}:")
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
         return lines
 
     def _parse_do_until_statement(self) -> list[str]:
@@ -502,16 +506,16 @@ class _StatementParser:
             raise GMLTranspileError("Expected until condition")
 
         condition = transpile_gml_condition(
-            _tokens_to_source(condition_tokens),
+            tokens_to_source(condition_tokens),
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             scope_context=self.scope_context,
             macro_values=self.macro_values,
         )
-        body_lines = _insert_until_check_before_continue(body_lines, condition)
+        body_lines = insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
-        lines.extend(_indent_lines(body_lines or ["pass"]))
+        lines.extend(indent_lines(body_lines or ["pass"]))
         lines.append(f"\tif {condition}:")
         lines.append("\t\tbreak")
         return lines
@@ -528,7 +532,7 @@ class _StatementParser:
         switch_control = self._next_generated_name("_gml_switch_control")
         switch_capture = self._switch_control_capture(switch_control)
         expression = transpile_gml_expression(
-            _tokens_to_source(expression_tokens),
+            tokens_to_source(expression_tokens),
             local_names=self.local_names,
             enum_values=self.enum_values,
             enum_names=self.enum_names,
@@ -567,11 +571,11 @@ class _StatementParser:
                 lines.append(f"\t\t{switch_matched} = true")
 
             lines.append(f"\tif {switch_matched}:")
-            lines.extend(_indent_lines(_indent_lines(section_lines or ["pass"])))
+            lines.extend(indent_lines(indent_lines(section_lines or ["pass"])))
         lines.append("\tbreak")
         if switch_capture is not None:
             lines.extend(
-                _control_flow_dispatch_lines(
+                control_flow_dispatch_lines(
                     switch_control,
                     switch_capture,
                     self.control_flow_capture,
@@ -580,7 +584,7 @@ class _StatementParser:
             )
         return lines
 
-    def _switch_control_capture(self, switch_control: str) -> _ControlFlowCapture | None:
+    def _switch_control_capture(self, switch_control: str) -> ControlFlowCapture | None:
         parent_capture = self.control_flow_capture
         capture_return = bool(parent_capture and parent_capture.capture_return)
         capture_exit = bool(parent_capture and parent_capture.capture_exit)
@@ -590,7 +594,7 @@ class _StatementParser:
         )
         if not (capture_return or capture_exit or capture_throw or capture_continue):
             return None
-        return _ControlFlowCapture(
+        return ControlFlowCapture(
             switch_control,
             self.loop_depth + 1,
             self.continue_depth,
@@ -602,7 +606,7 @@ class _StatementParser:
 
     def _parse_switch_sections(
         self,
-        control_flow_capture: _ControlFlowCapture | None,
+        control_flow_capture: ControlFlowCapture | None,
     ) -> list[tuple[str, str | None, list[str]]]:
         self._skip_newlines()
         self._consume("{")
@@ -615,7 +619,7 @@ class _StatementParser:
                 if not label_tokens:
                     raise GMLTranspileError("Expected switch case value")
                 label = transpile_gml_expression(
-                    _tokens_to_source(label_tokens),
+                    tokens_to_source(label_tokens),
                     local_names=self.local_names,
                     enum_values=self.enum_values,
                     enum_names=self.enum_names,
@@ -650,7 +654,7 @@ class _StatementParser:
     def _parse_switch_section_body(
         self,
         body_tokens: list[_Token],
-        control_flow_capture: _ControlFlowCapture | None,
+        control_flow_capture: ControlFlowCapture | None,
     ) -> list[str]:
         parser = _StatementParser(
             body_tokens,
@@ -676,7 +680,7 @@ class _StatementParser:
         self.local_names.update(parser.local_names)
         self.enum_names.update(parser.enum_names)
         self.global_names.update(parser.global_names)
-        self.scope_context = _scope_context_with_global_names(
+        self.scope_context = scope_context_with_global_names(
             self.scope_context,
             self.global_names,
         )
@@ -685,7 +689,7 @@ class _StatementParser:
     def _parse_try_statement(self) -> list[str]:
         self._consume_identifier("try")
         control_name = self._next_generated_name("_gml_try_control")
-        try_capture = _ControlFlowCapture(
+        try_capture = ControlFlowCapture(
             control_name,
             self.loop_depth,
             self.continue_depth,
@@ -732,7 +736,7 @@ class _StatementParser:
         lines = [
             f"var {control_name} = GMRuntime.gml_undefined()",
             "while true:",
-            *_indent_lines(try_lines or ["pass"]),
+            *indent_lines(try_lines or ["pass"]),
             "\tbreak",
         ]
 
@@ -751,7 +755,7 @@ class _StatementParser:
             lines.extend(finally_lines or ["pass"])
 
         lines.extend(
-            _control_flow_dispatch_lines(
+            control_flow_dispatch_lines(
                 control_name,
                 try_capture,
                 parent_capture,
@@ -812,8 +816,8 @@ class _StatementParser:
         statement_tokens = self._read_do_until_statement_tokens()
         if not statement_tokens:
             return []
-        return _transpile_statement(
-            _tokens_to_source(statement_tokens),
+        return transpile_statement(
+            tokens_to_source(statement_tokens),
             self.local_names,
             self.declared_local_names,
             self.instance_variables,
@@ -1039,6 +1043,38 @@ class _StatementParser:
     def _error(self, message: str) -> GMLTranspileError:
         token = self._peek()
         return GMLTranspileError(message, line=token.line, column=token.column)
+
+
+def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
+    parser = _StatementParser(
+        list(request.tokens),
+        local_names=request.local_names,
+        instance_variables=request.instance_variables,
+        return_depth=request.return_depth,
+        enum_values=request.enum_values,
+        enum_names=request.enum_names,
+        scope_context=request.scope_context,
+        inherited_event_call=request.inherited_event_call,
+        macro_values=request.macro_values,
+        macro_priorities=request.macro_priorities,
+        macro_configuration=request.macro_configuration,
+        top_level_global_scope=request.top_level_global_scope,
+        global_names=request.global_names,
+        asset_names=request.asset_names,
+        static_scope_prefix=request.static_scope_prefix,
+        extension_functions=request.extension_functions,
+        extension_function_mappings=request.extension_function_mappings,
+    )
+    lines = parser.parse()
+    return GMLStatementResult(
+        lines=tuple(lines),
+        local_names=frozenset(parser.local_names),
+        instance_variables=parser.instance_variables,
+        scope_context=parser.scope_context,
+        enum_values=parser.enum_values,
+        enum_names=frozenset(parser.enum_names),
+        macro_values=parser.macro_values,
+    )
 
 
 def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:

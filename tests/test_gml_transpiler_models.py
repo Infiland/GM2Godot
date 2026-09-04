@@ -61,6 +61,12 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     Token,
     __all__ as SHARED_MODEL_EXPORTS,
 )
+from src.conversion.gml_transpiler_parts.statement_models import (
+    ControlFlowCapture,
+    GMLStatementRequest,
+    GMLStatementResult,
+    __all__ as STATEMENT_MODEL_EXPORTS,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +122,11 @@ EXPECTED_RESULT_MODEL_EXPORTS = (
     "GMLSourceMapEntry",
     "GMLTranspileResult",
     "SourceDiagnosticSeverity",
+)
+EXPECTED_STATEMENT_MODEL_EXPORTS = (
+    "ControlFlowCapture",
+    "GMLStatementRequest",
+    "GMLStatementResult",
 )
 
 
@@ -338,6 +349,78 @@ class TestGMLTranspilerModels(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             setattr(source_diagnostic, "line", 2)
 
+    def test_constructs_every_statement_model_and_preserves_mutable_channels(self) -> None:
+        token = Token("IDENT", "score", line=2, column=3, index=4)
+        instance_variables = {"existing"}
+        enum_values = {"State": {"IDLE": 0}}
+        macro_values = {"STEP": "2"}
+        macro_priorities = {"STEP": 2}
+        extension_function = GMLExtensionFunction("sdk_call", "SDK", 1, 2)
+        extension_mapping = GMLExtensionFunctionMapping(
+            "sdk_call",
+            "SDKBridge.call",
+            1,
+            2,
+        )
+        scope = ScopeContext(self_expression="owner", other_expression="peer")
+        request = GMLStatementRequest(
+            tokens=(token,),
+            local_names=frozenset({"local"}),
+            instance_variables=instance_variables,
+            return_depth=1,
+            enum_values=enum_values,
+            enum_names=frozenset({"State"}),
+            scope_context=scope,
+            inherited_event_call="super._process(delta)",
+            macro_values=macro_values,
+            macro_priorities=macro_priorities,
+            macro_configuration="Android",
+            top_level_global_scope=True,
+            global_names=frozenset({"global_score"}),
+            asset_names=frozenset({"o_player"}),
+            static_scope_prefix="scr_test.scr_test",
+            extension_functions={"sdk_call": extension_function},
+            extension_function_mappings={"sdk_call": extension_mapping},
+        )
+        capture = ControlFlowCapture(
+            "_gml_control_0",
+            2,
+            1,
+            capture_return=True,
+            capture_exit=True,
+            capture_throw=True,
+            capture_break=True,
+            capture_continue=True,
+        )
+        result = GMLStatementResult(
+            lines=("score = 1",),
+            local_names=frozenset({"local"}),
+            instance_variables=instance_variables,
+            scope_context=scope,
+            enum_values=enum_values,
+            enum_names=frozenset({"State"}),
+            macro_values=macro_values,
+        )
+
+        self.assertEqual(request.tokens, (token,))
+        self.assertIs(request.instance_variables, instance_variables)
+        self.assertIs(request.enum_values, enum_values)
+        self.assertIs(request.macro_values, macro_values)
+        self.assertIs(request.macro_priorities, macro_priorities)
+        self.assertTrue(capture.capture_continue)
+        self.assertEqual(result.lines, ("score = 1",))
+        self.assertIs(result.instance_variables, instance_variables)
+        self.assertIs(result.enum_values, enum_values)
+        self.assertIs(result.macro_values, macro_values)
+        for value, attribute in (
+            (request, "return_depth"),
+            (capture, "loop_depth"),
+            (result, "lines"),
+        ):
+            with self.subTest(model=type(value).__name__):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(value, attribute, None)
+
     def test_supported_facade_and_phase_reexports_preserve_model_identity(self) -> None:
         self.assertIs(gml_transpiler.GMLTranspileError, GMLTranspileError)
         self.assertIs(gml_transpiler.GMLExtensionFunction, GMLExtensionFunction)
@@ -365,11 +448,13 @@ class TestGMLTranspilerModels(unittest.TestCase):
             PARTS_PATH / "shared_models.py": EXPECTED_SHARED_MODEL_EXPORTS,
             PARTS_PATH / "expression_models.py": EXPECTED_EXPRESSION_MODEL_EXPORTS,
             PARTS_PATH / "result_models.py": EXPECTED_RESULT_MODEL_EXPORTS,
+            PARTS_PATH / "statement_models.py": EXPECTED_STATEMENT_MODEL_EXPORTS,
         }
         runtime_exports = {
             PARTS_PATH / "shared_models.py": tuple(SHARED_MODEL_EXPORTS),
             PARTS_PATH / "expression_models.py": tuple(EXPRESSION_MODEL_EXPORTS),
             PARTS_PATH / "result_models.py": tuple(RESULT_MODEL_EXPORTS),
+            PARTS_PATH / "statement_models.py": tuple(STATEMENT_MODEL_EXPORTS),
         }
 
         for path, expected in expected_by_path.items():
@@ -383,6 +468,11 @@ class TestGMLTranspilerModels(unittest.TestCase):
                         and len(node.targets) == 1
                         and isinstance(node.targets[0], ast.Name)
                         and node.targets[0].id == "__all__"
+                    )
+                    or (
+                        isinstance(node, ast.AnnAssign)
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id == "__all__"
                     )
                 ]
                 self.assertEqual(len(all_values), 1)
@@ -406,11 +496,17 @@ class TestGMLTranspilerModels(unittest.TestCase):
             PARTS_PATH / "shared_models.py",
             PARTS_PATH / "expression_models.py",
             PARTS_PATH / "result_models.py",
+            PARTS_PATH / "statement_models.py",
             PARTS_PATH / "model.py",
         )
         allowed_absolute_roots = frozenset({"__future__", "dataclasses", "typing"})
         allowed_relative_modules = frozenset(
-            {"expression_models", "result_models", "shared_models"}
+            {
+                "expression_models",
+                "result_models",
+                "shared_models",
+                "statement_models",
+            }
         )
 
         for path in model_paths:

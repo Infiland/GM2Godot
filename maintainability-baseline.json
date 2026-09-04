@@ -667,7 +667,7 @@
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_existing_release_integrity_rejects_snapshot_mutation": 211,
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_linux_release_build_proves_packaged_xcb_gui": 234,
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_native_workflow_installs_use_fresh_selected_venvs": 597,
-    "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_pip_install_inventory_is_constrained_and_uses_module_entrypoints": 339,
+    "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_pip_install_inventory_is_constrained_and_uses_module_entrypoints": 333,
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_pip_inventory_classifies_continuations_and_rejects_escape_hatches": 311,
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_privileged_dependency_snapshot_validator_matches_producer_contract": 615,
     "tests|function_structure|tests/test_ci_workflows.py::TestCIWorkflows.test_privileged_dependency_snapshot_validator_matches_producer_contract.build_artifacts": 240,
@@ -1065,7 +1065,7 @@
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 2164,
     "tests|module_lines.executable|tests/test_architecture_policy.py::<module>": 1650,
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": 5545,
-    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6702,
+    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6699,
     "tests|module_lines.executable|tests/test_cli.py::<module>": 3611,
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2739,
     "tests|module_lines.executable|tests/test_converter.py::<module>": 1568,
@@ -1088,7 +1088,7 @@
     "tests|module_structure.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 5376,
     "tests|module_structure.executable|tests/test_architecture_policy.py::<module>": 2893,
     "tests|module_structure.executable|tests/test_asset_registry.py::<module>": 9997,
-    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12309,
+    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12303,
     "tests|module_structure.executable|tests/test_cli.py::<module>": 7102,
     "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4414,
     "tests|module_structure.executable|tests/test_converter.py::<module>": 2997,
@@ -1935,9 +1935,9 @@
       "structure": 9997
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {
-      "ast_sha256": "e647750f32c1eb56fb2b414ea7437717e0ae73aecaf1e3679a2b07aa553591aa",
-      "lines": 6699,
-      "structure": 12309
+      "ast_sha256": "ae72cebfc3f0628e27a3e13b0637a0fcf2257e0a2a77155261b728669846c986",
+      "lines": 6689,
+      "structure": 12303
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
       "ast_sha256": "e991b844378838044ab7664612ddaabc84470547844b1299655ca7d0983527d4",

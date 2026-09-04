@@ -19,6 +19,7 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.gamemaker_json import parse_gamemaker_json
 from src.conversion.generated_paths import (
     generated_nested_resource_path,
 )
@@ -43,11 +44,11 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     tokenize_gml_source,
 )
 from src.conversion.gml_transpiler_parts.shared_models import Token
+from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.project_source_paths import (
     is_safe_project_source_component,
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
-    project_gml_source_paths,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
@@ -554,8 +555,7 @@ class ObjectConverter(BaseConverter):
                 with open(yyp_source.filesystem_path, 'r', encoding='utf-8') as f:
                     content = f.read()
 
-                cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-                data = cast(JsonDict, json.loads(cleaned))
+                data = cast(JsonDict, parse_gamemaker_json(content).value)
 
                 asset_names: set[str] = set()
                 for resource in cast(list[JsonDict], data.get('resources', [])):
@@ -953,8 +953,7 @@ class ObjectConverter(BaseConverter):
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            data = cast(JsonDict, parse_gamemaker_json(content).value)
 
             sprite_reference = self._resolve_resource_reference(
                 data.get("spriteId"),

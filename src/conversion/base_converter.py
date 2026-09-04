@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Literal, cast
@@ -13,6 +12,7 @@ from src.conversion.conversion_outcome import (
     ResourceOutcomeTracker,
 )
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.project_manifest import GameMakerProjectManifest
 from src.conversion.project_source_paths import (
@@ -367,11 +367,8 @@ class BaseConverter(ABC):
                 self.gm_project_path,
                 yy_path,
             )
-            with open(resolved.filesystem_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
-            return cast(JsonDict, data) if isinstance(data, dict) else None
+            data = read_gamemaker_json(resolved.filesystem_path).value
+            return data if isinstance(data, dict) else None
         except (
             OSError,
             ProjectSourcePathError,

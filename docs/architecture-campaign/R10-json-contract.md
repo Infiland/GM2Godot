@@ -91,3 +91,38 @@ One isolated R10 implementer; separate semantic reviewer and root actual-code ap
 - Allowed documentation owner for the implementer is this contract. Root owns
   the ledger and contracts.json. Other architecture documentation requires a
   named, bounded approval before editing.
+- N01 owns the shared verification-manifest schema first. R10 records its exact
+  required method inventory in external evidence and runs the direct selection;
+  root adds that inventory to architecture-verification.json as a serialized
+  integration edit after N01. The implementer does not edit that shared manifest.
+
+## Implemented boundary and measured tradeoff
+
+The isolated source base is 4a60e46. The new value, decoder and discovery owners
+measure 95/216, 32/41 and 262/407 physical/structural units respectively. The
+retained resolver measures 320/458. The validator's 36/117 units and nesting 4
+meet the accepted limits. The strict ratchet records only actual reductions,
+including removal of the manifest/resolver cycle; no allowances were added.
+
+Canonical discovery consumes recursive values directly. The three legacy-return
+readers remain visible in their existing owners, and only the two pre-existing
+R19 object casts remain at the migrated object decoding sites. The legacy aliases
+are intentionally unchanged; their R11/R19/R26 removal conditions above apply.
+
+The frozen performance corpus contains 201 metadata files totaling 174,499 bytes
+from the five parity fixtures. Five isolated native process samples, each with
+three complete passes after one warm-up, measured read/decode medians of 14.819 ms
+before and 18.921 ms after (standard deviations 0.284/0.345 ms). The added complete
+recursive validation costs 1.37 ms per corpus pass. Manifest loading plus GML
+discovery measured 196.337/197.153 ms (standard deviations 3.080/0.941 ms), within
+the observed variance. Peak RSS stayed within 0.10 MB for both workloads. This
+measures those scoped operations, not overall conversion speed. Root accepted
+the measured validation cost; no caching or weaker validation was introduced.
+
+External R10 evidence retains input/file hashes, every timing sample, source and
+harness hashes, native peak RSS, the bounded cost profile, and pre-refactor loader
+characterizations. Correctness tests cover quoted-comma behavior, source retention,
+unknown/null/nonfinite values, malformed UTF-8, native decoder recursion errors,
+active cycles versus shared containers, exact key paths and the discovery event
+exception boundary. Immutable complete-conversion parity and native full-suite
+receipts remain separate completion proofs.

@@ -12,7 +12,7 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
 )
 from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
 from src.conversion.project_macros import collect_project_macro_values
-from src.conversion.project_source_paths import project_gml_source_paths
+from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.type_defs import StrPath
 
 

@@ -67,9 +67,9 @@ expression emitter does not own the GameMaker API argument tables.
 `tests/test_gml_transpiler_architecture.py` is the machine-checked migration
 baseline for #794. It records 135 private imported-name edges across 53
 facade/phase module pairs and all 60 production imports from the facade or
-phase package, including the 16 remaining private production names. Every
-entry records its owner and consumer and is classified as the supported public
-facade, an intended package-internal phase API, or a module-private
+phase package, including the 16 remaining private production import edges.
+Every entry records its owner and consumer and is classified as the supported
+public facade, an intended package-internal phase API, or a module-private
 implementation that must move behind its owner.
 
 The same test freezes the 44 supported non-underscore facade exports and their
@@ -82,12 +82,12 @@ private-usage suppressions fail the test.
 The #816 model extraction removed exactly 120 internal private model edges and
 replaced four production private model imports with explicit typed exports.
 The #861 language-metadata slice removed another 74 internal private edges,
-kept all 60 production imports while reducing their private names from 22 to
-16, and reduced private-usage suppressions from 17 to 15. Its sole remaining
-private constants edge is the frozen facade compatibility alias assigned to
-#820. The baseline is a migration allowlist, not a public-API declaration for
-private names. #817 continues the lexical/token boundary, #818 owns expression
-parsing/lowering/emission, #819 the statement phase, and #820 the legacy facade
-shim and final zero-private-edge assertion. Until those ordered children land,
-do not add an exception or expose an underscore name merely to make the
-baseline pass.
+kept all 60 production imports while reducing their private import edges from
+22 to 16, and reduced private-usage suppressions from 17 to 15. Its sole
+remaining private constants edge is the frozen facade compatibility alias
+assigned to #820. The baseline is a migration allowlist, not a public-API
+declaration for private names. #817 continues the lexical/token boundary, #818
+owns expression parsing/lowering/emission, #819 the statement phase, and #820
+the legacy facade shim and final zero-private-edge assertion. Until those
+ordered children land, do not add an exception or expose an underscore name
+merely to make the baseline pass.

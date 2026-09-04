@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import os
@@ -16,9 +15,11 @@ from src.conversion.gml_transpiler_parts.asset_lowering import (
     asset_argument_indices,
     first_argument_is_script_asset,
 )
-from src.conversion.gml_transpiler_parts.emitter import _emit_expression
+from src.conversion.gml_transpiler_parts.expression_api import (
+    emit_gml_expression,
+    parse_gml_expression,
+)
 from src.conversion.gml_transpiler_parts.expression_models import Binary
-from src.conversion.gml_transpiler_parts.expression_parser import _parse_gml_expression
 from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
     get_gml_function_descriptor,
     validate_gml_function_arity,
@@ -285,15 +286,15 @@ class TestGMLPipelineBoundaries(unittest.TestCase):
         self.assertIn("asset_lowering", content)
 
     def test_parser_semantic_and_emitter_modules_remain_independent(self) -> None:
-        expression = _parse_gml_expression("1 + score")
+        expression = parse_gml_expression("1 + score")
         self.assertIsInstance(expression, Binary)
 
-        emitted, _precedence = _emit_expression(
+        emission = emit_gml_expression(
             expression,
             {"score"},
             scope_context=ScopeContext(),
         )
-        self.assertEqual(emitted, "GMRuntime.gml_add(1, score)")
+        self.assertEqual(emission.text, "GMRuntime.gml_add(1, score)")
 
         descriptor = get_gml_function_descriptor("draw_sprite")
         self.assertIsNotNone(descriptor)

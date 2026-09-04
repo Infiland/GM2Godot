@@ -14,6 +14,7 @@ from .expression_models import (
     Expression as _Expression,
     FunctionLiteral as _FunctionLiteral,
     Grouped as _Grouped,
+    GMLExpression,
     Index as _Index,
     Member as _Member,
     NewCall as _NewCall,
@@ -30,7 +31,9 @@ from .shared_models import (
     GMLTranspileError,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
+    ScopeContext,
     ScopeContext as _ScopeContext,
+    Token,
     Token as _Token,
 )
 from .tokens import read_template_string
@@ -48,13 +51,27 @@ def _normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
     return frozenset(local_names or [])
 
 
+def normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
+    return _normalize_local_names(local_names)
+
+
 def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
+
+
+def tokens_to_source(tokens: Iterable[Token]) -> str:
+    return _tokens_to_source(tokens)
+
 
 def _unwrap_grouped_expression(expr: _Expression) -> _Expression:
     while isinstance(expr, _Grouped):
         expr = expr.expr
     return expr
+
+
+def unwrap_grouped_expression(expr: GMLExpression) -> GMLExpression:
+    return _unwrap_grouped_expression(expr)
+
 
 def _split_top_level_tokens(tokens: Iterable[_Token], separator: str) -> list[list[_Token]]:
     parts: list[list[_Token]] = [[]]
@@ -189,6 +206,10 @@ def _normalize_scope_context(scope_context: _ScopeContext | None) -> _ScopeConte
     return scope_context if scope_context is not None else _DEFAULT_SCOPE_CONTEXT
 
 
+def normalize_scope_context(scope_context: ScopeContext | None) -> ScopeContext:
+    return _normalize_scope_context(scope_context)
+
+
 def _scope_context_with_global_names(
     scope_context: _ScopeContext,
     global_names: Iterable[str] | None,
@@ -220,6 +241,26 @@ def _scope_context_with_global_names(
         static_prefix=scope_context.static_prefix if static_prefix is None else static_prefix,
         extension_functions=extensions,
         extension_function_mappings=extension_mappings,
+    )
+
+
+def scope_context_with_global_names(
+    scope_context: ScopeContext,
+    global_names: Iterable[str] | None,
+    top_level_global_scope: bool | None = None,
+    asset_names: Iterable[str] | None = None,
+    static_prefix: str | None = None,
+    extension_functions: Mapping[str, GMLExtensionFunction] | None = None,
+    extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
+) -> ScopeContext:
+    return _scope_context_with_global_names(
+        scope_context,
+        global_names,
+        top_level_global_scope=top_level_global_scope,
+        asset_names=asset_names,
+        static_prefix=static_prefix,
+        extension_functions=extension_functions,
+        extension_function_mappings=extension_function_mappings,
     )
 
 
@@ -289,6 +330,10 @@ def _strip_comments(source: str) -> str:
         index += 1
 
     return "".join(result)
+
+
+def strip_comments(source: str) -> str:
+    return _strip_comments(source)
 
 
 def _join_macro_continuation_lines(source: str) -> str:

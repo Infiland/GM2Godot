@@ -1,10 +1,10 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 from typing import Iterable, Mapping
 
 from .constants import GML_BUILTIN_CONSTANT_IDENTIFIERS, READ_ONLY_BUILTIN_VARIABLES
-from .expression_parser import _parse_gml_expression
+from .expression_parser import parse_gml_expression as _parse_gml_expression
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     Binary as _Binary,
@@ -13,6 +13,7 @@ from .expression_models import (
     DSMapAccess as _DSMapAccess,
     EnumMember as _EnumMember,
     Expression as _Expression,
+    GMLExpression,
     Grouped as _Grouped,
     Index as _Index,
     Member as _Member,
@@ -27,9 +28,14 @@ from .expression_models import (
 from .lexical_api import tokenize_gml_expression
 from .shared_models import (
     GMLTranspileError,
+    Token,
     Token as _Token,
 )
-from .utils import _normalize_local_names, _tokens_to_source, _unwrap_grouped_expression
+from .utils import (
+    normalize_local_names as _normalize_local_names,
+    tokens_to_source as _tokens_to_source,
+    unwrap_grouped_expression as _unwrap_grouped_expression,
+)
 
 def _evaluate_enum_value_tokens(
     tokens: Iterable[_Token],
@@ -287,3 +293,52 @@ def _target_chain_starts_with_enum(expr: _Expression, enum_names: Iterable[str])
             enum_names,
         )
     return False
+
+
+def evaluate_enum_value_tokens(
+    tokens: Iterable[Token],
+    enum_values: Mapping[str, Mapping[str, int]],
+    current_enum_values: Mapping[str, int],
+    macro_values: Mapping[str, str] | None = None,
+) -> int:
+    return _evaluate_enum_value_tokens(
+        tokens,
+        enum_values,
+        current_enum_values,
+        macro_values=macro_values,
+    )
+
+
+def reject_constant_assignment_target_name(
+    target_source: str,
+    macro_names: Iterable[str],
+) -> None:
+    _reject_constant_assignment_target_name(target_source, macro_names)
+
+
+def reject_constant_declaration_name(
+    name: str,
+    macro_names: Iterable[str],
+) -> None:
+    _reject_constant_declaration_name(name, macro_names)
+
+
+def reject_enum_assignment_target(
+    target_expr: GMLExpression,
+    enum_names: Iterable[str] | None,
+) -> None:
+    _reject_enum_assignment_target(target_expr, enum_names)
+
+
+def reject_enum_mutation_expression(
+    expr: GMLExpression,
+    enum_names: Iterable[str] | None,
+) -> None:
+    _reject_enum_mutation_expression(expr, enum_names)
+
+
+def reject_readonly_builtin_assignment_target(
+    target_expr: GMLExpression,
+    local_names: Iterable[str],
+) -> None:
+    _reject_readonly_builtin_assignment_target(target_expr, local_names)

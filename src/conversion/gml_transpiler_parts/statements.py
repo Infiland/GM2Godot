@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet
+from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet, TypeGuard
 
 from .constants import (
     BUILTIN_ARRAY_VARIABLES,
@@ -12,22 +12,19 @@ from .constants import (
     COMPOUND_RUNTIME_FUNCTIONS,
     GML_LITERAL_IDENTIFIERS,
 )
-from .emitter import (
-    _is_alarm_array_access,
-    _emit_expression,
-    _emit_instance_keyword_argument,
-    _name_resolves_to_global,
-    _uses_direct_builtin_instance_members,
-    _uses_direct_member_access,
+from .expression_api import (
+    emit_gml_expression,
+    emit_instance_keyword_argument,
+    name_resolves_to_global,
+    parse_gml_expression,
+    reject_constant_assignment_target_name,
+    reject_constant_declaration_name,
+    reject_enum_assignment_target,
+    reject_readonly_builtin_assignment_target,
+    transpile_gml_expression,
+    uses_direct_builtin_instance_members,
+    uses_direct_member_access,
 )
-from .enum_helpers import (
-    _reject_constant_assignment_target_name,
-    _reject_constant_declaration_name,
-    _reject_enum_assignment_target,
-    _reject_readonly_builtin_assignment_target,
-)
-from .expression_parser import _parse_gml_expression
-from .expression_service import transpile_gml_expression
 from .lexical_api import (
     is_plain_identifier,
     reject_asset_identifier_name,
@@ -67,16 +64,29 @@ from .utils import (
 _MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
 
 
+def _is_alarm_array_access(
+    expr: _Expression,
+    local_names: Iterable[str] | None,
+) -> TypeGuard[_Index]:
+    local_name_set = frozenset(local_names or ())
+    return (
+        isinstance(expr, _Index)
+        and isinstance(expr.target, _Name)
+        and expr.target.value == "alarm"
+        and expr.target.value not in local_name_set
+    )
+
+
 def _alarm_array_index(
     target_expr: _Index,
     local_names: Iterable[str],
     scope_context: _ScopeContext,
 ) -> str:
-    return _emit_expression(
+    return emit_gml_expression(
         target_expr.index,
         local_names,
         scope_context=scope_context,
-    )[0]
+    ).text
 
 
 def _alarm_array_get(scope_context: _ScopeContext, index: str) -> str:
@@ -232,16 +242,16 @@ def _transpile_statement(
 
     if statement.startswith("delete "):
         target_source = statement[7:].strip()
-        _reject_constant_assignment_target_name(target_source, macro_values.keys())
-        target_expr = _parse_gml_expression(
+        reject_constant_assignment_target_name(target_source, macro_values.keys())
+        target_expr = parse_gml_expression(
             target_source,
             enum_values,
             enum_names,
             macro_values=macro_values,
             scope_context=scope_context,
         )
-        _reject_enum_assignment_target(target_expr, enum_names)
-        _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        reject_enum_assignment_target(target_expr, enum_names)
+        reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
@@ -283,7 +293,7 @@ def _transpile_statement(
                 "GMRuntime.gml_variable_instance_set("
                 f"{instance_target}, {member_name}, GMRuntime.gml_undefined())"
             ]
-        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
+        target = emit_gml_expression(target_expr, local_names, scope_context=scope_context).text
         return [f"{target} = GMRuntime.gml_undefined()"]
 
     if statement.startswith("var "):
@@ -303,18 +313,18 @@ def _transpile_statement(
     if increment is not None:
         target, delta = increment
         helper = "gml_add" if delta > 0 else "gml_sub"
-        _reject_constant_assignment_target_name(target, macro_values.keys())
-        target_expr = _parse_gml_expression(
+        reject_constant_assignment_target_name(target, macro_values.keys())
+        target_expr = parse_gml_expression(
             target,
             enum_values,
             enum_names,
             macro_values=macro_values,
             scope_context=scope_context,
         )
-        _reject_enum_assignment_target(target_expr, enum_names)
+        reject_enum_assignment_target(target_expr, enum_names)
         if not _is_increment_target_expression(target_expr):
             raise GMLTranspileError("Increment target must be assignable")
-        _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
@@ -416,16 +426,16 @@ def _transpile_statement(
                 f"func({current_value}): return GMRuntime.{helper}({current_value}, 1))",
             ]
         if isinstance(target_expr, _Index):
-            container = _emit_expression(
+            container = emit_gml_expression(
                 target_expr.target,
                 local_names,
                 scope_context=scope_context,
-            )[0]
-            index = _emit_expression(
+            ).text
+            index = emit_gml_expression(
                 target_expr.index,
                 local_names,
                 scope_context=scope_context,
-            )[0]
+            ).text
             prelude_lines: list[str] = []
             container = _cache_assignment_part(
                 prelude_lines,
@@ -448,16 +458,16 @@ def _transpile_statement(
                 f"GMRuntime.{helper}({current_value}, 1))",
             ]
         if isinstance(target_expr, _ArrayRefAccess):
-            container = _emit_expression(
+            container = emit_gml_expression(
                 target_expr.target,
                 local_names,
                 scope_context=scope_context,
-            )[0]
-            index = _emit_expression(
+            ).text
+            index = emit_gml_expression(
                 target_expr.index,
                 local_names,
                 scope_context=scope_context,
-            )[0]
+            ).text
             prelude_lines: list[str] = []
             container = _cache_assignment_part(
                 prelude_lines,
@@ -610,7 +620,7 @@ def _transpile_statement(
                 f"GMRuntime.gml_ds_grid_set({container}, {x_index}, {y_index}, "
                 f"GMRuntime.{helper}({current_value}, 1))"
             ]
-        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
+        target = emit_gml_expression(target_expr, local_names, scope_context=scope_context).text
         return [f"{target} = GMRuntime.{helper}({target}, 1)"]
 
     assignment = _split_assignment(statement)
@@ -644,7 +654,7 @@ def _transpile_statement(
         increment_value = _parse_increment_expression(value)
         if operator in ("=", ":=") and increment_value is not None:
             increment_target, increment_delta, increment_mode = increment_value
-            increment_expr = _parse_gml_expression(
+            increment_expr = parse_gml_expression(
                 increment_target,
                 enum_values,
                 enum_names,
@@ -653,11 +663,11 @@ def _transpile_statement(
             )
             if not _is_increment_target_expression(increment_expr):
                 raise GMLTranspileError("Increment expression target must be assignable")
-            increment_value_text = _emit_expression(
+            increment_value_text = emit_gml_expression(
                 increment_expr,
                 local_names,
                 scope_context=scope_context,
-            )[0]
+            ).text
             prelude_lines: list[str] = []
             assigned_value = increment_value_text
             if increment_mode == "postfix":
@@ -701,16 +711,16 @@ def _transpile_statement(
                 *increment_lines,
                 *assignment_lines,
             ]
-        _reject_constant_assignment_target_name(target, macro_values.keys())
-        target_expr = _parse_gml_expression(
+        reject_constant_assignment_target_name(target, macro_values.keys())
+        target_expr = parse_gml_expression(
             target,
             enum_values,
             enum_names,
             macro_values=macro_values,
             scope_context=scope_context,
         )
-        _reject_enum_assignment_target(target_expr, enum_names)
-        _reject_readonly_builtin_assignment_target(target_expr, local_names)
+        reject_enum_assignment_target(target_expr, enum_names)
+        reject_readonly_builtin_assignment_target(target_expr, local_names)
         if isinstance(target_expr, _Name):
             reject_asset_identifier_name(target_expr.value, scope_context)
         static_target = _static_scope_assignment_parts(target_expr, scope_context)
@@ -911,18 +921,18 @@ def _transpile_statement(
         )
         if array_writeback_lines is not None:
             return array_writeback_lines
-        target = _emit_expression(target_expr, local_names, scope_context=scope_context)[0]
+        target = emit_gml_expression(target_expr, local_names, scope_context=scope_context).text
         if isinstance(target_expr, _Index):
-            container = _emit_expression(
+            container = emit_gml_expression(
                 target_expr.target,
                 local_names,
                 scope_context=scope_context,
-            )[0]
-            index = _emit_expression(
+            ).text
+            index = emit_gml_expression(
                 target_expr.index,
                 local_names,
                 scope_context=scope_context,
-            )[0]
+            ).text
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             container = _cache_assignment_part(
@@ -956,16 +966,16 @@ def _transpile_statement(
                     f"GMRuntime.{helper}({current_value}, {value}))"
                 ]
         if isinstance(target_expr, _ArrayRefAccess):
-            container = _emit_expression(
+            container = emit_gml_expression(
                 target_expr.target,
                 local_names,
                 scope_context=scope_context,
-            )[0]
-            index = _emit_expression(
+            ).text
+            index = emit_gml_expression(
                 target_expr.index,
                 local_names,
                 scope_context=scope_context,
-            )[0]
+            ).text
             if operator in ("=", ":="):
                 return [*prelude_lines, f"GMRuntime.gml_array_set({container}, {index}, {value})"]
             container = _cache_assignment_part(
@@ -1273,43 +1283,43 @@ def _delete_target_lines(
     scope_context: _ScopeContext,
 ) -> list[str] | None:
     if isinstance(target_expr, _Member):
-        target = _emit_expression(
+        target = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return [f"GMRuntime.gml_struct_remove({target}, {json.dumps(target_expr.member)})"]
     if isinstance(target_expr, _StructAccess):
-        target = _emit_expression(
+        target = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        key = _emit_expression(target_expr.key, local_names, scope_context=scope_context)[0]
+        ).text
+        key = emit_gml_expression(target_expr.key, local_names, scope_context=scope_context).text
         return [f"GMRuntime.gml_struct_remove({target}, {key})"]
     if isinstance(target_expr, _Index | _ArrayRefAccess):
-        target = _emit_expression(
+        target = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(target_expr.index, local_names, scope_context=scope_context)[0]
+        ).text
+        index = emit_gml_expression(target_expr.index, local_names, scope_context=scope_context).text
         return [f"GMRuntime.gml_array_delete({target}, {index}, 1)"]
     if isinstance(target_expr, _DSMapAccess):
-        target = _emit_expression(
+        target = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        key = _emit_expression(target_expr.key, local_names, scope_context=scope_context)[0]
+        ).text
+        key = emit_gml_expression(target_expr.key, local_names, scope_context=scope_context).text
         return [f"GMRuntime.gml_ds_map_delete({target}, {key})"]
     if isinstance(target_expr, _DSListAccess):
-        target = _emit_expression(
+        target = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(target_expr.index, local_names, scope_context=scope_context)[0]
+        ).text
+        index = emit_gml_expression(target_expr.index, local_names, scope_context=scope_context).text
         return [f"GMRuntime.gml_ds_list_delete({target}, {index})"]
     if isinstance(target_expr, _DSGridAccess):
         raise GMLTranspileError("delete does not support DS grid accessors")
@@ -1409,7 +1419,7 @@ def _transpile_event_inherited_statement(
     if not statement.strip().startswith("event_inherited"):
         return None
 
-    expr = _parse_gml_expression(statement)
+    expr = parse_gml_expression(statement)
     expr = _unwrap_grouped_expression(expr)
     if not (
         isinstance(expr, _Call)
@@ -1433,26 +1443,26 @@ def _struct_assignment_parts(
 ) -> tuple[str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _StructAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        key = _emit_expression(
+        ).text
+        key = emit_gml_expression(
             target_expr.key,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, key
-    if isinstance(target_expr, _Member) and not _uses_direct_member_access(
+    if isinstance(target_expr, _Member) and not uses_direct_member_access(
         target_expr,
         scope_context=scope_context,
     ):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, json.dumps(target_expr.member)
     return None
 
@@ -1464,16 +1474,16 @@ def _ds_map_assignment_parts(
 ) -> tuple[str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSMapAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        key = _emit_expression(
+        ).text
+        key = emit_gml_expression(
             target_expr.key,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, key
     return None
 
@@ -1485,16 +1495,16 @@ def _ds_list_assignment_parts(
 ) -> tuple[str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSListAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(
+        ).text
+        index = emit_gml_expression(
             target_expr.index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, index
     return None
 
@@ -1506,16 +1516,16 @@ def _array_ref_assignment_parts(
 ) -> tuple[str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _ArrayRefAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(
+        ).text
+        index = emit_gml_expression(
             target_expr.index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, index
     return None
 
@@ -1527,21 +1537,21 @@ def _ds_grid_assignment_parts(
 ) -> tuple[str, str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(target_expr, _DSGridAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        x_index = _emit_expression(
+        ).text
+        x_index = emit_gml_expression(
             target_expr.x_index,
             local_names,
             scope_context=scope_context,
-        )[0]
-        y_index = _emit_expression(
+        ).text
+        y_index = emit_gml_expression(
             target_expr.y_index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return container, x_index, y_index
     return None
 
@@ -1564,7 +1574,7 @@ def _scoped_instance_assignment_parts(
         or name in BUILTIN_GLOBAL_VARIABLES
         or (
             name in BUILTIN_INSTANCE_VARIABLES
-            and _uses_direct_builtin_instance_members(scope_context)
+            and uses_direct_builtin_instance_members(scope_context)
         )
         or not is_plain_identifier(name)
     ):
@@ -1591,7 +1601,7 @@ def _dynamic_instance_assignment_parts(
         or name in BUILTIN_GLOBAL_VARIABLES
         or (
             name in BUILTIN_INSTANCE_VARIABLES
-            and _uses_direct_builtin_instance_members(scope_context)
+            and uses_direct_builtin_instance_members(scope_context)
         )
         or not is_plain_identifier(name)
     ):
@@ -1673,7 +1683,7 @@ def _global_scope_assignment_parts(
     name = target_expr.value
     if name in BUILTIN_GLOBAL_VARIABLES and name not in local_names:
         return "GMRuntime.gml_global_scope()", json.dumps(name)
-    if not _name_resolves_to_global(name, local_names, scope_context):
+    if not name_resolves_to_global(name, local_names, scope_context):
         return None
     return "GMRuntime.gml_global_scope()", json.dumps(name)
 
@@ -1731,7 +1741,7 @@ def _transpile_var_statement(
             name = declaration.strip()
             validate_gml_identifier(name)
             reject_asset_identifier_name(name, scope_context)
-            _reject_constant_declaration_name(name, macro_values.keys())
+            reject_constant_declaration_name(name, macro_values.keys())
             if name in enum_name_set:
                 raise GMLTranspileError("Cannot redeclare enum")
             declaration_prefix = "" if name in declared_local_names else "var "
@@ -1745,7 +1755,7 @@ def _transpile_var_statement(
         name = name.strip()
         validate_gml_identifier(name)
         reject_asset_identifier_name(name, scope_context)
-        _reject_constant_declaration_name(name, macro_values.keys())
+        reject_constant_declaration_name(name, macro_values.keys())
         if name in enum_name_set:
             raise GMLTranspileError("Cannot redeclare enum")
         nested_assignment = _split_assignment(value)
@@ -2110,8 +2120,8 @@ def _parse_assignment_target(
 ) -> _Expression:
     scope_context = _normalize_scope_context(scope_context)
     macro_values = macro_values or {}
-    _reject_constant_assignment_target_name(target, macro_values.keys())
-    target_expr = _parse_gml_expression(
+    reject_constant_assignment_target_name(target, macro_values.keys())
+    target_expr = parse_gml_expression(
         target,
         enum_values,
         enum_names,
@@ -2119,8 +2129,8 @@ def _parse_assignment_target(
         scope_context=scope_context,
     )
     target_expr = _unwrap_grouped_expression(target_expr)
-    _reject_enum_assignment_target(target_expr, enum_names)
-    _reject_readonly_builtin_assignment_target(target_expr, local_names)
+    reject_enum_assignment_target(target_expr, enum_names)
+    reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
         reject_asset_identifier_name(target_expr.value, scope_context)
     return target_expr
@@ -2206,16 +2216,16 @@ def _assignment_target_reader_writer(
 
     _record_instance_assignment(target_source, local_names, instance_variables)
     if isinstance(target_expr, _Index | _ArrayRefAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(
+        ).text
+        index = emit_gml_expression(
             target_expr.index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         container = _cache_assignment_part(
             prelude_lines,
             target_expr.target,
@@ -2382,13 +2392,13 @@ def _assignment_target_reader_writer(
 
     if isinstance(target_expr, _Name) or (
         isinstance(target_expr, _Member)
-        and _uses_direct_member_access(target_expr, scope_context=scope_context)
+        and uses_direct_member_access(target_expr, scope_context=scope_context)
     ):
-        emitted_target = _emit_expression(
+        emitted_target = emit_gml_expression(
             target_expr,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return emitted_target, lambda value: [f"{emitted_target} = {value}"]
 
     raise GMLTranspileError("Assignment target must be assignable")
@@ -2419,11 +2429,11 @@ def _member_backed_array_assignment_lines(
         generated_counter,
         prelude_lines,
     )
-    index = _emit_expression(
+    index = emit_gml_expression(
         target_expr.index,
         local_names,
         scope_context=scope_context,
-    )[0]
+    ).text
     index = _cache_assignment_part(
         prelude_lines,
         target_expr.index,
@@ -2615,16 +2625,16 @@ def _transpile_assignment_to_emitted_value(
     scope_context = _normalize_scope_context(scope_context)
     macro_values = macro_values or {}
     generated_counter = generated_counter if generated_counter is not None else [0]
-    _reject_constant_assignment_target_name(target, macro_values.keys())
-    target_expr = _parse_gml_expression(
+    reject_constant_assignment_target_name(target, macro_values.keys())
+    target_expr = parse_gml_expression(
         target,
         enum_values,
         enum_names,
         macro_values=macro_values,
         scope_context=scope_context,
     )
-    _reject_enum_assignment_target(target_expr, enum_names)
-    _reject_readonly_builtin_assignment_target(target_expr, local_names)
+    reject_enum_assignment_target(target_expr, enum_names)
+    reject_readonly_builtin_assignment_target(target_expr, local_names)
     if isinstance(target_expr, _Name):
         reject_asset_identifier_name(target_expr.value, scope_context)
     static_target = _static_scope_assignment_parts(target_expr, scope_context)
@@ -2683,28 +2693,28 @@ def _transpile_assignment_to_emitted_value(
     if array_writeback_lines is not None:
         return array_writeback_lines
     if isinstance(target_expr, _Index):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(
+        ).text
+        index = emit_gml_expression(
             target_expr.index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
     if isinstance(target_expr, _ArrayRefAccess):
-        container = _emit_expression(
+        container = emit_gml_expression(
             target_expr.target,
             local_names,
             scope_context=scope_context,
-        )[0]
-        index = _emit_expression(
+        ).text
+        index = emit_gml_expression(
             target_expr.index,
             local_names,
             scope_context=scope_context,
-        )[0]
+        ).text
         return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
     ds_map_target = _ds_map_assignment_parts(
         target_expr,
@@ -2746,11 +2756,11 @@ def _transpile_assignment_to_emitted_value(
     if struct_target is not None:
         container, key = struct_target
         return [f"GMRuntime.gml_struct_set({container}, {key}, {value})"]
-    emitted_target = _emit_expression(
+    emitted_target = emit_gml_expression(
         target_expr,
         local_names,
         scope_context=scope_context,
-    )[0]
+    ).text
     return [f"{emitted_target} = {value}"]
 
 
@@ -2760,12 +2770,12 @@ def _selector_assignment_parts(
     scope_context: _ScopeContext | None = None,
 ) -> tuple[str, str] | None:
     scope_context = _normalize_scope_context(scope_context)
-    if not isinstance(target_expr, _Member) or _uses_direct_member_access(
+    if not isinstance(target_expr, _Member) or uses_direct_member_access(
         target_expr,
         scope_context=scope_context,
     ):
         return None
-    container = _emit_instance_keyword_argument(
+    container = emit_instance_keyword_argument(
         target_expr.target,
         local_names,
         scope_context=scope_context,

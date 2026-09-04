@@ -38,8 +38,9 @@ The dependency-only typed model layer has three explicit owners:
 - `gml_transpiler_parts.shared_models` owns tokens, scope context, static
   declarations, assignment/increment aliases, extension-function metadata, and
   `GMLTranspileError`.
-- `gml_transpiler_parts.expression_models` owns every expression AST node and
-  the complete `Expression` union.
+- `gml_transpiler_parts.expression_models` owns every expression AST node, the
+  complete `Expression` union and its `GMLExpression` alias, and the frozen
+  `GMLExpressionEmission` text/precedence result.
 - `gml_transpiler_parts.result_models` owns preprocessing diagnostics/results,
   source diagnostics/maps, and transpile results.
 
@@ -60,6 +61,18 @@ needed by `preprocessor`. Cursor loops, numeric and character readers, delimiter
 mechanics, directive matching, newline-search helpers, and template-expression
 internals remain module-private.
 
+`gml_transpiler_parts.expression_api` is the typed package-internal entry point
+for the expression phase. Its exact 17-operation surface covers expression
+parsing, normal and truthiness-aware emission, instance-keyword lowering,
+constructor/static initialization, enum and constant validation, and the
+direct-member/name-resolution queries consumed by higher phases. Cross-phase
+emission returns `expression_models.GMLExpressionEmission`; the recursive
+emitter keeps its tuple implementation private. Higher-level statement,
+script, project-enum, and API consumers import through `expression_api`, while
+the cycle-safe expression owner cohort imports exact public owner definitions
+directly. Parser cursors, recursive parse/emission helpers, enum evaluator
+mechanics, alarm-array recognition, and multiline formatting remain private.
+
 The GML transpiler has three explicit phase families:
 
 - Parser phase: `gml_transpiler_parts.tokens`,
@@ -78,19 +91,19 @@ expression emitter does not own the GameMaker API argument tables.
 ### Frozen transpiler boundary baseline
 
 `tests/test_gml_transpiler_architecture.py` is the machine-checked migration
-baseline for #794. It records 96 private imported-name edges across 32
+baseline for #794. It records 60 private imported-name edges across 14
 facade/phase module pairs and all 60 production imports from the facade or
-phase package, including the 7 remaining private production import edges.
+phase package, including the 4 remaining private production import edges.
 Every entry records its owner and consumer and is classified as the supported
 public facade, an intended package-internal phase API, or a module-private
 implementation that must move behind its owner.
 
 The same test freezes the 44 supported non-underscore facade exports and their
 signatures separately from the 30 underscore-prefixed legacy exports. It also
-permits exactly the current 11 phase-package `reportPrivateUsage=false`
+permits exactly the current 7 phase-package `reportPrivateUsage=false`
 directives plus the facade directive. New, missing, or unclassified imports,
-new private facade exports, signature drift, lexical-owner bypasses, and added
-or broadened private-usage suppressions fail the test.
+new private facade exports, signature drift, lexical- or expression-owner
+bypasses, and added or broadened private-usage suppressions fail the test.
 
 The #816 model extraction removed exactly 120 internal private model edges and
 replaced four production private model imports with explicit typed exports.
@@ -102,9 +115,13 @@ assigned to #820. The #862 lexical slice removed another 39 internal private
 edges and 21 private owner/consumer pairs, routed the higher-level lexical
 consumers through the exact typed facade, kept all 60 production imports while
 reducing private production import edges from 16 to 7, and reduced tracked
-suppressions from 15 to 12. The baseline is a migration allowlist, not a
-public-API declaration for private names. #818 owns expression
-parsing/lowering/emission, #819 the statement phase, and #820 the legacy facade
-shim and final zero-private-edge assertion. Until those ordered children land,
-do not add an exception or expose an underscore name merely to make the
-baseline pass.
+suppressions from 15 to 12. The #818 expression slice removed 36 internal
+private edges and 18 private owner/consumer pairs, replaced three private
+production imports without changing the 60-import total, and reduced tracked
+suppressions from 12 to 8. It routes higher phases through the exact typed
+expression facade while preserving one canonical AST representation and
+private recursive parser/emitter mechanics. The baseline is a migration
+allowlist, not a public-API declaration for private names. #819 owns the
+statement phase and #820 the legacy facade shim and final zero-private-edge
+assertion. Until those ordered children land, do not add an exception or
+expose an underscore name merely to make the baseline pass.

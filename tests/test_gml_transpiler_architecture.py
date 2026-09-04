@@ -11,6 +11,7 @@ import unittest
 
 import src.conversion.gml_transpiler as gml_transpiler
 from src.conversion.gml_transpiler_parts import constants as language_metadata
+from src.conversion.gml_transpiler_parts import expression_api as expression_phase_api
 from src.conversion.gml_transpiler_parts import lexical_api as lexical_phase_api
 
 
@@ -41,6 +42,128 @@ LOW_LEVEL_LEXICAL_IMPORTS_BY_CONSUMER = {
             (f"{PARTS_PACKAGE}.tokens", "read_template_string"),
         }
     )
+}
+EXPRESSION_API_MODULE = f"{PARTS_PACKAGE}.expression_api"
+EXPRESSION_IMPLEMENTATION_MODULES = frozenset(
+    {
+        f"{PARTS_PACKAGE}.emitter",
+        f"{PARTS_PACKAGE}.enum_helpers",
+        f"{PARTS_PACKAGE}.expression_parser",
+        f"{PARTS_PACKAGE}.expression_service",
+        f"{PARTS_PACKAGE}.function_helpers",
+    }
+)
+EXPRESSION_UTILITY_MODULE = f"{PARTS_PACKAGE}.utils"
+EXPRESSION_UTILITY_NAMES = frozenset(
+    {
+        "normalize_local_names",
+        "normalize_scope_context",
+        "scope_context_with_global_names",
+        "strip_comments",
+        "tokens_to_source",
+        "unwrap_grouped_expression",
+    }
+)
+LEGACY_EXPRESSION_FACADE_NAMES = frozenset(
+    {
+        "_ArrayLiteral",
+        "_Binary",
+        "_Call",
+        "_DSMapAccess",
+        "_Expression",
+        "_ExpressionParser",
+        "_FunctionLiteral",
+        "_FunctionParameter",
+        "_Grouped",
+        "_Index",
+        "_Literal",
+        "_Member",
+        "_Name",
+        "_NameOf",
+        "_NewCall",
+        "_NumberLiteral",
+        "_ScopeContext",
+        "_StaticDeclaration",
+        "_StringLiteral",
+        "_StructAccess",
+        "_StructLiteral",
+        "_TemplateStringLiteral",
+        "_Ternary",
+        "_Token",
+        "_Unary",
+        "_parse_gml_expression",
+    }
+)
+EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER = {
+    FACADE_MODULE: frozenset(
+        {
+            (f"{PARTS_PACKAGE}.expression_parser", "_ExpressionParser"),
+            (f"{PARTS_PACKAGE}.expression_parser", "_parse_gml_expression"),
+            (f"{PARTS_PACKAGE}.expression_service", "transpile_gml_condition"),
+            (f"{PARTS_PACKAGE}.expression_service", "transpile_gml_expression"),
+        }
+    ),
+    EXPRESSION_API_MODULE: frozenset(
+        {
+            (f"{PARTS_PACKAGE}.emitter", "emit_gml_expression"),
+            (f"{PARTS_PACKAGE}.emitter", "emit_gml_truthy_expression"),
+            (f"{PARTS_PACKAGE}.emitter", "emit_instance_keyword_argument"),
+            (f"{PARTS_PACKAGE}.emitter", "name_resolves_to_global"),
+            (f"{PARTS_PACKAGE}.emitter", "uses_direct_builtin_instance_members"),
+            (f"{PARTS_PACKAGE}.emitter", "uses_direct_member_access"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "evaluate_enum_value_tokens"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_constant_assignment_target_name"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_constant_declaration_name"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_enum_assignment_target"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_enum_mutation_expression"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_readonly_builtin_assignment_target"),
+            (f"{PARTS_PACKAGE}.expression_parser", "parse_gml_expression"),
+            (f"{PARTS_PACKAGE}.expression_service", "transpile_gml_condition"),
+            (f"{PARTS_PACKAGE}.expression_service", "transpile_gml_expression"),
+            (f"{PARTS_PACKAGE}.function_helpers", "emit_constructor_inheritance_line"),
+            (f"{PARTS_PACKAGE}.function_helpers", "emit_static_initialization_lines"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.emitter": frozenset(
+        {
+            (EXPRESSION_UTILITY_MODULE, "normalize_local_names"),
+            (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "unwrap_grouped_expression"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.enum_helpers": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.expression_parser", "parse_gml_expression"),
+            (EXPRESSION_UTILITY_MODULE, "normalize_local_names"),
+            (EXPRESSION_UTILITY_MODULE, "tokens_to_source"),
+            (EXPRESSION_UTILITY_MODULE, "unwrap_grouped_expression"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.expression_parser": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.function_helpers", "emit_constructor_inheritance_line"),
+            (f"{PARTS_PACKAGE}.function_helpers", "emit_static_initialization_lines"),
+            (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "strip_comments"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.expression_service": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.emitter", "emit_gml_expression"),
+            (f"{PARTS_PACKAGE}.emitter", "emit_gml_truthy_expression"),
+            (f"{PARTS_PACKAGE}.enum_helpers", "reject_enum_mutation_expression"),
+            (f"{PARTS_PACKAGE}.expression_parser", "parse_gml_expression"),
+            (EXPRESSION_UTILITY_MODULE, "normalize_local_names"),
+            (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "scope_context_with_global_names"),
+        }
+    ),
+    f"{PARTS_PACKAGE}.function_helpers": frozenset(
+        {
+            (f"{PARTS_PACKAGE}.emitter", "emit_gml_expression"),
+            (f"{PARTS_PACKAGE}.expression_parser", "parse_gml_expression"),
+        }
+    ),
 }
 
 
@@ -289,33 +412,15 @@ EXPECTED_INTERNAL_PRIVATE_IMPORT_GROUPS = """
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.constants|_BUILTIN_VARIABLE_REGISTRY
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.expression_parser|_ExpressionParser,_parse_gml_expression
 src.conversion.gml_transpiler|src.conversion.gml_transpiler_parts.model|_ArrayLiteral,_Binary,_BuiltinVariableMetadata,_Call,_DSMapAccess,_Expression,_FunctionLiteral,_FunctionParameter,_Grouped,_Index,_Literal,_Member,_Name,_NameOf,_NewCall,_NumberLiteral,_ScopeContext,_StaticDeclaration,_StringLiteral,_StructAccess,_StructLiteral,_TemplateStringLiteral,_Ternary,_Token,_Unary
-src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.function_helpers|_emit_static_initialization_lines
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
 src.conversion.gml_transpiler_parts.api|src.conversion.gml_transpiler_parts.utils|_prefix_multiline
-src.conversion.gml_transpiler_parts.emitter|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_prefix_multiline,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.enum_helpers|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_tokens_to_source,_unwrap_grouped_expression
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line,_emit_static_initialization_lines
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.statement_parser|_StatementParser
 src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.static_declarations|_collect_static_declarations,_static_scope_id
-src.conversion.gml_transpiler_parts.expression_parser|src.conversion.gml_transpiler_parts.utils|_normalize_scope_context,_strip_comments
-src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.emitter|_emit_expression,_emit_truthy_expression
-src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.enum_helpers|_reject_enum_mutation_expression
-src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.gml_transpiler_parts.expression_service|src.conversion.gml_transpiler_parts.utils|_normalize_local_names,_normalize_scope_context,_scope_context_with_global_names
-src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.emitter|_emit_expression
-src.conversion.gml_transpiler_parts.function_helpers|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_parts.utils|_join_macro_continuation_lines,_macro_configuration_matches,_strip_comments
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.emitter|_emit_instance_keyword_argument
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.enum_helpers|_evaluate_enum_value_tokens
-src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.statements|_ControlFlowCapture,_control_flow_dispatch_lines,_transpile_statement
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.static_declarations|_read_static_declaration_tokens
 src.conversion.gml_transpiler_parts.statement_parser|src.conversion.gml_transpiler_parts.utils|_indent_lines,_insert_lines_before_continue,_insert_until_check_before_continue,_macro_configuration_matches,_normalize_scope_context,_scope_context_with_global_names,_split_top_level_tokens,_tokens_to_source
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.emitter|_emit_expression,_emit_instance_keyword_argument,_is_alarm_array_access,_name_resolves_to_global,_uses_direct_builtin_instance_members,_uses_direct_member_access
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.enum_helpers|_reject_constant_assignment_target_name,_reject_constant_declaration_name,_reject_enum_assignment_target,_reject_readonly_builtin_assignment_target
-src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
 src.conversion.gml_transpiler_parts.statements|src.conversion.gml_transpiler_parts.utils|_cache_assignment_part,_indent_lines,_next_generated_name_from_counter,_normalize_scope_context,_split_assignment,_split_top_level,_unwrap_grouped_expression
 src.conversion.gml_transpiler_parts.static_declarations|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level,_tokens_to_source
 """
@@ -329,7 +434,7 @@ src.conversion.objects|src.conversion.gml_transpiler|GMLSourceMap,GMLTranspileEr
 src.conversion.objects|src.conversion.gml_transpiler_parts.constants|ASSIGNMENT_OPERATORS,BUILTIN_GLOBAL_VARIABLES,BUILTIN_INSTANCE_VARIABLES,GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,GML_LITERAL_IDENTIFIERS
 src.conversion.objects|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
 src.conversion.objects|src.conversion.gml_transpiler_parts.shared_models|Token
-src.conversion.project_enums|src.conversion.gml_transpiler_parts.enum_helpers|_evaluate_enum_value_tokens
+src.conversion.project_enums|src.conversion.gml_transpiler_parts.expression_api|evaluate_enum_value_tokens
 src.conversion.project_enums|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
 src.conversion.project_enums|src.conversion.gml_transpiler_parts.shared_models|GMLTranspileError,Token
 src.conversion.project_macros|src.conversion.gml_transpiler_parts.lexical_api|preprocess_gml_source,tokenize_gml_source
@@ -341,9 +446,8 @@ src.conversion.script_functions|src.conversion.gml_transpiler_parts.lexical_api|
 src.conversion.script_functions|src.conversion.gml_transpiler_parts.utils|_split_assignment,_split_top_level
 src.conversion.script_generator|src.conversion.gml_transpiler_parts.constants|GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 src.conversion.script_generator|src.conversion.gml_transpiler_parts.lexical_api|sanitize_gdscript_identifier
-src.conversion.scripts|src.conversion.gml_transpiler|EXTENSION_FUNCTION_MAPPING_FILENAME,GMLExtensionFunction,GMLExtensionFunctionMapping,GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,load_gml_extension_function_mappings,merge_gml_source_maps,render_gml_source_header,transpile_gml_code_with_source_map,transpile_gml_expression,write_gml_source_map
-src.conversion.scripts|src.conversion.gml_transpiler_parts.expression_parser|_parse_gml_expression
-src.conversion.scripts|src.conversion.gml_transpiler_parts.function_helpers|_emit_constructor_inheritance_line
+src.conversion.scripts|src.conversion.gml_transpiler|EXTENSION_FUNCTION_MAPPING_FILENAME,GMLExtensionFunction,GMLExtensionFunctionMapping,GMLSourceMap,GMLTranspileError,analyze_gml_source_identifiers,load_gml_extension_function_mappings,merge_gml_source_maps,render_gml_source_header,transpile_gml_code_with_source_map,write_gml_source_map
+src.conversion.scripts|src.conversion.gml_transpiler_parts.expression_api|emit_constructor_inheritance_line,parse_gml_expression,transpile_gml_expression
 src.conversion.scripts|src.conversion.gml_transpiler_parts.lexical_api|sanitize_gdscript_identifier
 src.conversion.scripts|src.conversion.gml_transpiler_parts.shared_models|ScopeContext
 """
@@ -366,28 +470,16 @@ EXPECTED_PRODUCTION_IMPORTS = _parse_import_groups(EXPECTED_PRODUCTION_IMPORT_GR
 EXPECTED_ALL_IMPORTS = EXPECTED_INTERNAL_PRIVATE_IMPORTS | EXPECTED_PRODUCTION_IMPORTS
 
 
-# The four owner modules below contain shared data, language metadata, or
-# semantic operations that the named child issue makes explicit.
+# The two owner modules below contain shared data or language metadata whose
+# remaining facade compatibility aliases are assigned to #820.
 ALL_PRIVATE_NAMES_ARE_INTENDED_INTERNAL = frozenset(
     {
         f"{PARTS_PACKAGE}.constants",
-        f"{PARTS_PACKAGE}.enum_helpers",
-        f"{PARTS_PACKAGE}.function_helpers",
         f"{PARTS_PACKAGE}.model",
     }
 )
 
 INTENDED_INTERNAL_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
-    f"{PARTS_PACKAGE}.emitter": frozenset(
-        {
-            "_emit_expression",
-            "_emit_instance_keyword_argument",
-            "_emit_truthy_expression",
-            "_name_resolves_to_global",
-            "_uses_direct_builtin_instance_members",
-            "_uses_direct_member_access",
-        }
-    ),
     f"{PARTS_PACKAGE}.expression_parser": frozenset({"_parse_gml_expression"}),
     f"{PARTS_PACKAGE}.statements": frozenset({"_ControlFlowCapture"}),
     f"{PARTS_PACKAGE}.utils": frozenset(
@@ -406,7 +498,6 @@ INTENDED_INTERNAL_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
 }
 
 MODULE_PRIVATE_NAMES_BY_MIXED_OWNER: dict[str, frozenset[str]] = {
-    f"{PARTS_PACKAGE}.emitter": frozenset({"_is_alarm_array_access"}),
     f"{PARTS_PACKAGE}.expression_parser": frozenset({"_ExpressionParser"}),
     f"{PARTS_PACKAGE}.statement_parser": frozenset({"_StatementParser"}),
     f"{PARTS_PACKAGE}.statements": frozenset(
@@ -445,10 +536,6 @@ RETAINED_PACKAGE_INTERNAL_EXPORTS = frozenset(
 )
 
 MIGRATION_STAGE_BY_OWNER: dict[str, int] = {
-    f"{PARTS_PACKAGE}.emitter": 818,
-    f"{PARTS_PACKAGE}.enum_helpers": 818,
-    f"{PARTS_PACKAGE}.expression_parser": 818,
-    f"{PARTS_PACKAGE}.function_helpers": 818,
     f"{PARTS_PACKAGE}.statement_parser": 819,
     f"{PARTS_PACKAGE}.statements": 819,
     f"{PARTS_PACKAGE}.static_declarations": 819,
@@ -458,10 +545,6 @@ UTILS_STAGE_BY_CONSUMER: dict[str, int] = {
     f"{PARTS_PACKAGE}.preprocessor": 817,
     "src.conversion.project_macros": 817,
     "src.conversion.script_functions": 817,
-    f"{PARTS_PACKAGE}.emitter": 818,
-    f"{PARTS_PACKAGE}.enum_helpers": 818,
-    f"{PARTS_PACKAGE}.expression_parser": 818,
-    f"{PARTS_PACKAGE}.expression_service": 818,
     f"{PARTS_PACKAGE}.api": 819,
     f"{PARTS_PACKAGE}.statement_parser": 819,
     f"{PARTS_PACKAGE}.statements": 819,
@@ -475,6 +558,8 @@ def _disposition_for(edge: ImportEdge) -> BoundaryDisposition:
     if edge.owner == f"{PARTS_PACKAGE}.constants" and edge.name in language_metadata.__all__:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if edge.owner == LEXICAL_API_MODULE and edge.name in lexical_phase_api.__all__:
+        return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
+    if edge.owner == EXPRESSION_API_MODULE and edge.name in expression_phase_api.__all__:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
     if (edge.owner, edge.name) in RETAINED_PACKAGE_INTERNAL_EXPORTS:
         return BoundaryDisposition(BoundaryClassification.INTENDED_PACKAGE_INTERNAL, None)
@@ -514,27 +599,7 @@ EXPECTED_PRIVATE_USAGE_SUPPRESSIONS = frozenset(
             "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
         ),
         (
-            "src/conversion/gml_transpiler_parts/emitter.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/enum_helpers.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
             "src/conversion/gml_transpiler_parts/expression_parser.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/expression_service.py",
-            1,
-            "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
-        ),
-        (
-            "src/conversion/gml_transpiler_parts/function_helpers.py",
             1,
             "# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false",
         ),
@@ -715,6 +780,117 @@ def _attribute_name_parts(node: ast.expr) -> tuple[str, ...] | None:
     if parent is None:
         return None
     return (*parent, node.attr)
+
+
+def _expression_boundary_bypasses_from_source(
+    source: str,
+    consumer: str,
+    *,
+    package_module: bool = False,
+) -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    owner_modules = EXPRESSION_IMPLEMENTATION_MODULES | frozenset(
+        {EXPRESSION_UTILITY_MODULE}
+    )
+    for edge in _imports_from_source(
+        source,
+        consumer,
+        package_module=package_module,
+    ):
+        if edge.owner in EXPRESSION_IMPLEMENTATION_MODULES:
+            bypasses.add(edge)
+            continue
+
+        imported_module = f"{edge.owner}.{edge.name}"
+        if imported_module in owner_modules:
+            bypasses.add(
+                ImportEdge(
+                    consumer=consumer,
+                    owner=imported_module,
+                    name=MODULE_IMPORT_NAME,
+                )
+            )
+            continue
+
+        if edge.owner == EXPRESSION_UTILITY_MODULE and (
+            edge.name in EXPRESSION_UTILITY_NAMES or edge.name == "*"
+        ):
+            bypasses.add(edge)
+            continue
+
+        if edge.owner == FACADE_MODULE and (
+            edge.name in LEGACY_EXPRESSION_FACADE_NAMES or edge.name == "*"
+        ):
+            bypasses.add(edge)
+
+    tree = ast.parse(source)
+    facade_bindings: set[tuple[str, ...]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported_module in node.names:
+                if imported_module.name != FACADE_MODULE:
+                    continue
+                if imported_module.asname is not None:
+                    facade_bindings.add((imported_module.asname,))
+                else:
+                    facade_bindings.add(tuple(FACADE_MODULE.split(".")))
+        elif isinstance(node, ast.ImportFrom):
+            owner = _resolve_import_owner(
+                consumer,
+                node,
+                package_module=package_module,
+            )
+            for imported_name in node.names:
+                if f"{owner}.{imported_name.name}" != FACADE_MODULE:
+                    continue
+                facade_bindings.add((imported_name.asname or imported_name.name,))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        name_parts = _attribute_name_parts(node)
+        if name_parts is None:
+            continue
+        for binding in facade_bindings:
+            if name_parts[: len(binding)] != binding or len(name_parts) <= len(binding):
+                continue
+            accessed_name = name_parts[len(binding)]
+            if accessed_name in LEGACY_EXPRESSION_FACADE_NAMES:
+                bypasses.add(
+                    ImportEdge(
+                        consumer=consumer,
+                        owner=FACADE_MODULE,
+                        name=accessed_name,
+                    )
+                )
+    return frozenset(bypasses)
+
+
+def _expression_boundary_import_is_allowed(
+    consumer: str,
+    edge: ImportEdge,
+) -> bool:
+    return (edge.owner, edge.name) in EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER.get(
+        consumer,
+        frozenset(),
+    )
+
+
+def _actual_expression_boundary_bypasses() -> frozenset[ImportEdge]:
+    bypasses: set[ImportEdge] = set()
+    for source_root in (PROJECT_ROOT / "src", PROJECT_ROOT / "tests"):
+        for path in sorted(source_root.rglob("*.py")):
+            consumer = _module_name(path)
+            bypasses.update(
+                edge
+                for edge in _expression_boundary_bypasses_from_source(
+                    path.read_text(encoding="utf-8"),
+                    consumer,
+                    package_module=path.name == "__init__.py",
+                )
+                if not _expression_boundary_import_is_allowed(consumer, edge)
+            )
+    return frozenset(bypasses)
 
 
 def _lexical_boundary_import_is_allowed(
@@ -983,6 +1159,154 @@ package_facade._tokenize("value")
     def test_lexical_implementation_modules_have_no_external_bypasses(self) -> None:
         self.assertEqual(_actual_lexical_boundary_bypasses(), frozenset())
 
+    def test_expression_boundary_scanner_rejects_every_bypass_form(self) -> None:
+        consumer = f"{PARTS_PACKAGE}.synthetic_consumer"
+        source = """
+from .emitter import (
+    _emit_expression as relative_parenthesized_alias,
+)
+from src.conversion.gml_transpiler_parts.expression_parser import (
+    parse_gml_expression as absolute_parenthesized_alias,
+)
+from .enum_helpers import reject_enum_mutation_expression as relative_alias
+from src.conversion.gml_transpiler_parts.function_helpers import *
+from .utils import normalize_scope_context as utility_alias
+from . import emitter as emitter_module
+from src.conversion.gml_transpiler_parts import enum_helpers as enum_module
+import src.conversion.gml_transpiler_parts.expression_parser as parser_module
+from src.conversion.gml_transpiler import _parse_gml_expression as legacy_facade_bypass
+from src.conversion.gml_transpiler import *
+import src.conversion.gml_transpiler as facade_module
+from src.conversion import gml_transpiler as package_facade
+
+emitter_module.emit_gml_expression(relative_parenthesized_alias)
+enum_module.reject_enum_mutation_expression(relative_alias, ())
+parser_module.parse_gml_expression("value")
+facade_module._ExpressionParser([])
+package_facade._Binary(None, "+", None)
+"""
+
+        self.assertEqual(
+            _expression_boundary_bypasses_from_source(source, consumer),
+            frozenset(
+                {
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.emitter",
+                        "_emit_expression",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.expression_parser",
+                        "parse_gml_expression",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.enum_helpers",
+                        "reject_enum_mutation_expression",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.function_helpers",
+                        "*",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        EXPRESSION_UTILITY_MODULE,
+                        "normalize_scope_context",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.emitter",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.enum_helpers",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        f"{PARTS_PACKAGE}.expression_parser",
+                        MODULE_IMPORT_NAME,
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "_parse_gml_expression",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "_ExpressionParser",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "_Binary",
+                    ),
+                    ImportEdge(
+                        consumer,
+                        FACADE_MODULE,
+                        "*",
+                    ),
+                }
+            ),
+        )
+
+        expression_service = f"{PARTS_PACKAGE}.expression_service"
+        self.assertTrue(
+            _expression_boundary_import_is_allowed(
+                expression_service,
+                ImportEdge(
+                    expression_service,
+                    f"{PARTS_PACKAGE}.emitter",
+                    "emit_gml_expression",
+                ),
+            )
+        )
+        self.assertTrue(
+            _expression_boundary_import_is_allowed(
+                expression_service,
+                ImportEdge(
+                    expression_service,
+                    EXPRESSION_UTILITY_MODULE,
+                    "normalize_scope_context",
+                ),
+            )
+        )
+        self.assertFalse(
+            _expression_boundary_import_is_allowed(
+                expression_service,
+                ImportEdge(
+                    expression_service,
+                    f"{PARTS_PACKAGE}.emitter",
+                    "_emit_expression",
+                ),
+            )
+        )
+        self.assertFalse(
+            _expression_boundary_import_is_allowed(
+                f"{PARTS_PACKAGE}.statements",
+                ImportEdge(
+                    f"{PARTS_PACKAGE}.statements",
+                    f"{PARTS_PACKAGE}.emitter",
+                    "emit_gml_expression",
+                ),
+            )
+        )
+        for owner, name in EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER[FACADE_MODULE]:
+            with self.subTest(owner=owner, name=name):
+                self.assertTrue(
+                    _expression_boundary_import_is_allowed(
+                        FACADE_MODULE,
+                        ImportEdge(FACADE_MODULE, owner, name),
+                    )
+                )
+
+    def test_expression_implementation_modules_have_no_external_bypasses(self) -> None:
+        self.assertEqual(_actual_expression_boundary_bypasses(), frozenset())
+
     def test_private_phase_and_production_import_inventory_is_exact(self) -> None:
         actual_internal = _actual_internal_private_imports()
         actual_production = _actual_production_imports()
@@ -991,11 +1315,20 @@ package_facade._tokenize("value")
             actual_internal | actual_production,
         )
 
-        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 96)
+        self.assertEqual(len(EXPECTED_INTERNAL_PRIVATE_IMPORTS), 60)
+        self.assertEqual(
+            len(
+                {
+                    (edge.consumer, edge.owner)
+                    for edge in EXPECTED_INTERNAL_PRIVATE_IMPORTS
+                }
+            ),
+            14,
+        )
         self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 60)
         self.assertEqual(
             sum(edge.name.startswith("_") for edge in EXPECTED_PRODUCTION_IMPORTS),
-            7,
+            4,
         )
         self.assertEqual(
             actual_internal,
@@ -1066,7 +1399,7 @@ package_facade._tokenize("value")
                 for edge, disposition in dispositions.items()
                 if edge.name.startswith("_")
             },
-            {817, 818, 819, 820},
+            {817, 819, 820},
         )
         self.assertEqual(
             {
@@ -1106,7 +1439,7 @@ package_facade._tokenize("value")
 
     def test_transitional_private_usage_suppressions_are_exact(self) -> None:
         actual = _actual_private_usage_suppressions()
-        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 12)
+        self.assertEqual(len(EXPECTED_PRIVATE_USAGE_SUPPRESSIONS), 8)
         self.assertEqual(actual, EXPECTED_PRIVATE_USAGE_SUPPRESSIONS)
 
 

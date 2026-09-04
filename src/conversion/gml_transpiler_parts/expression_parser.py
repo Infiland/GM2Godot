@@ -24,6 +24,7 @@ from .expression_models import (
     Expression as _Expression,
     FunctionLiteral as _FunctionLiteral,
     FunctionParameter as _FunctionParameter,
+    GMLExpression,
     Grouped as _Grouped,
     Index as _Index,
     Member as _Member,
@@ -48,11 +49,15 @@ from .lexical_api import (
 )
 from .shared_models import (
     GMLTranspileError,
+    ScopeContext,
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
 from .static_declarations import _collect_static_declarations, _static_scope_id
-from .utils import _normalize_scope_context, _strip_comments
+from .utils import (
+    normalize_scope_context as _normalize_scope_context,
+    strip_comments as _strip_comments,
+)
 
 
 def _is_float_like_number(value: str) -> bool:
@@ -444,7 +449,9 @@ class _ExpressionParser:
         if parent_constructor is not None:
             if not is_constructor:
                 raise GMLTranspileError("Constructor inheritance requires a constructor function")
-            from .function_helpers import _emit_constructor_inheritance_line
+            from .function_helpers import (
+                emit_constructor_inheritance_line as _emit_constructor_inheritance_line,
+            )
 
             prelude_lines.append(
                 _emit_constructor_inheritance_line(
@@ -455,7 +462,9 @@ class _ExpressionParser:
                 )
             )
         if static_declarations:
-            from .function_helpers import _emit_static_initialization_lines
+            from .function_helpers import (
+                emit_static_initialization_lines as _emit_static_initialization_lines,
+            )
 
             prelude_lines.extend(
                 _emit_static_initialization_lines(
@@ -580,3 +589,21 @@ def _parse_gml_expression(
         macro_expansion_stack=macro_expansion_stack,
     )
     return parser.parse()
+
+
+def parse_gml_expression(
+    source: str,
+    enum_values: MutableMapping[str, dict[str, int]] | None = None,
+    enum_names: Iterable[str] | None = None,
+    macro_values: Mapping[str, str] | None = None,
+    macro_expansion_stack: frozenset[str] | None = None,
+    scope_context: ScopeContext | None = None,
+) -> GMLExpression:
+    return _parse_gml_expression(
+        source,
+        enum_values=enum_values,
+        enum_names=enum_names,
+        macro_values=macro_values,
+        macro_expansion_stack=macro_expansion_stack,
+        scope_context=scope_context,
+    )

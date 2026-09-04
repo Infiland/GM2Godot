@@ -173,6 +173,14 @@ Expression: TypeAlias = (
     | Grouped
 )
 
+GMLExpression: TypeAlias = Expression
+
+
+@dataclass(frozen=True)
+class GMLExpressionEmission:
+    text: str
+    precedence: int
+
 
 __all__ = [
     "ArrayLiteral",
@@ -186,6 +194,8 @@ __all__ = [
     "Expression",
     "FunctionLiteral",
     "FunctionParameter",
+    "GMLExpression",
+    "GMLExpressionEmission",
     "Grouped",
     "Index",
     "Literal",

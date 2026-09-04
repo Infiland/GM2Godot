@@ -1,11 +1,10 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from src.conversion.gml_transpiler_parts.enum_helpers import (
-    _evaluate_enum_value_tokens,
+from src.conversion.gml_transpiler_parts.expression_api import (
+    evaluate_enum_value_tokens,
 )
 from src.conversion.gml_transpiler_parts.lexical_api import (
     preprocess_gml_source,
@@ -180,7 +179,7 @@ def _evaluate_project_enum_declaration(
         if member.value_tokens is None:
             value = next_integer_value
         else:
-            value = _evaluate_enum_value_tokens(
+            value = evaluate_enum_value_tokens(
                 member.value_tokens,
                 enum_values,
                 current_values,

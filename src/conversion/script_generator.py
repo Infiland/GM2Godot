@@ -62,7 +62,7 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "yprevious",
     "ystart",
 })
-DRAW_RUNTIME_FUNCTIONS = frozenset({
+_DRAW_RUNTIME_FUNCTIONS = frozenset({
     "_draw",
     "_on_draw_begin",
     "_on_draw_end",
@@ -174,7 +174,7 @@ def _uses_motion_runtime(object_runtime: ObjectRuntimeConfig | None) -> bool:
 
 
 def _uses_draw_runtime(function_names: set[str]) -> bool:
-    return bool(function_names & DRAW_RUNTIME_FUNCTIONS)
+    return bool(function_names & _DRAW_RUNTIME_FUNCTIONS)
 
 
 def _get_function_body(func: EventMapping, code_bodies: _CodeBodies | None) -> str:
@@ -736,7 +736,7 @@ def generate_script_content(
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
             body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
-        if uses_draw_runtime and func.godot_func in DRAW_RUNTIME_FUNCTIONS:
+        if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")

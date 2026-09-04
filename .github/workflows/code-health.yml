@@ -116,6 +116,26 @@ jobs:
             --bootstrap-policy stable \
             --output "$RUNNER_TEMP/ruff-dependencies.json"
 
+      - name: Enforce shrinking maintainability debt
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            base_ref="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+          else
+            base_ref="$PUSH_BASE_SHA"
+          fi
+          if [[ ! "$base_ref" =~ ^[0-9a-f]{40}$ || "$base_ref" =~ ^0+$ ]]; then
+            echo "::error::Maintainability requires the PR merge-base or previous push SHA." >&2
+            exit 1
+          fi
+          python scripts/check_maintainability.py \
+            --baseline maintainability-baseline.json --base-ref "$base_ref"
+          python -m unittest tests.test_maintainability_policy tests.test_maintainability_metrics -v
+
       - name: Run Ruff
         run: python -m ruff check .
 

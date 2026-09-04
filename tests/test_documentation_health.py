@@ -59,7 +59,7 @@ EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E9", "F"]},
+    "lint": {"select": ["E9", "F", "C90"], "mccabe": {"max-complexity": 122}},
 }
 EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff

@@ -102,6 +102,23 @@ GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest discover -s tests -p 'test_*_godot.py'
 ```
 
+Code Health also enforces R02's shrinking maintainability baseline and the
+campaign's coarse Ruff C90 ceiling. For uncommitted changes, run:
+
+```bash
+./venv/bin/python scripts/check_maintainability.py --baseline maintainability-baseline.json --base-ref HEAD
+```
+
+New debt fails. Reductions and deletions require the same command with `--update`,
+then a successful check; raised allowances still fail against the Git parent.
+Schema v2 also counts formatting-independent structural units. Shorter formatting
+updates the recorded physical size but retains an existing line allowance until
+structure shrinks, so packing code cannot retire debt or evade destination checks.
+For branch changes use the PR merge-base. The canonical
+[contributor policy](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md#shrinking-maintainability-debt-r02--795)
+defines the inventory, measurements, bootstrap commit, deliberate update
+procedure, and graph limitations. Keep the existing phase-boundary tests too.
+
 Godot validation gives the output reader a bounded drain window, then requests shutdown and permits exactly one deliberate final nonblocking read attempt. Reader I/O failures fail validation capture, and inherited or continuously writing stdout descendants cannot extend the stop deadline.
 
 Linux packaged-GUI verifier tests use a named 15-second budget for ordinary subprocess integration. Intentional timeout and cleanup cases first require a bounded test-only PID readiness receipt, then exercise a 0.25-second runtime deadline; missing readiness is a distinct startup-test failure. Receipt and loader-diagnostic policy is tested directly where a real process is not part of the behavior. The production release verifier remains fail-closed at 60 seconds and still launches the exact packaged GUI through real Xvfb.

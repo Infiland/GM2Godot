@@ -12,4 +12,8 @@ extend-exclude = [
 select = [
   "E9",
   "F",
+  "C90",
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 122

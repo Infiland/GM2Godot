@@ -84,6 +84,87 @@ Compatibility work continues to target GameMaker LTS 2026 source projects and ex
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
 - Run `ruff check .` before submitting Python code. CI enforces Ruff's `E9` fatal-error checks and the complete Pyflakes (`F`) rule family. Do not disable `F` or individual `F`-numbered rules globally or per file. Broader style rules should be introduced separately from feature work.
 
+### Shrinking maintainability debt (R02 / #795)
+
+Run the same ratchet as Code Health for uncommitted changes:
+
+```bash
+./venv/bin/python scripts/check_maintainability.py --baseline maintainability-baseline.json --base-ref HEAD
+```
+
+For committed branch changes, use `--base-ref "$(git merge-base origin/main HEAD)"`.
+CI supplies the actual PR merge-base or previous push SHA. A baseline increase
+cannot be approved by regenerating the candidate file: the checker also reads
+the immutable parent baseline. The one initial bootstrap is main commit
+`38b364855f06e971d2676b921fd300e1f40f076a`, measured from its Git archive;
+all later parents must contain the baseline. R01's facade cutover is not in
+that tree. Its later integration must remove the debt it eliminates. The
+original campaign's post-R01 manifest/runner integration remains dependent on
+those artifacts becoming available; this gate runs directly in Code Health.
+
+`maintainability-baseline.json` records exact exceptions by path and qualified
+symbol, separating application, tooling, and tests. `scripts/maintainability_metrics.py`
+owns measurement thresholds, module classifications, and lint rules; the JSON
+records that policy to reject accidental changes. Every tracked Python input
+(including tracked ignored files) and nonignored untracked Python input is
+measured. Unknown classifications fail. Existing E9/F checks remain mandatory;
+normal Ruff also enforces the campaign's coarse C90 ceiling of 122. The ratchet
+independently measures C901 above 15, function/module length, nesting,
+parameters, duplicate symbols, pending I001/B/E4/E7/E9 findings, exact suppression
+comments (including directives after explanatory comment prefixes), and static/eager import cycles. Declarative/mixed modules are labeled,
+not exempted. Ruff runs at the requirements pin with isolated configuration and
+ignores neither files nor `noqa` findings. Source traversal and JSON are sorted;
+paths use `/`, symbols omit line numbers, and the AST grammar is Python 3.12.
+
+Schema v2 also records formatting-independent size: statements, collection
+entries, call arguments, expression operations, comprehension clauses, and
+multiline string/bytes payload breaks count as structural units under the
+existing function/module budgets. These conservative units differ from physical
+lines; they measure packed expressions and payloads in new or moved destinations
+as well as existing owners. Each line-debt entry keeps its
+actual physical lines, structural units, and location-free AST digest as size
+evidence. When formatting or comment removal shortens an owner without reducing
+its structure, its previous effective line allowance remains; the new physical
+size is still recorded accurately. For example, removing one comment from an
+890-line module records 889 physical lines while retaining its 890-line debt.
+The retained allowance survives subsequent commits, including packing below a
+threshold. A structural reduction lowers its effective line debt proportionally:
+the larger of actual lines and the prior effective debt multiplied by the ratio
+of new to prior structural units, rounded up. Removing one statement cannot
+retire a large packed function's entire allowance. Structural growth also raises
+that effective debt, so restoring removed work fails instead of resetting the
+comparison. Zero-structure owners retain their allowance; deleting an owner
+removes it. The independent Git parent supplies both allowances and evidence.
+
+After reducing or deleting debt, validation intentionally fails on stale
+entries. Deliberately record the reduction, then recheck:
+
+```bash
+./venv/bin/python scripts/check_maintainability.py --baseline maintainability-baseline.json --base-ref HEAD --update
+./venv/bin/python scripts/check_maintainability.py --baseline maintainability-baseline.json --base-ref HEAD
+./venv/bin/python -m unittest tests.test_maintainability_policy tests.test_maintainability_metrics -v
+```
+
+Use the same parent reference for both commands. `--update` only lowers or
+removes allowances; it cannot introduce or rename debt, increase an accepted
+metric, or restore a removed allowance. Include the updated JSON with the code
+change. Reaching a threshold through structural reduction removes the exception;
+cosmetic packing alone does not. Exit 0 means
+exact agreement, 1 identifies violated metric limits or stale entries, and 2
+means invalid configuration or unavailable measurement prerequisites. Review
+changes to the measurement policy separately; dependency upgrades must also
+review any change to the pinned Ruff measurement semantics.
+
+Import graphs are syntax-based and never import application code. They include
+relative/absolute imports, package initializers, re-exports, imports in functions
+and typing guards, and literal `importlib.import_module`/`__import__` calls with
+explicit aliases. Only function/lambda bodies and recognized typing guards are
+deferred from the eager graph; other conditional imports are conservative.
+Computed import names and arbitrary alias reassignment require code review.
+Each directed elementary cycle is an exact exception, so adding a cycle inside
+an existing component also fails. This gate prevents debt growth; it does not
+perform the refactors assigned to later campaign rows.
+
 ### UI Development
 - Maintain consistency with the existing dark theme
 - Follow the existing panel, dialog, icon, and theme patterns under `src/gui/`

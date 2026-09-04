@@ -42,7 +42,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound sco
 | --- | --- | --- | --- | --- |
 | Initial audit/plan | verified | root | three read-only investigators | initial-metrics.json, issue/pr history, native-environment.json |
 | R02 | integrated | audit_transactions_cli, GM2Godot-080-policy | audit_policy_tests_docs + root | two reproduced bypasses |
-| R01 | implementing | audit_gml_resources, GM2Godot-080-gml | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
+| R01 | integrated | audit_gml_resources, GM2Godot-080-gml | policy/test reviewer + root | preserved 6e86c3f, r01-new-debt.json |
 | Remaining contracts | planned | assigned at contract acceptance | independent owner + root | see contracts.json |
 
 R02 is integrated locally; native campaign CI verification follows through C01. Other implementation tasks remain unintegrated.
@@ -67,3 +67,6 @@ Plan review requested explicit particles/extensions/alias-retirement rows, seria
 
 - R01 final correction code independently and root APPROVED, committed68dbf847. Required gate at that fixed revision passed594 tests with zero skips. Full suite and five-fixture base/head plus same-ref parity are running; integration remains pending.
 - D01 precise eight-file contract accepted and assigned to audit_policy_tests_docs in GM2Godot-080-diagnostics. Distinct immutable diagnostic/location records move to one stdlib-only leaf; only three one-hop exports remain for named oversize consumers until R26 (now also depends on L03). Its owners are unchanged by R01, so implementation may overlap immutable R01 validation; integration stays in dependency order.
+
+- R01 complete immutable proof at68dbf847:594required/zero skips;2932fulltests/70 classifiedhost-or-optionalcorpus skips;38b→candidate andcandidate→samecandidate fivefixtures×fourteenfields allmatch,44publicexports preserved. Root verifiedall19evidencehashes and27integratedPythonfilesbyte-identical plusremovedmodelabsent. RootcombinedR01withpolicy andreranPyright0/0,Ruff,60policy/doc/versiontests and594requiredtests/zero skips. Ratchetshrinks1364→1341. Evidence:r01-corrections-final-index.json, r01-integrated-required.json.
+- The inherited0.7.75metadata remains an unpublished campaign intermediate; no0.7.75tag/releaseexists. Rootwillreplacecurrentversion/noteswithcoordinated0.8.0onlyatfinalrelease. Maincheckoutandoriginaldirtypolicyfilesremainuntouched.

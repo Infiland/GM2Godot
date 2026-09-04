@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 import os
 import sys
 import unittest

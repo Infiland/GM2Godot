@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Sequence, Set
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final, cast, get_args, get_origin, get_type_hints
+from typing import Any, cast
 import unittest
 
-from src.conversion.gml_transpiler_parts import constants
+from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.shared_models import BuiltinVariableMetadata
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONSTANTS_PATH = (
+    PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts" / "constants.py"
+)
 PUBLIC_NAMES = (
     "EOF",
     "MULTI_CHAR_OPERATORS",
@@ -113,48 +116,46 @@ FROZEN_SET_NAMES = (
 TUPLE_NAMES = ("MULTI_CHAR_OPERATORS", "ASSIGNMENT_OPERATORS")
 
 
+def _declarations() -> dict[str, ast.AnnAssign]:
+    tree = ast.parse(CONSTANTS_PATH.read_text(encoding="utf-8"), filename=str(CONSTANTS_PATH))
+    return {
+        node.target.id: node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+
+def _literal_export_names(declaration: ast.AnnAssign) -> tuple[str, ...]:
+    value = declaration.value
+    if not isinstance(value, ast.Tuple):
+        raise AssertionError("constants.__all__ must remain a literal tuple")
+    exports: list[str] = []
+    for element in value.elts:
+        if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+            raise AssertionError("constants.__all__ must contain only literal strings")
+        exports.append(element.value)
+    return tuple(exports)
+
+
 class GmlLanguageMetadataTests(unittest.TestCase):
     def test_exact_public_surface(self) -> None:
-        self.assertEqual(tuple(constants.__all__), PUBLIC_NAMES)
-        self.assertEqual(len(constants.__all__), 64)
-        self.assertTrue(all(not name.startswith("_") for name in constants.__all__))
+        declarations = _declarations()
+        exports = _literal_export_names(declarations["__all__"])
+        self.assertEqual(exports, PUBLIC_NAMES)
+        self.assertEqual(len(exports), 64)
+        self.assertTrue(all(not name.startswith("_") for name in exports))
 
     def test_public_declarations_are_final_and_direct_literals(self) -> None:
-        hints = get_type_hints(constants, include_extras=True)
-        self.assertEqual(
-            {name for name in PUBLIC_NAMES if get_origin(hints.get(name)) is Final},
-            set(PUBLIC_NAMES),
-        )
-        self.assertIs(get_origin(hints.get("__all__")), Final)
+        declarations = _declarations()
+        self.assertEqual(set(PUBLIC_NAMES), set(declarations) & set(PUBLIC_NAMES))
+        for name in (*PUBLIC_NAMES, "__all__"):
+            with self.subTest(name=name):
+                self.assertTrue(ast.unparse(declarations[name].annotation).startswith("Final["))
         for name in TUPLE_NAMES:
             with self.subTest(name=name):
-                annotation = get_args(hints[name])[0]
-                self.assertIs(get_origin(annotation), Sequence)
+                self.assertIn("Sequence[", ast.unparse(declarations[name].annotation))
         for name in FROZEN_SET_NAMES:
             with self.subTest(name=name):
-                annotation = get_args(hints[name])[0]
-                self.assertIs(get_origin(annotation), Set)
-
-        module_path = Path(constants.__file__)
-        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-        declarations = {
-            node.target.id: node
-            for node in tree.body
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertEqual(set(PUBLIC_NAMES), set(declarations) & set(PUBLIC_NAMES))
-
-        all_value = declarations["__all__"].value
-        self.assertIsInstance(all_value, ast.Tuple)
-        assert isinstance(all_value, ast.Tuple)
-        self.assertEqual(len(all_value.elts), len(PUBLIC_NAMES))
-        self.assertTrue(
-            all(isinstance(element, ast.Constant) and isinstance(element.value, str) for element in all_value.elts)
-        )
-        self.assertEqual(
-            tuple(cast(ast.Constant, element).value for element in all_value.elts),
-            PUBLIC_NAMES,
-        )
+                self.assertIn("Set[", ast.unparse(declarations[name].annotation))
 
         for name in MAPPING_NAMES:
             with self.subTest(name=name):
@@ -167,49 +168,23 @@ class GmlLanguageMetadataTests(unittest.TestCase):
                 self.assertEqual(len(value.args), 1)
                 self.assertIsInstance(value.args[0], ast.Dict)
 
-    def test_mapping_exports_are_read_only_mapping_proxies(self) -> None:
-        for name in MAPPING_NAMES:
-            with self.subTest(name=name):
-                value = getattr(constants, name)
-                self.assertIsInstance(value, MappingProxyType)
-                with self.assertRaises(TypeError):
-                    value["__mutation_probe__"] = "changed"
-                if value:
-                    with self.assertRaises(TypeError):
-                        del value[next(iter(value))]
-
-    def test_set_exports_are_frozensets(self) -> None:
-        for name in FROZEN_SET_NAMES:
-            with self.subTest(name=name):
-                value = getattr(constants, name)
-                self.assertIsInstance(value, frozenset)
-                with self.assertRaises(AttributeError):
-                    value.add("__mutation_probe__")
-
-    def test_sequence_exports_remain_tuples(self) -> None:
-        for name in TUPLE_NAMES:
-            with self.subTest(name=name):
-                self.assertIsInstance(getattr(constants, name), tuple)
+    def test_registry_export_is_read_only_mapping_proxy(self) -> None:
+        self.assertIsInstance(BUILTIN_VARIABLE_REGISTRY, MappingProxyType)
+        mutable_registry = cast(Any, BUILTIN_VARIABLE_REGISTRY)
+        with self.assertRaises(TypeError):
+            mutable_registry["__mutation_probe__"] = "changed"
+        with self.assertRaises(TypeError):
+            del mutable_registry[next(iter(mutable_registry))]
 
     def test_registry_values_are_frozen(self) -> None:
-        self.assertTrue(constants.BUILTIN_VARIABLE_REGISTRY)
-        values: list[object] = []
-        values.extend(constants.BUILTIN_VARIABLE_REGISTRY.values())
+        self.assertTrue(BUILTIN_VARIABLE_REGISTRY)
+        values: list[object] = list(BUILTIN_VARIABLE_REGISTRY.values())
         self.assertTrue(all(isinstance(metadata, BuiltinVariableMetadata) for metadata in values))
-        metadata = constants.BUILTIN_VARIABLE_REGISTRY["x"]
+        metadata = BUILTIN_VARIABLE_REGISTRY["x"]
         with self.assertRaises(FrozenInstanceError):
             cast(Any, metadata).scope = "global"
 
-    def test_facade_compatibility_alias_preserves_registry_identity(self) -> None:
-        self.assertIs(
-            getattr(constants, "_BUILTIN_VARIABLE_REGISTRY"),
-            constants.BUILTIN_VARIABLE_REGISTRY,
-        )
-        self.assertEqual(
-            [name for name in vars(constants) if name.startswith("_") and name[1:] in PUBLIC_NAMES],
-            ["_BUILTIN_VARIABLE_REGISTRY"],
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_removed_registry_compatibility_alias_cannot_return(self) -> None:
+        declarations = _declarations()
+        self.assertNotIn("_BUILTIN_VARIABLE_REGISTRY", declarations)
+        self.assertNotIn("_BUILTIN_VARIABLE_REGISTRY", CONSTANTS_PATH.read_text(encoding="utf-8"))

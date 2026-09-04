@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.74 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.7.75 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-04
 
@@ -123,41 +123,54 @@ Godot validation gives the output reader a bounded drain window, then requests s
 
 Linux packaged-GUI verifier tests use a named 15-second budget for ordinary subprocess integration. Intentional timeout and cleanup cases first require a bounded test-only PID readiness receipt, then exercise a 0.25-second runtime deadline; missing readiness is a distinct startup-test failure. Receipt and loader-diagnostic policy is tested directly where a real process is not part of the behavior. The production release verifier remains fail-closed at 60 seconds and still launches the exact packaged GUI through real Xvfb.
 
-### Preserve the GML phase-boundary baseline
+### Enforce the GML phase boundary
 
-Before the ordered #794 phase-interface migration is complete, run:
+Run the R01 architecture contract while changing the GML facade or phase owners:
 
 ```bash
 ./venv/bin/python -m unittest tests.test_gml_transpiler_architecture -v
 ```
 
-The baseline inventories 60 cross-module private imported-name edges across
-14 facade/phase module pairs and all 60 production imports from those surfaces,
-including 4 remaining private production import edges. It separately freezes
-44 supported non-underscore facade exports and their signatures, 30 legacy
-private facade exports, the 7 phase-package `reportPrivateUsage=false`
-directives, and the facade directive. It is a no-growth migration allowlist,
-not permission to publish another private name. The #816 model slice removed
-120 internal private edges, replaced four production private model imports,
-and established `shared_models`, `expression_models`, and `result_models` as
-dependency-only typed owners. The #861 language-metadata slice removed another
-74 internal private edges, reduced private production import edges from 22 to
-16 and private-usage suppressions from 17 to 15, and left only the frozen
-constants facade alias assigned to #820. The #862 lexical slice publishes an
-exact 15-operation typed phase API, removes another 39 internal private edges
-and 21 private module pairs, reduces private production import edges from 16 to
-7 and tracked suppressions from 15 to 12, and adds executable rejection of
-higher-level lexical-owner bypasses. The low-level owner cohort retains only
-the exact public direct imports needed to keep preprocessing acyclic. Changes
-under #819 and #820 must remove the entries owned by that stage; unrelated
-changes must not edit the inventory. The #818 expression slice publishes an
-exact 17-operation typed package-internal facade, removes another 36 internal
-private edges and 18 private module pairs, replaces three production-private
-imports, and reduces tracked suppressions from 12 to 8. Cross-phase emission
-uses a frozen named text/precedence result while the recursive parser/emitter
-and the canonical AST representation remain unchanged; higher phases cannot
-bypass the expression facade.
+Run the complete declared gate and immutable-commit parity capture as modules
+from the checkout root after configuring the exact runtime and fixture paths
+required by `architecture-verification.json`:
 
+```bash
+./venv/bin/python -m scripts.run_required_unittest \
+  --manifest architecture-verification.json --gate R01 --receipt required-tests.json
+./venv/bin/python -m scripts.capture_conversion_parity \
+  --manifest architecture-verification.json --gate R01 \
+  --base-ref "$GM2GODOT_BASE_REF" --head-ref HEAD --receipt conversion-parity.json
+```
+
+Set `GM2GODOT_BASE_REF` to the approved parent commit. Parity exports the resolved
+Git commits; commit the reviewed candidate before interpreting its receipt.
+
+`scripts/capture_conversion_parity.py` owns source exports, subprocesses, and
+destination cleanup. `scripts/conversion_parity_snapshot.py` owns output-byte
+capture, snapshot fields, comparisons, and the explicit transaction normalization
+rules. `scripts/conversion_parity_contract.py` parses their shared typed manifest;
+`scripts/conversion_parity_inputs.py` verifies the exact runtime, source hashes,
+and external repository identities before capture starts.
+
+The contract preserves the ordered 44-name public facade, every direct owner
+identity, and every callable signature. It rejects all private facade exports,
+cross-module private imports, governed module-object imports, star imports,
+package-ancestor access chains, constant dynamic imports, and literal private
+reflection. The scanner is structural: it walks every scope and does not
+simulate assignments or control flow.
+
+Production code must not import either architecture-test support module:
+`gml_facade_contract_support` owns exact facade/export forms and
+`gml_transpiler_architecture_support` owns structural import checks. The test
+also verifies the explicit deferred expression-to-statement
+grammar gateway and zero `reportPrivateUsage=false` directives in the facade and
+phase package. It deliberately does not freeze a census of otherwise benign
+public callers.
+
+Do not add a facade export, private-use suppression, compatibility alias, or
+module-object import to satisfy a test. Import the explicit non-underscore owner
+instead.
 The policy follows Python's
 [`__all__` package guidance](https://docs.python.org/3.12/tutorial/modules.html#importing-from-a-package),
 [`ast.ImportFrom`](https://docs.python.org/3.12/library/ast.html#ast.ImportFrom),

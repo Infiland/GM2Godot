@@ -1,22 +1,16 @@
-# pyright: reportPrivateUsage=false
 import json
 import os
-import sys
 import tempfile
 import unittest
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
 from src.conversion.gml_transpiler import (
-    _BUILTIN_VARIABLE_REGISTRY,
     GMLTranspileError,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
 )
+from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.expression_api import parse_gml_expression
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
@@ -30,20 +24,20 @@ from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 
 class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_builtin_variable_registry_captures_scope_defaults_and_mutability(self):
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].scope, "instance")
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].default, "0")
-        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["x"].mutable)
-        self.assertFalse(_BUILTIN_VARIABLE_REGISTRY["x"].is_array)
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["x"].subsystem, "transform")
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["room"].scope, "global")
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["room"].default, "undefined")
-        self.assertFalse(_BUILTIN_VARIABLE_REGISTRY["room"].mutable)
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["view_xview"].scope, "global")
-        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["view_xview"].mutable)
-        self.assertTrue(_BUILTIN_VARIABLE_REGISTRY["view_xview"].is_array)
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["view_xview"].subsystem, "view")
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["argument"].default, "[]")
-        self.assertEqual(_BUILTIN_VARIABLE_REGISTRY["async_load"].subsystem, "async_event")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["x"].scope, "instance")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["x"].default, "0")
+        self.assertTrue(BUILTIN_VARIABLE_REGISTRY["x"].mutable)
+        self.assertFalse(BUILTIN_VARIABLE_REGISTRY["x"].is_array)
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["x"].subsystem, "transform")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["room"].scope, "global")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["room"].default, "undefined")
+        self.assertFalse(BUILTIN_VARIABLE_REGISTRY["room"].mutable)
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["view_xview"].scope, "global")
+        self.assertTrue(BUILTIN_VARIABLE_REGISTRY["view_xview"].mutable)
+        self.assertTrue(BUILTIN_VARIABLE_REGISTRY["view_xview"].is_array)
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["view_xview"].subsystem, "view")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["argument"].default, "[]")
+        self.assertEqual(BUILTIN_VARIABLE_REGISTRY["async_load"].subsystem, "async_event")
 
     def test_preserves_arithmetic_precedence(self):
         self.assertEqual(

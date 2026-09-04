@@ -46,7 +46,7 @@
       "task_id": "R01",
       "issue": 820,
       "title": "Integrate reviewed zero-private GML facade",
-      "state": "implementing",
+      "state": "integrated",
       "problem_and_evidence": "Preserved 6e86c3f has compatible 44 exports and sound receipts, but newer policy reports 14 integration conflicts.",
       "expected_benefit": "Zero governed private imports/suppressions; preserve 44 exports; resolve all 14 policy conflicts without new allowances.",
       "current_owner": "GM2Godot-820 at 6e86c3f",

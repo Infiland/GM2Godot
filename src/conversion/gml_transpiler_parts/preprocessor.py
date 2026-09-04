@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import re
@@ -10,7 +9,7 @@ from .lexical import is_verbatim_string_start, read_verbatim_string
 from .result_models import GMLPreprocessResult, GMLPreprocessorDiagnostic
 from .shared_models import GMLTranspileError
 from .tokens import read_template_string
-from .utils import _join_macro_continuation_lines, _macro_configuration_matches, _strip_comments
+from .utils import join_macro_continuation_lines, macro_configuration_matches, strip_comments
 
 
 _DIRECTIVE_RE = re.compile(r"^\s*#([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
@@ -183,7 +182,7 @@ def preprocess_gml_source(
     if macro_configuration:
         symbols.add(macro_configuration.casefold())
 
-    clean_source = _join_macro_continuation_lines(_strip_comments(source))
+    clean_source = join_macro_continuation_lines(strip_comments(source))
     output_lines: list[str] = []
     diagnostics: list[GMLPreprocessorDiagnostic] = []
     conditionals: list[_ConditionalFrame] = []
@@ -581,7 +580,7 @@ def _preprocess_macro(
     if match is None:
         return
     configuration = match.group("configuration")
-    if configuration is not None and not _macro_configuration_matches(configuration, macro_configuration):
+    if configuration is not None and not macro_configuration_matches(configuration, macro_configuration):
         return
     name = match.group("name")
     value = (match.group("value") or "").strip()

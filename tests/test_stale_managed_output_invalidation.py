@@ -744,7 +744,7 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
         self.assertEqual(version.returncode, 0, version.stdout + version.stderr)
         self.assertEqual(
             version.stdout.strip(),
-            "4.7.1.stable.official.a13da4feb",
+            "4.7.2.stable.official.ed1daf0bf",
         )
         report = validate_generated_godot_project(
             str(self.godot_dir),

@@ -731,8 +731,9 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        self.assertTrue(
-            version_result.stdout.strip().startswith("4.7.1."),
+        self.assertEqual(
+            version_result.stdout.strip(),
+            "4.7.2.stable.official.ed1daf0bf",
             version_result.stdout + version_result.stderr,
         )
         result = subprocess.run(
@@ -998,8 +999,9 @@ class TestConvertIconFallback(unittest.TestCase):
             check=False,
         )
         self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        self.assertTrue(
-            version_result.stdout.strip().startswith("4.7.1."),
+        self.assertEqual(
+            version_result.stdout.strip(),
+            "4.7.2.stable.official.ed1daf0bf",
             version_result.stdout + version_result.stderr,
         )
         result = subprocess.run(

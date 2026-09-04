@@ -190,7 +190,7 @@ class TestBoundMethodContextGodot(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(
-            "Godot Engine v4.7.1.stable.official.a13da4feb",
+            "Godot Engine v4.7.2.stable.official.ed1daf0bf",
             result.stdout,
         )
         self.assertIn("BOUND_METHOD_CONTEXT_OK", result.stdout)

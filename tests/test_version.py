@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_7_68(self) -> None:
-        self.assertEqual(get_version(), "0.7.68")
+    def test_release_version_is_0_7_69(self) -> None:
+        self.assertEqual(get_version(), "0.7.69")
 
     def test_release_surfaces_match_source_version(self) -> None:
         version_source = (PROJECT_ROOT / "src" / "version.py").read_text(
@@ -55,7 +55,7 @@ class TestVersion(unittest.TestCase):
             1,
         )
         release_label = (
-            f"GM2Godot {current_version}, GameMaker LTS 2026, Godot 4.7.1"
+            f"GM2Godot {current_version}, GameMaker LTS 2026, Godot 4.7.2"
         )
         _, versions_separator, versions_section = issue_template.partition(
             "  - type: input\n    id: versions\n"
@@ -70,7 +70,7 @@ class TestVersion(unittest.TestCase):
 
         wiki_banner = (
             f"> **Applies to:** GM2Godot {current_version} · "
-            "GameMaker LTS 2026 · Godot 4.7.1"
+            "GameMaker LTS 2026 · Godot 4.7.2"
         )
         expected_wiki_pages = {
             "Compatibility-and-Limitations.md": "# Compatibility and Limitations",
@@ -102,7 +102,7 @@ class TestVersion(unittest.TestCase):
                 )
         self.assertIn(
             "GM2Godot targets GameMaker LTS 2026 source projects and "
-            "Godot 4.7.1 output.",
+            "Godot 4.7.2 output.",
             readme,
         )
         self.assertIn("## 0.7.57 - 2026-09-02", changelog)

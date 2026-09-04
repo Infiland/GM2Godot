@@ -370,7 +370,7 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
         )
         version_output = (version.stdout + version.stderr).strip()
         self.assertEqual(version.returncode, 0, version_output)
-        self.assertRegex(version_output, r"^4\.7\.1\.stable\.")
+        self.assertEqual(version_output, "4.7.2.stable.official.ed1daf0bf")
 
         resource_report = validate_generated_godot_project(
             os.fspath(destination),

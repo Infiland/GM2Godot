@@ -1,8 +1,8 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.7.68 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.69 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-03
+> **Last reviewed:** 2026-09-04
 
 This guide covers a first conversion through either the desktop interface or the source CLI. GM2Godot converts source projects, so select the GameMaker project root that contains the `.yyp` file—not an exported or compiled game.
 
@@ -62,16 +62,16 @@ When `--only` contains at least one key, it takes precedence over `--groups`. Un
 1. Read the terminal outcome (CLI). A terminal state can be `success`, `partial`, `failed`, or `cancelled`.
 2. After destination preflight succeeds, read `<GodotProject>/gm2godot/conversion_attempt.json` and `<GodotProject>/gm2godot/conversion_diagnostics.md`. Address errors, unsupported APIs, and relevant warnings. A pre-existing `conversion_manifest.json` may describe an earlier trustworthy run, so inspect the newest attempt ledger first. A rejected preflight writes no conversion attempt or canonical report, although the persistent private destination lock/workspace parent may have been initialized before the rejection.
    For a successful or partial v0.7.43 conversion, `conversion_manifest.json` contains the complete deterministic `generation_inventory` committed with the managed files. Selected object, room, sprite, shader, and asset-registry/timeline converters rebuild their owned logical-resource outputs, so current unavailable, blocked, skipped, or YYP-removed resources do not leave earlier files or registry references behind. A converter omitted by `--only` remains disabled and carries its prior inventory exactly; include `asset_registry` when selectively rebuilding resource outputs that must be reflected in the runtime registry. `project.godot` remains under shared project-configuration ownership, with only a missing GM2Godot-managed room startup scene cleared. Failed or cancelled pre-decision reruns preserve the prior inventory byte- and mode-exact and publish an attempt whose preserved canonical generation is `verified`. If the private managed-output recovery artifact exists, close Godot and all writers and complete recovery before trusting either generation.
-3. Validate the destination project, including the generated resources, with the exact Godot 4.7.1 executable:
+3. Validate the destination project, including the generated resources, with the exact Godot 4.7.2 executable:
 
    ```bash
-   python main.py validate --godot-project "/path/to/GodotProject" --godot-bin "/absolute/path/to/Godot-4.7.1" --fail-on-unsupported
+   python main.py validate --godot-project "/path/to/GodotProject" --godot-bin "/absolute/path/to/Godot-4.7.2" --fail-on-unsupported
    ```
 
    If `--godot-bin` is omitted, validation checks `GODOT_BIN`, then a `godot` executable on `PATH`, then the standard macOS application path. If Godot cannot be found, project/resource validation is reported as skipped rather than passed.
 
 4. For an additional bounded boot check of the configured main scene, add `--godot-boot-frames 60`. The validation details are written to `<GodotProject>/gm2godot/godot_validation_report.json`.
-5. Open `project.godot` in Godot 4.7.1, inspect the generated scenes and scripts, and test the game paths that matter to your project. Conversion and parser validation do not guarantee one-to-one runtime behavior.
+5. Open `project.godot` in Godot 4.7.2, inspect the generated scenes and scripts, and test the game paths that matter to your project. Conversion and parser validation do not guarantee one-to-one runtime behavior.
 
 The repository CI pins the full Godot build used for smoke tests in [`godot-smoke.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/godot-smoke.yml). For interpreting partial output and unsupported features, continue with [Compatibility and Limitations](Compatibility-and-Limitations); for report details and failures, use [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting). Generated file layout and runtime helpers are covered in [Generated Project and Runtime](Generated-Project-and-Runtime).
 

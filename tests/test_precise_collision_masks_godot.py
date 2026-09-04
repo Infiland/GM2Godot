@@ -16,7 +16,7 @@ from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sprites import SpriteConverter
 
 
-_EXPECTED_GODOT_VERSION = "4.7.1.stable.official.a13da4feb"
+_EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
     Path(__file__).parent
     / "fixtures"
@@ -399,7 +399,7 @@ class TestPreciseCollisionMasksGodot(unittest.TestCase):
         self.assertEqual(version_result.returncode, 0, version_result.stderr)
         if version_result.stdout.strip() != _EXPECTED_GODOT_VERSION:
             self.skipTest(
-                "Exact Godot 4.7.1 required; found "
+                "Exact Godot 4.7.2 required; found "
                 + version_result.stdout.strip()
             )
 

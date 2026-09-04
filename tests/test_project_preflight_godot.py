@@ -19,13 +19,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class ProjectPreflightGodotTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("GODOT_BIN"), "GODOT_BIN is not set")
-    def test_cli_generated_project_opens_in_exact_godot_4_7_1(self) -> None:
+    def test_cli_generated_project_opens_in_exact_godot_4_7_2(self) -> None:
         godot_binary = os.environ["GODOT_BIN"]
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             gm_directory = root / "game-maker"
             gm_directory.mkdir()
-            project_name = 'Godot 4.7.1 "Open" Test'
+            project_name = 'Godot 4.7.2 "Open" Test'
             (gm_directory / "GodotOpen.yyp").write_text(
                 json.dumps({"%Name": project_name}),
                 encoding="utf-8",
@@ -94,7 +94,10 @@ class ProjectPreflightGodotTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(version_result.returncode, 0, version_result.stderr)
-            self.assertRegex(version_result.stdout.strip(), r"^4\.7\.1\.stable\.")
+            self.assertEqual(
+                version_result.stdout.strip(),
+                "4.7.2.stable.official.ed1daf0bf",
+            )
 
             open_result = subprocess.run(
                 [

@@ -7,10 +7,10 @@ on:
     branches: [main]
 
 env:
-  GODOT_VERSION: 4.7.1-stable
-  GODOT_ARCHIVE: Godot_v4.7.1-stable_linux.x86_64.zip
-  GODOT_BINARY: Godot_v4.7.1-stable_linux.x86_64
-  GODOT_ARCHIVE_SHA256: c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba
+  GODOT_VERSION: 4.7.2-stable
+  GODOT_ARCHIVE: Godot_v4.7.2-stable_linux.x86_64.zip
+  GODOT_BINARY: Godot_v4.7.2-stable_linux.x86_64
+  GODOT_ARCHIVE_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4
   SIMPLE_TOPDOWN_REF: 2413d7714b0dbd5d548058ea4c74f591f0d4e1e3
   TCC_REF: 4b6e942caca4d58af49dc006a037404d2f2a348c
   MONOPHOBIA_REF: b79cc26f2d3d01823d7e6359ee116322840f97a2
@@ -92,7 +92,9 @@ jobs:
             chmod +x "$godot_bin"
           fi
           echo "GODOT_BIN=$godot_bin" >> "$GITHUB_ENV"
-          "$godot_bin" --version
+          godot_build="$("$godot_bin" --version)"
+          printf '%s\n' "$godot_build"
+          test "$godot_build" = "4.7.2.stable.official.ed1daf0bf"
 
       - name: Checkout pinned SimpleTopDown test game
         run: |
@@ -214,7 +216,8 @@ jobs:
           fi
           echo "GODOT_BIN=$godot_bin" >> "$GITHUB_ENV"
           godot_build="$("$godot_bin" --version)"
-          test "$godot_build" = "4.7.1.stable.official.a13da4feb"
+          printf '%s\n' "$godot_build"
+          test "$godot_build" = "4.7.2.stable.official.ed1daf0bf"
 
       - name: Checkout pinned SNAP
         run: |

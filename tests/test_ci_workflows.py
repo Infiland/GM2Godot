@@ -27,11 +27,12 @@ from scripts import build_dependency_snapshot as dependency_snapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_GODOT_ENV_LINES = (
-    "GODOT_VERSION: 4.7.1-stable",
-    "GODOT_ARCHIVE: Godot_v4.7.1-stable_linux.x86_64.zip",
-    "GODOT_BINARY: Godot_v4.7.1-stable_linux.x86_64",
-    "GODOT_ARCHIVE_SHA256: c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba",
+    "GODOT_VERSION: 4.7.2-stable",
+    "GODOT_ARCHIVE: Godot_v4.7.2-stable_linux.x86_64.zip",
+    "GODOT_BINARY: Godot_v4.7.2-stable_linux.x86_64",
+    "GODOT_ARCHIVE_SHA256: cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4",
 )
+EXPECTED_GODOT_BUILD = "4.7.2.stable.official.ed1daf0bf"
 GODOT_ENV_PREFIXES = tuple(line.partition(":")[0] + ":" for line in EXPECTED_GODOT_ENV_LINES)
 LIVE_GODOT_MODULES_OUTSIDE_DISCOVERY = (
     "tests.test_godot_validation",
@@ -515,6 +516,44 @@ def _workflow_run_script(content: str, step_name: str) -> str:
             break
         script_lines.append(line[10:] if line else "")
     return "\n".join(script_lines).strip() + "\n"
+
+
+def _workflow_run_scripts(content: str, step_name: str) -> tuple[str, ...]:
+    marker = f"      - name: {step_name}\n"
+    remainder = content
+    scripts: list[str] = []
+
+    while marker in remainder:
+        _, _, remainder = remainder.partition(marker)
+        metadata, separator, script_remainder = remainder.partition("        run: |\n")
+        if not separator or "\n      - " in metadata:
+            raise AssertionError(f"Workflow run script not found: {step_name}")
+
+        script_lines: list[str] = []
+        for line in script_remainder.splitlines():
+            if line and not line.startswith("          "):
+                break
+            script_lines.append(line[10:] if line else "")
+        scripts.append("\n".join(script_lines).strip() + "\n")
+        remainder = script_remainder
+
+    return tuple(scripts)
+
+
+def _workflow_step_sections(content: str, step_name: str) -> tuple[str, ...]:
+    marker = f"      - name: {step_name}\n"
+    sections: list[str] = []
+
+    for match in re.finditer(re.escape(marker), content):
+        remainder = content[match.end():]
+        next_boundary = re.search(
+            r"(?m)^(?:      - |  [A-Za-z0-9_-]+:\s*$)",
+            remainder,
+        )
+        end = len(content) if next_boundary is None else match.end() + next_boundary.start()
+        sections.append(content[match.start():end])
+
+    return tuple(sections)
 
 
 def _workflow_job_section(content: str, job_name: str) -> str:
@@ -6424,28 +6463,87 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(workflow=workflow_name):
                 workflow = PROJECT_ROOT / ".github" / "workflows" / workflow_name
                 content = workflow.read_text(encoding="utf-8")
+                install_scripts = _workflow_run_scripts(content, "Install pinned Godot")
 
                 self.assertEqual(_godot_env_lines(content), EXPECTED_GODOT_ENV_LINES)
-                self.assertNotIn("4.4.1", content)
+                self.assertGreater(len(install_scripts), 0)
+                self.assertEqual(
+                    len(install_scripts),
+                    content.count("      - name: Install pinned Godot\n"),
+                )
+                self.assertEqual(
+                    {
+                        version
+                        for line in content.splitlines()
+                        if "godot" in line.casefold()
+                        for version in re.findall(
+                            r"(?<![\d.])4\.\d+\.\d+(?![\d.])",
+                            line,
+                        )
+                    },
+                    {"4.7.2"},
+                )
+                for install_index, install_script in enumerate(install_scripts, start=1):
+                    with self.subTest(install=install_index):
+                        self.assertTrue(
+                            install_script.startswith("set -euo pipefail\n"),
+                            install_script,
+                        )
+                        self.assertEqual(
+                            install_script.count(
+                                'godot_build="$("$godot_bin" --version)"'
+                            ),
+                            1,
+                        )
+                        self.assertEqual(
+                            install_script.count("printf '%s\\n' \"$godot_build\""),
+                            1,
+                        )
+                        self.assertLess(
+                            install_script.index("printf '%s\\n' \"$godot_build\""),
+                            install_script.index(
+                                f'test "$godot_build" = "{EXPECTED_GODOT_BUILD}"'
+                            ),
+                        )
+                        self.assertEqual(
+                            install_script.count(
+                                f'test "$godot_build" = "{EXPECTED_GODOT_BUILD}"'
+                            ),
+                            1,
+                        )
 
     def test_godot_workflows_verify_archive_digest_before_unzip(self) -> None:
         workflow_names = ("godot-smoke.yml", "tcc-conversion-test.yml")
+        checksum_command = (
+            'echo "${GODOT_ARCHIVE_SHA256}  '
+            '${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict'
+        )
+        unzip_command = 'unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}"'
 
         for workflow_name in workflow_names:
             with self.subTest(workflow=workflow_name):
                 workflow = PROJECT_ROOT / ".github" / "workflows" / workflow_name
                 content = workflow.read_text(encoding="utf-8")
-                checksum_command = (
-                    'echo "${GODOT_ARCHIVE_SHA256}  '
-                    '${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict'
+                install_scripts = _workflow_run_scripts(content, "Install pinned Godot")
+                cache_sections = _workflow_step_sections(content, "Cache pinned Godot")
+                expected_cache_key = (
+                    "key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}-"
+                    "${{ env.GODOT_ARCHIVE_SHA256 }}"
                 )
 
-                self.assertIn(checksum_command, content)
-                self.assertLess(content.index(checksum_command), content.index('unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}"'))
-                self.assertIn(
-                    "key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}-${{ env.GODOT_ARCHIVE_SHA256 }}",
-                    content,
-                )
+                self.assertGreater(len(install_scripts), 0)
+                self.assertEqual(len(cache_sections), len(install_scripts))
+                for install_index, install_script in enumerate(install_scripts, start=1):
+                    with self.subTest(install=install_index):
+                        self.assertEqual(install_script.count(checksum_command), 1)
+                        self.assertEqual(install_script.count(unzip_command), 1)
+                        self.assertLess(
+                            install_script.index(checksum_command),
+                            install_script.index(unzip_command),
+                        )
+                for cache_index, cache_section in enumerate(cache_sections, start=1):
+                    with self.subTest(cache=cache_index):
+                        self.assertEqual(cache_section.count(expected_cache_key), 1)
 
     def test_godot_smoke_workflow_covers_discovered_and_nonmatching_live_tests(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "godot-smoke.yml"
@@ -6536,7 +6634,10 @@ class TestCIWorkflows(unittest.TestCase):
             '${RUNNER_TEMP}/${GODOT_ARCHIVE}" | sha256sum --check --strict'
         )
 
-        self.assertIn('test "$godot_build" = "4.7.1.stable.official.a13da4feb"', lts_job)
+        self.assertIn(
+            f'test "$godot_build" = "{EXPECTED_GODOT_BUILD}"',
+            lts_job,
+        )
         self.assertIn(checksum_command, lts_job)
         self.assertLess(lts_job.index(checksum_command), lts_job.index("unzip -q"))
         self.assertIn('test -f "$repo_dir/snap.yyp"', lts_job)

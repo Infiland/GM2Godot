@@ -50,8 +50,8 @@ metadata and queued through managers:
 
 - Godot autoloads: https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html
 - Godot CanvasLayer: https://docs.godotengine.org/en/stable/tutorials/2d/canvas_layers.html
-- Godot 4.7.1 CollisionShape2D: https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html
-- Godot 4.7.1 Transform2D: https://docs.godotengine.org/en/4.7/classes/class_transform2d.html
+- Godot 4.7.2 CollisionShape2D: https://docs.godotengine.org/en/4.7/classes/class_collisionshape2d.html
+- Godot 4.7.2 Transform2D: https://docs.godotengine.org/en/4.7/classes/class_transform2d.html
 - Godot AudioServer: https://docs.godotengine.org/en/stable/classes/class_audioserver.html
 - Godot HTTPRequest: https://docs.godotengine.org/en/stable/classes/class_httprequest.html
 - GameMaker LTS collision masks: https://manual.gamemaker.io/lts/en/The_Asset_Editors/Sprites.htm

@@ -1,8 +1,8 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.7.68 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.69 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-03
+> **Last reviewed:** 2026-09-04
 
 [Home](Home) · [Quick Start Conversion](Quick-Start-Conversion) · [Compatibility and Limitations](Compatibility-and-Limitations)
 
@@ -108,14 +108,14 @@ After `failed` or `cancelled`, never assume that an existing manifest describes 
 
 Malformed, oversized, absolute, escaping, case-colliding, redirected, mounted, cross-device, non-regular, or multiply-linked inventory state is rejected before a new canonical publication. Preserve the named paths and error instead of editing the manifest to force migration. Inventory records are capped at 32 MiB and 100,000 entries. A digest mismatch after a same-size edit remains a mismatch even if timestamps were restored.
 
-## Validate with Godot 4.7.1
+## Validate with Godot 4.7.2
 
 Run validation after conversion:
 
 ```bash
 python main.py validate \
   --godot-project path/to/GodotProject \
-  --godot-bin path/to/Godot-4.7.1 \
+  --godot-bin path/to/Godot-4.7.2 \
   --fail-on-unsupported
 ```
 
@@ -126,7 +126,7 @@ Godot binary discovery uses the first existing file in this order:
 3. `godot` on `PATH`
 4. `/Applications/Godot.app/Contents/MacOS/Godot` on macOS
 
-An explicit or environment path that is not a file is skipped and discovery continues. The selected file must still be executable. Check it directly with `path/to/godot --version`; the pinned CI baseline is the official `4.7.1.stable.official.a13da4feb` build.
+An explicit or environment path that is not a file is skipped and discovery continues. The selected file must still be executable. Check it directly with `path/to/godot --version`; the pinned CI baseline is the official `4.7.2.stable.official.ed1daf0bf` build.
 
 If no Godot binary is found, validation records `status: "skipped"` and an informational diagnostic. It does **not** prove the project is valid and is not a hard failure by itself. Set `GODOT_BIN` or pass `--godot-bin` to get real parser/resource validation.
 
@@ -144,7 +144,7 @@ An import-only timeout is treated as clean only when output capture succeeded an
 | A shader has no generated `.gdshader` | Filter diagnostics for `GM2GD-SHADER-`. Use its `source_path`, line/column, `event` stage, `manifest_entry` construct, and workaround. Custom/normal vertex streams, arbitrary clip-space/3D transforms, macros, mutable globals, and conflicting stage declarations require source simplification or a manual Godot shader. |
 | Unsupported GML call or extension | Use the diagnostic's `api`, `manifest_entry`, `issue_number`, and `workaround`. Native extensions and service SDKs need a reviewed Godot addon/GDExtension or explicit local mapping; a generated stub is not a working native integration. |
 | Runtime says a custom Godot `Callable` lacks explicit receiver metadata | Do not add or remove guessed arguments. Use a transpiled GML function/method or the generated script registry path so GM2Godot can preserve the receiver contract. If converter-generated output reaches this error without hand edits or an extension bridge, report the minimal GML source and generated call site. |
-| Godot validation is `skipped` | Fix `--godot-bin`/`GODOT_BIN`, check executable permissions, and confirm `--version` reports the official 4.7.1 build. |
+| Godot validation is `skipped` | Fix `--godot-bin`/`GODOT_BIN`, check executable permissions, and confirm `--version` reports the official 4.7.2 build. |
 | Godot reports a parse, load, import, or boot error | Open `godot_validation_report.json` and fix the first retained Godot issue. Correlate generated scripts with adjacent `.gmlmap.json` source maps when present, then rerun validation. Boot warnings also fail boot validation. |
 | Converted output runs but differs from GameMaker | Check [Compatibility and Limitations](Compatibility-and-Limitations), `architecture_policy.json`, platform capabilities, and the affected resource/API report. Create the smallest fixture that preserves the mismatch. |
 | Another GM2Godot conversion is already publishing or recovering Included Files | Let the active converter finish, then retry. A leftover lock file is normal and does not itself mean the lock is held; do not delete it. Close any live game or editor operation using Included Files before retrying. |

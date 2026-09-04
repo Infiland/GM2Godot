@@ -113,7 +113,7 @@ class TestDocumentationHealth(unittest.TestCase):
         current_version = get_version()
         applies_to_pattern = re.compile(
             rf"^> \*\*Applies to:\*\* GM2Godot {re.escape(current_version)} · "
-            r"GameMaker LTS 2026 · Godot 4\.7\.1\s*$",
+            r"GameMaker LTS 2026 · Godot 4\.7\.2\s*$",
             re.MULTILINE,
         )
         reviewed_pattern = re.compile(

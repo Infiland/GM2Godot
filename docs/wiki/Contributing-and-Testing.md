@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.68 · GameMaker LTS 2026 · Godot 4.7.1
+> **Applies to:** GM2Godot 0.7.69 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-03
+> **Last reviewed:** 2026-09-04
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -36,7 +36,7 @@ python -m pip --isolated --disable-pip-version-check --no-input install \
   -r requirements-bootstrap.txt -r requirements-tooling.txt
 ```
 
-On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.lock`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.lock`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.1 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
+On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.lock`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.lock`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.2 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
 
 ### Refresh dependency constraints
 
@@ -82,7 +82,7 @@ Use the repository's fixture manifests and existing test families as the pattern
 
 - focused parser/converter fixtures under `tests/fixtures/`;
 - deterministic golden snapshots for generated output;
-- exact Godot 4.7.1 tests for parse/load/runtime behavior; and
+- exact Godot 4.7.2 tests for parse/load/runtime behavior; and
 - pinned external-project CI only when the source revision, license, runtime cost, and failure artifacts are bounded.
 
 ## Required checks
@@ -98,7 +98,7 @@ For Python or generated-code logic changes:
 CI enforces Ruff's `E9` fatal-error checks and the complete Pyflakes (`F`) rule family. Do not disable `F` or individual `F`-numbered rules globally or per file. Fix every Pyright error and warning in changed code. Run the relevant focused test while iterating; use the full suite for broad behavior changes. For Godot-dependent changes, run with the exact binary:
 
 ```bash
-GODOT_BIN=/path/to/Godot-4.7.1 \
+GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest discover -s tests -p 'test_*_godot.py'
 ```
 
@@ -171,7 +171,7 @@ Documentation-only changes do not require Pyright or the Python suite unless the
 Bound-method, script-call, callback, or constructor-context changes must retain the focused fixture and generated-output suites:
 
 ```bash
-GODOT_BIN=/path/to/Godot-4.7.1 \
+GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest \
   tests.test_bound_method_context_godot \
   tests.test_array_foreach_godot \
@@ -237,7 +237,7 @@ The depth probe exercises 25, 50, 100, and 200 nested directories, requires at m
 Shader translation changes must run the token/declaration, converter outcome, stale-output, real-corpus, and exact Godot load coverage:
 
 ```bash
-GODOT_BIN=/path/to/Godot-4.7.1 \
+GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest \
   tests.test_shader_translation \
   tests.test_shaders \
@@ -246,12 +246,12 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
   tests.test_resource_matrix_godot
 ```
 
-Keep `tests/fixtures/shader_corpus/manifest.json` provenance and SHA-256 values pinned. Every supported corpus pair must produce one collision-safe `.gdshader` and load under `4.7.1.stable.official.a13da4feb`. Every unsupported construct must retain a source-linked `GM2GD-SHADER-*` diagnostic and failed logical-resource count without a placeholder output. Do not replace parser coverage with regex substitutions or broaden a bounded 2D mapping into guessed custom vertex-buffer, 3D, macro, multi-pass, or renderer-state semantics.
+Keep `tests/fixtures/shader_corpus/manifest.json` provenance and SHA-256 values pinned. Every supported corpus pair must produce one collision-safe `.gdshader` and load under `4.7.2.stable.official.ed1daf0bf`. Every unsupported construct must retain a source-linked `GM2GD-SHADER-*` diagnostic and failed logical-resource count without a placeholder output. Do not replace parser coverage with regex substitutions or broaden a bounded 2D mapping into guessed custom vertex-buffer, 3D, macro, multi-pass, or renderer-state semantics.
 
 Authored sequence/timeline changes must run their descriptor, registry, runtime-segment, API-manifest, generated timeline GML, and exact Godot playback/order coverage:
 
 ```bash
-GODOT_BIN=/path/to/Godot-4.7.1 \
+GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest \
   tests.test_sequences_timelines_godot \
   tests.test_asset_registry \
@@ -260,7 +260,7 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
   tests.test_stale_managed_output_invalidation
 ```
 
-The mixed current-LTS fixture covers supported sprite, instance, audio, text, nested-sequence, mapped audio-effect, moment, and broadcast keys. Keep same-frame moment/broadcast order, eager object creation, playback-speed modes, interpolation/transforms, generated `.tres` loading, timeline GML order, audio-bus cleanup, and source-linked unsupported-type diagnostics under exact `4.7.1.stable.official.a13da4feb`.
+The mixed current-LTS fixture covers supported sprite, instance, audio, text, nested-sequence, mapped audio-effect, moment, and broadcast keys. Keep same-frame moment/broadcast order, eager object creation, playback-speed modes, interpolation/transforms, generated `.tres` loading, timeline GML order, audio-bus cleanup, and source-linked unsupported-type diagnostics under exact `4.7.2.stable.official.ed1daf0bf`.
 
 Managed-generation inventory changes must retain the complete deterministic schema, migration, carry-forward, and mutation suite:
 
@@ -275,7 +275,7 @@ The inventory suite compares canonical bytes across input order, path separators
 Stale logical-resource policy changes must run the repeat-conversion suite together with the inventory, registry, room, and destination-transaction regressions:
 
 ```bash
-GODOT_BIN=/path/to/Godot-4.7.1 \
+GODOT_BIN=/path/to/Godot-4.7.2 \
   ./venv/bin/python -m unittest \
   tests.test_stale_managed_output_invalidation \
   tests.test_asset_registry \
@@ -284,7 +284,7 @@ GODOT_BIN=/path/to/Godot-4.7.1 \
   tests.test_generation_inventory
 ```
 
-The stale-output suite establishes a successful object/room/sprite/shader/sequence/timeline generation, then separately removes YYP resources, loses source files, and injects object, room, sequence, and timeline blockers. It requires all owned multi-file outputs, sequence descriptors, registry rows, timeline script references, manifest resources, and inventory entries to agree after a committed partial rerun. Cancellation and ordinary publication failure must retain the prior generation; unknown user files under managed roots must fail closed and remain unchanged; unrelated files and disabled-converter output must be preserved. The Godot-gated combined case requires exact `4.7.1.stable.official.a13da4feb` import/resource validation with no engine warnings or errors.
+The stale-output suite establishes a successful object/room/sprite/shader/sequence/timeline generation, then separately removes YYP resources, loses source files, and injects object, room, sequence, and timeline blockers. It requires all owned multi-file outputs, sequence descriptors, registry rows, timeline script references, manifest resources, and inventory entries to agree after a committed partial rerun. Cancellation and ordinary publication failure must retain the prior generation; unknown user files under managed roots must fail closed and remain unchanged; unrelated files and disabled-converter output must be preserved. The Godot-gated combined case requires exact `4.7.2.stable.official.ed1daf0bf` import/resource validation with no engine warnings or errors.
 
 Production conversion-transaction changes must retain both the real mutation/cooperative-cancellation suite and the subprocess crash matrix:
 

@@ -109,7 +109,7 @@ This file tracks GameMaker project/resource data that the converter must eventua
 - [x] Map the supported 2D GameMaker position, colour, texture-coordinate, base-texture, varying, uniform, and matrix subset.
 - [x] Parse fixed arrays plus multi-line and comma-separated declarations.
 - [x] Emit source-linked diagnostics and fail the logical shader resource for unsupported constructs.
-- [x] Compile and load every supported pinned-corpus case through exact Godot 4.7.1.
+- [x] Compile and load every supported pinned-corpus case through exact Godot 4.7.2.
 - [ ] Full vertex shader translation.
 - [ ] Full fragment shader translation.
 - [ ] Custom/normal/additional vertex attribute streams and custom vertex-buffer binding.

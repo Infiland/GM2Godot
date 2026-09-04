@@ -48,3 +48,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound sco
 No implementation task is integrated or verified in this checkpoint.
 
 Plan review requested explicit particles/extensions/alias-retirement rows, serialization edges, slice-specific G01 targets, pre-extraction I01 state inventory, complete G05 structured-family ownership and measured time/memory evidence. Root incorporated these findings; the finite roadmap now has 54 rows. R02 repairs may proceed independently.
+
+## Validation checkpoint
+
+- Fresh unchanged-production baseline at planning commit 7141a27: full unittest passed, 2,897 tests in 409.879 seconds, 70 recorded platform/optional skips, using exact Godot and pinned SNAP/Adding/SimpleTopDown fixtures. Receipt: baseline-full-unittest.log.
+- R01 initial correction review approved semantics: independent 59-test cohort and 16,011 base/candidate lexical comparisons passed. The owner is refining a measured split_top_level performance regression before freezing the final candidate. This review is not final integrated acceptance.
+- R02 v2 design accepted: formatting-independent size evidence, retained effective physical allowance where structure does not shrink, immutable bootstrap, and structural debt for packed new destinations. Comment/import-only shortening is allowed but receives no structural improvement credit.
+- C01 exact job/permission/concurrency contract accepted at C01-ci-contract.md; implementation waits for R02.

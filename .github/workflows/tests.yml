@@ -47,13 +47,15 @@ jobs:
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.lock \
             coverage==7.15.2 \
-            packaging==26.2
+            packaging==26.2 \
+            ruff==0.15.22
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require coverage \
             --require packaging \
+            --require ruff \
             --require Pillow \
             --require markdown2 \
             --require requests \

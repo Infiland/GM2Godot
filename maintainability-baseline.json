@@ -1081,7 +1081,7 @@
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 2164,
     "tests|module_lines.executable|tests/test_architecture_policy.py::<module>": 1650,
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": 5545,
-    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6706,
+    "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6702,
     "tests|module_lines.executable|tests/test_cli.py::<module>": 3611,
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2739,
     "tests|module_lines.executable|tests/test_converter.py::<module>": 1568,
@@ -1105,7 +1105,7 @@
     "tests|module_structure.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 5376,
     "tests|module_structure.executable|tests/test_architecture_policy.py::<module>": 2893,
     "tests|module_structure.executable|tests/test_asset_registry.py::<module>": 9997,
-    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12317,
+    "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12309,
     "tests|module_structure.executable|tests/test_cli.py::<module>": 7102,
     "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4414,
     "tests|module_structure.executable|tests/test_converter.py::<module>": 2997,
@@ -1958,9 +1958,9 @@
       "structure": 9997
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {
-      "ast_sha256": "def7bc17c85db10516c812f0aa587ed67a02966a022094155cebd75ad5c12565",
-      "lines": 6706,
-      "structure": 12317
+      "ast_sha256": "e647750f32c1eb56fb2b414ea7437717e0ae73aecaf1e3679a2b07aa553591aa",
+      "lines": 6699,
+      "structure": 12309
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
       "ast_sha256": "e991b844378838044ab7664612ddaabc84470547844b1299655ca7d0983527d4",

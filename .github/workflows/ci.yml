@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev/080-architecture-campaign]
+  push:
+    branches: [main, dev/080-architecture-campaign]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gm2godot-ci-caller-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  pyright:
+    uses: ./.github/workflows/pyright.yml
+
+  code-health:
+    uses: ./.github/workflows/code-health.yml
+
+  godot:
+    uses: ./.github/workflows/godot-smoke.yml
+
+  conversion:
+    uses: ./.github/workflows/tcc-conversion-test.yml
+
+  dependencies:
+    uses: ./.github/workflows/dependency-locks.yml
+    permissions:
+      actions: read
+      contents: write
+
+  release-smoke:
+    uses: ./.github/workflows/release-action-smoke.yml
+
+  ci-success:
+    name: ci-success
+    if: always()
+    needs: [tests, pyright, code-health, godot, conversion, dependencies, release-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      REQUIRED_JOBS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require successful validation jobs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {
+              "tests": "success",
+              "pyright": "success",
+              "code-health": "success",
+              "godot": "success",
+              "conversion": "success",
+              "dependencies": "success",
+              "release-smoke": "success",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
+          if actual != expected:
+              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
+          PY

@@ -1227,23 +1227,18 @@ def _write_release_payloads(root: Path) -> None:
 
 
 class TestCIWorkflows(unittest.TestCase):
-    def test_release_action_smoke_is_pr_only_and_credentialless(self) -> None:
+    def test_release_action_smoke_is_reusable_and_credentialless(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
         content = workflow.read_text(encoding="utf-8")
 
         self.assertIn(
             "on:\n"
-            "  pull_request:\n"
-            "    branches: [main]\n"
-            "    paths:\n"
-            "      - '.github/workflows/release.yml'\n"
-            "      - '.github/workflows/release-action-smoke.yml'\n"
-            "      - 'scripts/release_publisher.py'\n",
+            "  workflow_call:\n",
             content,
         )
-        self.assertEqual(content.count("permissions:"), 2)
+        self.assertEqual(content.count("permissions:"), 3)
         self.assertIn("\npermissions: {}\n", content)
-        self.assertEqual(content.count("permissions: {}"), 1)
+        self.assertEqual(content.count("permissions: {}"), 2)
         self.assertIn("permissions:\n      contents: read", content)
         self.assertEqual(content.count("actions/checkout@"), 1)
         self.assertEqual(content.count("actions/setup-python@"), 1)
@@ -3677,7 +3672,8 @@ class TestCIWorkflows(unittest.TestCase):
         for workflow_name, job_count in linux_workflow_job_counts.items():
             with self.subTest(workflow=workflow_name):
                 content = (workflow_dir / workflow_name).read_text(encoding="utf-8")
-                self.assertEqual(content.count("runs-on: ubuntu-24.04"), job_count)
+                validation_jobs = content.partition("\n  workflow-success:\n")[0]
+                self.assertEqual(validation_jobs.count("runs-on: ubuntu-24.04"), job_count)
                 self.assertEqual(content.count("python-version: '3.12.13'"), job_count)
                 self.assertEqual(content.count("architecture: x64"), job_count)
                 self.assertNotIn("ubuntu-latest", content)
@@ -4760,8 +4756,7 @@ class TestCIWorkflows(unittest.TestCase):
         workflow = PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
         content = workflow.read_text(encoding="utf-8")
         trigger_section = content[:content.index("permissions:")]
-        self.assertIn("  pull_request:\n    branches: [main]", trigger_section)
-        self.assertIn("  push:\n    branches: [main]", trigger_section)
+        self.assertIn("  workflow_call:\n", trigger_section)
         self.assertIn("  workflow_dispatch:", trigger_section)
         self.assertNotIn("paths:", trigger_section)
         self.assertIn("permissions:\n  contents: read", content)
@@ -6401,9 +6396,7 @@ class TestCIWorkflows(unittest.TestCase):
     ) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
         content = workflow.read_text(encoding="utf-8")
-        windows_job = content[
-            content.index("  windows-managed-output-crash-recovery:"):
-        ]
+        windows_job = _workflow_job_section(content, "windows-managed-output-crash-recovery")
 
         self.assertIn("runs-on: windows-2025", windows_job)
         self.assertEqual(

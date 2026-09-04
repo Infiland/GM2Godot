@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.70 - 2026-09-04
+
+- Replaced the mutable GameMaker monthly-manual root in generated GML compatibility evidence with one canonical `https://manual.gamemaker.io/lts/en/` source shared by API entries, manual-scope entries, function descriptors, and the runtime API index.
+- Verified all 233 referenced evidence topics against the 3,311-topic official GameMaker LTS 2026 manual tree pinned at commit `bb7dc2165b6bd77eedfe4dd5afe3445ef53a4601`, remapping monthly-only paths to exact LTS topics or explicitly documented compatibility-extension fallbacks.
+- Intentionally changed evidence-link/report bytes while preserving support classifications, lowering, diagnostics semantics, generated GDScript/resource bytes, runtime behavior, GameMaker fixture revisions, and exact Godot `4.7.2.stable.official.ed1daf0bf` validation.
+
 ## 0.7.69 - 2026-09-04
 
 - Retargeted generated output and runtime validation to exact Godot `4.7.2.stable.official.ed1daf0bf`, with the official Linux archive and SHA-256 pinned in both Godot workflows.

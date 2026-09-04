@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from typing import Iterable, Mapping, MutableSet
 
-from .constants import _LEGACY_GLOBAL_BUILTINS
+from .constants import LEGACY_GLOBAL_BUILTINS
 from .extension_functions import (
     normalize_extension_function_mappings,
     normalize_extension_functions,
@@ -142,7 +142,7 @@ def transpile_gml_code_with_source_map(
         return_depth=return_depth,
         macro_configuration=macro_configuration,
         top_level_global_scope=top_level_global_scope,
-        global_names=_LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
+        global_names=LEGACY_GLOBAL_BUILTINS if legacy_global_builtins else None,
         enum_values=known_enum_values,
         enum_names=known_enum_values,
         macro_values=known_macro_values,

@@ -9,7 +9,7 @@ from src.conversion.event_mapping import is_input_event, map_event, map_input_ev
 from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
-from src.conversion.gml_transpiler_parts.constants import _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+from src.conversion.gml_transpiler_parts.constants import GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 from src.conversion.gml_transpiler_parts.identifiers import _sanitize_gdscript_identifier
 from src.conversion.type_defs import JsonDict
 
@@ -92,7 +92,7 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_sprite_visual_node",
     "Vector2",
 })
-_NATIVE_NODE2D_MEMBER_VARIABLES = _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+_NATIVE_NODE2D_MEMBER_VARIABLES = GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
     "as",

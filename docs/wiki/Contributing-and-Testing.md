@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.7.70 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.7.71 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-04
 
@@ -114,17 +114,21 @@ Before the ordered #794 phase-interface migration is complete, run:
 ./venv/bin/python -m unittest tests.test_gml_transpiler_architecture -v
 ```
 
-The baseline inventories 209 cross-module private imported-name edges within
-the facade/phase implementation and all 60 production imports from those
-surfaces. It separately freezes 44 supported non-underscore facade exports and
-their signatures, 30 legacy private facade exports, the 16 phase-package
-`reportPrivateUsage=false` directives, and the facade directive. It is a
-no-growth migration allowlist, not permission to publish another private name.
-The #816 model slice removed 120 internal private edges, replaced four
-production private model imports, and established `shared_models`,
-`expression_models`, and `result_models` as dependency-only typed owners.
-Changes under #817 through #820 must remove the entries owned by that stage;
-unrelated changes must not edit the inventory.
+The baseline inventories 135 cross-module private imported-name edges across
+53 facade/phase module pairs and all 60 production imports from those surfaces,
+including 16 remaining private production import edges. It separately freezes
+44 supported non-underscore facade exports and their signatures, 30 legacy
+private facade exports, the 14 phase-package `reportPrivateUsage=false`
+directives, and the facade directive. It is a no-growth migration allowlist,
+not permission to publish another private name. The #816 model slice removed
+120 internal private edges, replaced four production private model imports,
+and established `shared_models`, `expression_models`, and `result_models` as
+dependency-only typed owners. The #861 language-metadata slice removed another
+74 internal private edges, reduced private production import edges from 22 to
+16 and private-usage suppressions from 17 to 15, and left only the frozen
+constants facade alias assigned to #820. Changes under #817 through #820 must
+remove the entries owned by that stage; unrelated changes must not edit the
+inventory.
 
 The policy follows Python's
 [`__all__` package guidance](https://docs.python.org/3.12/tutorial/modules.html#importing-from-a-package),

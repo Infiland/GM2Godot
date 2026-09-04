@@ -1,15 +1,22 @@
 # pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence, Set as AbstractSet
+from types import MappingProxyType
+from typing import Final
+
 from .shared_models import (
     AssignmentOperator as _AssignmentOperator,
     BuiltinVariableMetadata as _BuiltinVariableMetadata,
     Token as _Token,
 )
 
-_EOF = _Token("EOF", "")
+# These tables mirror external language metadata. Keep their payload layout stable so
+# reviews expose value changes instead of formatter churn.
+# fmt: off
+EOF: Final[_Token] = _Token("EOF", "")
 
-_MULTI_CHAR_OPERATORS = (
+MULTI_CHAR_OPERATORS: Final[Sequence[str]] = (
     "??=",
     "<<=",
     ">>=",
@@ -36,7 +43,7 @@ _MULTI_CHAR_OPERATORS = (
     ">>",
 )
 
-_ASSIGNMENT_OPERATORS: tuple[_AssignmentOperator, ...] = (
+ASSIGNMENT_OPERATORS: Final[Sequence[_AssignmentOperator]] = (
     "??=",
     "<<=",
     ">>=",
@@ -52,7 +59,7 @@ _ASSIGNMENT_OPERATORS: tuple[_AssignmentOperator, ...] = (
     "=",
 )
 
-_BINARY_PRECEDENCE = {
+BINARY_PRECEDENCE: Final[Mapping[str, int]] = MappingProxyType({
     "??": 10,
     "or": 20,
     "||": 20,
@@ -78,18 +85,18 @@ _BINARY_PRECEDENCE = {
     "%": 100,
     "div": 100,
     "mod": 100,
-}
+})
 
-_UNARY_PRECEDENCE = 110
-_POSTFIX_PRECEDENCE = 120
-_PRIMARY_PRECEDENCE = 130
-_TERNARY_PRECEDENCE = 5
-_GML_IDENTIFIER_MAX_LENGTH = 64
-_GENERATED_IDENTIFIER_PREFIX = "_gml_"
+UNARY_PRECEDENCE: Final[int] = 110
+POSTFIX_PRECEDENCE: Final[int] = 120
+PRIMARY_PRECEDENCE: Final[int] = 130
+TERNARY_PRECEDENCE: Final[int] = 5
+GML_IDENTIFIER_MAX_LENGTH: Final[int] = 64
+GENERATED_IDENTIFIER_PREFIX: Final[str] = "_gml_"
 
-_RIGHT_ASSOCIATIVE = {"??"}
+RIGHT_ASSOCIATIVE: Final[AbstractSet[str]] = frozenset({"??"})
 
-_GDSCRIPT_RESERVED_IDENTIFIERS = frozenset({
+GDSCRIPT_RESERVED_IDENTIFIERS: Final[AbstractSet[str]] = frozenset({
     "_",
     "as",
     "break",
@@ -121,7 +128,7 @@ _GDSCRIPT_RESERVED_IDENTIFIERS = frozenset({
     "when",
     "while",
 })
-_GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS = frozenset({
+GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS: Final[AbstractSet[str]] = frozenset({
     "editor_description",
     "global_position",
     "global_rotation",
@@ -160,14 +167,14 @@ _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS = frozenset({
     # Native methods also occupy the script member namespace.
     "draw",
 })
-_GML_LITERAL_IDENTIFIERS = frozenset({
+GML_LITERAL_IDENTIFIERS: Final[AbstractSet[str]] = frozenset({
     "false",
     "null",
     "self",
     "super",
     "true",
 })
-_GML_BUILTIN_CONSTANT_IDENTIFIERS = frozenset({
+GML_BUILTIN_CONSTANT_IDENTIFIERS: Final[AbstractSet[str]] = frozenset({
     "NaN",
     "all",
     "false",
@@ -218,14 +225,14 @@ _GML_BUILTIN_CONSTANT_IDENTIFIERS = frozenset({
     "true",
     "undefined",
 })
-_DIRECT_MEMBER_TARGETS = frozenset({
+DIRECT_MEMBER_TARGETS: Final[AbstractSet[str]] = frozenset({
     "global",
     "other",
     "self",
     "super",
 })
 
-_BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
+BOOLEAN_RESULT_BINARY_OPERATORS: Final[AbstractSet[str]] = frozenset({
     "&&",
     "||",
     "^^",
@@ -240,7 +247,7 @@ _BOOLEAN_RESULT_BINARY_OPERATORS = frozenset({
     ">=",
 })
 
-_BOOLEAN_RESULT_FUNCTIONS = frozenset({
+BOOLEAN_RESULT_FUNCTIONS: Final[AbstractSet[str]] = frozenset({
     "bool",
     "is_array",
     "is_bool",
@@ -286,30 +293,30 @@ _BOOLEAN_RESULT_FUNCTIONS = frozenset({
     "texture_is_ready",
 })
 
-_ARITHMETIC_RUNTIME_FUNCTIONS = {
+ARITHMETIC_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "+": "gml_add",
     "-": "gml_sub",
     "*": "gml_mul",
     "%": "gml_mod",
     "mod": "gml_mod",
-}
+})
 
-_BITWISE_RUNTIME_FUNCTIONS = {
+BITWISE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "&": "gml_bit_and",
     "|": "gml_bit_or",
     "^": "gml_bit_xor",
     "<<": "gml_shift_left",
     ">>": "gml_shift_right",
-}
+})
 
-_COMPARISON_RUNTIME_FUNCTIONS = {
+COMPARISON_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "<": "gml_lt",
     "<=": "gml_lte",
     ">": "gml_gt",
     ">=": "gml_gte",
-}
+})
 
-_DS_COLLECTIONS_FUNCTIONS = {
+DS_COLLECTIONS_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "ds_exists": "gml_ds_exists",
     "ds_list_create": "gml_ds_list_create",
     "ds_list_destroy": "gml_ds_list_destroy",
@@ -374,9 +381,9 @@ _DS_COLLECTIONS_FUNCTIONS = {
     "ds_priority_copy": "gml_ds_priority_copy",
     "ds_priority_read": "gml_ds_priority_read",
     "ds_priority_write": "gml_ds_priority_write",
-}
+})
 
-_COMPOUND_RUNTIME_FUNCTIONS: dict[_AssignmentOperator, str] = {
+COMPOUND_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "&=": "gml_bit_and",
     "+=": "gml_add",
     "-=": "gml_sub",
@@ -387,16 +394,16 @@ _COMPOUND_RUNTIME_FUNCTIONS: dict[_AssignmentOperator, str] = {
     ">>=": "gml_shift_right",
     "|=": "gml_bit_or",
     "^=": "gml_bit_xor",
-}
+})
 
-_OPERATOR_REPLACEMENTS = {
+OPERATOR_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "&&": "and",
     "||": "or",
     "=": "==",
     "mod": "%",
-}
+})
 
-_NAME_REPLACEMENTS = {
+NAME_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "all": "GMRuntime.gml_instance_all()",
     "application_surface": 'GMRuntime.gml_builtin_global("application_surface")',
     "buffer_bool": "9",
@@ -690,21 +697,21 @@ _NAME_REPLACEMENTS = {
     "AdMob_ContentRating_PARENTAL_GUIDANCE": "1",
     "AdMob_ContentRating_TEEN": "2",
     "AdMob_ContentRating_MATURE_AUDIENCE": "3",
-}
+})
 
-_BLOCK_DELIMITER_REPLACEMENTS = {
+BLOCK_DELIMITER_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "begin": "{",
     "end": "}",
-}
+})
 
-_INSTANCE_NAME_REPLACEMENTS = {
+INSTANCE_NAME_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "x": "position.x",
     "y": "position.y",
-}
+})
 
-_LEGACY_GLOBAL_BUILTINS = frozenset({"health", "lives", "score"})
+LEGACY_GLOBAL_BUILTINS: Final[AbstractSet[str]] = frozenset({"health", "lives", "score"})
 
-_BUILTIN_VARIABLE_REGISTRY = {
+BUILTIN_VARIABLE_REGISTRY: Final[Mapping[str, _BuiltinVariableMetadata]] = MappingProxyType({
     "application_surface": _BuiltinVariableMetadata("global", "undefined", False, False, "surface"),
     "argument": _BuiltinVariableMetadata("global", "[]", False, False, "script_arguments"),
     "argument_count": _BuiltinVariableMetadata("global", "0", False, False, "script_arguments"),
@@ -805,34 +812,34 @@ _BUILTIN_VARIABLE_REGISTRY = {
     "y": _BuiltinVariableMetadata("instance", "0", True, False, "transform"),
     "yprevious": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
     "ystart": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
-}
+})
 
-_BUILTIN_GLOBAL_VARIABLES = frozenset(
-    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+BUILTIN_GLOBAL_VARIABLES: Final[AbstractSet[str]] = frozenset(
+    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items()
     if metadata.scope == "global" and not metadata.is_array
 )
-_BUILTIN_ARRAY_VARIABLES = frozenset(
-    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+BUILTIN_ARRAY_VARIABLES: Final[AbstractSet[str]] = frozenset(
+    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items()
     if metadata.is_array
 )
-_READ_ONLY_BUILTIN_VARIABLES = frozenset(
-    name for name, metadata in _BUILTIN_VARIABLE_REGISTRY.items()
+READ_ONLY_BUILTIN_VARIABLES: Final[AbstractSet[str]] = frozenset(
+    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items()
     if not metadata.mutable
 )
-_BUILTIN_INSTANCE_VARIABLES = frozenset(_BUILTIN_VARIABLE_REGISTRY)
+BUILTIN_INSTANCE_VARIABLES: Final[AbstractSet[str]] = frozenset(BUILTIN_VARIABLE_REGISTRY)
 
-_VIRTUAL_KEY_ACTIONS = {
+VIRTUAL_KEY_ACTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "vk_left": "ui_left",
     "vk_right": "ui_right",
     "vk_up": "ui_up",
     "vk_down": "ui_down",
-}
+})
 
-_VIRTUAL_KEY_CONSTANTS = {
+VIRTUAL_KEY_CONSTANTS: Final[Mapping[str, str]] = MappingProxyType({
     "vk_shift": "KEY_SHIFT",
-}
+})
 
-_RUNTIME_FUNCTIONS = {
+RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "int64": "gml_int64",
     "is_array": "is_array",
     "is_bool": "is_bool",
@@ -859,9 +866,9 @@ _RUNTIME_FUNCTIONS = {
     "with_targets": "gml_with_targets",
     "string": "gml_string",
     "bool": "gml_bool",
-}
+})
 
-_MATH_RUNTIME_FUNCTIONS = {
+MATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "abs": "gml_abs",
     "sign": "gml_sign",
     "floor": "gml_floor",
@@ -915,9 +922,9 @@ _MATH_RUNTIME_FUNCTIONS = {
     "randomise": "gml_randomise",
     "random_set_seed": "gml_random_set_seed",
     "random_get_seed": "gml_random_get_seed",
-}
+})
 
-_FILE_RUNTIME_FUNCTIONS = {
+FILE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "file_exists": "gml_file_exists",
     "file_delete": "gml_file_delete",
     "directory_exists": "gml_directory_exists",
@@ -961,9 +968,9 @@ _FILE_RUNTIME_FUNCTIONS = {
     "json_decode": "gml_json_decode",
     "json_stringify": "gml_json_stringify",
     "json_parse": "gml_json_parse",
-}
+})
 
-_BUFFER_RUNTIME_FUNCTIONS = {
+BUFFER_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "buffer_create": "gml_buffer_create",
     "buffer_delete": "gml_buffer_delete",
     "buffer_exists": "gml_buffer_exists",
@@ -993,15 +1000,15 @@ _BUFFER_RUNTIME_FUNCTIONS = {
     "buffer_sha1": "gml_buffer_sha1",
     "buffer_sha256": "gml_buffer_sha256",
     "buffer_crc32": "gml_buffer_crc32",
-}
+})
 
-_ASYNC_RUNTIME_FUNCTIONS = {
+ASYNC_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "http_get": "gml_http_get",
     "http_post_string": "gml_http_post_string",
     "http_request": "gml_http_request",
-}
+})
 
-_NETWORK_RUNTIME_FUNCTIONS = {
+NETWORK_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "network_create_socket": "gml_network_create_socket",
     "network_create_socket_ext": "gml_network_create_socket_ext",
     "network_create_server": "gml_network_create_server",
@@ -1016,9 +1023,9 @@ _NETWORK_RUNTIME_FUNCTIONS = {
     "network_send_udp_raw": "gml_network_send_udp_raw",
     "network_send_broadcast": "gml_network_send_broadcast",
     "network_destroy": "gml_network_destroy",
-}
+})
 
-_PHYSICS_RUNTIME_FUNCTIONS = {
+PHYSICS_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "physics_world_create": "gml_physics_world_create",
     "physics_world_gravity": "gml_physics_world_gravity",
     "physics_world_gravity_get": "gml_physics_world_gravity_get",
@@ -1048,9 +1055,9 @@ _PHYSICS_RUNTIME_FUNCTIONS = {
     "physics_joint_set_value": "gml_physics_joint_set_value",
     "physics_joint_enable_motor": "gml_physics_joint_enable_motor",
     "physics_mass_properties": "gml_physics_mass_properties",
-}
+})
 
-_STRUCT_RUNTIME_FUNCTIONS = {
+STRUCT_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "struct_exists": "gml_struct_exists",
     "struct_get": "gml_struct_get",
     "struct_get_names": "gml_struct_get_names",
@@ -1067,9 +1074,9 @@ _STRUCT_RUNTIME_FUNCTIONS = {
     "struct_set_from_hash": "gml_struct_set_from_hash",
     "struct_exists_from_hash": "gml_struct_exists_from_hash",
     "struct_remove_from_hash": "gml_struct_remove_from_hash",
-}
+})
 
-_VARIABLE_RUNTIME_FUNCTIONS = {
+VARIABLE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "method_call": "gml_method_call",
     "method": "gml_method",
     "script_execute": "gml_script_execute",
@@ -1094,9 +1101,9 @@ _VARIABLE_RUNTIME_FUNCTIONS = {
     "variable_struct_remove": "gml_variable_struct_remove",
     "variable_struct_get_names": "gml_variable_struct_get_names",
     "variable_struct_names_count": "gml_variable_struct_names_count",
-}
+})
 
-_DS_MAP_RUNTIME_FUNCTIONS = {
+DS_MAP_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "ds_map_create": "gml_ds_map_create",
     "ds_map_destroy": "gml_ds_map_destroy",
     "ds_map_clear": "gml_ds_map_clear",
@@ -1124,9 +1131,9 @@ _DS_MAP_RUNTIME_FUNCTIONS = {
     "ds_map_replace_map": "gml_ds_map_replace_map",
     "ds_map_is_list": "gml_ds_map_is_list",
     "ds_map_is_map": "gml_ds_map_is_map",
-}
+})
 
-_DS_GRID_FUNCTIONS = {
+DS_GRID_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "ds_grid_create": "gml_ds_grid_create",
     "ds_grid_destroy": "gml_ds_grid_destroy",
     "ds_grid_width": "gml_ds_grid_width",
@@ -1148,9 +1155,9 @@ _DS_GRID_FUNCTIONS = {
     "ds_grid_copy": "gml_ds_grid_copy",
     "ds_grid_read": "gml_ds_grid_read",
     "ds_grid_write": "gml_ds_grid_write",
-}
+})
 
-_STRING_RUNTIME_FUNCTIONS = {
+STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "string_length": "gml_string_length",
     "string_byte_length": "gml_string_byte_length",
     "string_char_at": "gml_string_char_at",
@@ -1174,9 +1181,9 @@ _STRING_RUNTIME_FUNCTIONS = {
     "chr": "gml_chr",
     "ord": "gml_ord",
     "ansi_char": "gml_ansi_char",
-}
+})
 
-_ARRAY_RUNTIME_FUNCTIONS = {
+ARRAY_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",
     "array_push_back": "gml_array_push_back",
@@ -1197,18 +1204,18 @@ _ARRAY_RUNTIME_FUNCTIONS = {
     "array_filter": "gml_array_filter",
     "array_map": "gml_array_map",
     "array_reduce": "gml_array_reduce",
-}
+})
 
-_ASSET_RUNTIME_FUNCTIONS = {
+ASSET_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "asset_get_index": "gml_asset_get_index",
     "asset_get_type": "gml_asset_get_type",
     "asset_get_ids": "gml_asset_get_ids",
     "asset_get_type_name": "gml_asset_get_type_name",
     "asset_get_index_from_id": "gml_asset_get_index_from_id",
     "asset_has_any_tag": "gml_asset_has_any_tag",
-}
+})
 
-_INSTANCE_RUNTIME_FUNCTIONS = {
+INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "instance_create_layer": "gml_instance_create_layer",
     "instance_create_depth": "gml_instance_create_depth",
     "instance_destroy": "gml_instance_destroy",
@@ -1218,9 +1225,9 @@ _INSTANCE_RUNTIME_FUNCTIONS = {
     "instance_nearest": "gml_instance_nearest",
     "instance_furthest": "gml_instance_furthest",
     "instance_id_get": "gml_instance_id_get",
-}
+})
 
-_COLLISION_RUNTIME_FUNCTIONS = {
+COLLISION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "distance_to_object": "gml_distance_to_object",
     "place_meeting": "gml_place_meeting",
     "position_meeting": "gml_position_meeting",
@@ -1234,9 +1241,9 @@ _COLLISION_RUNTIME_FUNCTIONS = {
     "collision_rectangle_list": "gml_collision_rectangle_list",
     "collision_line_list": "gml_collision_line_list",
     "collision_circle_list": "gml_collision_circle_list",
-}
+})
 
-_MOTION_RUNTIME_FUNCTIONS = {
+MOTION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "motion_set": "gml_motion_set",
     "motion_add": "gml_motion_add",
     "move_towards_point": "gml_move_towards_point",
@@ -1247,15 +1254,15 @@ _MOTION_RUNTIME_FUNCTIONS = {
     "move_random": "gml_move_random",
     "move_snap": "gml_move_snap",
     "place_snapped": "gml_place_snapped",
-}
+})
 
-_PATH_RUNTIME_FUNCTIONS = {
+PATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "path_start": "gml_path_start",
     "path_end": "gml_path_end",
     "path_get_length": "gml_path_get_length",
-}
+})
 
-_MP_GRID_RUNTIME_FUNCTIONS = {
+MP_GRID_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "mp_grid_create": "gml_mp_grid_create",
     "mp_grid_destroy": "gml_mp_grid_destroy",
     "mp_grid_clear_all": "gml_mp_grid_clear_all",
@@ -1263,9 +1270,9 @@ _MP_GRID_RUNTIME_FUNCTIONS = {
     "mp_grid_clear_cell": "gml_mp_grid_clear_cell",
     "mp_grid_add_rectangle": "gml_mp_grid_add_rectangle",
     "mp_grid_path": "gml_mp_grid_path",
-}
+})
 
-_INPUT_RUNTIME_FUNCTIONS = {
+INPUT_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "keyboard_check": "gml_keyboard_check",
     "keyboard_check_pressed": "gml_keyboard_check_pressed",
     "keyboard_check_released": "gml_keyboard_check_released",
@@ -1289,9 +1296,9 @@ _INPUT_RUNTIME_FUNCTIONS = {
     "gamepad_get_axis_deadzone": "gml_gamepad_get_axis_deadzone",
     "gamepad_set_vibration": "gml_gamepad_set_vibration",
     "gamepad_set_color": "gml_gamepad_set_color",
-}
+})
 
-_AUDIO_RUNTIME_FUNCTIONS = {
+AUDIO_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "audio_play_sound": "gml_audio_play_sound",
     "audio_play_sound_at": "gml_audio_play_sound_at",
     "audio_play_sound_on": "gml_audio_play_sound_on",
@@ -1377,9 +1384,9 @@ _AUDIO_RUNTIME_FUNCTIONS = {
     "sound_volume": "gml_sound_volume",
     "sound_pitch": "gml_sound_pitch",
     "sound_global_volume": "gml_sound_global_volume",
-}
+})
 
-_TIME_RUNTIME_FUNCTIONS = {
+TIME_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "alarm_get": "gml_alarm_get",
     "alarm_set": "gml_alarm_set",
     "time_source_create": "gml_time_source_create",
@@ -1395,9 +1402,9 @@ _TIME_RUNTIME_FUNCTIONS = {
     "time_source_get_time_remaining": "gml_time_source_get_time_remaining",
     "call_later": "gml_call_later",
     "call_cancel": "gml_call_cancel",
-}
+})
 
-_ROOM_RUNTIME_FUNCTIONS = {
+ROOM_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "room_goto": "gml_room_goto",
     "room_goto_next": "gml_room_goto_next",
     "room_goto_previous": "gml_room_goto_previous",
@@ -1408,9 +1415,9 @@ _ROOM_RUNTIME_FUNCTIONS = {
     "room_exists": "gml_room_exists",
     "room_get_name": "gml_room_get_name",
     "room_get_info": "gml_room_get_info",
-}
+})
 
-_LAYER_RUNTIME_FUNCTIONS = {
+LAYER_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "layer_exists": "gml_layer_exists",
     "layer_get_id": "gml_layer_get_id",
     "layer_get_id_at_depth": "gml_layer_get_id_at_depth",
@@ -1443,9 +1450,9 @@ _LAYER_RUNTIME_FUNCTIONS = {
     "tilemap_get": "gml_tilemap_get",
     "tilemap_get_width": "gml_tilemap_get_width",
     "tilemap_get_height": "gml_tilemap_get_height",
-}
+})
 
-_SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS = {
+SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "timeline_exists": "gml_timeline_exists",
     "timeline_get_name": "gml_timeline_get_name",
     "timeline_moment_add_script": "gml_timeline_moment_add_script",
@@ -1472,9 +1479,9 @@ _SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS = {
     "layer_sequence_is_paused": "gml_layer_sequence_is_paused",
     "layer_sequence_is_finished": "gml_layer_sequence_is_finished",
     "layer_sequence_step": "gml_layer_sequence_step",
-}
+})
 
-_FLEXPANEL_RUNTIME_FUNCTIONS = {
+FLEXPANEL_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "flexpanel_create_node": "gml_flexpanel_create_node",
     "flexpanel_delete_node": "gml_flexpanel_delete_node",
     "flexpanel_node_insert_child": "gml_flexpanel_node_insert_child",
@@ -1542,9 +1549,9 @@ _FLEXPANEL_RUNTIME_FUNCTIONS = {
     "flexpanel_node_style_get_align_self": "gml_flexpanel_node_style_get_align_self",
     "flexpanel_node_style_get_align_content": "gml_flexpanel_node_style_get_align_content",
     "flexpanel_node_style_get_display": "gml_flexpanel_node_style_get_display",
-}
+})
 
-_OS_DEBUG_GC_RUNTIME_FUNCTIONS = {
+OS_DEBUG_GC_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "os_is_paused": "gml_os_is_paused",
     "os_is_network_connected": "gml_os_is_network_connected",
     "os_get_config": "gml_os_get_config",
@@ -1572,9 +1579,9 @@ _OS_DEBUG_GC_RUNTIME_FUNCTIONS = {
     "weak_ref_create": "gml_weak_ref_create",
     "weak_ref_alive": "gml_weak_ref_alive",
     "weak_ref_any_alive": "gml_weak_ref_any_alive",
-}
+})
 
-_PLATFORM_SERVICE_RUNTIME_FUNCTIONS = {
+PLATFORM_SERVICE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "steam_is_initialized": "gml_steam_is_initialized",
     "browser_input_capture": "gml_browser_input_capture",
     "url_open": "gml_url_open",
@@ -1590,9 +1597,9 @@ _PLATFORM_SERVICE_RUNTIME_FUNCTIONS = {
     "cloud_synchronise": "gml_cloud_synchronise",
     "cloud_string_save": "gml_cloud_string_save",
     "cloud_file_save": "gml_cloud_file_save",
-}
+})
 
-_DRAW_RUNTIME_FUNCTIONS = {
+DRAW_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "draw_self": "gml_draw_self",
     "draw_sprite": "gml_draw_sprite",
     "draw_sprite_ext": "gml_draw_sprite_ext",
@@ -1853,4 +1860,76 @@ _DRAW_RUNTIME_FUNCTIONS = {
     "string_height": "gml_string_height",
     "string_width_ext": "gml_string_width_ext",
     "string_height_ext": "gml_string_height_ext",
-}
+})
+
+# fmt: on
+
+__all__: Final[tuple[str, ...]] = (
+    "EOF",
+    "MULTI_CHAR_OPERATORS",
+    "ASSIGNMENT_OPERATORS",
+    "BINARY_PRECEDENCE",
+    "UNARY_PRECEDENCE",
+    "POSTFIX_PRECEDENCE",
+    "PRIMARY_PRECEDENCE",
+    "TERNARY_PRECEDENCE",
+    "GML_IDENTIFIER_MAX_LENGTH",
+    "GENERATED_IDENTIFIER_PREFIX",
+    "RIGHT_ASSOCIATIVE",
+    "GDSCRIPT_RESERVED_IDENTIFIERS",
+    "GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS",
+    "GML_LITERAL_IDENTIFIERS",
+    "GML_BUILTIN_CONSTANT_IDENTIFIERS",
+    "DIRECT_MEMBER_TARGETS",
+    "BOOLEAN_RESULT_BINARY_OPERATORS",
+    "BOOLEAN_RESULT_FUNCTIONS",
+    "ARITHMETIC_RUNTIME_FUNCTIONS",
+    "BITWISE_RUNTIME_FUNCTIONS",
+    "COMPARISON_RUNTIME_FUNCTIONS",
+    "DS_COLLECTIONS_FUNCTIONS",
+    "COMPOUND_RUNTIME_FUNCTIONS",
+    "OPERATOR_REPLACEMENTS",
+    "NAME_REPLACEMENTS",
+    "BLOCK_DELIMITER_REPLACEMENTS",
+    "INSTANCE_NAME_REPLACEMENTS",
+    "LEGACY_GLOBAL_BUILTINS",
+    "BUILTIN_VARIABLE_REGISTRY",
+    "BUILTIN_GLOBAL_VARIABLES",
+    "BUILTIN_ARRAY_VARIABLES",
+    "READ_ONLY_BUILTIN_VARIABLES",
+    "BUILTIN_INSTANCE_VARIABLES",
+    "VIRTUAL_KEY_ACTIONS",
+    "VIRTUAL_KEY_CONSTANTS",
+    "RUNTIME_FUNCTIONS",
+    "MATH_RUNTIME_FUNCTIONS",
+    "FILE_RUNTIME_FUNCTIONS",
+    "BUFFER_RUNTIME_FUNCTIONS",
+    "ASYNC_RUNTIME_FUNCTIONS",
+    "NETWORK_RUNTIME_FUNCTIONS",
+    "PHYSICS_RUNTIME_FUNCTIONS",
+    "STRUCT_RUNTIME_FUNCTIONS",
+    "VARIABLE_RUNTIME_FUNCTIONS",
+    "DS_MAP_RUNTIME_FUNCTIONS",
+    "DS_GRID_FUNCTIONS",
+    "STRING_RUNTIME_FUNCTIONS",
+    "ARRAY_RUNTIME_FUNCTIONS",
+    "ASSET_RUNTIME_FUNCTIONS",
+    "INSTANCE_RUNTIME_FUNCTIONS",
+    "COLLISION_RUNTIME_FUNCTIONS",
+    "MOTION_RUNTIME_FUNCTIONS",
+    "PATH_RUNTIME_FUNCTIONS",
+    "MP_GRID_RUNTIME_FUNCTIONS",
+    "INPUT_RUNTIME_FUNCTIONS",
+    "AUDIO_RUNTIME_FUNCTIONS",
+    "TIME_RUNTIME_FUNCTIONS",
+    "ROOM_RUNTIME_FUNCTIONS",
+    "LAYER_RUNTIME_FUNCTIONS",
+    "SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS",
+    "FLEXPANEL_RUNTIME_FUNCTIONS",
+    "OS_DEBUG_GC_RUNTIME_FUNCTIONS",
+    "PLATFORM_SERVICE_RUNTIME_FUNCTIONS",
+    "DRAW_RUNTIME_FUNCTIONS",
+)
+
+# Temporary compatibility alias; the top-level facade migrates in #820.
+_BUILTIN_VARIABLE_REGISTRY = BUILTIN_VARIABLE_REGISTRY

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from .constants import _GDSCRIPT_RESERVED_IDENTIFIERS
+from .constants import GDSCRIPT_RESERVED_IDENTIFIERS
 from .identifiers import _sanitize_gdscript_identifier
 from .lexical import (
     _is_verbatim_string_start,
@@ -182,7 +182,7 @@ def analyze_gml_source_identifiers(source: str) -> tuple[GMLSourceDiagnostic, ..
     declarations = _declared_identifier_locations(source)
     for identifier, line, column in declarations:
         suggested_name = _sanitize_gdscript_identifier(identifier)
-        if suggested_name != identifier and identifier in _GDSCRIPT_RESERVED_IDENTIFIERS:
+        if suggested_name != identifier and identifier in GDSCRIPT_RESERVED_IDENTIFIERS:
             diagnostics.append(
                 GMLSourceDiagnostic(
                     severity="warning",

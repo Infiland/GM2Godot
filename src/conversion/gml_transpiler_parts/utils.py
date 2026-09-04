@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from .constants import _ASSIGNMENT_OPERATORS
+from .constants import ASSIGNMENT_OPERATORS
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     Binary as _Binary,
@@ -389,7 +389,7 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
             continue
 
         if depth == 0:
-            for operator in _ASSIGNMENT_OPERATORS:
+            for operator in ASSIGNMENT_OPERATORS:
                 if statement.startswith(operator, index):
                     if operator == "=" and _is_comparison_assignment_false_positive(statement, index):
                         continue

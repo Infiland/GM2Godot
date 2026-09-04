@@ -32,11 +32,11 @@ from src.conversion.gml_transpiler import (
     write_gml_source_map,
 )
 from src.conversion.gml_transpiler_parts.constants import (
-    _ASSIGNMENT_OPERATORS,
-    _BUILTIN_GLOBAL_VARIABLES,
-    _BUILTIN_INSTANCE_VARIABLES,
-    _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
-    _GML_LITERAL_IDENTIFIERS,
+    ASSIGNMENT_OPERATORS,
+    BUILTIN_GLOBAL_VARIABLES,
+    BUILTIN_INSTANCE_VARIABLES,
+    GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+    GML_LITERAL_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.preprocessor import preprocess_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import Token
@@ -66,11 +66,11 @@ from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, P
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
 )
-_SCRIPT_ASSIGNMENT_OPERATORS = frozenset(_ASSIGNMENT_OPERATORS) | frozenset({"++", "--"})
+_SCRIPT_ASSIGNMENT_OPERATORS = frozenset(ASSIGNMENT_OPERATORS) | frozenset({"++", "--"})
 _SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS = (
-    _BUILTIN_GLOBAL_VARIABLES
-    | _BUILTIN_INSTANCE_VARIABLES
-    | _GML_LITERAL_IDENTIFIERS
+    BUILTIN_GLOBAL_VARIABLES
+    | BUILTIN_INSTANCE_VARIABLES
+    | GML_LITERAL_IDENTIFIERS
     | frozenset(
         {
             "break",
@@ -1224,7 +1224,7 @@ class ObjectConverter(BaseConverter):
         direct_names.update(direct_reference_names or set())
         dynamic_names = (
             set(instance_variables)
-            | _GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+            | GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
         ) - direct_names
 
         for entry in source_entries:

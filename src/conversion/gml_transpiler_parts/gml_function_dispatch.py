@@ -1,40 +1,39 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 from .constants import (
-    _ARRAY_RUNTIME_FUNCTIONS,
-    _ASSET_RUNTIME_FUNCTIONS,
-    _ASYNC_RUNTIME_FUNCTIONS,
-    _AUDIO_RUNTIME_FUNCTIONS,
-    _BUFFER_RUNTIME_FUNCTIONS,
-    _COLLISION_RUNTIME_FUNCTIONS,
-    _DRAW_RUNTIME_FUNCTIONS,
-    _DS_COLLECTIONS_FUNCTIONS,
-    _DS_GRID_FUNCTIONS,
-    _DS_MAP_RUNTIME_FUNCTIONS,
-    _FILE_RUNTIME_FUNCTIONS,
-    _FLEXPANEL_RUNTIME_FUNCTIONS,
-    _INPUT_RUNTIME_FUNCTIONS,
-    _INSTANCE_RUNTIME_FUNCTIONS,
-    _LAYER_RUNTIME_FUNCTIONS,
-    _MATH_RUNTIME_FUNCTIONS,
-    _MOTION_RUNTIME_FUNCTIONS,
-    _MP_GRID_RUNTIME_FUNCTIONS,
-    _NETWORK_RUNTIME_FUNCTIONS,
-    _OS_DEBUG_GC_RUNTIME_FUNCTIONS,
-    _PLATFORM_SERVICE_RUNTIME_FUNCTIONS,
-    _PATH_RUNTIME_FUNCTIONS,
-    _PHYSICS_RUNTIME_FUNCTIONS,
-    _ROOM_RUNTIME_FUNCTIONS,
-    _RUNTIME_FUNCTIONS,
-    _SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS,
-    _STRING_RUNTIME_FUNCTIONS,
-    _STRUCT_RUNTIME_FUNCTIONS,
-    _TIME_RUNTIME_FUNCTIONS,
-    _VARIABLE_RUNTIME_FUNCTIONS,
+    ARRAY_RUNTIME_FUNCTIONS,
+    ASSET_RUNTIME_FUNCTIONS,
+    ASYNC_RUNTIME_FUNCTIONS,
+    AUDIO_RUNTIME_FUNCTIONS,
+    BUFFER_RUNTIME_FUNCTIONS,
+    COLLISION_RUNTIME_FUNCTIONS,
+    DRAW_RUNTIME_FUNCTIONS,
+    DS_COLLECTIONS_FUNCTIONS,
+    DS_GRID_FUNCTIONS,
+    DS_MAP_RUNTIME_FUNCTIONS,
+    FILE_RUNTIME_FUNCTIONS,
+    FLEXPANEL_RUNTIME_FUNCTIONS,
+    INPUT_RUNTIME_FUNCTIONS,
+    INSTANCE_RUNTIME_FUNCTIONS,
+    LAYER_RUNTIME_FUNCTIONS,
+    MATH_RUNTIME_FUNCTIONS,
+    MOTION_RUNTIME_FUNCTIONS,
+    MP_GRID_RUNTIME_FUNCTIONS,
+    NETWORK_RUNTIME_FUNCTIONS,
+    OS_DEBUG_GC_RUNTIME_FUNCTIONS,
+    PLATFORM_SERVICE_RUNTIME_FUNCTIONS,
+    PATH_RUNTIME_FUNCTIONS,
+    PHYSICS_RUNTIME_FUNCTIONS,
+    ROOM_RUNTIME_FUNCTIONS,
+    RUNTIME_FUNCTIONS,
+    SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS,
+    STRING_RUNTIME_FUNCTIONS,
+    STRUCT_RUNTIME_FUNCTIONS,
+    TIME_RUNTIME_FUNCTIONS,
+    VARIABLE_RUNTIME_FUNCTIONS,
 )
 from .gml_api_manifest import gamemaker_lts_manual_url, get_gml_api_entry
 
@@ -1319,12 +1318,12 @@ def _descriptor(
 def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     descriptors: dict[str, GMLFunctionDescriptor] = {}
 
-    for name, target in _RUNTIME_FUNCTIONS.items():
+    for name, target in RUNTIME_FUNCTIONS.items():
         if name == "with_targets":
             continue
         descriptors[name] = _descriptor(name, 1, 1, "runtime", target)
 
-    for name, target in _STRUCT_RUNTIME_FUNCTIONS.items():
+    for name, target in STRUCT_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRUCT_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = (
             "runtime_call_scope" if name == "struct_foreach" else "runtime"
@@ -1337,7 +1336,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             target,
         )
 
-    for name, target in _VARIABLE_RUNTIME_FUNCTIONS.items():
+    for name, target in VARIABLE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _VARIABLE_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "script_execute":
@@ -1346,11 +1345,11 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_method_call"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _DS_MAP_RUNTIME_FUNCTIONS.items():
+    for name, target in DS_MAP_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DS_MAP_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _ARRAY_RUNTIME_FUNCTIONS.items():
+    for name, target in ARRAY_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ARRAY_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "array_push":
@@ -1363,34 +1362,34 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_call_scope"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _STRING_RUNTIME_FUNCTIONS.items():
+    for name, target in STRING_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRING_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _MATH_RUNTIME_FUNCTIONS.items():
+    for name, target in MATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MATH_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("min", "max", "choose"):
             lowering_kind = "runtime_variadic_all"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _FILE_RUNTIME_FUNCTIONS.items():
+    for name, target in FILE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _FILE_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _BUFFER_RUNTIME_FUNCTIONS.items():
+    for name, target in BUFFER_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _BUFFER_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _ASYNC_RUNTIME_FUNCTIONS.items():
+    for name, target in ASYNC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ASYNC_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _NETWORK_RUNTIME_FUNCTIONS.items():
+    for name, target in NETWORK_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _NETWORK_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _PHYSICS_RUNTIME_FUNCTIONS.items():
+    for name, target in PHYSICS_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _PHYSICS_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in (
@@ -1405,11 +1404,11 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_append_self"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _ASSET_RUNTIME_FUNCTIONS.items():
+    for name, target in ASSET_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ASSET_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _INSTANCE_RUNTIME_FUNCTIONS.items():
+    for name, target in INSTANCE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INSTANCE_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime_instance_api"
         if name in ("instance_create_layer", "instance_create_depth"):
@@ -1418,15 +1417,15 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_self_default"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _COLLISION_RUNTIME_FUNCTIONS.items():
+    for name, target in COLLISION_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _COLLISION_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_collision_api", target)
 
-    for name, target in _MOTION_RUNTIME_FUNCTIONS.items():
+    for name, target in MOTION_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MOTION_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_motion_api", target)
 
-    for name, target in _PATH_RUNTIME_FUNCTIONS.items():
+    for name, target in PATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _PATH_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("path_start", "path_end"):
@@ -1435,42 +1434,42 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _MP_GRID_RUNTIME_FUNCTIONS.items():
+    for name, target in MP_GRID_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MP_GRID_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "mp_grid_path":
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _INPUT_RUNTIME_FUNCTIONS.items():
+    for name, target in INPUT_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INPUT_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _AUDIO_RUNTIME_FUNCTIONS.items():
+    for name, target in AUDIO_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _AUDIO_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_audio_api", target)
 
-    for name, target in _ROOM_RUNTIME_FUNCTIONS.items():
+    for name, target in ROOM_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _ROOM_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_room_api", target)
 
-    for name, target in _LAYER_RUNTIME_FUNCTIONS.items():
+    for name, target in LAYER_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _LAYER_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_layer_api", target)
 
-    for name, target in _SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS.items():
+    for name, target in SEQUENCE_TIMELINE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _SEQUENCE_TIMELINE_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime_sequence_api", target)
 
-    for name, target in _FLEXPANEL_RUNTIME_FUNCTIONS.items():
+    for name, target in FLEXPANEL_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _FLEXPANEL_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
+    for name, target in OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _OS_DEBUG_GC_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _PLATFORM_SERVICE_RUNTIME_FUNCTIONS.items():
+    for name, target in PLATFORM_SERVICE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _PLATFORM_SERVICE_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
@@ -1484,25 +1483,25 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             service_name,
         )
 
-    for name, target in _DS_COLLECTIONS_FUNCTIONS.items():
+    for name, target in DS_COLLECTIONS_FUNCTIONS.items():
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("ds_list_add", "ds_stack_push", "ds_queue_enqueue"):
             lowering_kind = "runtime_variadic_1"
         min_args, max_args = _DS_COLLECTIONS_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _DS_GRID_FUNCTIONS.items():
+    for name, target in DS_GRID_FUNCTIONS.items():
         min_args, max_args = _DS_GRID_ARITY[name]
         descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
 
-    for name, target in _TIME_RUNTIME_FUNCTIONS.items():
+    for name, target in TIME_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _TIME_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("alarm_get", "alarm_set"):
             lowering_kind = "runtime_time_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
-    for name, target in _DRAW_RUNTIME_FUNCTIONS.items():
+    for name, target in DRAW_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _DRAW_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime_draw_api"
         if name == "draw_self":

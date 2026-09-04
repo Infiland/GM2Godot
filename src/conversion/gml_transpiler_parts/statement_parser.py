@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, MutableMapping, MutableSet
 
-from .constants import _BINARY_PRECEDENCE, _EOF
+from .constants import BINARY_PRECEDENCE, EOF
 from .emitter import _emit_instance_keyword_argument
 from .enum_helpers import _evaluate_enum_value_tokens
 from .expression_parser import _parse_gml_expression
@@ -851,7 +851,7 @@ class _StatementParser:
             while lookahead < len(self.tokens) and self.tokens[lookahead].value == "\n":
                 lookahead += 1
             next_value = self.tokens[lookahead].value if lookahead < len(self.tokens) else ""
-            if next_value not in _BINARY_PRECEDENCE and next_value not in {"?", "(", "[", "."}:
+            if next_value not in BINARY_PRECEDENCE and next_value not in {"?", "(", "[", "."}:
                 return parenthesized_tokens
 
             tokens = list(self.tokens[condition_start:self.position])
@@ -1022,7 +1022,7 @@ class _StatementParser:
 
     def _peek(self) -> _Token:
         if self.position >= len(self.tokens):
-            return _EOF
+            return EOF
         return self.tokens[self.position]
 
     def _at_end(self) -> bool:

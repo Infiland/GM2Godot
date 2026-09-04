@@ -36,7 +36,7 @@ from .constants import (
     _TIME_RUNTIME_FUNCTIONS,
     _VARIABLE_RUNTIME_FUNCTIONS,
 )
-from .gml_api_manifest import get_gml_api_entry
+from .gml_api_manifest import gamemaker_lts_manual_url, get_gml_api_entry
 
 GMLFunctionLoweringKind: TypeAlias = Literal[
     "keyboard_check",
@@ -93,8 +93,7 @@ class GMLFunctionDescriptor:
 
 _DEFAULT_CATEGORY = "Runtime Function Dispatch"
 _DEFAULT_ISSUE_NUMBER = 483
-_DEFAULT_DOCS_URL = (
-    "https://manual.gamemaker.io/monthly/en/"
+_DEFAULT_DOCS_URL = gamemaker_lts_manual_url(
     "GameMaker_Language/GML_Reference/GML_Reference.htm"
 )
 

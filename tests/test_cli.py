@@ -45,6 +45,10 @@ from src.conversion.project_godot import ConversionPreflightError
 from src.version import get_version
 
 
+EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
+MONTHLY_MANUAL_PATH = "/monthly/en/"
+
+
 class _OutcomeConverterStub:
     def __init__(
         self,
@@ -393,6 +397,11 @@ class TestCLIReports(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(report_root, "gml_api_compatibility.md")))
         self.assertTrue(os.path.isfile(os.path.join(report_root, "platform_capability_report.json")))
         self.assertTrue(os.path.isfile(os.path.join(report_root, "platform_capability_report.md")))
+
+        with open(manual_path, encoding="utf-8") as manual_file:
+            manual_report = manual_file.read()
+        self.assertIn(EXPECTED_LTS_MANUAL_ROOT, manual_report)
+        self.assertNotIn(MONTHLY_MANUAL_PATH, manual_report)
 
         with open(os.path.join(report_root, "conversion_diagnostics.json"), "r", encoding="utf-8") as report_file:
             report = json.load(report_file)

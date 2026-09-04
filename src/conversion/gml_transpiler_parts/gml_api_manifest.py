@@ -50,7 +50,7 @@ class GMLAPICategoryReport:
         )
 
 
-_GM_DOCS = "https://manual.gamemaker.io/monthly/en"
+GAMEMAKER_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 _GODOT_DOCS = "https://docs.godotengine.org/en/stable"
 
 _CATEGORY_ISSUE_NUMBERS = {
@@ -98,6 +98,10 @@ _CATEGORY_ISSUE_NUMBERS = {
 }
 
 
+def gamemaker_lts_manual_url(path: str) -> str:
+    return GAMEMAKER_LTS_MANUAL_ROOT + path.lstrip("/")
+
+
 def _entry(
     name: str,
     category: str,
@@ -121,7 +125,7 @@ def _entry(
         emitter_support=emitter_support,
         runtime_support=runtime_support,
         smoke_coverage=smoke_coverage,
-        docs_url=f"{_GM_DOCS}/{docs_path}",
+        docs_url=gamemaker_lts_manual_url(docs_path),
         notes=notes,
     )
 
@@ -3280,8 +3284,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Cameras_And_Display/display_set_orientation.htm",
-        "Sets screen orientation via DisplayServer screen_set_orientation.",
+        "GameMaker_Language/GML_Reference/Cameras_And_Display/Cameras_And_Display.htm",
+        "No GameMaker LTS 2026 API page exists for this GM2Godot compatibility extension; it sets screen orientation via DisplayServer screen_set_orientation.",
     ),
     _entry(
         "display_get_frequency",
@@ -5957,7 +5961,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_push.htm",
         "Implemented as a runtime helper with GML mutation behavior.",
     ),
     _entry(
@@ -5969,7 +5973,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_create.htm",
         "Implemented with optional default value and GML index coercion.",
     ),
     _entry(
@@ -5981,7 +5985,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_length_1d.htm",
         "Returns size of 1D array via GDScript .size().",
     ),
     _entry(
@@ -6005,7 +6009,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_resize.htm",
         "Resizes array via GDScript .resize().",
     ),
     _entry(
@@ -6017,7 +6021,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_pop.htm",
         "Removes and returns the last element via .pop_back().",
     ),
     _entry(
@@ -6029,8 +6033,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
-        "Alias for array_push with a single value.",
+        "GameMaker_Language/GML_Reference/Variable_Functions/Array_Functions.htm",
+        "GM2Godot compatibility alias for array_push with a single value; GameMaker LTS 2026 has no dedicated array_push_back API page.",
     ),
     _entry(
         "array_insert",
@@ -6041,7 +6045,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_insert.htm",
         "Inserts value at index via GDScript .insert().",
     ),
     _entry(
@@ -6053,7 +6057,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_delete.htm",
         "Removes element at index via GDScript .remove_at().",
     ),
     _entry(
@@ -6077,7 +6081,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_shuffle.htm",
         "Shuffles array in-place via GDScript .shuffle().",
     ),
     _entry(
@@ -6089,7 +6093,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_copy.htm",
         "Copies a portion of an array with GML index semantics.",
     ),
     _entry(
@@ -6101,7 +6105,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_concat.htm",
         "Concatenates two arrays into a new array.",
     ),
     _entry(
@@ -6113,7 +6117,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_contains.htm",
         "Checks if array contains a value via GDScript .has().",
     ),
     _entry(
@@ -6125,7 +6129,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_find_index.htm",
         "Returns index of value or -1 via GDScript .find().",
     ),
     _entry(
@@ -6149,7 +6153,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_map.htm",
         "Maps elements through GML method callback (element, index, array).",
     ),
     _entry(
@@ -6161,7 +6165,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_filter.htm",
         "Filters elements through GML method callback (element, index, array).",
     ),
     _entry(
@@ -6173,7 +6177,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "no",
-        "GameMaker_Language/GML_Reference/Array_Functions/Array_Functions.htm",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_reduce.htm",
         "Reduces array through GML method callback (accumulator, element, index, array).",
     ),
     _entry(
@@ -7563,21 +7567,54 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "yes",
             "yes",
             "partial",
-            "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+            docs_path,
             "Resolves converted shader assets through the registry and applies ShaderMaterial state/uniforms through the draw runtime.",
         )
-        for name in (
-            "shader_set",
-            "shader_reset",
-            "shader_get_name",
-            "shader_is_compiled",
-            "shader_get_uniform",
-            "shader_get_sampler_index",
-            "shader_set_uniform_f",
-            "shader_set_uniform_i",
-            "shader_set_uniform_f_array",
-            "shader_set_uniform_i_array",
-            "texture_set_stage",
+        for name, docs_path in (
+            (
+                "shader_set",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set.htm",
+            ),
+            (
+                "shader_reset",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_reset.htm",
+            ),
+            (
+                "shader_get_name",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_get_name.htm",
+            ),
+            (
+                "shader_is_compiled",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_is_compiled.htm",
+            ),
+            (
+                "shader_get_uniform",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_get_uniform.htm",
+            ),
+            (
+                "shader_get_sampler_index",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_get_sampler_index.htm",
+            ),
+            (
+                "shader_set_uniform_f",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_f.htm",
+            ),
+            (
+                "shader_set_uniform_i",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_i.htm",
+            ),
+            (
+                "shader_set_uniform_f_array",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_f_array.htm",
+            ),
+            (
+                "shader_set_uniform_i_array",
+                "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_i_array.htm",
+            ),
+            (
+                "texture_set_stage",
+                "GameMaker_Language/GML_Reference/Drawing/Textures/texture_set_stage.htm",
+            ),
         )
     ),
     _entry(
@@ -7589,7 +7626,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "partial",
         "yes",
-        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+        "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_matrix.htm",
         "Sets a Godot mat4 uniform to the current compatibility matrix; exact GameMaker matrix-stack parity remains pending matrix-function support.",
     ),
     _entry(
@@ -7601,7 +7638,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "no",
         "no",
         "no",
-        "GameMaker_Language/GML_Reference/Drawing/Shaders/Shaders.htm",
+        "GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_enable_corner_id.htm",
         "GameMaker corner-ID color-bit injection requires a custom vertex emission path that the current CanvasItem draw runtime cannot safely emulate.",
     ),
     *(

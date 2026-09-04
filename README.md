@@ -96,6 +96,8 @@ Version 0.7.68 binds dependency-receipt publication to the physical filesystem r
 
 Version 0.7.69 moves the generated-output and runtime-validation target to the official Godot 4.7.2 stable build `4.7.2.stable.official.ed1daf0bf`. CI verifies the exact Linux archive digest and complete engine build string before running import, resource-loading, runtime, golden-output, and pinned GameMaker LTS 2026 fixture gates. Generated GDScript/resource bytes, golden snapshots, the Godot 4.7 feature declaration, GameMaker fixture revisions, conversion behavior, diagnostic codes/counts/semantics, and public contracts remain unchanged; only required target-version labels now name 4.7.2.
 
+Version 0.7.70 makes every generated GML compatibility-evidence URL use one canonical GameMaker LTS manual root instead of the mutable monthly manual. A pinned official `YoYoGames/GameMaker-Manual` tree proves all 233 referenced topics against the 3,311-topic LTS 2026 source inventory; monthly-only paths now resolve to exact LTS pages or explicit compatibility-extension fallbacks. Evidence-link/report bytes intentionally change, while support classifications, lowering, diagnostics semantics, generated GDScript/resource bytes, runtime behavior, GameMaker fixture revisions, and exact Godot 4.7.2 validation remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -116,7 +118,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.69`.
+Current source version: `0.7.70`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

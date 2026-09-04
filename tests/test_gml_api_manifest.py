@@ -21,6 +21,13 @@ from src.conversion.gml_transpiler import (
     transpile_gml_expression,
     validate_gml_function_arity,
 )
+from src.conversion.gml_transpiler_parts.gml_api_manifest import (
+    GAMEMAKER_LTS_MANUAL_ROOT,
+)
+
+
+EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
+MONTHLY_MANUAL_PATH = "/monthly/en/"
 
 
 class TestGMLAPIManifest(unittest.TestCase):
@@ -43,16 +50,21 @@ class TestGMLAPIManifest(unittest.TestCase):
                     + row.out_of_scope,
                 )
 
-    def test_manifest_entries_have_owner_issue_module_and_docs(self):
+    def test_manifest_entries_have_owner_issue_module_and_lts_docs(self):
         entries = tuple(iter_gml_api_entries())
         issue_numbers = set(category_issue_numbers().values())
 
         self.assertGreater(len(entries), 50)
+        self.assertEqual(GAMEMAKER_LTS_MANUAL_ROOT, EXPECTED_LTS_MANUAL_ROOT)
         for entry in entries:
             with self.subTest(api=entry.name):
                 self.assertIn(entry.issue_number, issue_numbers)
                 self.assertTrue(entry.owner_module)
-                self.assertTrue(entry.docs_url.startswith("https://manual.gamemaker.io/monthly/en/"))
+                self.assertTrue(
+                    entry.docs_url.startswith(EXPECTED_LTS_MANUAL_ROOT),
+                    entry.docs_url,
+                )
+                self.assertNotIn(MONTHLY_MANUAL_PATH, entry.docs_url)
 
     def test_manifest_exposes_implemented_and_planned_apis(self):
         array_push = get_gml_api_entry("array_push")
@@ -480,6 +492,28 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(platform_descriptor.lowering_kind, "runtime_platform_service_api")
         self.assertEqual(platform_descriptor.lowering_target, "steam")
         self.assertEqual(platform_descriptor.issue_number, 570)
+
+    def test_function_descriptor_docs_use_lts_manual_including_fallback(self):
+        descriptors = iter_gml_function_descriptors()
+
+        self.assertGreater(len(descriptors), 50)
+        for descriptor in descriptors:
+            with self.subTest(api=descriptor.name):
+                self.assertTrue(
+                    descriptor.docs_url.startswith(EXPECTED_LTS_MANUAL_ROOT),
+                    descriptor.docs_url,
+                )
+                self.assertNotIn(MONTHLY_MANUAL_PATH, descriptor.docs_url)
+
+        self.assertIsNone(get_gml_api_entry("bool"))
+        fallback_descriptor = get_gml_function_descriptor("bool")
+        self.assertIsNotNone(fallback_descriptor)
+        assert fallback_descriptor is not None
+        self.assertEqual(
+            fallback_descriptor.docs_url,
+            EXPECTED_LTS_MANUAL_ROOT
+            + "GameMaker_Language/GML_Reference/GML_Reference.htm",
+        )
 
     def test_function_descriptors_cover_current_implemented_call_helpers(self):
         descriptor_names = {descriptor.name for descriptor in iter_gml_function_descriptors()}

@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import json
@@ -24,7 +23,6 @@ from src.conversion.gml_transpiler import (
     render_gml_source_header,
     load_gml_extension_function_mappings,
     transpile_gml_code_with_source_map,
-    transpile_gml_expression,
     write_gml_source_map,
 )
 from src.conversion.resource_index import GameMakerResourceIndex
@@ -45,11 +43,10 @@ from src.conversion.script_functions import (
     modern_script_structure,
     render_script_top_level_source,
 )
-from src.conversion.gml_transpiler_parts.expression_parser import (
-    _parse_gml_expression,
-)
-from src.conversion.gml_transpiler_parts.function_helpers import (
-    _emit_constructor_inheritance_line,
+from src.conversion.gml_transpiler_parts.expression_api import (
+    emit_constructor_inheritance_line,
+    parse_gml_expression,
+    transpile_gml_expression,
 )
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
@@ -563,7 +560,7 @@ class ScriptConverter(BaseConverter):
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
-            parent_expression = _parse_gml_expression(
+            parent_expression = parse_gml_expression(
                 declaration.parent_constructor,
                 {name: dict(members) for name, members in enum_values.items()},
                 enum_values,
@@ -572,7 +569,7 @@ class ScriptConverter(BaseConverter):
             )
             lines.append(
                 "\t"
-                + _emit_constructor_inheritance_line(
+                + emit_constructor_inheritance_line(
                     parent_expression,
                     local_names,
                     constructor_scope,

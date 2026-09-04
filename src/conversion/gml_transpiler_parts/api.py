@@ -9,7 +9,7 @@ from .extension_functions import (
     normalize_extension_function_mappings,
     normalize_extension_functions,
 )
-from .function_helpers import _emit_static_initialization_lines
+from .expression_api import emit_static_initialization_lines
 from .lexical_api import preprocess_gml_source, tokenize_gml_source
 from .result_models import GMLTranspileResult
 from .shared_models import ScopeContext as _ScopeContext
@@ -169,7 +169,7 @@ def transpile_gml_code_with_source_map(
     lines = parser.parse()
     if static_declarations:
         lines = [
-            *_emit_static_initialization_lines(
+            *emit_static_initialization_lines(
                 static_scope_name,
                 static_scope_id,
                 static_declarations,

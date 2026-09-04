@@ -1,4 +1,4 @@
-# pyright: reportPrivateUsage=false, reportUnusedFunction=false, reportUnusedClass=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
 import json
@@ -51,9 +51,12 @@ from .expression_models import (
     Expression as _Expression,
     FunctionLiteral as _FunctionLiteral,
     FunctionParameter as _FunctionParameter,
+    GMLExpression,
+    GMLExpressionEmission,
     Grouped as _Grouped,
     Index as _Index,
     Literal as _Literal,
+    Member,
     Member as _Member,
     Name as _Name,
     NameOf as _NameOf,
@@ -69,13 +72,13 @@ from .expression_models import (
 from .lexical_api import is_plain_identifier, sanitize_gdscript_identifier
 from .shared_models import (
     GMLTranspileError,
+    ScopeContext,
     ScopeContext as _ScopeContext,
 )
 from .utils import (
-    _normalize_local_names,
-    _normalize_scope_context,
-    _prefix_multiline,
-    _unwrap_grouped_expression,
+    normalize_local_names as _normalize_local_names,
+    normalize_scope_context as _normalize_scope_context,
+    unwrap_grouped_expression as _unwrap_grouped_expression,
 )
 
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -104,6 +107,10 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "collision_line_list": frozenset({4}),
     "collision_circle_list": frozenset({3}),
 }
+
+
+def _prefix_multiline(text: str, prefix: str) -> str:
+    return "\n".join(f"{prefix}{line}" if line else "" for line in text.split("\n"))
 
 def _emit_name(
     value: str,
@@ -189,6 +196,10 @@ def _uses_direct_builtin_instance_members(scope_context: _ScopeContext) -> bool:
     )
 
 
+def uses_direct_builtin_instance_members(scope_context: ScopeContext) -> bool:
+    return _uses_direct_builtin_instance_members(scope_context)
+
+
 def _name_resolves_to_global(
     name: str,
     local_names: Iterable[str],
@@ -207,6 +218,14 @@ def _name_resolves_to_global(
         and name not in BUILTIN_INSTANCE_VARIABLES
         and name not in GML_BUILTIN_CONSTANT_IDENTIFIERS
     )
+
+
+def name_resolves_to_global(
+    name: str,
+    local_names: Iterable[str],
+    scope_context: ScopeContext,
+) -> bool:
+    return _name_resolves_to_global(name, local_names, scope_context)
 
 
 def _legacy_argument_replacement(name: str) -> str | None:
@@ -455,6 +474,21 @@ def _emit_expression(
     return f"GMRuntime.gml_selector_get({target}, {json.dumps(expr.member)})", POSTFIX_PRECEDENCE
 
 
+def emit_gml_expression(
+    expr: GMLExpression,
+    local_names: Iterable[str] | None = None,
+    bind_function_literals: bool = True,
+    scope_context: ScopeContext | None = None,
+) -> GMLExpressionEmission:
+    text, precedence = _emit_expression(
+        expr,
+        local_names,
+        bind_function_literals=bind_function_literals,
+        scope_context=scope_context,
+    )
+    return GMLExpressionEmission(text=text, precedence=precedence)
+
+
 def _emit_template_string(
     expr: _TemplateStringLiteral,
     local_names: Iterable[str],
@@ -506,6 +540,13 @@ def _uses_direct_member_access(
     if expr.target.value == "other" and scope_context.other_expression != "other":
         return False
     return expr.target.value in DIRECT_MEMBER_TARGETS
+
+
+def uses_direct_member_access(
+    expr: Member,
+    scope_context: ScopeContext | None = None,
+) -> bool:
+    return _uses_direct_member_access(expr, scope_context=scope_context)
 
 
 def _emit_function_literal(
@@ -935,6 +976,14 @@ def _emit_instance_keyword_argument(
     return _emit_expression(expr, local_names, scope_context=scope_context)[0]
 
 
+def emit_instance_keyword_argument(
+    expr: GMLExpression,
+    local_names: Iterable[str],
+    scope_context: ScopeContext | None = None,
+) -> str:
+    return _emit_instance_keyword_argument(expr, local_names, scope_context=scope_context)
+
+
 def _emit_instance_api_args(
     descriptor: GMLFunctionDescriptor,
     args: tuple[_Expression, ...],
@@ -1355,6 +1404,14 @@ def _emit_truthy_expression(
     if _emits_boolean_result(expr):
         return _emit_expression(expr, local_names, scope_context=scope_context)[0]
     return _gml_bool_call(_emit_expression(expr, local_names, scope_context=scope_context)[0])
+
+
+def emit_gml_truthy_expression(
+    expr: GMLExpression,
+    local_names: Iterable[str],
+    scope_context: ScopeContext | None = None,
+) -> str:
+    return _emit_truthy_expression(expr, local_names, scope_context=scope_context)
 
 
 def _emits_boolean_result(expr: _Expression) -> bool:

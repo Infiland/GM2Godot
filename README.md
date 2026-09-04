@@ -102,6 +102,8 @@ Version 0.7.71 publishes the exact 64-name GML language-metadata surface with st
 
 Version 0.7.72 publishes the exact 15-operation typed GML lexical phase API for tokenization, preprocessing, identifiers, and shared string/template scanning. Fifteen higher-level source modules now use that facade while the cycle-safe low-level owner cohort keeps only deliberate public direct imports; the architecture baseline falls from 135 to 96 private edges across 32 module pairs, all 60 production imports remain, private production import edges fall from 16 to 7, and tracked suppressions fall from 15 to 12. Preprocessed bytes/layout, token values and locations, identifier diagnostics, exception text/locations, source maps, transpiled GDScript, golden output, shared models, and all 74 top-level facade exports/signatures remain unchanged.
 
+Version 0.7.73 publishes the exact 17-operation typed package-internal GML expression API for parsing, normal and truthiness-aware emission, instance/constructor/static lowering, enum and constant validation, and direct-member/name-resolution queries. Cross-phase emission now uses the frozen `GMLExpressionEmission` result while `GMLExpression` remains an alias of the canonical #816 AST union; recursive parser/emitter mechanics stay private. The architecture baseline falls from 96 to 60 private edges across 14 module pairs, all 60 production imports remain, private production import edges fall from 7 to 4, and tracked suppressions fall from 12 to 8. Emitted expression/script/resource bytes, precedence, diagnostics and locations, source maps, static IDs, golden output, and all 74 top-level facade exports/signatures remain unchanged.
+
 ## What GM2Godot Is and Isn't
 
 **GM2Godot is:**
@@ -122,7 +124,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.72`.
+Current source version: `0.7.73`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

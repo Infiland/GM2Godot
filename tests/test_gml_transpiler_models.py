@@ -17,9 +17,10 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     DSListAccess,
     DSMapAccess,
     EnumMember,
-    Expression,
     FunctionLiteral,
     FunctionParameter,
+    GMLExpression,
+    GMLExpressionEmission,
     Grouped,
     Index,
     Literal,
@@ -90,6 +91,8 @@ EXPECTED_EXPRESSION_MODEL_EXPORTS = (
     "Expression",
     "FunctionLiteral",
     "FunctionParameter",
+    "GMLExpression",
+    "GMLExpressionEmission",
     "Grouped",
     "Index",
     "Literal",
@@ -217,7 +220,7 @@ class TestGMLTranspilerModels(unittest.TestCase):
         member = Member(name, "value")
         grouped = Grouped(binary)
         template = TemplateStringLiteral(("score=", name))
-        expressions: tuple[Expression, ...] = (
+        expressions: tuple[GMLExpression, ...] = (
             name,
             name_of,
             literal,
@@ -244,6 +247,9 @@ class TestGMLTranspilerModels(unittest.TestCase):
         )
 
         self.assertEqual(len(expressions), 23)
+        expression_emission = GMLExpressionEmission("score", 130)
+        self.assertEqual(expression_emission.text, "score")
+        self.assertEqual(expression_emission.precedence, 130)
         self.assertEqual(parameter.default, number)
         self.assertEqual(function.parameters, (parameter,))
         self.assertEqual(template.parts, ("score=", name))

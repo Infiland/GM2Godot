@@ -12,16 +12,12 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.gml_transpiler import (
     _BUILTIN_VARIABLE_REGISTRY,
     GMLTranspileError,
-    _ExpressionParser,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
     transpile_gml_expression,
 )
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    tokenize_gml_expression,
-    tokenize_gml_source,
-)
+from src.conversion.gml_transpiler_parts.expression_api import parse_gml_expression
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
     NumberLiteral,
@@ -29,6 +25,7 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     StructLiteral,
     TemplateStringLiteral,
 )
+from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 
 
 class TestGMLExpressionTranspiler(unittest.TestCase):
@@ -99,8 +96,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 )
 
     def test_preserves_numeric_literal_float_metadata(self):
-        integer_literal = _ExpressionParser(tokenize_gml_expression("42")).parse()
-        decimal_literal = _ExpressionParser(tokenize_gml_expression("3.5")).parse()
+        integer_literal = parse_gml_expression("42")
+        decimal_literal = parse_gml_expression("3.5")
 
         self.assertIsInstance(integer_literal, NumberLiteral)
         self.assertIsInstance(decimal_literal, NumberLiteral)
@@ -240,7 +237,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                     transpile_gml_expression(source)
 
     def test_preserves_string_literal_metadata(self):
-        literal = _ExpressionParser(tokenize_gml_expression('"hello"')).parse()
+        literal = parse_gml_expression('"hello"')
 
         self.assertIsInstance(literal, StringLiteral)
         assert isinstance(literal, StringLiteral)
@@ -305,7 +302,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(tokens[0].column, 1)
         self.assertEqual(tokens[1].value, "+")
 
-        literal = _ExpressionParser(tokenize_gml_expression('$"Hello {name}!"')).parse()
+        literal = parse_gml_expression('$"Hello {name}!"')
         self.assertIsInstance(literal, TemplateStringLiteral)
         assert isinstance(literal, TemplateStringLiteral)
         self.assertEqual(literal.parts[0], "Hello ")
@@ -1509,7 +1506,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_preserves_array_literal_metadata(self):
-        literal = _ExpressionParser(tokenize_gml_expression("[1, [2]]")).parse()
+        literal = parse_gml_expression("[1, [2]]")
 
         self.assertIsInstance(literal, ArrayLiteral)
         assert isinstance(literal, ArrayLiteral)
@@ -1542,9 +1539,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             '"Unicode \\u9375": 3, "quote\\\" and slash\\\\": 4})',
         )
 
-        literal = _ExpressionParser(
-            tokenize_gml_expression(r'{"line\nname": 1, "Unicode 鍵": 2}')
-        ).parse()
+        literal = parse_gml_expression(r'{"line\nname": 1, "Unicode 鍵": 2}')
         self.assertIsInstance(literal, StructLiteral)
         assert isinstance(literal, StructLiteral)
         self.assertEqual(
@@ -1586,9 +1581,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_preserves_struct_literal_metadata(self):
-        literal = _ExpressionParser(
-            tokenize_gml_expression("{a: 1, child: {b: 2}, shorthand}")
-        ).parse()
+        literal = parse_gml_expression("{a: 1, child: {b: 2}, shorthand}")
 
         self.assertIsInstance(literal, StructLiteral)
         assert isinstance(literal, StructLiteral)

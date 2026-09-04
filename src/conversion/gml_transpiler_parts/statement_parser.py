@@ -5,10 +5,13 @@ import json
 from typing import Iterable, MutableMapping, MutableSet
 
 from .constants import BINARY_PRECEDENCE, EOF
-from .emitter import _emit_instance_keyword_argument
-from .enum_helpers import _evaluate_enum_value_tokens
-from .expression_parser import _parse_gml_expression
-from .expression_service import transpile_gml_condition, transpile_gml_expression
+from .expression_api import (
+    emit_instance_keyword_argument,
+    evaluate_enum_value_tokens,
+    parse_gml_expression,
+    transpile_gml_condition,
+    transpile_gml_expression,
+)
 from .lexical_api import (
     reject_asset_identifier_name,
     sanitize_gdscript_identifier,
@@ -243,7 +246,7 @@ class _StatementParser:
             member_name = self._consume_identifier_name()
             if self._match("="):
                 value_tokens = self._read_enum_value_tokens()
-                enum_value = _evaluate_enum_value_tokens(
+                enum_value = evaluate_enum_value_tokens(
                     value_tokens,
                     self.enum_values,
                     current_enum_values,
@@ -302,14 +305,14 @@ class _StatementParser:
         if not target_tokens:
             raise GMLTranspileError("Expected with target")
 
-        target_expr = _parse_gml_expression(
+        target_expr = parse_gml_expression(
             _tokens_to_source(target_tokens),
             enum_values=self.enum_values,
             enum_names=self.enum_names,
             macro_values=self.macro_values,
             scope_context=self.scope_context,
         )
-        target = _emit_instance_keyword_argument(
+        target = emit_instance_keyword_argument(
             target_expr,
             self.local_names,
             scope_context=self.scope_context,

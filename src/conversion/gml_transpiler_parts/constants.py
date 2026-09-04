@@ -1931,5 +1931,5 @@ __all__: Final[tuple[str, ...]] = (
     "DRAW_RUNTIME_FUNCTIONS",
 )
 
-# Temporary compatibility aliases; production consumers migrate in slice 2.
+# Temporary compatibility alias; the top-level facade migrates in #820.
 _BUILTIN_VARIABLE_REGISTRY = BUILTIN_VARIABLE_REGISTRY

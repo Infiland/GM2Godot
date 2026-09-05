@@ -20,7 +20,7 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .statement_models import ControlFlowCapture, GMLStatementRequest, GMLStatementResult
+from .statement_models import ControlFlowCapture, GMLStatementRequest, GMLStatementResult, StatementLoweringContext
 from .statements import control_flow_dispatch_lines, transpile_statement
 from .static_declarations import read_static_declaration_tokens
 from .utils import (
@@ -122,6 +122,24 @@ class _StatementParser:
             lines.extend(self._parse_statement())
         return lines
 
+    def _lowering_context(self, *, include_control_flow_capture: bool = False) -> StatementLoweringContext:
+        return StatementLoweringContext(
+            local_names=self.local_names,
+            declared_local_names=self.declared_local_names,
+            instance_variables=self.instance_variables,
+            loop_depth=self.loop_depth,
+            continue_depth=self.continue_depth,
+            return_depth=self.return_depth,
+            finally_depth=self.finally_depth,
+            enum_values=self.enum_values,
+            enum_names=self.enum_names,
+            scope_context=self.scope_context,
+            inherited_event_call=self.inherited_event_call,
+            macro_values=self.macro_values,
+            generated_counter=self.generated_counter,
+            control_flow_capture=self.control_flow_capture if include_control_flow_capture else None,
+        )
+
     def _parse_statement(self) -> list[str]:
         if self._check_directive("#macro"):
             return self._parse_macro_statement()
@@ -158,20 +176,7 @@ class _StatementParser:
             return []
         return transpile_statement(
             tokens_to_source(statement_tokens),
-            self.local_names,
-            self.declared_local_names,
-            self.instance_variables,
-            loop_depth=self.loop_depth,
-            continue_depth=self.continue_depth,
-            return_depth=self.return_depth,
-            finally_depth=self.finally_depth,
-            enum_values=self.enum_values,
-            enum_names=self.enum_names,
-            scope_context=self.scope_context,
-            inherited_event_call=self.inherited_event_call,
-            macro_values=self.macro_values,
-            generated_counter=self.generated_counter,
-            control_flow_capture=self.control_flow_capture,
+            self._lowering_context(include_control_flow_capture=True),
         )
 
     def _parse_macro_statement(self) -> list[str]:
@@ -414,19 +419,7 @@ class _StatementParser:
             lines.extend(
                 transpile_statement(
                     initializer,
-                    self.local_names,
-                    self.declared_local_names,
-                    self.instance_variables,
-                    loop_depth=self.loop_depth,
-                    continue_depth=self.continue_depth,
-                    return_depth=self.return_depth,
-                    finally_depth=self.finally_depth,
-                    enum_values=self.enum_values,
-                    enum_names=self.enum_names,
-                    scope_context=self.scope_context,
-                    inherited_event_call=self.inherited_event_call,
-                    macro_values=self.macro_values,
-                    generated_counter=self.generated_counter,
+                    self._lowering_context(),
                 )
             )
 
@@ -445,19 +438,7 @@ class _StatementParser:
         operation_lines = (
             transpile_statement(
                 operation,
-                self.local_names,
-                self.declared_local_names,
-                self.instance_variables,
-                loop_depth=self.loop_depth,
-                continue_depth=self.continue_depth,
-                return_depth=self.return_depth,
-                finally_depth=self.finally_depth,
-                enum_values=self.enum_values,
-                enum_names=self.enum_names,
-                scope_context=self.scope_context,
-                inherited_event_call=self.inherited_event_call,
-                macro_values=self.macro_values,
-                generated_counter=self.generated_counter,
+                self._lowering_context(),
             )
             if operation
             else []
@@ -808,19 +789,7 @@ class _StatementParser:
             return []
         return transpile_statement(
             tokens_to_source(statement_tokens),
-            self.local_names,
-            self.declared_local_names,
-            self.instance_variables,
-            loop_depth=self.loop_depth,
-            continue_depth=self.continue_depth,
-            return_depth=self.return_depth,
-            finally_depth=self.finally_depth,
-            enum_values=self.enum_values,
-            enum_names=self.enum_names,
-            scope_context=self.scope_context,
-            inherited_event_call=self.inherited_event_call,
-            macro_values=self.macro_values,
-            generated_counter=self.generated_counter,
+            self._lowering_context(),
         )
 
     def _parse_body(self) -> list[str]:

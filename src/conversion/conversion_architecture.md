@@ -43,8 +43,8 @@ The dependency-only typed model layer has four explicit owners:
   `GMLExpressionEmission` text/precedence result.
 - `gml_transpiler_parts.statement_models` owns the frozen
   `GMLStatementRequest` input contract, `GMLStatementResult` output contract,
-  and `ControlFlowCapture` state shared only within statement parsing and
-  lowering.
+  `ControlFlowCapture`, and the internal `StatementLoweringContext` shared
+  only within statement parsing and lowering.
 - `gml_transpiler_parts.result_models` owns preprocessing diagnostics/results,
   source diagnostics/maps, and transpile results.
 
@@ -89,6 +89,14 @@ function-body route remains cycle-safe through a function-local import.
 Control-flow capture has an explicit frozen model, while parser cursors and
 matching, generated-name counters, recursive statement lowering, and
 static-declaration mechanics remain private.
+
+Statement lowering takes source text and one `StatementLoweringContext`.
+The parser constructs a fresh context at each call from its current state;
+freezing prevents field rebinding while sets, mappings and the generated-name
+counter remain live references. The lowerer preserves its own default
+normalization. Control-flow capture travels only through the ordinary statement
+call; for clauses, unbraced do-until bodies and recursive increment lowering
+retain their existing omission. The context is not a public facade export.
 
 The GML transpiler has three explicit phase families:
 

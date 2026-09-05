@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Mapping, MutableMapping, MutableSet
+from typing import Final, Iterable, Mapping, MutableMapping, MutableSet
 
 from .shared_models import GMLExtensionFunction, GMLExtensionFunctionMapping, ScopeContext, Token
 
@@ -50,8 +50,27 @@ class GMLStatementResult:
     macro_values: MutableMapping[str, str]
 
 
+@dataclass(frozen=True)
+class StatementLoweringContext:
+    local_names: MutableSet[str] | None = None
+    declared_local_names: MutableSet[str] | None = None
+    instance_variables: MutableSet[str] | None = None
+    loop_depth: int = 0
+    continue_depth: int = 0
+    return_depth: int = 0
+    finally_depth: int = 0
+    enum_values: MutableMapping[str, dict[str, int]] | None = None
+    enum_names: Iterable[str] | None = None
+    scope_context: ScopeContext | None = None
+    inherited_event_call: str | None = None
+    macro_values: Mapping[str, str] | None = None
+    generated_counter: list[int] | None = None
+    control_flow_capture: ControlFlowCapture | None = None
+
+
 __all__: Final[tuple[str, ...]] = (
     "ControlFlowCapture",
     "GMLStatementRequest",
     "GMLStatementResult",
+    "StatementLoweringContext",
 )

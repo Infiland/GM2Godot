@@ -278,7 +278,7 @@
       "task_id": "R04",
       "issue": 795,
       "title": "Complete I001 import sorting lint cohort",
-      "state": "approved",
+      "state": "implementing",
       "problem_and_evidence": "213 inherited I001 owner entries; fixed explicit layout detects 247 findings on the accepted R03 source. Project/isolated defaults previously disagreed; frozen source has 372 Python inputs and 41 Markdown inputs.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current I001 import sorting baseline entries",
@@ -549,12 +549,34 @@
       "expected_measurable_improvement": "Zero I findings across all source and tracked lint inputs; projected debt 1056 with no new/increased allowance. Formatting is not credited as architecture decomposition.",
       "characterization_tests": "Inspect each potentially behavior-sensitive fix; full suite; verify no unrelated formatting or frozen output drift. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
-      "implementation_owner": "audit_policy_tests_docs in GM2Godot-080-import-layout, dev/080-import-layout",
-      "independent_reviewers": "audit_gml_resources read-only, then root actual-code/integration review",
+      "implementation_owner": "audit_policy_tests_docs in GM2Godot-080-import-layout-cleanup, dev/080-import-layout-cleanup",
+      "independent_reviewers": "Initial implementation: audit_gml_resources and root; cleanup: audit_transactions_cli read-only, then root actual-code/integration review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "R04 owns separate post-integration deletion of both legacy constants, exact guard, unused hashlib and temporary acceptance test; strict baseline-bearing parents restored, bootstrap 38b unchanged. R04 cannot be verified before cleanup CI and removed-P rejection pass.",
       "plan_verdict": "ACCEPTED by root after independent review; R04-import-contract.md is authoritative. Exact parent 1240a7b16d893bc06ba3d258683c731c60dbadca and raw baseline SHA cea9e1b5ec2a55a05c0f720ce43de7c4e11219e2108aabb9d47b888c38e85d7e. Isolated implementation while R03 merge CI runs is approved; PR/integration waits verified R03 and exact P event identities.",
-      "review_evidence": "Immutable ef758360d91e96f2df0a72fc17769e7e5ed77c09: independent and root actual-code APPROVE; 252 allowed paths and 372 source hashes verified; all 367 import-only ASTs and both dependency graphs preserved. Full suite: 3,064 tests with 56 classified native/filesystem skips, all five pinned projects and exact Godot. Pyright 0 errors/warnings; both Ruff paths and actionlint; 398 focused tests with one Windows-only skip; 80 independent tests and 13 native macOS tests with zero skips; strict gate 1,056 against exact 1240a7b. PR/merge native CI and separate bridge removal remain required."
+      "review_evidence": "Immutable ef758360d91e96f2df0a72fc17769e7e5ed77c09: independent and root actual-code APPROVE; 252 allowed paths and 372 source hashes verified; all 367 import-only ASTs and both dependency graphs preserved. Full suite: 3,064 tests with 56 classified native/filesystem skips, all five pinned projects and exact Godot. Pyright 0 errors/warnings; both Ruff paths and actionlint; 398 focused tests with one Windows-only skip; 80 independent tests and 13 native macOS tests with zero skips; strict gate 1,056 against exact 1240a7b. Initial PR #881 and merge f40402c passed exact CI 33939639226/33941403378, with 24 successful jobs and sole allowed skip. Six native receipts and Linux/macOS 6, Windows 2 artifact-mode proofs pass at both exact revisions. Separate bridge cleanup is implementing and still required before task verification.",
+      "cleanup": {
+        "contract": "R04-cleanup-contract.md",
+        "state": "implementing",
+        "base_ref": "f40402cebc7f4820571f6f54febd78c7f9c17e6a",
+        "allowed_files": [
+          "scripts/check_maintainability.py",
+          "tests/test_maintainability_metrics.py",
+          "CONTRIBUTING.md",
+          "todo-list/07-testing-codebase-improvements.md"
+        ],
+        "optional_file": "maintainability-baseline.json only if genuine strict-generator reductions require it; none expected",
+        "frozen_input_sha256": {
+          "scripts/check_maintainability.py": "00638f0a1c73f181eae9df2c23738fb48f71fb8a96422b76944343c4355abb30",
+          "tests/test_maintainability_metrics.py": "e85f1987eeba2279f22ae9eebeff0dc342b4f2ac29b69efdc8dbb55cd428302d",
+          "CONTRIBUTING.md": "3c81a33529fdf25b419f84358d93437bb2e028a2998cc1e9d38ca3669e351976",
+          "todo-list/07-testing-codebase-improvements.md": "b4fd7bab1b834a711f872b7c3f404c82fd8cd165f263380228ac9627f78025de"
+        },
+        "baseline_sha256": "30ef0346df5cdc85c2a5c7ea66dc47907d8766ea91b7f012e3d747040d1e9e6d",
+        "debt_entries": 1056,
+        "root_contract_verdict": "ACCEPTED after independent/root contract review and exact initial merge proof",
+        "completion": "Approved actual small diff, required local checks, exact cleanup PR and merge CI, new-policy parent acceptance and old-policy parent rejection; no remaining bridge."
+      }
     },
     {
       "task_id": "R05",

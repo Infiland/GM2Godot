@@ -2174,7 +2174,7 @@
       "task_id": "L01",
       "issue": 867,
       "title": "CLI remove obsolete nontransactional adapter",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "_run_convert 579 lines/C98; nested legacy repair141/C28.",
       "expected_benefit": "Readable coordinator with explicit state and outcome/rendering ownership.",
       "current_owner": "src/cli.py",
@@ -2238,7 +2238,7 @@
         "full": "3064 tests /3008 pass /56 classified host skips; exact Godot/all five pinned fixtures",
         "parity": "Nine real CLI cases, same-ref control, later78-assertion replays; public bytes exact; reviewed finite private projection and12 controls"
       },
-      "remaining_verification": "Exact final Linux full coverage and both new preflight guard IDs without skips; unchanged CLI/platform/real/Converter/crash/bind native cohorts; exact PR and merge CI. No task completion yet.",
+      "remaining_verification": "None for L01. L02 and L03 remain separate campaign tasks.",
       "combined_integration": {
         "actual_parent": "7fdd97cfb0149bb166175fd5479b5193f3d64423",
         "prepared_merge": "816c4b46caeec3b2350c19fe13cc6184db367c03",
@@ -2298,6 +2298,21 @@
         "local": "Pyright0/0;bothRuff;strict1047unchanged;new2/0,CLI78/1Windows hostskip,retained6/0,all26requiredactualsuccesses",
         "coverage_scope": "Two-test local line679/branch678to679 execution only; finalfullLinuxCI floor not yet proven",
         "state": "Independent/root source and local-proof APPROVE; finalmetadata and exactPR/mergeCIpending"
+      },
+      "verification": {
+        "pr": 887,
+        "pr_head": "3449f9492e485e95131e4ba167a707eecc3cf9e7",
+        "pr_ci": 33958314011,
+        "merge": "7dd2b9c2eb1bb4c805ca822821c6f5c38284b998",
+        "merge_ci": 33959387452,
+        "tree": "9b50640e84a29c719654fb3a8912d44c416e163f",
+        "both_revisions": "25jobs/24success/sole dependency-submission skip; six exact-head N01 receipts; modes6/6/2; all78CLI IDs perhost withonlyexistinghostskips; all applicable realCLI/Converter/crash methods; forcedLinuxbind; new2guard cases0skips; unchangedcoveragefloor536/57693.06%and125/14685.62%; strict1047actual7fdd",
+        "proof": "L01/final-verification.json",
+        "proof_sha256": "5af3296af72b16569c8e01ff7f440e646aebb7e56b012dcbc3f099496fa1579d",
+        "prior_failed_runs_preserved": [
+          33954287755,
+          33956488909
+        ]
       }
     },
     {
@@ -2517,7 +2532,7 @@
         "independent_receipt_sha256": "44c17c5d29ad6110b22ca70c2e3a85bb40d4f1912c3dca2f99dd7cbe4cb3fdb3",
         "root_review_sha256": "dd4e3efe01510bc29ef9b1f5350f0cb39fdbd4a9e638ba1d4d1fe191557c6dbd"
       },
-      "remaining_verification": "Actual verified campaign-parent ancestry/gate refresh and final metadata review; exact native PR/merge CI including12 helper cases0skips on macOS/Windows.",
+      "remaining_verification": "Final metadata review and exact native PR/merge CI:12 helper cases zero skips on Linux/macOS/Windows and65 applicable runtime IDs actual Godot success. The66th runtime case retains explicit required local proof.",
       "combined_integration": {
         "state": "Prepared and locally checked; reviewed L01 parent native CI pending",
         "prepared_merge": "b0c47b0587df9183924765bf13f02a0d6e9768ae",
@@ -2534,6 +2549,23 @@
         "checks": "Pyright0/0; Ruff; actionlint; strict; required78/0; G01 required49/0;113 CLI/policy tests with one Windows-only skip",
         "inputs_sha256": "f204323a26fc1c389ee3e6a32c5ce875dcb78d49e57444c2ef9d08641491b599",
         "result_sha256": "360df34ac8befbc7a8585c49a316acf5b33aea2743bbd36e80f5cb3a4b04cf7c"
+      },
+      "final_parent_preparation": {
+        "prepared_head": "bfca73acd17e4ef66f9e18e962a5b4f3bc8a3ab9",
+        "checked_head": "2947e9f1bce8439f08bf7e6f645ea20a94a8c3e3",
+        "tree_identical": true,
+        "actual_parent": "7dd2b9c2eb1bb4c805ca822821c6f5c38284b998",
+        "source_owners_exact": 53,
+        "other_python_exact_parent": 337,
+        "frozen_tracked_inputs": 584,
+        "baseline_entries": 1045,
+        "baseline_sha256": "0fc84d1eba1138c2080bc4f04704e465d00a421d9a350ebeb9ace1ee0c355f53",
+        "checks": "Pyright0/0; Ruff; strict1045 against reviewed3449 and actual7dd; new2/0 plusCLI78/one exact Windows host skip",
+        "inputs_sha256": "272e7024893f2fa49a909f3c5494a6954a998ca92f63815e88f55fd4507c0094",
+        "results_sha256": "5d148e2c893f66f055d96be528ba84b4f0320a969efa052062e2dadbe64dcb48",
+        "independent_review_sha256": "2311e02cc2e7eb47ac7dd92afed0c34ecbea72acfbae2377a0bd006e8f92aaa1",
+        "root_review_sha256": "97ec0eb6e57c76a4d36ac7cc9a83376aede81454cd8b1a7234c7a65e05191202",
+        "proof_limits": "Prior full/runtime/negative-control/timing evidence retains original source attribution. No source changes to53 T01 owners; actual native PR/merge CI pending."
       }
     },
     {

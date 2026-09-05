@@ -292,3 +292,44 @@ metadata review, and exact PR/merge native CI remain required.
 
 Combined input SHA256: `f204323a26fc1c389ee3e6a32c5ce875dcb78d49e57444c2ef9d08641491b599`.
 Combined result SHA256: `360df34ac8befbc7a8585c49a316acf5b33aea2743bbd36e80f5cb3a4b04cf7c`.
+
+
+## Final campaign-parent preparation
+
+The final L01 PR head `3449f9492e485e95131e4ba167a707eecc3cf9e7` passed
+CI run 33958314011, including its corrected Windows assertion, two public preflight
+guards, unchanged coverage floors and required native cohorts. Its campaign merge
+is `7dd2b9c2eb1bb4c805ca822821c6f5c38284b998`; merge CI 33959387452 and its
+required native/artifact evidence also passed. L01 is verified.
+The first two failed L01 runs remain preserved and are not success evidence.
+
+Prepared T01 head `bfca73acd17e4ef66f9e18e962a5b4f3bc8a3ab9` includes that
+actual campaign parent. Its tree is identical to checked head
+`2947e9f1bce8439f08bf7e6f645ea20a94a8c3e3`. All 53 approved T01 owner files
+remain byte-identical to `4defcb3`; the other 337 of 388 Python files match final
+L01. The L01 correction changed only one expected POSIX snapshot key and added
+the independently reviewed guard module. T01 implementation and runtime assertions
+did not change during either parent correction.
+
+The first corrected-parent delta passed all 78 CLI cases with one exact existing
+Windows-only skip. The final delta passed both new guard cases and those same 78
+CLI cases with that one skip. Pyright reported zero errors and warnings; Ruff and
+the strict gate passed. All 584 tracked inputs stayed frozen. The baseline remains
+1,045 entries, SHA256 `0fc84d1eba1138c2080bc4f04704e465d00a421d9a350ebeb9ace1ee0c355f53`.
+The strict gate also passed against actual campaign parent `7dd2b9c`, after its
+ancestry was merged, without changing baseline bytes.
+
+Earlier combined required78/0, G01 required49/0 and 113 CLI/policy cases retain their
+original source attribution, as do the full suite, negative controls and timing.
+They were not repeated or relabeled as a new full run for these test-only parent
+deltas. Final delta input SHA256: `272e7024893f2fa49a909f3c5494a6954a998ca92f63815e88f55fd4507c0094`.
+Final delta result SHA256: `5d148e2c893f66f055d96be528ba84b4f0320a969efa052062e2dadbe64dcb48`.
+Independent delta review SHA256: `2311e02cc2e7eb47ac7dd92afed0c34ecbea72acfbae2377a0bd006e8f92aaa1`.
+Root delta/actual-parent review SHA256: `97ec0eb6e57c76a4d36ac7cc9a83376aede81454cd8b1a7234c7a65e05191202`.
+
+T01 still requires exact PR and merge CI. Each native macOS and Windows job must
+execute all 12 helper cases without skips; Linux must do likewise. Godot CI must
+execute the 65 applicable runtime IDs. The 66th local required runtime case,
+`tests.test_stale_managed_output_invalidation.TestStaleManagedOutputInvalidation.test_combined_partial_rerun_validates_with_exact_godot`,
+is not selected by the existing Godot CI discovery and retains its explicit local
+zero-skip proof. No claim of 66 runtime cases executing in CI is made.

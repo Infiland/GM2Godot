@@ -16,6 +16,7 @@ import threading
 import unittest
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -32,6 +33,13 @@ from src.conversion.diagnostics import (
 from src.conversion.godot_validation import GodotValidationReport
 from src.conversion.project_godot import ConversionPreflightError
 from src.version import get_version
+from tests.cli_test_support import (
+    OutcomeConverterStub,
+    cli_sigint_at_boundary,
+    failed_outcome,
+    partial_outcome,
+    success_outcome,
+)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -40,97 +48,6 @@ EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"
 
 
-class _OutcomeConverterStub:
-    def __init__(
-        self,
-        outcome: ConversionOutcome,
-        *,
-        error: Exception | None = None,
-        warning: bool = False,
-        on_convert: Callable[[], None] | None = None,
-    ) -> None:
-        self.outcome = outcome
-        self.error = error
-        self.warning = warning
-        self.on_convert = on_convert
-        self.diagnostics = DiagnosticCollector()
-        self.artifact_refreshes: list[ConversionOutcome] = []
-        self.attempt_publications: list[ConversionOutcome] = []
-
-    def convert(
-        self,
-        *_args: object,
-        diagnostics: DiagnosticCollector | None = None,
-        **_kwargs: object,
-    ) -> ConversionOutcome:
-        self.diagnostics = diagnostics or DiagnosticCollector()
-        if self.warning:
-            self.diagnostics.add(
-                "warning",
-                "GM2GD-TEST-WARNING",
-                "Synthetic conversion warning.",
-            )
-        self.diagnostics.set_outcome(self.outcome)
-        if self.on_convert is not None:
-            self.on_convert()
-        if self.error is not None:
-            raise self.error
-        return self.outcome
-
-    def refresh_conversion_artifacts(
-        self,
-        attempt_outcome: ConversionOutcome,
-    ) -> tuple[str | None, str]:
-        self.artifact_refreshes.append(attempt_outcome)
-        return "", ""
-
-    def publish_conversion_attempt(
-        self,
-        attempt_outcome: ConversionOutcome,
-    ) -> str:
-        self.attempt_publications.append(attempt_outcome)
-        return ""
-
-
-def _success_outcome() -> ConversionOutcome:
-    completed = ConversionCounts(
-        requested=1,
-        executed=1,
-        completed=1,
-    )
-    steps = ConversionStepLedger.from_requested(("scripts",))
-    steps = steps.start("scripts").complete("scripts")
-    return ConversionOutcome(
-        state="success",
-        steps=steps,
-        resources=completed,
-    )
-
-
-def _partial_outcome() -> ConversionOutcome:
-    steps = ConversionStepLedger.from_requested(("scripts",))
-    steps = steps.start("scripts").complete("scripts")
-    return ConversionOutcome(
-        state="partial",
-        steps=steps,
-        resources=ConversionCounts(
-            requested=2,
-            executed=2,
-            completed=1,
-            skipped=1,
-        ),
-    )
-
-
-def _failed_outcome() -> ConversionOutcome:
-    steps = ConversionStepLedger.from_requested(("scripts",))
-    steps = steps.start("scripts").fail("scripts")
-    return ConversionOutcome(
-        state="failed",
-        steps=steps,
-        failed_step="scripts",
-        failure_phase="converter",
-    )
 
 
 class TestCLIReports(unittest.TestCase):
@@ -228,13 +145,13 @@ class TestCLIReports(unittest.TestCase):
 
     def _run_stubbed_convert(
         self,
-        converter: _OutcomeConverterStub,
+        converter: OutcomeConverterStub,
         *extra: str,
     ) -> tuple[int, str, str]:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with (
-            patch("src.cli.Converter", return_value=converter),
+            patch("src.cli.Converter", side_effect=converter.bind_factory),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
         ):
@@ -1283,11 +1200,11 @@ class TestCLIReports(unittest.TestCase):
     def test_convert_success_prints_one_summary_and_writes_outcome_report(
         self,
     ) -> None:
-        outcome = _success_outcome()
+        outcome = success_outcome()
         report_dir = os.path.join(self.temp_dir, "success-report")
 
         exit_code, stdout, stderr = self._run_stubbed_convert(
-            _OutcomeConverterStub(outcome),
+            OutcomeConverterStub(outcome),
             "--report-dir",
             report_dir,
         )
@@ -1310,7 +1227,7 @@ class TestCLIReports(unittest.TestCase):
     def test_convert_static_report_commit_failure_cleans_temp_and_fails_outcome(
         self,
     ) -> None:
-        outcome = _success_outcome()
+        outcome = success_outcome()
         report_dir = os.path.join(self.temp_dir, "static-commit-failure")
         report_root = os.path.join(report_dir, "gm2godot")
 
@@ -1330,7 +1247,7 @@ class TestCLIReports(unittest.TestCase):
             side_effect=fail_static_commit,
         ):
             exit_code, stdout, stderr = self._run_stubbed_convert(
-                _OutcomeConverterStub(outcome),
+                OutcomeConverterStub(outcome),
                 "--report-dir",
                 report_dir,
             )
@@ -1348,8 +1265,8 @@ class TestCLIReports(unittest.TestCase):
         )
 
     def test_external_report_failure_returns_failed_outcome(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
 
         with patch(
             "src.cli._write_external_conversion_reports",
@@ -1369,23 +1286,18 @@ class TestCLIReports(unittest.TestCase):
             stderr,
             "GM2Godot external report generation failed: report disk full\n",
         )
-        failed_outcome = converter.diagnostics.outcome()
-        self.assertIsNotNone(failed_outcome)
-        assert failed_outcome is not None
-        self.assertEqual(failed_outcome.state, "failed")
-        self.assertEqual(failed_outcome.failed_step, "external_reports")
-        self.assertEqual(failed_outcome.failure_phase, "report")
-        self.assertEqual(failed_outcome.converters, outcome.converters)
-        self.assertEqual(failed_outcome.resources, outcome.resources)
-        self.assertEqual(converter.artifact_refreshes, [failed_outcome])
-        self.assertEqual(converter.attempt_publications, [])
+        expected = replace(outcome, state="failed", failed_step="external_reports", failure_phase="report")
+        self.assertEqual(converter.diagnostics.outcome(), expected)
+        self.assertEqual(converter.attempt_publications, [expected])
 
     def test_external_report_failure_repairs_published_success_json(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         godot_dir = os.path.join(self.temp_dir, "godot")
         report_dir = os.path.join(self.temp_dir, "stale-success-report")
         self._write_outcome_reports(godot_dir, outcome)
+        canonical_root = os.path.join(godot_dir, "gm2godot")
+        canonical_before = self._static_report_directory_snapshot(canonical_root)
 
         def publish_success_then_fail(
             destination: str | None,
@@ -1414,11 +1326,10 @@ class TestCLIReports(unittest.TestCase):
             "GM2Godot external report generation failed: "
             "failed after publishing success JSON\n",
         )
-        self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
+        self.assertEqual(self._static_report_directory_snapshot(canonical_root), canonical_before)
         self.assertEqual(self._read_report_outcome_state(report_dir), "failed")
-        self.assertEqual(len(converter.artifact_refreshes), 1)
-        self.assertEqual(converter.artifact_refreshes[0].state, "failed")
-        self.assertEqual(converter.attempt_publications, [])
+        expected = replace(outcome, state="failed", failed_step="external_reports", failure_phase="report")
+        self.assertEqual(converter.attempt_publications, [expected])
 
     def test_real_external_report_failure_preserves_canonical_generation(
         self,
@@ -2122,57 +2033,75 @@ class TestCLIReports(unittest.TestCase):
         )
         self.assertEqual(attempt["attempt"]["state"], "success")
 
-    def test_recovered_terminal_attempt_publication_clears_stale_error(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        publish_calls: list[ConversionOutcome] = []
-
-        def fail_late_refresh(_current: ConversionOutcome) -> tuple[str | None, str]:
-            raise OSError("late artifact failure")
-
-        def fail_once_then_publish(current: ConversionOutcome) -> str:
-            publish_calls.append(current)
-            if len(publish_calls) == 1:
-                signal.raise_signal(signal.SIGINT)
-                raise OSError("intermediate attempt failure")
-            return ""
-
-        with (
-            patch.object(
-                converter,
-                "refresh_conversion_artifacts",
-                side_effect=fail_late_refresh,
+    def test_terminal_attempt_publication_uses_exact_outcome_comparison(self) -> None:
+        success = success_outcome()
+        partial = partial_outcome()
+        failed = failed_outcome()
+        cancelled = replace(success, state="cancelled")
+        cases = (
+            ("distinct equal", success, replace(success), False, 0),
+            ("changed state", success, failed, False, 0),
+            (
+                "same state counts", success,
+                replace(success, resources=ConversionCounts(requested=2, executed=2, completed=2)),
+                False, 0,
             ),
-            patch.object(
-                converter,
-                "publish_conversion_attempt",
-                side_effect=fail_once_then_publish,
+            (
+                "same state ledger", success,
+                replace(success, steps=ConversionStepLedger.from_requested(("rooms",)).start("rooms").complete("rooms")),
+                False, 0,
             ),
-        ):
-            exit_code, stdout, stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                os.path.join(self.temp_dir, "godot"),
-            )
-
-        self.assertEqual(exit_code, 130)
-        self.assertEqual(stderr, "")
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
-        self.assertEqual([item.state for item in publish_calls], ["failed", "cancelled"])
-        self.assertEqual(
-            self._read_report_outcome_state(os.path.join(self.temp_dir, "godot")),
-            "cancelled",
+            ("absent outcome", success, None, False, 0),
+            ("invalid outcome", success, "not an outcome", False, 0),
+            ("success publication failure", success, failed, True, 1),
+            ("partial publication failure", partial, success, True, 2),
+            ("failed publication failure", failed, success, True, 1),
+            ("cancelled publication failure", cancelled, success, True, 130),
         )
+        for label, outcome, published, publication_fails, expected_exit in cases:
+            with self.subTest(case=label):
+                converter = OutcomeConverterStub(outcome)
+                selected_outcome = patch.object(converter, "last_outcome", published)
+                self.addCleanup(selected_outcome.stop)
+
+                def select_published(*_args: object, select: Callable[[], object] = selected_outcome.start) -> None:
+                    select()
+
+                error = OSError("attempt ledger disk full") if publication_fails else None
+                with (
+                    patch("src.cli._write_external_conversion_reports", side_effect=select_published),
+                    patch.object(
+                        converter, "publish_conversion_attempt",
+                        wraps=converter.publish_conversion_attempt, side_effect=error,
+                    ) as publish,
+                ):
+                    exit_code, stdout, stderr = self._run_stubbed_convert(converter)
+                should_publish = isinstance(published, ConversionOutcome) and published != outcome
+                self.assertEqual(exit_code, expected_exit)
+                self.assertEqual(stdout, outcome.summary_line() + "\n")
+                expected_error = (
+                    "GM2Godot terminal conversion attempt publication failed: attempt ledger disk full\n"
+                    if publication_fails else ""
+                )
+                self.assertEqual(stderr, expected_error)
+                self.assertEqual(publish.call_count, int(should_publish))
+                if should_publish:
+                    publish.assert_called_once_with(outcome)
+                self.assertEqual(converter.attempt_publications, [outcome] if should_publish and not error else [])
+                self.assertEqual(converter.last_outcome, outcome if should_publish and not error else published)
+                self.assertEqual(converter.diagnostics.outcome(), outcome)
 
     def test_external_report_failure_preserves_every_failed_repair_pair(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         godot_dir = os.path.join(self.temp_dir, "godot")
         report_dir = os.path.join(self.temp_dir, "unrepairable-report")
         self._write_outcome_reports(godot_dir, outcome)
         self._write_outcome_reports(report_dir, outcome)
+        roots = (os.path.join(godot_dir, "gm2godot"), os.path.join(report_dir, "gm2godot"))
+        before = [self._static_report_directory_snapshot(root) for root in roots]
 
         with (
             patch(
@@ -2198,59 +2127,44 @@ class TestCLIReports(unittest.TestCase):
             stderr,
             "GM2Godot external report generation failed: report disk full\n",
         )
-        for destination in (godot_dir, report_dir):
-            with self.subTest(destination=destination):
-                self.assertEqual(
-                    self._read_report_outcome_state(destination),
-                    "success",
-                )
-        self.assertEqual(converter.artifact_refreshes, [])
-        self.assertEqual(len(converter.attempt_publications), 1)
-        self.assertEqual(converter.attempt_publications[0].state, "failed")
-        self.assertEqual(
-            converter.attempt_publications[0].failed_step,
-            "external_reports",
-        )
+        self.assertEqual([self._static_report_directory_snapshot(root) for root in roots], before)
+        expected = replace(outcome, state="failed", failed_step="external_reports", failure_phase="report")
+        self.assertEqual(converter.attempt_publications, [expected])
 
-    def test_external_report_failure_deduplicates_canonical_destination(
-        self,
-    ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        godot_dir = os.path.join(self.temp_dir, "godot")
-        self._write_outcome_reports(godot_dir, outcome)
-        original_publish_reports = DiagnosticCollector.publish_reports
-        repair_destinations: list[str] = []
+    def test_managed_report_destination_suppresses_post_commit_external_writes(self) -> None:
+        gm_dir, godot_dir = self._write_real_script_project("ManagedReports")
+        suppressed: list[str | None] = []
+        committed: dict[str, bytes] = {}
 
-        def track_repair(
-            diagnostics: DiagnosticCollector,
-            destination: str | os.PathLike[str],
-        ) -> object:
-            repair_destinations.append(os.fspath(destination))
-            return original_publish_reports(diagnostics, destination)
+        def observe_external(
+            destination: str | None, _platform: str, diagnostics: DiagnosticCollector,
+        ) -> None:
+            suppressed.append(destination)
+            self.assertIsNone(destination)
+            current = diagnostics.outcome()
+            assert current is not None
+            self.assertEqual(current.state, "success")
+            for file in Path(godot_dir).rglob("*"):
+                if file.is_file():
+                    committed[file.relative_to(godot_dir).as_posix()] = file.read_bytes()
 
-        with (
-            patch(
-                "src.cli._write_external_conversion_reports",
-                side_effect=OSError("report disk full"),
-            ),
-            patch.object(
-                DiagnosticCollector,
-                "publish_reports",
-                track_repair,
-            ),
-        ):
-            exit_code, _stdout, _stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                os.path.join(godot_dir, "."),
+        with patch("src.cli._write_external_conversion_reports", side_effect=observe_external):
+            exit_code, stdout, stderr = self._run_real_convert(
+                gm_dir, godot_dir, "--only", "scripts", "--report-dir", os.path.join(godot_dir, "."),
             )
-
-        self.assertEqual(exit_code, 1)
-        self.assertEqual(repair_destinations, [godot_dir])
-        self.assertEqual(self._read_report_outcome_state(godot_dir), "failed")
-        self.assertEqual(len(converter.artifact_refreshes), 1)
-        self.assertEqual(converter.attempt_publications, [])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
+        self.assertIn("GM2Godot conversion outcome: success", stdout)
+        self.assertEqual(suppressed, [None])
+        self.assertEqual(
+            committed,
+            {p.relative_to(godot_dir).as_posix(): p.read_bytes() for p in Path(godot_dir).rglob("*") if p.is_file()},
+        )
+        for filename in self._STATIC_REPORT_FILENAMES:
+            self.assertIn("gm2godot/" + filename, committed)
+        self.assertIn("gm2godot/conversion_manifest.json", committed)
+        self._assert_manifest_diagnostic_hashes(godot_dir)
 
     def test_real_preflight_refusal_does_not_publish_conversion_artifacts(self) -> None:
         gm_dir, godot_dir = self._write_real_script_project("UnsafeDestination")
@@ -2302,7 +2216,7 @@ class TestCLIReports(unittest.TestCase):
                     ) as sentinel_file:
                         sentinel_file.write("keep\n")
 
-                converter = _OutcomeConverterStub(
+                converter = OutcomeConverterStub(
                     ConversionOutcome(
                         state="failed",
                         failure_phase="preflight",
@@ -2312,7 +2226,7 @@ class TestCLIReports(unittest.TestCase):
                 stdout = io.StringIO()
                 stderr = io.StringIO()
                 with (
-                    patch("src.cli.Converter", return_value=converter),
+                    patch("src.cli.Converter", side_effect=converter.bind_factory),
                     redirect_stdout(stdout),
                     redirect_stderr(stderr),
                 ):
@@ -2363,7 +2277,7 @@ class TestCLIReports(unittest.TestCase):
         with (
             patch(
                 "src.cli.Converter",
-                return_value=_OutcomeConverterStub(outcome, error=error),
+                side_effect=OutcomeConverterStub(outcome, error=error).bind_factory,
             ),
             patch(
                 "src.cli._write_external_conversion_reports",
@@ -2437,13 +2351,13 @@ class TestCLIReports(unittest.TestCase):
                 with (
                     patch(
                         "src.cli.Converter",
-                        return_value=_OutcomeConverterStub(
+                        side_effect=OutcomeConverterStub(
                             ConversionOutcome(
                                 state="failed",
                                 failure_phase="preflight",
                             ),
                             error=error,
-                        ),
+                        ).bind_factory,
                     ),
                     redirect_stdout(stdout),
                     redirect_stderr(stderr),
@@ -2474,7 +2388,7 @@ class TestCLIReports(unittest.TestCase):
                 )
 
     def test_runtime_error_survives_external_report_failure(self) -> None:
-        outcome = _failed_outcome()
+        outcome = failed_outcome()
         report_dir = os.path.join(self.temp_dir, "runtime-report-failure")
 
         with patch(
@@ -2482,7 +2396,7 @@ class TestCLIReports(unittest.TestCase):
             side_effect=OSError("report disk full"),
         ):
             exit_code, stdout, stderr = self._run_stubbed_convert(
-                _OutcomeConverterStub(
+                OutcomeConverterStub(
                     outcome,
                     error=RuntimeError("converter disk full"),
                 ),
@@ -2507,7 +2421,7 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(report["outcome"], outcome.to_dict())
 
     def test_partial_conversion_requires_explicit_allow_partial(self) -> None:
-        outcome = _partial_outcome()
+        outcome = partial_outcome()
         cases = ((False, 2), (True, 0))
         for allow_partial, expected_exit in cases:
             with self.subTest(allow_partial=allow_partial):
@@ -2520,7 +2434,7 @@ class TestCLIReports(unittest.TestCase):
                     extra.append("--allow-partial")
 
                 exit_code, stdout, stderr = self._run_stubbed_convert(
-                    _OutcomeConverterStub(outcome),
+                    OutcomeConverterStub(outcome),
                     *extra,
                 )
 
@@ -2634,7 +2548,7 @@ class TestCLIReports(unittest.TestCase):
 
     def test_partial_allow_does_not_override_diagnostic_thresholds(self) -> None:
         exit_code, stdout, stderr = self._run_stubbed_convert(
-            _OutcomeConverterStub(_partial_outcome(), warning=True),
+            OutcomeConverterStub(partial_outcome(), warning=True),
             "--allow-partial",
             "--max-warnings",
             "0",
@@ -2647,11 +2561,11 @@ class TestCLIReports(unittest.TestCase):
     def test_runtime_exception_returns_one_after_failed_report_and_summary(
         self,
     ) -> None:
-        outcome = _failed_outcome()
+        outcome = failed_outcome()
         report_dir = os.path.join(self.temp_dir, "runtime-report")
 
         exit_code, stdout, stderr = self._run_stubbed_convert(
-            _OutcomeConverterStub(
+            OutcomeConverterStub(
                 outcome,
                 error=RuntimeError("disk full"),
             ),
@@ -2680,8 +2594,8 @@ class TestCLIReports(unittest.TestCase):
         )
 
         exit_code, stdout, stderr = self._run_stubbed_convert(
-            _OutcomeConverterStub(
-                _failed_outcome(),
+            OutcomeConverterStub(
+                failed_outcome(),
                 error=runtime_error,
             )
         )
@@ -2698,14 +2612,14 @@ class TestCLIReports(unittest.TestCase):
         )
 
     def test_runtime_exception_coerces_preexisting_nonfailed_outcome(self) -> None:
-        for original_outcome in (_success_outcome(), _partial_outcome()):
+        for original_outcome in (success_outcome(), partial_outcome()):
             with self.subTest(original_state=original_outcome.state):
                 report_dir = os.path.join(
                     self.temp_dir,
                     f"runtime-after-{original_outcome.state}",
                 )
                 exit_code, stdout, stderr = self._run_stubbed_convert(
-                    _OutcomeConverterStub(
+                    OutcomeConverterStub(
                         original_outcome,
                         error=RuntimeError("late converter failure"),
                     ),
@@ -2805,7 +2719,7 @@ class TestCLIReports(unittest.TestCase):
         report_dir = os.path.join(self.temp_dir, "preflight-report")
 
         exit_code, stdout, stderr = self._run_stubbed_convert(
-            _OutcomeConverterStub(outcome, error=error),
+            OutcomeConverterStub(outcome, error=error),
             "--report-dir",
             report_dir,
         )
@@ -2826,19 +2740,19 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(report["outcome"], outcome.to_dict())
 
     def test_sigint_overrides_success_restores_handler_and_returns_130(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(
             outcome,
             on_convert=lambda: signal.raise_signal(signal.SIGINT),
         )
         running_events: list[threading.Event] = []
 
-        def converter_factory(**kwargs: object) -> _OutcomeConverterStub:
+        def converter_factory(**kwargs: object) -> OutcomeConverterStub:
             conversion_running = kwargs["conversion_running"]
             self.assertIsInstance(conversion_running, threading.Event)
             assert isinstance(conversion_running, threading.Event)
             running_events.append(conversion_running)
-            return converter
+            return converter.bind_factory(**kwargs)
 
         report_dir = os.path.join(self.temp_dir, "cancelled-report")
         previous_sigint = signal.getsignal(signal.SIGINT)
@@ -2882,17 +2796,17 @@ class TestCLIReports(unittest.TestCase):
     def test_sigint_during_converter_construction_publishes_cancelled_outcome(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         running_events: list[threading.Event] = []
 
-        def interrupting_factory(**kwargs: object) -> _OutcomeConverterStub:
+        def interrupting_factory(**kwargs: object) -> OutcomeConverterStub:
             conversion_running = kwargs["conversion_running"]
             self.assertIsInstance(conversion_running, threading.Event)
             assert isinstance(conversion_running, threading.Event)
             running_events.append(conversion_running)
             signal.raise_signal(signal.SIGINT)
-            return converter
+            return converter.bind_factory(**kwargs)
 
         report_dir = os.path.join(self.temp_dir, "constructor-interrupted")
         previous_sigint = signal.getsignal(signal.SIGINT)
@@ -2922,8 +2836,8 @@ class TestCLIReports(unittest.TestCase):
     def test_second_sigint_during_handler_install_restores_previous_handler(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         previous_sigint = signal.getsignal(signal.SIGINT)
         original_signal = signal.signal
         install_calls = 0
@@ -2951,7 +2865,7 @@ class TestCLIReports(unittest.TestCase):
         handler_after_abort: Any = None
         try:
             with (
-                patch("src.cli.Converter", return_value=converter),
+                patch("src.cli.Converter", side_effect=converter.bind_factory),
                 patch(
                     "src.cli.signal.signal",
                     side_effect=interrupt_after_handler_install,
@@ -2972,34 +2886,27 @@ class TestCLIReports(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
 
-    def test_sigint_during_log_flush_publishes_cancelled_outcome(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        godot_dir = os.path.join(self.temp_dir, "godot")
+    def test_sigint_during_log_flush_preserves_decided_outcome(self) -> None:
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "log-flush-interrupted")
+        godot_dir = os.path.join(self.temp_dir, "godot")
         self._write_outcome_reports(godot_dir, outcome)
-        original_print_logs = getattr(cli, "_print_conversion_logs")
-
-        def interrupt_during_log_flush(logs: list[str]) -> None:
-            signal.raise_signal(signal.SIGINT)
-            original_print_logs(logs)
-
-        with patch(
-            "src.cli._print_conversion_logs",
-            side_effect=interrupt_during_log_flush,
-        ):
-            exit_code, stdout, stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                report_dir,
-            )
-
-        self.assertEqual(exit_code, 130)
+        canonical = Path(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        before = canonical.read_bytes()
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        with cli_sigint_at_boundary("log-flush") as reached:
+            exit_code, stdout, stderr = self._run_stubbed_convert(converter, "--report-dir", report_dir)
+        self.assertEqual(reached, ["log-flush"])
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(stderr, "")
-        self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
-        self.assertEqual(self._read_report_outcome_state(godot_dir), "cancelled")
-        self.assertEqual(self._read_report_outcome_state(report_dir), "cancelled")
+        self.assertEqual(stdout, outcome.summary_line() + "\n")
+        report = self._read_conversion_artifact(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        self.assertEqual(report["outcome"], outcome.to_dict())
+        self.assertEqual(converter.last_outcome, outcome)
+        self.assertEqual(converter.attempt_publications, [])
+        self.assertEqual(canonical.read_bytes(), before)
 
     def test_real_sigint_after_generation_decision_does_not_report_cancelled(
         self,
@@ -3232,133 +3139,67 @@ class TestCLIReports(unittest.TestCase):
         )
         self._assert_manifest_diagnostic_hashes(godot_dir)
 
-    def test_sigint_before_summary_output_republishes_cancelled_outcome(
-        self,
-    ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+    def test_sigint_before_summary_output_preserves_decided_outcome(self) -> None:
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
+        report_dir = os.path.join(self.temp_dir, "before-summary-interrupted")
         godot_dir = os.path.join(self.temp_dir, "godot")
-        report_dir = os.path.join(self.temp_dir, "summary-interrupted")
         self._write_outcome_reports(godot_dir, outcome)
-        original_print_summary = getattr(cli, "_print_conversion_summary")
-        interrupted = False
-
-        def interrupt_before_summary(current: ConversionOutcome) -> None:
-            nonlocal interrupted
-            if not interrupted:
-                interrupted = True
-                signal.raise_signal(signal.SIGINT)
-            original_print_summary(current)
-
-        with patch(
-            "src.cli._print_conversion_summary",
-            side_effect=interrupt_before_summary,
-        ):
-            exit_code, stdout, stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                report_dir,
-            )
-
-        self.assertEqual(exit_code, 130)
+        canonical = Path(godot_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        before = canonical.read_bytes()
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        with cli_sigint_at_boundary("before-summary") as reached:
+            exit_code, stdout, stderr = self._run_stubbed_convert(converter, "--report-dir", report_dir)
+        self.assertEqual(reached, ["before-summary"])
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(stderr, "")
-        self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
-        self.assertNotIn("GM2Godot conversion outcome: success", stdout)
-        self.assertEqual(self._read_report_outcome_state(godot_dir), "cancelled")
-        self.assertEqual(self._read_report_outcome_state(report_dir), "cancelled")
+        self.assertEqual(stdout, outcome.summary_line() + "\n")
+        report = self._read_conversion_artifact(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        self.assertEqual(report["outcome"], outcome.to_dict())
+        self.assertEqual(converter.last_outcome, outcome)
+        self.assertEqual(converter.attempt_publications, [])
+        self.assertEqual(canonical.read_bytes(), before)
 
-    def test_sigint_after_buffered_summary_prints_only_cancelled_summary(
-        self,
-    ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        report_dir = os.path.join(self.temp_dir, "summary-post-print-interrupt")
-        original_print_summary = getattr(cli, "_print_conversion_summary")
-        interrupted = False
-
-        def interrupt_after_summary(current: ConversionOutcome) -> None:
-            nonlocal interrupted
-            original_print_summary(current)
-            if not interrupted:
-                interrupted = True
-                signal.raise_signal(signal.SIGINT)
-
-        with patch(
-            "src.cli._print_conversion_summary",
-            side_effect=interrupt_after_summary,
-        ):
-            exit_code, stdout, stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                report_dir,
-            )
-
-        self.assertTrue(interrupted)
-        self.assertEqual(exit_code, 130)
+    def test_sigint_after_buffered_summary_prints_only_decided_summary(self) -> None:
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
+        report_dir = os.path.join(self.temp_dir, "after-summary-interrupted")
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        with cli_sigint_at_boundary("after-summary") as reached:
+            exit_code, stdout, stderr = self._run_stubbed_convert(converter, "--report-dir", report_dir)
+        self.assertEqual(reached, ["after-summary"])
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(stderr, "")
-        self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
-        self.assertNotIn("GM2Godot conversion outcome: success", stdout)
-        self.assertEqual(self._read_report_outcome_state(report_dir), "cancelled")
+        self.assertEqual(stdout, outcome.summary_line() + "\n")
+        report = self._read_conversion_artifact(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        self.assertEqual(report["outcome"], outcome.to_dict())
+        self.assertEqual(converter.last_outcome, outcome)
+        self.assertEqual(converter.attempt_publications, [])
 
-    def test_sigint_in_pre_summary_gap_is_observed_before_output(self) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        report_dir = os.path.join(self.temp_dir, "pre-summary-gap-interrupt")
-        run_convert = getattr(cli, "_run_convert")
-        source_lines, source_start = inspect.getsourcelines(run_convert)
-        phase_assignment_offset = next(
-            offset
-            for offset, source_line in enumerate(source_lines)
-            if source_line.strip() == 'terminal_summary_phase = "preparing"'
-        )
-        target_line = source_start + phase_assignment_offset + 1
-        interrupted = False
-
-        def interrupt_on_terminal_entry(
-            frame: object,
-            event: str,
-            _arg: object,
-        ) -> object:
-            nonlocal interrupted
-            frame_code = getattr(frame, "f_code", None)
-            frame_line = getattr(frame, "f_lineno", None)
-            if (
-                not interrupted
-                and event == "line"
-                and frame_code is run_convert.__code__
-                and frame_line == target_line
-            ):
-                interrupted = True
-                sys.settrace(None)
-                signal.raise_signal(signal.SIGINT)
-            return interrupt_on_terminal_entry
-
-        previous_trace = sys.gettrace()
-        sys.settrace(cast(Any, interrupt_on_terminal_entry))
-        try:
-            exit_code, stdout, stderr = self._run_stubbed_convert(
-                converter,
-                "--report-dir",
-                report_dir,
-            )
-        finally:
-            sys.settrace(previous_trace)
-
-        self.assertTrue(interrupted)
-        self.assertEqual(exit_code, 130)
+    def test_sigint_in_pre_summary_gap_preserves_decided_outcome(self) -> None:
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
+        report_dir = os.path.join(self.temp_dir, "pre-summary-gap-interrupted")
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        with cli_sigint_at_boundary("pre-summary-gap") as reached:
+            exit_code, stdout, stderr = self._run_stubbed_convert(converter, "--report-dir", report_dir)
+        self.assertEqual(reached, ["pre-summary-gap"])
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(stderr, "")
-        self.assertEqual(stdout.count("GM2Godot conversion outcome:"), 1)
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout)
-        self.assertNotIn("GM2Godot conversion outcome: success", stdout)
-        self.assertEqual(self._read_report_outcome_state(report_dir), "cancelled")
+        self.assertEqual(stdout, outcome.summary_line() + "\n")
+        report = self._read_conversion_artifact(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        self.assertEqual(report["outcome"], outcome.to_dict())
+        self.assertEqual(converter.last_outcome, outcome)
+        self.assertEqual(converter.attempt_publications, [])
 
     def test_sigint_while_restoring_handler_after_commit_keeps_one_summary(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "handler-restore-interrupt")
         previous_sigint = signal.getsignal(signal.SIGINT)
         original_signal = signal.signal
@@ -3400,8 +3241,8 @@ class TestCLIReports(unittest.TestCase):
     def test_sigint_after_handler_restore_does_not_duplicate_committed_summary(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "post-handler-restore-interrupt")
         previous_sigint = signal.getsignal(signal.SIGINT)
         original_signal = signal.signal
@@ -3444,8 +3285,8 @@ class TestCLIReports(unittest.TestCase):
     def test_sigint_after_stdout_accepts_summary_keeps_single_committed_line(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "stdout-commit-interrupt")
 
         class SignalAfterOutcomeWrite(io.StringIO):
@@ -3464,7 +3305,7 @@ class TestCLIReports(unittest.TestCase):
         stdout = SignalAfterOutcomeWrite()
         stderr = io.StringIO()
         with (
-            patch("src.cli.Converter", return_value=converter),
+            patch("src.cli.Converter", side_effect=converter.bind_factory),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
         ):
@@ -3488,8 +3329,8 @@ class TestCLIReports(unittest.TestCase):
     def test_sigint_after_handler_restore_cannot_override_committed_exit(
         self,
     ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "post-restore-return-interrupt")
         run_convert = getattr(cli, "_run_convert")
         source_lines, source_start = inspect.getsourcelines(run_convert)
@@ -3540,62 +3381,22 @@ class TestCLIReports(unittest.TestCase):
         self.assertIn("GM2Godot conversion outcome: success", stdout)
         self.assertEqual(self._read_report_outcome_state(report_dir), "success")
 
-    def test_sigint_during_report_generation_rewrites_cancelled_outcome(
-        self,
-    ) -> None:
-        outcome = _success_outcome()
-        converter = _OutcomeConverterStub(outcome)
-        report_dir = os.path.join(self.temp_dir, "report-interrupted")
-        original_write_reports = getattr(
-            cli,
-            "_write_external_conversion_reports",
-        )
-
-        def interrupt_during_reports(
-            destination: str | None,
-            target_platform: str,
-            diagnostics: DiagnosticCollector,
-        ) -> None:
-            signal.raise_signal(signal.SIGINT)
-            original_write_reports(destination, target_platform, diagnostics)
-
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with (
-            patch("src.cli.Converter", return_value=converter),
-            patch(
-                "src.cli._write_external_conversion_reports",
-                side_effect=interrupt_during_reports,
-            ),
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
-        ):
-            exit_code = cli.main(
-                self._convert_args("--report-dir", report_dir)
-            )
-
-        self.assertEqual(exit_code, 130)
-        self.assertEqual(stderr.getvalue(), "")
-        self.assertEqual(
-            stdout.getvalue().count("GM2Godot conversion outcome:"),
-            1,
-        )
-        self.assertIn("GM2Godot conversion outcome: cancelled", stdout.getvalue())
-        with open(
-            os.path.join(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH),
-            "r",
-            encoding="utf-8",
-        ) as report_file:
-            report = json.load(report_file)
-        self.assertEqual(report["outcome"]["state"], "cancelled")
-        self.assertEqual(
-            report["outcome"]["converters"],
-            outcome.converters.to_dict(),
-        )
-        self.assertEqual(
-            report["outcome"]["resources"],
-            outcome.resources.to_dict(),
-        )
+    def test_sigint_during_report_generation_preserves_decided_outcome(self) -> None:
+        outcome = success_outcome()
+        converter = OutcomeConverterStub(outcome)
+        report_dir = os.path.join(self.temp_dir, "report-generation-interrupted")
+        previous_sigint = signal.getsignal(signal.SIGINT)
+        with cli_sigint_at_boundary("report-generation") as reached:
+            exit_code, stdout, stderr = self._run_stubbed_convert(converter, "--report-dir", report_dir)
+        self.assertEqual(reached, ["report-generation"])
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_sigint)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, outcome.summary_line() + "\n")
+        report = self._read_conversion_artifact(report_dir, DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH)
+        self.assertEqual(report["outcome"], outcome.to_dict())
+        self.assertEqual(converter.last_outcome, outcome)
+        self.assertEqual(converter.attempt_publications, [])
 
 
 if __name__ == "__main__":

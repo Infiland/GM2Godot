@@ -5,7 +5,6 @@ import io
 import json
 import os
 import signal
-import stat
 import sys
 import threading
 from contextlib import redirect_stdout
@@ -14,17 +13,13 @@ from types import FrameType
 from typing import Sequence, TypedDict, cast
 
 from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     ConversionDiagnosticReportPublicationReceipt,
-    ConversionDiagnosticReportSnapshot,
     DiagnosticCollector,
     DiagnosticSeverity,
-    capture_conversion_diagnostic_reports,
-    restore_conversion_diagnostic_reports,
 )
 from src.conversion.gml_transpiler import generate_gml_api_compatibility_report, render_gml_manual_scope_markdown
 from src.conversion.godot_validation import validate_generated_godot_project, write_godot_validation_report
@@ -59,13 +54,6 @@ class CLISetting:
 
     def get(self) -> bool:
         return self.value
-
-
-@dataclass
-class _ManagedDiagnosticCheckpoint:
-    destination: str
-    snapshot: ConversionDiagnosticReportSnapshot
-    receipt: ConversionDiagnosticReportPublicationReceipt | None = None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -266,15 +254,9 @@ def _run_convert(args: argparse.Namespace) -> int:
     sigint_received = False
     managed_generation_decided = False
     terminal_summary_phase = "idle"
-    canonical_reports_authorized = False
     external_report_dir: str | None = args.report_dir
-    canonical_refresh_disabled = False
-    late_artifact_error: Exception | None = None
     late_report_error: Exception | None = None
     attempt_publication_error: Exception | None = None
-    report_restore_error: Exception | None = None
-    protect_managed_reports = False
-    managed_report_checkpoints: dict[str, _ManagedDiagnosticCheckpoint] = {}
 
     class _TerminalSummaryInterrupted(Exception):
         pass
@@ -349,9 +331,7 @@ def _run_convert(args: argparse.Namespace) -> int:
                 else None
             ),
         )
-        transactional_conversion = bool(
-            getattr(converter, "managed_output_transactional", False)
-        )
+
         def observe_cancellation(current: ConversionOutcome) -> ConversionOutcome:
             if (
                 sigint_received
@@ -362,152 +342,23 @@ def _run_convert(args: argparse.Namespace) -> int:
             converter.diagnostics.set_outcome(current)
             return current
 
-        def managed_report_checkpoint(
-            destination: str,
-        ) -> _ManagedDiagnosticCheckpoint | None:
-            if (
-                not protect_managed_reports
-                or not _resolved_path_is_within(
-                    destination,
-                    args.godot_project,
-                )
-            ):
-                return None
-            destination_key = _resolved_path_key(destination)
-            checkpoint = managed_report_checkpoints.get(destination_key)
-            if checkpoint is None:
-                normalized_destination = os.path.realpath(
-                    os.path.abspath(destination)
-                )
-                checkpoint = _ManagedDiagnosticCheckpoint(
-                    destination=normalized_destination,
-                    snapshot=capture_conversion_diagnostic_reports(
-                        normalized_destination
-                    ),
-                )
-                managed_report_checkpoints[destination_key] = checkpoint
-            return checkpoint
-
-        def reset_managed_report_publications() -> bool:
-            nonlocal report_restore_error
-            restore_errors: list[tuple[str, Exception]] = []
-            for checkpoint in reversed(tuple(managed_report_checkpoints.values())):
-                if checkpoint.receipt is None:
-                    continue
-                try:
-                    restore_conversion_diagnostic_reports(
-                        checkpoint.destination,
-                        checkpoint.snapshot,
-                        checkpoint.receipt,
-                    )
-                except Exception as error:
-                    restore_errors.append((checkpoint.destination, error))
-                else:
-                    checkpoint.receipt = None
-            if restore_errors:
-                restore_error = OSError(
-                    "managed conversion diagnostics could not be restored: "
-                    + "; ".join(
-                        f"{destination}: {error}"
-                        for destination, error in restore_errors
-                    )
-                )
-                for destination, error in restore_errors:
-                    for note in _exception_notes(error):
-                        restore_error.add_note(f"{destination}: {note}")
-                report_restore_error = restore_error
-                return False
-            report_restore_error = None
-            return True
-
-        def restore_managed_reports() -> bool:
-            restored = reset_managed_report_publications()
-            if restored:
-                managed_report_checkpoints.clear()
-            return restored
-
-        def repair_conversion_reports(
-            current: ConversionOutcome,
-        ) -> ConversionOutcome:
-            nonlocal attempt_publication_error
-            nonlocal canonical_refresh_disabled, late_artifact_error, late_report_error
-            nonlocal protect_managed_reports, report_restore_error
-            destinations: list[tuple[str, str]] = []
-            seen_destinations: set[str] = set()
-            canonical_destination_key = (
-                _resolved_path_key(args.godot_project)
-                if canonical_reports_authorized
-                else None
-            )
-            candidate_destinations = (
-                args.godot_project if canonical_reports_authorized else None,
-                external_report_dir,
-            )
-            for destination in candidate_destinations:
-                if destination is None:
-                    continue
-                destination_key = _resolved_path_key(destination)
-                if destination_key in seen_destinations:
-                    continue
-                seen_destinations.add(destination_key)
-                destinations.append((destination, destination_key))
-
+        def repair_conversion_reports(current: ConversionOutcome) -> ConversionOutcome:
+            nonlocal late_report_error
             while True:
                 converter.diagnostics.set_outcome(current)
-                if not reset_managed_report_publications():
-                    canonical_refresh_disabled = True
-                canonical_reports_current = False
                 report_repair_error: Exception | None = None
-                for destination, destination_key in destinations:
-                    if (
-                        canonical_refresh_disabled
-                        and protect_managed_reports
-                        and _resolved_path_is_within(
-                            destination,
-                            args.godot_project,
-                        )
-                    ):
-                        # Once a managed repair or artifact publication fails
-                        # while a current manifest is protected, preserve the
-                        # exact diagnostic files described by that manifest.
-                        # Failed and cancelled attempts have no new canonical
-                        # candidate, so their terminal diagnostics must still
-                        # be published when no current manifest is protected.
-                        continue
+                if external_report_dir is not None:
                     try:
-                        checkpoint = managed_report_checkpoint(destination)
-                        publication_destination = (
-                            checkpoint.destination
-                            if checkpoint is not None
-                            else destination
-                        )
-                        receipt = converter.diagnostics.publish_reports(
-                            publication_destination
-                        )
+                        converter.diagnostics.publish_reports(external_report_dir)
                     except Exception as error:
-                        # A failed late repair must not delete a previously
-                        # trustworthy report or its canonical manifest.
-                        if report_repair_error is None:
-                            report_repair_error = error
-                        continue
-                    else:
-                        if checkpoint is not None:
-                            checkpoint.receipt = receipt
-                        if destination_key == canonical_destination_key:
-                            canonical_reports_current = True
+                        report_repair_error = error
 
                 observed = observe_cancellation(current)
                 if observed.state != current.state:
                     current = observed
                     continue
-
-                if (
-                    report_repair_error is not None
-                    and current.state in {"success", "partial"}
-                ):
-                    canonical_refresh_disabled = True
+                if report_repair_error is not None and current.state in {"success", "partial"}:
                     late_report_error = report_repair_error
-                    restore_managed_reports()
                     current = replace(
                         current,
                         state="failed",
@@ -516,53 +367,6 @@ def _run_convert(args: argparse.Namespace) -> int:
                     )
                     converter.diagnostics.set_outcome(current)
                     continue
-
-                if canonical_destination_key is not None:
-                    if canonical_reports_current and not canonical_refresh_disabled:
-                        try:
-                            manifest_path, _attempt_path = (
-                                converter.refresh_conversion_artifacts(current)
-                            )
-                        except Exception as error:
-                            canonical_refresh_disabled = True
-                            restore_managed_reports()
-                            if current.state in {"success", "partial"}:
-                                late_artifact_error = error
-                                current = replace(
-                                    current,
-                                    state="failed",
-                                    failed_step="conversion_artifacts",
-                                    failure_phase="finalizer",
-                                )
-                                converter.diagnostics.set_outcome(current)
-                                continue
-                            try:
-                                converter.publish_conversion_attempt(current)
-                            except Exception as error:
-                                attempt_publication_error = error
-                            else:
-                                attempt_publication_error = None
-                        else:
-                            attempt_publication_error = None
-                            if manifest_path is None and protect_managed_reports:
-                                restore_managed_reports()
-                                canonical_refresh_disabled = True
-                            else:
-                                managed_report_checkpoints.clear()
-                                report_restore_error = None
-                                if manifest_path is not None:
-                                    protect_managed_reports = True
-                    else:
-                        if protect_managed_reports and managed_report_checkpoints:
-                            restore_managed_reports()
-                            canonical_refresh_disabled = True
-                        try:
-                            converter.publish_conversion_attempt(current)
-                        except Exception as error:
-                            attempt_publication_error = error
-                        else:
-                            attempt_publication_error = None
-
                 observed = observe_cancellation(current)
                 if observed.state == current.state:
                     return observed
@@ -586,8 +390,7 @@ def _run_convert(args: argparse.Namespace) -> int:
         except Exception as error:
             runtime_error = error
         finally:
-            if transactional_conversion:
-                managed_generation_decided = True
+            managed_generation_decided = True
 
         if preflight_error is not None:
             diagnostic = converter.diagnostics.add(
@@ -617,18 +420,6 @@ def _run_convert(args: argparse.Namespace) -> int:
                 failure_phase="missing-outcome",
             )
 
-        canonical_reports_authorized = (
-            not transactional_conversion
-            and preflight_error is None
-            and outcome.failure_phase != "preflight"
-        )
-        protect_managed_reports = (
-            not transactional_conversion
-            and preflight_error is None
-            and runtime_error is None
-            and outcome.state in {"success", "partial"}
-            and _regular_conversion_manifest_exists(args.godot_project)
-        )
         external_report_dir = _safe_conversion_report_destination(
             args.report_dir,
             preflight_failed=outcome.failure_phase == "preflight",
@@ -636,7 +427,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             gm_project_path=args.gm_project,
             godot_project_path=args.godot_project,
         )
-        if transactional_conversion and managed_report_relative is not None:
+        if managed_report_relative is not None:
             external_report_dir = None
 
         state_before_log_flush = outcome.state
@@ -650,37 +441,9 @@ def _run_convert(args: argparse.Namespace) -> int:
         report_state = outcome.state
         report_error: Exception | None = None
         try:
-            external_checkpoint = (
-                managed_report_checkpoint(external_report_dir)
-                if external_report_dir is not None
-                else None
-            )
-            external_publication_destination = (
-                external_checkpoint.destination
-                if external_checkpoint is not None
-                else external_report_dir
-            )
-            external_receipt = _write_external_conversion_reports(
-                external_publication_destination,
-                args.platform,
-                converter.diagnostics,
-            )
-            if external_checkpoint is not None and external_receipt is not None:
-                external_checkpoint.receipt = external_receipt
+            _write_external_conversion_reports(external_report_dir, args.platform, converter.diagnostics)
         except Exception as error:
             report_error = error
-        else:
-            if (
-                canonical_reports_authorized
-                and external_report_dir is not None
-                and _resolved_path_is_within(
-                    external_report_dir,
-                    args.godot_project,
-                )
-            ):
-                # Reports written inside managed output after Converter's
-                # initial artifact commit must enter the canonical file ledger.
-                reports_need_repair = True
 
         outcome = observe_cancellation(outcome)
         report_failure_stderr: str | None = None
@@ -713,18 +476,17 @@ def _run_convert(args: argparse.Namespace) -> int:
         else:
             outcome = observed
 
-        if transactional_conversion:
-            published_outcome = converter.last_outcome
-            if (
-                isinstance(published_outcome, ConversionOutcome)
-                and published_outcome != outcome
-            ):
-                try:
-                    converter.publish_conversion_attempt(outcome)
-                except Exception as error:
-                    attempt_publication_error = error
-                else:
-                    attempt_publication_error = None
+        published_outcome = converter.last_outcome
+        if (
+            isinstance(published_outcome, ConversionOutcome)
+            and published_outcome != outcome
+        ):
+            try:
+                converter.publish_conversion_attempt(outcome)
+            except Exception as error:
+                attempt_publication_error = error
+            else:
+                attempt_publication_error = None
 
         summary_output = ""
         while True:
@@ -787,14 +549,6 @@ def _run_convert(args: argparse.Namespace) -> int:
             )
             _print_conversion_failure_details(late_report_error)
             exit_code = 1
-        elif late_artifact_error is not None:
-            print(
-                "GM2Godot conversion artifact publication failed: "
-                f"{late_artifact_error}",
-                file=sys.stderr,
-            )
-            _print_conversion_failure_details(late_artifact_error)
-            exit_code = 1
         else:
             exit_code = _conversion_outcome_exit_code(
                 outcome,
@@ -809,15 +563,6 @@ def _run_convert(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             _print_conversion_failure_details(attempt_publication_error)
-            if exit_code == 0:
-                exit_code = 1
-        if report_restore_error is not None:
-            print(
-                "GM2Godot managed conversion report restoration failed: "
-                f"{report_restore_error}",
-                file=sys.stderr,
-            )
-            _print_conversion_failure_details(report_restore_error)
             if exit_code == 0:
                 exit_code = 1
 
@@ -992,18 +737,6 @@ def _resolved_path_key(path: str) -> str:
     if os.name == "nt" or sys.platform == "darwin":
         return normalized.casefold()
     return normalized
-
-
-def _regular_conversion_manifest_exists(godot_project_path: str) -> bool:
-    manifest_path = os.path.join(
-        godot_project_path,
-        CONVERSION_MANIFEST_RELATIVE_PATH,
-    )
-    try:
-        manifest_stat = os.lstat(manifest_path)
-    except OSError:
-        return False
-    return stat.S_ISREG(manifest_stat.st_mode)
 
 
 def _conversion_outcome_exit_code(

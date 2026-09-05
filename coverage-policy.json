@@ -74,6 +74,7 @@
         "src/conversion/diagnostic_models.py",
         "src/conversion/gamemaker_json.py",
         "src/conversion/json_values.py",
+        "src/conversion/path_model.py",
         "src/conversion/project_manifest.py",
         "src/conversion/project_model.py",
         "src/conversion/project_source_discovery.py",

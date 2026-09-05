@@ -13,6 +13,7 @@ from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.project_settings import ProjectOperationResult, ProjectSettingsConverter
+from tests.godot_test_support import require_exact_godot
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -718,19 +719,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
             )
 
         godot_bin = os.environ["GODOT_BIN"]
-        version_result = subprocess.run(
-            [godot_bin, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        self.assertEqual(
-            version_result.stdout.strip(),
-            "4.7.2.stable.official.ed1daf0bf",
-            version_result.stdout + version_result.stderr,
-        )
+        require_exact_godot(godot_bin, timeout=30)
         result = subprocess.run(
             [
                 godot_bin,
@@ -986,19 +975,7 @@ class TestConvertIconFallback(unittest.TestCase):
             )
 
         godot_bin = os.environ["GODOT_BIN"]
-        version_result = subprocess.run(
-            [godot_bin, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        self.assertEqual(
-            version_result.stdout.strip(),
-            "4.7.2.stable.official.ed1daf0bf",
-            version_result.stdout + version_result.stderr,
-        )
+        require_exact_godot(godot_bin, timeout=30)
         result = subprocess.run(
             [
                 godot_bin,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -9,21 +8,7 @@ import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -189,9 +174,7 @@ def _write_smoke_scene(project_dir: Path) -> None:
 
 class TestGameInputGodotSmoke(unittest.TestCase):
     def test_input_bridge_tracks_edges_and_coordinates(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)

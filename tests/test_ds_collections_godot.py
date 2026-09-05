@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -7,21 +6,10 @@ import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
+from src.conversion.godot_validation import find_godot_binary
+from tests.godot_test_support import require_exact_godot
 
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
-
-godot_binary = _find_godot_binary()
+godot_binary = find_godot_binary()
 
 
 
@@ -29,7 +17,7 @@ godot_binary = _find_godot_binary()
 @unittest.skipIf(godot_binary is None, "Godot binary not found")
 class TestDSCollectionsGodotSmoke(unittest.TestCase):
     def test_ds_collections_runtime(self):
-        assert godot_binary is not None
+        selected_godot_binary = require_exact_godot(godot_binary)
         
 
         smoke_script = textwrap.dedent(
@@ -184,7 +172,7 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             godot_env["HOME"] = str(project_dir)
             result = subprocess.run(
                 [
-                    godot_binary,
+                    selected_godot_binary,
                     "--headless",
                     "--path",
                     str(project_dir),

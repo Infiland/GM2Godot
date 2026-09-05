@@ -239,3 +239,52 @@ paths and six root-only metadata paths remain. Native Linux/macOS 23 each,
 privileged Included Files Linux 1, Windows metadata 3, retained Windows 14 plus
 scale, seven Godot cases and the separate generic bind gate are unchanged. No
 production implementation, native CI or I02 task verification is claimed here.
+
+
+## Original proof accepted and current-parent preparation
+
+Immutable implementation `95831c08f0e230da0baa8822d80411b532cb75bf` has
+independent and root actual-code approval. Its full suite ran 3,120 tests with
+3,064 successes and the 56 exact existing host skips; all five required real
+project methods passed with the required exact Godot. Public parity is exact
+across ten cases and eight fields against actual old7fdd and a same-ref control,
+including public bytes and modes. These executions remain attributed to958.
+
+The approved call comparison preserves all5,844 raw rows and209,253 calls,
+including301 originally unmapped rows and the four dual mock bindings. Its
+64 selected cases have63 actual Mac successes and the one exact old privileged
+Linux skip; no old native Linux profiler evidence is invented. The full44
+invocation-control set passed as20 preservedv2 and24newv3 cases. The failed
+foreign-test import is retained without credit; a byte-identical candidate test
+file at the foreign path supplies the intended origin rejection. Controls are
+not positive native Linux/Windows proof.
+
+The accepted next parent is verified R12 merge
+`b9c05cd326cbcb8531ca93c24709bcf14cb81748`. All six I02 Python owners remain
+exact958; the389 other parent Python files are exactb9, giving395 total. The
+workflow retains the complete approved I02 body and adds only the two already
+verified T01 helper entries. Parent coverage and all eight gate objects remain
+byte-exact; no schema, floor, exclusion or new runner is introduced.
+
+Root resolves the ledger and task evidence, and checks the seven permitted
+baseline reductions against actualb9, retaining1045 debt keys. The existing
+checker requires its comparison parent to be a HEAD ancestor, so a prepared
+merge commit may establish that ancestry before the exact-parent update/check.
+This preparation is not final approval or campaign integration. Source/workflow
+bytes must match the reviewed projection before and after all combined checks.
+
+Combined checks are zero-diagnostic Pyright, project/tracked Ruff, actionlint,
+the strict actual-parent gate, diff checks, and the83 existing CI workflow and
+aggregate cases after lint/type fixes. Original full/parity/observer/controls
+are retained with their original references. Actual PR and merge CI supply the
+new combined full/native proof: Linux23, Mac23, privilegedLinux1 and Windows
+metadata3 must run with zero skips, together with every retained native, CLI,
+T01/R12, exact-Godot and receipt requirement. Root and independent review must
+accept the resulting exact revision before counting I02 as verified.
+
+Current-parent proposal index:
+`a625bc04ad990c8aab70fa4d2837bba54238df955b1696c0140a19afd37943b1`;
+independent review:
+`200e426410a02c30e297360e0b1a30100cc74b769151068d7007311f5b7eb36b`;
+root review:
+`665409b2da6e36ee1031262adecdb950384c427aa546c52a57c8aea537a7db1f`.

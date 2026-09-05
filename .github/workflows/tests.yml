@@ -428,6 +428,7 @@ jobs:
           tests.test_stale_managed_output_invalidation
           tests.test_cli
           tests.test_gui_conversion_outcomes
+          tests.test_godot_test_support
 
   windows-artifact-transactions:
     runs-on: windows-2025
@@ -528,6 +529,7 @@ jobs:
           tests.test_managed_output_publisher
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
+          tests.test_godot_test_support
 
       - name: Run native windows artifact mode characterization
         run: >-

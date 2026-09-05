@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -10,21 +9,7 @@ from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.rooms import render_room_runtime_script
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -193,9 +178,7 @@ def _write_scripts(project_dir: Path) -> None:
 
 class TestRoomGameFlowGodotSmoke(unittest.TestCase):
     def test_room_runtime_updates_view_follow_and_scrolling_background(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
@@ -343,9 +326,7 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
         self.assertIn("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK", output)
 
     def test_room_creation_code_lifecycle_trace_order(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
@@ -469,9 +450,7 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
         self.assertIn("ROOM_CREATION_LIFECYCLE_TRACE_OK", output)
 
     def test_room_runtime_transitions_lifecycle_and_persistent_nodes(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)

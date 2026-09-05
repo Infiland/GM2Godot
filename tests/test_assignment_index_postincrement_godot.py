@@ -8,7 +8,7 @@ from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
-from src.conversion.godot_validation import find_godot_binary
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -18,24 +18,7 @@ def _write_text(path: Path, content: str) -> None:
 
 class TestAssignmentIndexPostincrementGodotSmoke(unittest.TestCase):
     def test_array_index_postincrement_executes_on_exact_godot_4_7_2(self) -> None:
-        godot_binary = find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         converted = transpile_gml_code(
             textwrap.dedent(

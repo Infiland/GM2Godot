@@ -8,6 +8,8 @@ from typing import cast
 from src.conversion.diagnostic_models import ResourceModelDiagnostic
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
+from src.conversion.json_values import JsonObject
+from src.conversion.path_model import PathModel, parse_path_model
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectResourceReference,
@@ -102,12 +104,6 @@ class TileSetModel(ResourceModel):
     sprite_name: str | None = None
     tile_width: int = 0
     tile_height: int = 0
-
-
-@dataclass(frozen=True)
-class PathModel(ResourceModel):
-    point_count: int = 0
-    closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -243,7 +239,7 @@ class _ParsedResourceModelBuckets:
     timelines: list[TimelineModel] = field(default_factory=_empty_timeline_models)
     other_resources: list[ResourceModel] = field(default_factory=_empty_resource_models)
 
-    def add(self, model: ResourceModel) -> None:
+    def add(self, model: ResourceModel | PathModel) -> None:
         if isinstance(model, SpriteModel):
             self.sprites.append(model)
         elif isinstance(model, SoundModel):
@@ -273,7 +269,7 @@ class _ParsedResourceModelBuckets:
 def _parse_resource_model(
     gm_project_path: str,
     reference: ProjectResourceReference,
-) -> tuple[ResourceModel | None, tuple[ResourceModelDiagnostic, ...]]:
+) -> tuple[ResourceModel | PathModel | None, tuple[ResourceModelDiagnostic, ...]]:
     try:
         resolved_yy = resolve_project_source_path(
             gm_project_path,
@@ -305,6 +301,12 @@ def _parse_resource_model(
             ),
         )
 
+    if reference.kind == "paths":
+        return parse_path_model(
+            raw_data,
+            name=reference.name,
+            source_path=resolved_yy.source_path,
+        ), ()
     base = _base_kwargs(
         reference,
         yy_path,
@@ -388,12 +390,6 @@ def _parse_resource_model(
             tile_width=_int_value(raw_data.get("tileWidth")),
             tile_height=_int_value(raw_data.get("tileHeight")),
         ), ()
-    if kind == "paths":
-        return PathModel(
-            **base,
-            point_count=len(_dict_list(raw_data.get("points"))),
-            closed=bool(raw_data.get("closed", False)),
-        ), ()
     if kind == "sequences":
         return SequenceModel(
             **base,
@@ -425,7 +421,7 @@ def _base_kwargs(
     }
 
 
-def _read_lenient_json_file(path: str) -> JsonDict | None:
+def _read_lenient_json_file(path: str) -> JsonObject | None:
     try:
         data = read_gamemaker_json(path).value
         return data if isinstance(data, dict) else None

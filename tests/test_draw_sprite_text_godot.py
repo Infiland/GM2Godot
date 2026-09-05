@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -13,26 +12,12 @@ from src.conversion.asset_registry import AssetRegistryEntry, render_asset_regis
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
 from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
+from tests.godot_test_support import require_exact_godot
 
 _PNG_1X1_WHITE = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
     "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -283,9 +268,7 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
 
 class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
     def test_generated_draw_event_uses_sprite_text_runtime(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
@@ -330,9 +313,7 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
         self.assertIn("DRAW_SPRITE_TEXT_SMOKE_OK", output)
 
     def test_room_instance_transform_metadata_hydrates_sprite_runtime(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)

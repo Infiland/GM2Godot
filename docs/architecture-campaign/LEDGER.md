@@ -7,10 +7,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through G01 PR #886 at
-  `7fdd97cfb0149bb166175fd5479b5193f3d64423`. G01 exact PR/merge CI, native
-  receipts, all 49 selected tests and actual-parent proof are fully verified.
-- Progress counts fully verified roadmap tasks: 11 of 54 (20.4%). Source review,
+- Integration branch: `dev/080-architecture-campaign`, through R12 PR #889 at
+  `b9c05cd326cbcb8531ca93c24709bcf14cb81748`. Exact PR/merge CI, native helpers,
+  Godot runtime, artifact receipts and actual-parent proof are verified.
+- Progress counts fully verified roadmap tasks: 14 of 54 (25.9%). Source review,
   integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -18,9 +18,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. G01 is verified. I02 begins its accepted finite work in an
-  isolated checkout; before-production observations and all native/final proof
-  remain required. Other reviewed slices are integrated serially by root.
+- No external blocker. R12 is verified. I02 source and original local proof are
+  approved; its combination with b9 is under review. L02 is implementing in its
+  separate e142-based worktree. R13 is resolving a before-test input expectation.
 
 
 ## Ownership and progress
@@ -39,7 +39,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
-| I02 Included Files POSIX operations | implementing | audit_transactions_cli; accepted entry `7fdd97c`, unchanged proof head `abd97e4` | Independent/root observer, ten-test data and four-site amendment APPROVE | 64 selected/63 actual Mac/one exact Linux skip; all59 active pairs; ten new before-tests10/0; source extraction and exact native proof pending |
+| L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
+| T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
+| R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
+| I02 Included Files POSIX operations | reviewing | audit_transactions_cli; immutable source95831c0, prepared b9 ancestry | Original source/full/parity/observer/44controls and integration proposal independent/root APPROVE | Full3120/56knownhostskips,10case8fieldparity+same-ref,5844rows209253calls; combined static/workflow and exact native PR/merge pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

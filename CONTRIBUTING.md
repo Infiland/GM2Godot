@@ -199,6 +199,14 @@ When adding or improving a GML API:
 - Add focused Python and, when behavior depends on Godot, `*_godot.py` coverage.
 - Update compatibility docs or reports when support status changes.
 
+For optional Godot runtime tests, call `tests.godot_test_support.require_exact_godot()`
+inside the test before launching the engine. It uses the production finder, skips when
+no engine is available, and fails for a build other than `4.7.2.stable.official.ed1daf0bf`.
+Pass an already selected path explicitly to preserve existing discovery timing, and
+retain an existing version probe's timeout with `timeout=...`. Keep environment and
+import-time skip decorators in place; the helper does not probe or cache at import.
+Required CI runtime proof must supply the exact engine and reject skips.
+
 ### Runtime Segments
 When adding a runtime segment or moving runtime helpers:
 - Declare the segment, dependencies, description, and tests in `src/conversion/gml_runtime_parts/manifest.py`.

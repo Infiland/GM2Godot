@@ -1894,7 +1894,7 @@
       "task_id": "L01",
       "issue": 867,
       "title": "CLI remove obsolete nontransactional adapter",
-      "state": "planned",
+      "state": "implementing",
       "problem_and_evidence": "_run_convert 579 lines/C98; nested legacy repair141/C28.",
       "expected_benefit": "Readable coordinator with explicit state and outcome/rendering ownership.",
       "current_owner": "src/cli.py",
@@ -1907,11 +1907,9 @@
       ],
       "allowed_files": [
         "src/cli.py",
-        "src/cli_configuration.py",
-        "src/cli_session.py",
-        "src/cli_reporting.py",
+        "src/conversion/converter.py",
         "tests/test_cli.py",
-        "matching focused CLI tests",
+        "tests/cli_test_support.py",
         "maintainability-baseline.json"
       ],
       "non_goals": "No new CLI flags, changed output/exit semantics, GUI dependency, or general application framework.",
@@ -1920,11 +1918,26 @@
       "expected_measurable_improvement": "Readable coordinator with explicit state and outcome/rendering ownership. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Production Converter.managed_output_transactional=True has sole CLI reader; prove supported injection contract, correct test fakes, preserve real cancellation/report failures. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
-      "implementation_owner": "One designated L01 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
-      "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
+      "implementation_owner": "audit_transactions_cli in GM2Godot-080-cli-artifact-ownership",
+      "independent_reviewers": "audit_policy_tests_docs read-only, then root actual-code review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+      "plan_verdict": "ACCEPTED by root after independent review; L01-cli-artifact-contract.md and exact refreshed base/source inventory are authoritative.",
+      "accepted_entry": {
+        "base_ref": "feb22c30ea13475116c0190e302df0fc7fe08383",
+        "contract": "L01-cli-artifact-contract.md",
+        "original_contract_sha256": "8ec82051c6d564650612d6836d01bdafc0ead17ee9876bbf52858a5cfa1e7638",
+        "source_count": 15,
+        "implementation_files": [
+          "src/cli.py",
+          "src/conversion/converter.py",
+          "tests/test_cli.py",
+          "tests/cli_test_support.py"
+        ],
+        "baseline_owner": "root only; serialize against immutable parent",
+        "source_refresh": "L01/root-cleanup-merge-source-refresh.json",
+        "proof_coordination": "Root CPU reservation required for full/parity/performance"
+      }
     },
     {
       "task_id": "L02",

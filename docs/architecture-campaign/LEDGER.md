@@ -36,6 +36,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
 | R04 import layout | approved | Initial PR #881 at `f40402c`; cleanup `bfe9b1f` by audit_policy_tests_docs | Initial and cleanup actual code approved independently and by root | Initial PR/merge proof and cleanup local checks pass; exact cleanup PR/merge proof remains |
+| L01 CLI artifact ownership | implementing | audit_transactions_cli; accepted parent `feb22c3` | Contract independently and root approved; actual code review required | L01-cli-artifact-contract.md; fifteen source inputs unchanged at verified cleanup merge; four owner files plus root baseline |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

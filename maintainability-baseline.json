@@ -219,7 +219,7 @@
     "application|function_structure|src/conversion/managed_output_workspace.py::_open_or_create_destination": 166,
     "application|function_structure|src/conversion/notes.py::NoteConverter._discover_notes": 187,
     "application|function_structure|src/conversion/notes.py::NoteConverter.convert_notes": 168,
-    "application|function_structure|src/conversion/objects.py::ObjectConverter._get_project_asset_names": 186,
+    "application|function_structure|src/conversion/objects.py::ObjectConverter._get_project_asset_names": 181,
     "application|function_structure|src/conversion/objects.py::ObjectConverter._load_event_code_bodies": 240,
     "application|function_structure|src/conversion/objects.py::ObjectConverter._process_object": 251,
     "application|function_structure|src/conversion/objects.py::ObjectConverter.convert_objects": 308,
@@ -432,9 +432,9 @@
     "application|module_lines.executable|src/conversion/included_files.py::<module>": 12130,
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": 5054,
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
-    "application|module_lines.executable|src/conversion/objects.py::<module>": 1914,
+    "application|module_lines.executable|src/conversion/objects.py::<module>": 1913,
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": 1088,
-    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1097,
+    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1093,
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
@@ -471,14 +471,13 @@
     "application|module_structure.executable|src/conversion/included_files.py::<module>": 16958,
     "application|module_structure.executable|src/conversion/managed_output_publisher.py::<module>": 7149,
     "application|module_structure.executable|src/conversion/managed_output_workspace.py::<module>": 4143,
-    "application|module_structure.executable|src/conversion/objects.py::<module>": 3002,
+    "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1992,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1984,
     "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
-    "application|module_structure.executable|src/conversion/project_source_paths.py::<module>": 892,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1047,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1035,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
@@ -620,7 +619,6 @@
     "graph|static_cycle|src/conversion/gml_transpiler_parts/expression_api.py -> src/conversion/gml_transpiler_parts/function_helpers.py -> src/conversion/gml_transpiler_parts/expression_parser.py -> src/conversion/gml_transpiler_parts/statement_api.py -> src/conversion/gml_transpiler_parts/statement_parser.py": 1,
     "graph|static_cycle|src/conversion/gml_transpiler_parts/expression_api.py -> src/conversion/gml_transpiler_parts/function_helpers.py -> src/conversion/gml_transpiler_parts/expression_parser.py -> src/conversion/gml_transpiler_parts/statement_api.py -> src/conversion/gml_transpiler_parts/statement_parser.py -> src/conversion/gml_transpiler_parts/statements.py": 1,
     "graph|static_cycle|src/conversion/gml_transpiler_parts/expression_parser.py -> src/conversion/gml_transpiler_parts/function_helpers.py": 1,
-    "graph|static_cycle|src/conversion/project_manifest.py -> src/conversion/project_source_paths.py": 1,
     "tests|complexity|tests/test_ci_workflows.py::TestCIWorkflows.test_privileged_dependency_snapshot_validator_matches_producer_contract": 25,
     "tests|complexity|tests/test_ci_workflows.py::_run_existing_release_integrity": 22,
     "tests|complexity|tests/test_release_publisher.py::ScriptedTransport._fault_result": 36,
@@ -1739,9 +1737,9 @@
       "structure": 4143
     },
     "application|module_lines.executable|src/conversion/objects.py::<module>": {
-      "ast_sha256": "90de840194bfc9871181ad6e798f2fe13e03802a854b32b94fca137f6a3195b0",
-      "lines": 1914,
-      "structure": 3002
+      "ast_sha256": "030f4de3191133e721e2478c6d203023f057d020dcb1e3628026514b9def7f1d",
+      "lines": 1913,
+      "structure": 2994
     },
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": {
       "ast_sha256": "2611fe5bc4e91989553c8fc483a8123e4a926e197cf528961b0ea3a69fe7bbc0",
@@ -1749,9 +1747,9 @@
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "fc3f59b674a2a76d7cbd15bc1bed8c7abd7800a56de26163a65a42e7711daeda",
+      "ast_sha256": "706f545df199d2bace46f520eb4900b401bcd82ee1290784cb14af01fb70216f",
       "lines": 1091,
-      "structure": 1992
+      "structure": 1984
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",

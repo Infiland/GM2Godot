@@ -11,7 +11,7 @@ from src.conversion.gml_transpiler_parts.utils import (
     macro_configuration_matches,
     tokens_to_source,
 )
-from src.conversion.project_source_paths import project_gml_source_paths
+from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.type_defs import StrPath
 
 

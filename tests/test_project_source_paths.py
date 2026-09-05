@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    project_gml_source_paths,
     resolve_project_filesystem_source_path,
     resolve_project_sidecar_source_path,
     resolve_project_source_path,

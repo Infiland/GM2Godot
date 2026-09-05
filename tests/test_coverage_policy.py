@@ -12,6 +12,13 @@ from scripts import check_coverage
 
 
 class TestCoveragePolicy(unittest.TestCase):
+    def test_project_parsing_tracks_canonical_json_and_discovery_owners(self) -> None:
+        policy = check_coverage.load_policy(check_coverage.DEFAULT_POLICY_PATH)
+        scope = next(scope for scope in policy.scopes if scope.name == "project-parsing")
+        for path in ("json_values.py", "gamemaker_json.py", "project_source_discovery.py"):
+            with self.subTest(owner=path):
+                self.assertIn(f"src/conversion/{path}", scope.include)
+
     def test_diagnostic_models_remain_in_both_owning_coverage_scopes(self) -> None:
         policy = check_coverage.load_policy(check_coverage.DEFAULT_POLICY_PATH)
         scopes = {scope.name: scope for scope in policy.scopes}

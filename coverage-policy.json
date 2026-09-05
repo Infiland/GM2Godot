@@ -56,6 +56,7 @@
       "name": "manifests-diagnostics",
       "include": [
         "src/conversion/conversion_manifest.py",
+        "src/conversion/diagnostic_models.py",
         "src/conversion/diagnostics.py"
       ],
       "line": 92.47,
@@ -70,6 +71,7 @@
     {
       "name": "project-parsing",
       "include": [
+        "src/conversion/diagnostic_models.py",
         "src/conversion/project_manifest.py",
         "src/conversion/project_source_paths.py",
         "src/conversion/resource_models.py"

@@ -11,10 +11,7 @@ from src.conversion.event_mapping import is_input_event, map_event, map_input_ev
 from src.conversion.events.base import EventMapping
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.project_manifest import (
-    ProjectResourceReference,
-    load_gamemaker_project_manifest,
-)
+from src.conversion.project_manifest import ProjectResourceReference, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,

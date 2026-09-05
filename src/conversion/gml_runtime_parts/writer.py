@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import os
 
-from src.conversion.runtime_managers import (
-    register_runtime_manager_autoloads,
-    write_runtime_managers,
-)
+from src.conversion.runtime_managers import register_runtime_manager_autoloads, write_runtime_managers
 
 from .script import GML_RUNTIME_SCRIPT
 

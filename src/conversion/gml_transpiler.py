@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.conversion.gml_transpiler_parts.api import transpile_gml_code as transpile_gml_code
 from src.conversion.gml_transpiler_parts.api import (
+    transpile_gml_code as transpile_gml_code,
     transpile_gml_code_with_source_map as transpile_gml_code_with_source_map,
 )
 from src.conversion.gml_transpiler_parts.expression_service import (
@@ -26,6 +26,12 @@ from src.conversion.gml_transpiler_parts.gml_api_manifest import (
     is_known_gml_api as is_known_gml_api,
     iter_gml_api_entries as iter_gml_api_entries,
 )
+from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
+    GMLFunctionDescriptor as GMLFunctionDescriptor,
+    get_gml_function_descriptor as get_gml_function_descriptor,
+    iter_gml_function_descriptors as iter_gml_function_descriptors,
+    validate_gml_function_arity as validate_gml_function_arity,
+)
 from src.conversion.gml_transpiler_parts.gml_manual_scope import (
     GMLManualScopeCategoryReport as GMLManualScopeCategoryReport,
     GMLManualScopeEntry as GMLManualScopeEntry,
@@ -35,18 +41,10 @@ from src.conversion.gml_transpiler_parts.gml_manual_scope import (
     render_gml_manual_scope_markdown as render_gml_manual_scope_markdown,
     validate_gml_manual_scope_against_manifest as validate_gml_manual_scope_against_manifest,
 )
-from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
-    GMLFunctionDescriptor as GMLFunctionDescriptor,
-    get_gml_function_descriptor as get_gml_function_descriptor,
-    iter_gml_function_descriptors as iter_gml_function_descriptors,
-    validate_gml_function_arity as validate_gml_function_arity,
-)
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    preprocess_gml_source as preprocess_gml_source,
-)
+from src.conversion.gml_transpiler_parts.lexical_api import preprocess_gml_source as preprocess_gml_source
 from src.conversion.gml_transpiler_parts.result_models import (
-    GMLPreprocessResult as GMLPreprocessResult,
     GMLPreprocessorDiagnostic as GMLPreprocessorDiagnostic,
+    GMLPreprocessResult as GMLPreprocessResult,
     GMLSourceDiagnostic as GMLSourceDiagnostic,
     GMLSourceMap as GMLSourceMap,
     GMLSourceMapEntry as GMLSourceMapEntry,

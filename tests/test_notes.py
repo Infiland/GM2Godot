@@ -6,11 +6,10 @@ import threading
 import unittest
 from unittest.mock import MagicMock
 
-
-from src.conversion.notes import NoteConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.notes import NoteConverter
 
 
 class TestableNoteConverter(NoteConverter):

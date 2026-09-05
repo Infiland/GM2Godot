@@ -14,12 +14,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import cast
 
-from scripts.conversion_parity_contract import (
-    DestinationDefinition,
-    FixtureDefinition,
-    ParityError,
-    value_sha256,
-)
+from scripts.conversion_parity_contract import DestinationDefinition, FixtureDefinition, ParityError, value_sha256
 
 
 @dataclass(frozen=True)

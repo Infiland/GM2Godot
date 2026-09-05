@@ -8,25 +8,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
-from src.conversion.asset_registry import AssetRegistryConverter
-from src.conversion.base_converter import BaseConverter
 from src.conversion.architecture_policy import (
     ROOM_ROOT_POLICY_ID,
     gui_canvas_layer_node_lines,
     room_root_metadata_lines,
 )
+from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.project_godot import GodotProjectFile
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    is_safe_project_source_component,
-)
+from src.conversion.project_source_paths import ProjectSourcePathError, is_safe_project_source_component
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.room_creation_code import (
+    ROOM_EXECUTION_ORDER,
     CreationCodeMetadata,
     CreationCodeSourceResolver,
-    ROOM_EXECUTION_ORDER,
     instance_creation_order_names,
     resolve_instance_creation_code,
     resolve_room_creation_code,

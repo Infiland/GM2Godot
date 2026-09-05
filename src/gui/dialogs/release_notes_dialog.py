@@ -1,26 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 import html
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import cast
 
 import markdown2  # type: ignore[reportMissingTypeStubs]
 import requests
-
-from PySide6.QtWidgets import (
-    QDialog,
-    QMessageBox,
-    QPushButton,
-    QTextBrowser,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QDialog, QMessageBox, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from src.gui.theme import THEME
 from src.localization import get_localized, get_localized_list
-
 
 RELEASES_API_URL = "https://api.github.com/repos/Infiland/GM2Godot/releases"
 RELEASES_PER_PAGE = 10

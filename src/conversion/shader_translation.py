@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
-
 ShaderStage: TypeAlias = Literal["vertex", "fragment"]
 
 _STORAGE_QUALIFIERS = frozenset(

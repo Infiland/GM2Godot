@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
+import json
 import re
 import subprocess
 import sys
@@ -12,8 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import check_maintainability as checker
-from scripts import maintainability_metrics as metrics
+from scripts import check_maintainability as checker, maintainability_metrics as metrics
 from scripts.maintainability_imports import build_graphs, elementary_cycles
 
 
@@ -318,6 +319,34 @@ class TestMaintainabilityParent(unittest.TestCase):
             self.assertEqual(checker.parent_debt(root, "parent").debt, debt)
         self.assertEqual(git_call.call_args_list[-1].args, (root, "show", f"{revision}:{checker.BASELINE_PATH}"))
 
+    def test_import_layout_bridge_requires_exact_git_parent_and_raw_bytes(self) -> None:
+        root = checker.PROJECT_ROOT
+        revision = "a" * 40
+        debt = {"application|complexity|src/example.py::process": 19}
+        legacy_policy = checker.policy(root)
+        legacy_policy.pop("import_layout")
+        raw = json.dumps({"schema_version": 2, "policy": legacy_policy, "debt": debt, "size_evidence": {}}).encode()
+        current = checker.serialize(root, debt).encode()
+        for selected, payload, allowed in (
+            (revision, raw, True),
+            ("b" * 40, raw, False),
+            (revision, raw + b"\n", False),
+            ("b" * 40, current, True),
+        ):
+            with (
+                self.subTest(selected=selected, payload=payload),
+                patch.object(checker, "LEGACY_IMPORT_LAYOUT_PARENT", revision),
+                patch.object(checker, "LEGACY_IMPORT_LAYOUT_BASELINE_SHA256", hashlib.sha256(raw).hexdigest()),
+                patch.object(checker, "git", side_effect=[selected.encode(), b"", checker.BASELINE_PATH.encode(), payload]),
+            ):
+                if allowed:
+                    self.assertEqual(checker.parent_debt(root, "parent").debt, debt)
+                else:
+                    with self.assertRaisesRegex(metrics.MaintainabilityError, "policy/version mismatch"):
+                        checker.parent_debt(root, "parent")
+        with self.assertRaisesRegex(metrics.MaintainabilityError, "policy/version mismatch"):
+            checker.load_baseline(raw.decode(), checker.policy(root))
+
     def test_missing_parent_baseline_only_bootstraps_one_fixed_commit(self) -> None:
         for revision in (checker.BOOTSTRAP_REF, "a" * 40):
             with (
@@ -376,7 +405,10 @@ class TestMaintainabilityWorkflow(unittest.TestCase):
             '--baseline maintainability-baseline.json --base-ref "$base_ref"',
             "python -m unittest tests.test_maintainability_policy",
             "python -m ruff check .",
-            "--select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude",
+            "--line-length 120",
+            "--config lint.isort.combine-as-imports=true",
+            "--config lint.isort.split-on-trailing-comma=false",
+            "--select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)

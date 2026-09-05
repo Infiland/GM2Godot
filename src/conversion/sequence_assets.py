@@ -7,7 +7,6 @@ from typing import cast
 
 from src.conversion.type_defs import JsonDict
 
-
 SEQUENCE_DESCRIPTOR_FORMAT_VERSION = 1
 
 _ASSET_TRACK_TYPES = {

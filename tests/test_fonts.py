@@ -9,16 +9,11 @@ import unittest
 from typing import TypeAlias
 from unittest.mock import MagicMock, Mock, patch
 
-
-from src.conversion.fonts import FontConverter, _find_system_font
-from src.conversion.asset_output_paths import (
-    build_asset_output_paths,
-    resource_filesystem_path,
-)
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
-
+from src.conversion.fonts import FontConverter, _find_system_font
 
 FontYY: TypeAlias = dict[str, object]
 

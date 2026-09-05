@@ -12,17 +12,9 @@ from typing import Callable
 from unittest.mock import patch
 
 from src.conversion import atomic_generated_text as atomic_generated_text_module
-from src.conversion.atomic_generated_text import (
-    atomic_write_confined_generated_text,
-)
-from src.conversion.asset_registry import (
-    ASSET_REGISTRY_RELATIVE_PATH,
-    AssetRegistryConverter,
-)
-from src.conversion.included_file_registry import (
-    INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-    write_included_file_registry,
-)
+from src.conversion.asset_registry import ASSET_REGISTRY_RELATIVE_PATH, AssetRegistryConverter
+from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, write_included_file_registry
 
 
 class TestAtomicGeneratedText(unittest.TestCase):

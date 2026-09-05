@@ -20,17 +20,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src import cli
-from src.conversion import managed_output_publisher as publisher_module
-from src.conversion import managed_output_workspace as workspace_module
-from src.conversion.conversion_manifest import (
-    CONVERSION_ATTEMPT_RELATIVE_PATH,
-    CONVERSION_MANIFEST_RELATIVE_PATH,
-)
+from src.conversion import managed_output_publisher as publisher_module, managed_output_workspace as workspace_module
+from src.conversion.conversion_manifest import CONVERSION_ATTEMPT_RELATIVE_PATH, CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.converter import Converter
-from src.conversion.generation_inventory import (
-    GenerationInventory,
-    capture_generation_inventory,
-)
+from src.conversion.generation_inventory import GenerationInventory, capture_generation_inventory
 from src.conversion.managed_output_publisher import (
     MANAGED_OUTPUT_DURABLE_PHASES,
     MANAGED_OUTPUT_JOURNAL_NAME,
@@ -44,7 +37,6 @@ from src.conversion.managed_output_workspace import (
     WORKSPACE_PARENT_NAME,
     ManagedOutputWorkspace,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _HARD_EXIT_STATUS = 86

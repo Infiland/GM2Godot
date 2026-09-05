@@ -13,12 +13,9 @@ from src.conversion.anchored_artifacts import (
     ByteArtifactTransaction,
     artifact_sha256,
 )
+from src.conversion.project_source_paths import ProjectSourcePathError, resolve_project_filesystem_source_path
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.runtime_managers import runtime_manager_definitions
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    resolve_project_filesystem_source_path,
-)
 from src.conversion.type_defs import JsonDict
 
 ARCHITECTURE_POLICY_RELATIVE_PATH = os.path.join("gm2godot", "architecture_policy.json")

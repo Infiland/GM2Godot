@@ -5,10 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.conversion.project_manifest import (
-    load_gamemaker_project_manifest,
-    unsupported_project_option_diagnostics,
-)
+from src.conversion.project_manifest import load_gamemaker_project_manifest, unsupported_project_option_diagnostics
 
 
 def _write_file(path: str, content: str) -> None:

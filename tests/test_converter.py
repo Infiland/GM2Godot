@@ -1,29 +1,20 @@
 # pyright: reportPrivateUsage=false
 from __future__ import annotations
 
-import os
-import threading
-import tempfile
-import shutil
-import unittest
 import json
+import os
+import shutil
+import tempfile
+import threading
+import unittest
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-
 from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_context import ConversionContext, enabled_converter_keys
-from src.conversion.converter import (
-    CONVERSION_CATEGORIES,
-    Converter,
-    _FinalizerReportCheckpoint,
-)
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepResult,
-)
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome, ConversionStepResult
+from src.conversion.converter import CONVERSION_CATEGORIES, Converter, _FinalizerReportCheckpoint
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.generation_inventory import GenerationInventory
 from src.conversion.project_godot import ConversionPreflightError

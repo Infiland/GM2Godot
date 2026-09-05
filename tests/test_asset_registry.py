@@ -13,18 +13,17 @@ import unittest
 from typing import BinaryIO, Iterable, cast
 from unittest.mock import MagicMock, patch
 
-
-from src.conversion.asset_registry import (
-    ASSET_REGISTRY_RELATIVE_PATH,
-    AssetRegistryConverter,
-    AssetRegistryPublication,
-    GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
-    _ProjectResource,
-)
 from src.conversion import asset_registry as asset_registry_module
 from src.conversion.animation_curve_registry import ANIMATION_CURVE_REGISTRY_RELATIVE_PATH
-from src.conversion.converter import Converter
+from src.conversion.asset_registry import (
+    ASSET_REGISTRY_RELATIVE_PATH,
+    GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
+    AssetRegistryConverter,
+    AssetRegistryPublication,
+    _ProjectResource,
+)
 from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,

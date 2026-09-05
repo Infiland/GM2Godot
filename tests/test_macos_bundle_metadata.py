@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
 import os
-from pathlib import Path
 import plistlib
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest import mock
 import warnings
 import zipfile
+from collections.abc import Mapping
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
+from unittest import mock
 
 from scripts import verify_macos_bundle_metadata as verifier
 from src.version import VERSION
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VERIFIER_PATH = PROJECT_ROOT / "scripts" / "verify_macos_bundle_metadata.py"

@@ -9,7 +9,8 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
-
+import src.conversion.extension_registry as extension_registry
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
     ExtensionEntry,
@@ -20,9 +21,7 @@ from src.conversion.extension_registry import (
     render_extension_stub_script,
     write_extension_compatibility_outputs,
 )
-from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
-import src.conversion.extension_registry as extension_registry
 
 
 def _write_file(path: str, content: str) -> None:

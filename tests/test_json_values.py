@@ -3,12 +3,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from src.conversion.json_values import (
-    JsonFieldPath,
-    JsonValueError,
-    format_json_field_path,
-    validate_json_value,
-)
+from src.conversion.json_values import JsonFieldPath, JsonValueError, format_json_field_path, validate_json_value
 
 
 class TestJsonValues(unittest.TestCase):

@@ -1,19 +1,13 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import FrozenInstanceError, fields, is_dataclass
 import inspect
-from pathlib import Path
 import subprocess
 import sys
-from typing import (
-    Iterable,
-    Mapping,
-    MutableMapping,
-    MutableSet,
-    get_type_hints,
-)
 import unittest
+from dataclasses import FrozenInstanceError, fields, is_dataclass
+from pathlib import Path
+from typing import Iterable, Mapping, MutableMapping, MutableSet, get_type_hints
 
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
@@ -35,7 +29,6 @@ from src.conversion.gml_transpiler_parts.statement_models import (
     GMLStatementResult,
 )
 from tests.gml_facade_contract_support import static_all_exports
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"

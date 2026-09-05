@@ -1,7 +1,6 @@
 from src.conversion.events.base import EventMapping
 from src.conversion.type_defs import JsonDict
 
-
 # Input event types are merged into a single _input(event) function.
 # GameMaker keyboard-down events also route through the shared input stub for
 # now so they are recognized as supported input instead of unknown events.

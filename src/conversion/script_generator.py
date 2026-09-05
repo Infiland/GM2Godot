@@ -12,7 +12,6 @@ from src.conversion.gml_transpiler_parts.constants import GDSCRIPT_NATIVE_INSTAN
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.type_defs import JsonDict
 
-
 _CodeBodies: TypeAlias = Mapping[str, str]
 _MapEvent: TypeAlias = Callable[[JsonDict], EventMapping | None]
 _IsInputEvent: TypeAlias = Callable[[JsonDict], bool]

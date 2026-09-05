@@ -11,12 +11,7 @@ from dataclasses import FrozenInstanceError, asdict, replace
 from pathlib import Path
 from unittest.mock import patch
 
-from src.conversion import (
-    diagnostic_models,
-    diagnostics,
-    project_manifest,
-    resource_models,
-)
+from src.conversion import diagnostic_models, diagnostics, project_manifest, resource_models
 from src.conversion.diagnostic_models import (
     ConversionDiagnostic,
     ProjectManifestDiagnostic,

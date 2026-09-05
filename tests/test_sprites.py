@@ -9,20 +9,14 @@ import unittest
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-
 from PIL import Image
+
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.resource_index import GameMakerResourceIndex
-from src.conversion.sprites import (
-    AnimationData,
-    CollisionData,
-    SpriteConverter,
-    SpriteParseResult,
-    SpriteProcessResult,
-)
+from src.conversion.sprites import AnimationData, CollisionData, SpriteConverter, SpriteParseResult, SpriteProcessResult
 
 
 class TestSpriteConverterBasic(unittest.TestCase):

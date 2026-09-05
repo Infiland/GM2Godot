@@ -5,9 +5,8 @@ import tempfile
 import unittest
 from typing import Iterable
 
-
-from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.resource_index import GameMakerResourceIndex
 
 
 def _write_file(path: str, content: str) -> None:

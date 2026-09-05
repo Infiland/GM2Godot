@@ -1,9 +1,7 @@
 import unittest
 
-
 from src.conversion.event_mapping import map_event
 from src.conversion.script_generator import generate_script_content
-
 
 WALLPAPER_EVENTS = [
     (79, "_on_wallpaper_config", "Other_79.gml"),

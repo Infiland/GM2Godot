@@ -7,7 +7,6 @@ from src.conversion.conversion_plan import CONVERSION_STEPS
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.type_defs import BoolSetting, ConversionRunning, LogCallback, ProgressCallback
 
-
 _CONVERSION_STEP_KEYS = frozenset(step.key for step in CONVERSION_STEPS)
 
 

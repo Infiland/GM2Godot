@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager, redirect_stderr
-from io import StringIO
 import inspect
 import os
-from pathlib import Path
 import shlex
 import stat
 import subprocess
 import tempfile
 import time
-from typing import cast
 import unittest
-from unittest import mock
 import warnings
 import zipfile
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, redirect_stderr
+from io import StringIO
+from pathlib import Path
+from typing import cast
+from unittest import mock
 
 from scripts import verify_linux_gui_artifact as verifier
-
 
 NON_TIMEOUT_INTEGRATION_SECONDS = 15.0
 CHILD_READINESS_SECONDS = 15.0

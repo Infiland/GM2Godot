@@ -118,7 +118,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [x] Add Ruff or equivalent linting.
 - [x] Enforce complete Ruff E4/E7 families and remove their legacy cohort without rule suppressions.
 - [ ] Add complexity checks for parser/emitter/runtime generation modules.
-- [ ] Add import sorting.
+- [x] Add import sorting with consistent project, tracked-input CI and maintainability settings. R04's separate policy-bridge removal remains required before campaign verification.
 - [ ] Add unused code checks.
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.

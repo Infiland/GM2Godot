@@ -13,15 +13,11 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import capture_conversion_parity as parity
-from scripts import run_required_unittest as runner
+from scripts import capture_conversion_parity as parity, run_required_unittest as runner
 from scripts._anchored_output import AnchoredOutputError
 from tests import test_native_receipts_posix as posix
 from tests.test_native_receipt_producers import producer_profile
-from tests.windows_receipt_native_support import (
-    WINDOWS_AMD64_ABI,
-    native_abi_layout,
-)
+from tests.windows_receipt_native_support import WINDOWS_AMD64_ABI, native_abi_layout
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "architecture-verification.json"

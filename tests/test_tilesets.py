@@ -1,7 +1,7 @@
 # pyright: reportPrivateUsage=false
 
-import os
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -9,8 +9,8 @@ import unittest
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-
 from PIL import Image
+
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter

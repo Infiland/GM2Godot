@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
-import unittest
 
 from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.shared_models import BuiltinVariableMetadata
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONSTANTS_PATH = (

@@ -7,7 +7,6 @@ from src.conversion.events import mappings
 from src.conversion.events.base import EventMapping, EventTypeHandlers, StaticMappings
 from src.conversion.type_defs import JsonDict
 
-
 _GML_EVENT_NAMES: dict[int, str] = {
     0: "Create",
     1: "Destroy",

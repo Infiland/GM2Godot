@@ -3,12 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Mapping, MutableMapping, MutableSet
 
-from .shared_models import (
-    GMLExtensionFunction,
-    GMLExtensionFunctionMapping,
-    ScopeContext,
-    Token,
-)
+from .shared_models import GMLExtensionFunction, GMLExtensionFunctionMapping, ScopeContext, Token
 
 
 @dataclass(frozen=True)

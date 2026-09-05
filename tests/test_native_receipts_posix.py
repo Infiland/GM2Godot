@@ -11,10 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts._anchored_output import (
-    AnchoredOutputError,
-    publish_identical_receipt_bytes,
-)
+from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
 
 PAYLOAD = b'{"native":"receipt"}\n'
 

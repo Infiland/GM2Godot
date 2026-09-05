@@ -6,12 +6,8 @@ import re
 from typing import NamedTuple, Protocol, cast
 
 from src.conversion.architecture_policy import layer_policy_metadata_lines
-from src.conversion.room_creation_code import (
-    CreationCodeSourceResolver,
-    resolve_instance_creation_code,
-)
+from src.conversion.room_creation_code import CreationCodeSourceResolver, resolve_instance_creation_code
 from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
-
 
 KNOWN_LAYER_TYPES = {
     "GMRInstanceLayer",

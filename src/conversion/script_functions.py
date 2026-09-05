@@ -12,10 +12,7 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     read_verbatim_string,
     validate_gml_identifier,
 )
-from src.conversion.gml_transpiler_parts.utils import (
-    split_assignment,
-    split_top_level,
-)
+from src.conversion.gml_transpiler_parts.utils import split_assignment, split_top_level
 
 
 @dataclass(frozen=True)

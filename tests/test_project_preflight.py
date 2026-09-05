@@ -19,7 +19,6 @@ from src.conversion.project_godot import (
     prepare_godot_project_destination,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

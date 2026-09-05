@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import ctypes
 import inspect
-from pathlib import Path
 import sys
 import unittest
-from unittest import mock
+from pathlib import Path
 from typing import Any, Callable, cast
+from unittest import mock
 
 from scripts import _anchored_receipt_windows as receipt
 from tests.test_anchored_receipt_windows import FakeKernel32
-
 
 PAYLOAD = b'{"status":"verified"}\n'
 

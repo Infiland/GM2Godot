@@ -139,8 +139,9 @@ jobs:
       - name: Run Ruff on every tracked lint input
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
-            xargs -0 -- python -m ruff check --isolated --target-version py312 \
-              --select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+            xargs -0 -- python -m ruff check --isolated --target-version py312 --line-length 120 \
+              --config lint.isort.combine-as-imports=true --config lint.isort.split-on-trailing-comma=false \
+              --select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --
 
   workflow-success:
     name: workflow-success

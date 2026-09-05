@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostic_models import ProjectManifestDiagnostic
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.project_manifest import (
-    GameMakerProjectManifest,
-    load_gamemaker_project_manifest,
-)
+from src.conversion.project_manifest import GameMakerProjectManifest, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,

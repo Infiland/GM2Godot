@@ -8,9 +8,8 @@ import unittest
 from datetime import date
 from typing import Any, ClassVar, cast
 
-
-from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
+from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.gui.setting_value import SettingValue
 from tests.conversion_outcome_helpers import completed_conversion_step_ledger

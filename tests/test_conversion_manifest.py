@@ -15,18 +15,14 @@ from typing import Any, cast
 from unittest.mock import patch
 
 from src import cli
-from src.conversion import asset_registry as asset_registry_module
 from src.conversion import (
+    asset_registry as asset_registry_module,
     conversion_artifact_generation as generation_module,
+    conversion_manifest as conversion_manifest_module,
 )
-from src.conversion import conversion_manifest as conversion_manifest_module
 from src.conversion.anchored_artifacts import ByteArtifactTransaction
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
-from src.conversion.asset_registry import (
-    AssetRegistryConverter,
-    AssetRegistryEntry,
-    AssetRegistryPublication,
-)
+from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry, AssetRegistryPublication
 from src.conversion.conversion_manifest import (
     CONVERSION_ATTEMPT_RELATIVE_PATH,
     CONVERSION_MANIFEST_RELATIVE_PATH,
@@ -35,11 +31,7 @@ from src.conversion.conversion_manifest import (
     recover_conversion_artifacts,
     write_conversion_artifacts,
 )
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepLedger,
-)
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome, ConversionStepLedger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "golden" / "basic_scripts"

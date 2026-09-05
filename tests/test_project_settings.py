@@ -1,22 +1,18 @@
 import json
 import os
 import re
-import sys
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
-
-from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.project_settings import (
-    ProjectOperationResult,
-    ProjectSettingsConverter,
-)
+from src.conversion.project_godot import prepare_godot_project_destination
+from src.conversion.project_settings import ProjectOperationResult, ProjectSettingsConverter
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

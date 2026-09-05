@@ -14,8 +14,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from src.conversion import generation_inventory as inventory_module
-from src.conversion import managed_output_publisher as publisher_module
+from src.conversion import generation_inventory as inventory_module, managed_output_publisher as publisher_module
 from src.conversion.generation_inventory import (
     GenerationInventory,
     capture_generation_inventory,
@@ -29,10 +28,7 @@ from src.conversion.managed_output_publisher import (
     publish_managed_output_generation,
     recover_managed_output_generation,
 )
-from src.conversion.managed_output_workspace import (
-    WORKSPACE_PARENT_NAME,
-    ManagedOutputWorkspace,
-)
+from src.conversion.managed_output_workspace import WORKSPACE_PARENT_NAME, ManagedOutputWorkspace
 
 
 class TestManagedOutputPublisher(unittest.TestCase):

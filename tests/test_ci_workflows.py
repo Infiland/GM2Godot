@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import base64
-from collections import Counter
-from collections.abc import Callable, Sequence
 import copy
 import hashlib
 import json
@@ -18,12 +16,13 @@ import unittest
 import warnings
 import zipfile
 import zlib
+from collections import Counter
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
 
 from scripts import build_dependency_snapshot as dependency_snapshot
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_GODOT_ENV_LINES = (

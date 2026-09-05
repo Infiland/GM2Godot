@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.conversion.included_file_paths import (
-    canonical_included_file_lookup_path,
-    plan_included_file_paths,
-)
+from src.conversion.included_file_paths import canonical_included_file_lookup_path, plan_included_file_paths
 from src.conversion.project_source_paths import ProjectSourcePathError
 
 

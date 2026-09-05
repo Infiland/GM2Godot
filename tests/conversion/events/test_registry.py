@@ -1,6 +1,5 @@
 import unittest
 
-
 from src.conversion.event_mapping import INPUT_EVENT_TYPES, INPUT_MERGED_MAPPING, map_event
 
 

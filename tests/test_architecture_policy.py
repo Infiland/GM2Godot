@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Callable, cast
 from unittest.mock import patch
 
-from src.conversion import anchored_artifacts as anchored_artifacts_module
-from src.conversion import architecture_policy as architecture_policy_module
+import src.conversion.anchored_artifacts as anchored_artifacts_module
+import src.conversion.architecture_policy as architecture_policy_module
 from src.conversion.anchored_artifacts import ByteArtifactTransaction
 from src.conversion.architecture_policy import (
     ARCHITECTURE_POLICY_RELATIVE_PATH,

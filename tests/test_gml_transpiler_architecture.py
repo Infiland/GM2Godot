@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import inspect
+import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
-import unittest
 
 import src.conversion.gml_transpiler as gml_transpiler
 from src.conversion.gml_transpiler_parts.api import (
@@ -48,12 +48,10 @@ from src.conversion.gml_transpiler_parts.gml_manual_scope import (
     render_gml_manual_scope_markdown as owner_render_gml_manual_scope_markdown,
     validate_gml_manual_scope_against_manifest as owner_validate_gml_manual_scope_against_manifest,
 )
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    preprocess_gml_source as owner_preprocess_gml_source,
-)
+from src.conversion.gml_transpiler_parts.lexical_api import preprocess_gml_source as owner_preprocess_gml_source
 from src.conversion.gml_transpiler_parts.result_models import (
-    GMLPreprocessResult as owner_gml_preprocess_result,
     GMLPreprocessorDiagnostic as owner_gml_preprocessor_diagnostic,
+    GMLPreprocessResult as owner_gml_preprocess_result,
     GMLSourceDiagnostic as owner_gml_source_diagnostic,
     GMLSourceMap as owner_gml_source_map,
     GMLSourceMapEntry as owner_gml_source_map_entry,
@@ -71,17 +69,17 @@ from src.conversion.gml_transpiler_parts.source_map import (
     render_gml_source_header as owner_render_gml_source_header,
     write_gml_source_map as owner_write_gml_source_map,
 )
-from tests.gml_transpiler_architecture_support import ImportEdge
-from tests.gml_transpiler_architecture_support import ImportViolation
-from tests.gml_transpiler_architecture_support import MODULE_IMPORT_NAME
-from tests.gml_facade_contract_support import facade_reexports_from_source
-from tests.gml_transpiler_architecture_support import import_edges_from_source
-from tests.gml_transpiler_architecture_support import iter_python_paths
-from tests.gml_facade_contract_support import literal_all_exports
-from tests.gml_transpiler_architecture_support import module_name
-from tests.gml_transpiler_architecture_support import structural_import_violations
-from tests.gml_transpiler_architecture_support import top_level_import_edges_from_source
-
+from tests.gml_facade_contract_support import facade_reexports_from_source, literal_all_exports
+from tests.gml_transpiler_architecture_support import (
+    MODULE_IMPORT_NAME,
+    ImportEdge,
+    ImportViolation,
+    import_edges_from_source,
+    iter_python_paths,
+    module_name,
+    structural_import_violations,
+    top_level_import_edges_from_source,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FACADE_MODULE = "src.conversion.gml_transpiler"

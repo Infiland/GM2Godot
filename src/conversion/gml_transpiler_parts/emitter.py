@@ -29,16 +29,6 @@ from .constants import (
     VIRTUAL_KEY_ACTIONS,
     VIRTUAL_KEY_CONSTANTS,
 )
-from .gml_function_dispatch import (
-    GMLFunctionDescriptor,
-    get_gml_function_descriptor,
-    validate_gml_function_arity,
-)
-from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
-from .extension_functions import (
-    diagnostic_for_unmapped_extension_function,
-    validate_extension_mapping_arity,
-)
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     ArrayRefAccess as _ArrayRefAccess,
@@ -69,12 +59,11 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
+from .extension_functions import diagnostic_for_unmapped_extension_function, validate_extension_mapping_arity
+from .gml_api_manifest import diagnostic_for_unimplemented_gml_api
+from .gml_function_dispatch import GMLFunctionDescriptor, get_gml_function_descriptor, validate_gml_function_arity
 from .lexical_api import is_plain_identifier, sanitize_gdscript_identifier
-from .shared_models import (
-    GMLTranspileError,
-    ScopeContext,
-    ScopeContext as _ScopeContext,
-)
+from .shared_models import GMLTranspileError, ScopeContext, ScopeContext as _ScopeContext
 from .utils import (
     normalize_local_names as _normalize_local_names,
     normalize_scope_context as _normalize_scope_context,

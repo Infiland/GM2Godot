@@ -5,13 +5,13 @@ import errno
 import gc
 import inspect
 import os
-from pathlib import Path
 import stat
 import sys
 import tempfile
+import unittest
+from pathlib import Path
 from types import FrameType
 from typing import Any
-import unittest
 from unittest import mock
 
 from scripts import _anchored_output as anchored

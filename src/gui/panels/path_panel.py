@@ -1,8 +1,5 @@
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QPushButton,
-    QFileDialog,
-)
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from src.gui.icons import AppIcons
 from src.localization import get_localized

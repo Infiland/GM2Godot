@@ -11,16 +11,13 @@ import secrets
 import stat
 import sys
 import tempfile
-from contextlib import ExitStack
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
-from src.localization import get_localized
-from src.conversion.atomic_generated_text import (
-    atomic_write_confined_generated_text,
-)
+from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import (
@@ -28,20 +25,15 @@ from src.conversion.included_file_paths import (
     canonical_included_file_lookup_path,
     plan_included_file_paths,
 )
-from src.conversion.included_file_registry import (
-    INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-    render_included_file_registry,
-)
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
     load_gamemaker_project_manifest,
 )
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    ResolvedProjectSourcePath,
-)
+from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.localization import get_localized
 
 
 @dataclass(frozen=True)

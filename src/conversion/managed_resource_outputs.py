@@ -10,7 +10,6 @@ from typing import Iterable, Mapping, cast
 from src.conversion.generation_inventory import normalize_generation_inventory_path
 from src.conversion.type_defs import JsonDict
 
-
 STALE_INVALIDATION_RESOURCE_KINDS = frozenset(
     {
         "objects",

@@ -1,11 +1,7 @@
 # pyright: reportUnusedFunction=false, reportUnusedClass=false
 from __future__ import annotations
 
-from .constants import (
-    GDSCRIPT_RESERVED_IDENTIFIERS,
-    GENERATED_IDENTIFIER_PREFIX,
-    GML_IDENTIFIER_MAX_LENGTH,
-)
+from .constants import GDSCRIPT_RESERVED_IDENTIFIERS, GENERATED_IDENTIFIER_PREFIX, GML_IDENTIFIER_MAX_LENGTH
 from .shared_models import GMLTranspileError, ScopeContext
 
 

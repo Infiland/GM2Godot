@@ -1,6 +1,5 @@
 from src.conversion.events.base import EventMapping
 
-
 _READY_FUNC = "_ready"
 _RESIZE_FUNC = "_on_resize"
 _CONNECT_RESIZE_BODY = "\tget_viewport().size_changed.connect(_on_resize)"

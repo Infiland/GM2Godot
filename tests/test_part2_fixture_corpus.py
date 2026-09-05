@@ -9,9 +9,8 @@ import unittest
 from pathlib import Path
 from typing import TypedDict, cast
 
-
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
+from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 

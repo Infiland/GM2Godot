@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from src.conversion.project_source_paths import ProjectSourcePathError
 
-
 _ASCII_LOOKUP_TRANSLATION = str.maketrans(
     {
         **{

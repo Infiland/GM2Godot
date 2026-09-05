@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import Mock, patch
 
-from scripts import capture_conversion_parity as parity
-from scripts import conversion_parity_contract as contract
-from scripts import conversion_parity_inputs as inputs
-from scripts import conversion_parity_snapshot as snapshots
+from scripts import (
+    capture_conversion_parity as parity,
+    conversion_parity_contract as contract,
+    conversion_parity_inputs as inputs,
+    conversion_parity_snapshot as snapshots,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

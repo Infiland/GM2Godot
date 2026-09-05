@@ -14,12 +14,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Iterable, Protocol, cast
 
-from src.conversion.anchored_artifacts import (
-    PathIdentity,
-    VerifiedDirectory,
-    modes_match,
-)
-
+from src.conversion.anchored_artifacts import PathIdentity, VerifiedDirectory, modes_match
 
 DESTINATION_LOCK_NAME = ".gm2godot-managed-output.lock"
 WORKSPACE_PARENT_NAME = ".gm2godot-managed-output"

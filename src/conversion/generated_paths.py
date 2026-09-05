@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 
-
 _CAMEL_ACRONYM_BOUNDARY_RE = re.compile(r"([A-Z]+)([A-Z][a-z])")
 _CAMEL_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
 _UNSAFE_SEGMENT_RE = re.compile(r"[^0-9A-Za-z]+")

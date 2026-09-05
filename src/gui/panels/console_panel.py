@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Literal, TypeAlias
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPlainTextEdit
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
 
 from src.gui.theme import THEME
-
 
 ConsoleLogStyle: TypeAlias = Literal[
     "auto",

@@ -13,10 +13,7 @@ import traceback
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from scripts._anchored_output import (
-    AnchoredOutputError,
-    publish_identical_receipt_bytes,
-)
+from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
 from scripts.conversion_parity_contract import (
     DestinationDefinition,
     FixtureDefinition,

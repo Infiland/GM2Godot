@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 from typing import TypedDict, cast
 
-
 from src.conversion.gml_transpiler import category_issue_numbers, get_gml_api_entry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

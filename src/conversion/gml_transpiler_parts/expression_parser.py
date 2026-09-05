@@ -5,13 +5,7 @@ import hashlib
 import json
 from typing import Iterable, Mapping, MutableMapping
 
-from .constants import (
-    BINARY_PRECEDENCE,
-    EOF,
-    NAME_REPLACEMENTS,
-    RIGHT_ASSOCIATIVE,
-    TERNARY_PRECEDENCE,
-)
+from .constants import BINARY_PRECEDENCE, EOF, NAME_REPLACEMENTS, RIGHT_ASSOCIATIVE, TERNARY_PRECEDENCE
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     ArrayRefAccess as _ArrayRefAccess,
@@ -47,17 +41,9 @@ from .lexical_api import (
     tokenize_gml_expression,
     validate_gml_identifier,
 )
-from .shared_models import (
-    GMLTranspileError,
-    ScopeContext,
-    ScopeContext as _ScopeContext,
-    Token as _Token,
-)
+from .shared_models import GMLTranspileError, ScopeContext, ScopeContext as _ScopeContext, Token as _Token
 from .statement_models import GMLStatementRequest
-from .utils import (
-    normalize_scope_context as _normalize_scope_context,
-    strip_comments as _strip_comments,
-)
+from .utils import normalize_scope_context as _normalize_scope_context, strip_comments as _strip_comments
 
 
 def _is_float_like_number(value: str) -> bool:
@@ -455,9 +441,7 @@ class _ExpressionParser:
         if parent_constructor is not None:
             if not is_constructor:
                 raise GMLTranspileError("Constructor inheritance requires a constructor function")
-            from .function_helpers import (
-                emit_constructor_inheritance_line as _emit_constructor_inheritance_line,
-            )
+            from .function_helpers import emit_constructor_inheritance_line as _emit_constructor_inheritance_line
 
             prelude_lines.append(
                 _emit_constructor_inheritance_line(
@@ -468,9 +452,7 @@ class _ExpressionParser:
                 )
             )
         if static_declarations:
-            from .function_helpers import (
-                emit_static_initialization_lines as _emit_static_initialization_lines,
-            )
+            from .function_helpers import emit_static_initialization_lines as _emit_static_initialization_lines
 
             prelude_lines.extend(
                 _emit_static_initialization_lines(

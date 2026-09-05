@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, ClassVar, Iterable, cast
 
+from src.conversion.animation_curve_registry import write_animation_curve_registry
 from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text,
     confined_generated_output_supported as _confined_asset_output_supported,
@@ -19,35 +20,39 @@ from src.conversion.atomic_generated_text import (
 )
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.project_manifest import (
-    GameMakerProjectManifest,
-    ProjectManifestDiagnostic,
-    ProjectTextureGroup,
-    load_gamemaker_project_manifest,
+from src.conversion.extension_registry import (
+    collision_safe_extension_stub_resource_paths,
+    extension_entry_from_yy,
+    extension_entry_metadata,
+    extension_stub_resource_path,
+    write_extension_compatibility_outputs,
 )
-from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
-from src.conversion.fonts import (
-    bundled_font_output_filename,
-    resolve_system_font_source,
-)
+from src.conversion.fonts import bundled_font_output_filename, resolve_system_font_source
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
     generated_path_segment,
     generated_resource_stem,
 )
-from src.conversion.included_file_paths import (
-    canonical_included_file_lookup_path,
-    plan_included_file_paths,
-)
-from src.conversion.generation_inventory import (
-    GenerationInventory,
-    capture_generation_inventory,
-)
+from src.conversion.generation_inventory import GenerationInventory, capture_generation_inventory
+from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.included_file_paths import canonical_included_file_lookup_path, plan_included_file_paths
 from src.conversion.managed_resource_outputs import (
     STALE_INVALIDATION_RESOURCE_KINDS,
     managed_resource_outputs,
     reconcile_timeline_action_outputs,
+)
+from src.conversion.particle_assets import (
+    normalize_particle_system_asset,
+    particle_system_unsupported_modifier_fields,
+    render_particle_system_resource,
+)
+from src.conversion.path_registry import write_path_registry
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+    ProjectTextureGroup,
+    load_gamemaker_project_manifest,
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -56,31 +61,8 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.script_functions import modern_script_function_names
-from src.conversion.type_defs import (
-    ConversionRunning,
-    JsonDict,
-    LogCallback,
-    ProgressCallback,
-    StrPath,
-)
-from src.conversion.path_registry import write_path_registry
-from src.conversion.animation_curve_registry import write_animation_curve_registry
-from src.conversion.particle_assets import (
-    normalize_particle_system_asset,
-    particle_system_unsupported_modifier_fields,
-    render_particle_system_resource,
-)
-from src.conversion.sequence_assets import (
-    normalize_sequence_asset,
-    render_sequence_resource,
-)
-from src.conversion.extension_registry import (
-    collision_safe_extension_stub_resource_paths,
-    extension_entry_from_yy,
-    extension_entry_metadata,
-    extension_stub_resource_path,
-    write_extension_compatibility_outputs,
-)
+from src.conversion.sequence_assets import normalize_sequence_asset, render_sequence_resource
+from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 ASSET_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_asset_registry.gd")
 ASSET_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_asset_registry.gd"

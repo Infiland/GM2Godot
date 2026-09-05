@@ -9,10 +9,7 @@ import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
-from src.conversion.runtime_managers import (
-    register_runtime_manager_autoloads,
-    write_runtime_managers,
-)
+from src.conversion.runtime_managers import register_runtime_manager_autoloads, write_runtime_managers
 
 
 def _find_godot_binary() -> str | None:

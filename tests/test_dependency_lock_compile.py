@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr
-from io import StringIO
 import os
-from pathlib import Path
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from pathlib import Path
 from unittest import mock
 
 from scripts import compile_dependency_lock as compiler
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"

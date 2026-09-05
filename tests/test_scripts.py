@@ -10,23 +10,12 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-from src.conversion.asset_registry import (
-    AssetRegistryConverter,
-    AssetRegistryEntry,
-    _ProjectResource,
-)
+from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry, _ProjectResource
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.scripts import (
-    SCRIPT_REGISTRY_RELATIVE_PATH,
-    ScriptConverter,
-)
-from src.conversion.script_functions import (
-    modern_script_function_declarations,
-    modern_script_structure,
-)
+from src.conversion.script_functions import modern_script_function_declarations, modern_script_structure
+from src.conversion.scripts import SCRIPT_REGISTRY_RELATIVE_PATH, ScriptConverter
 from src.conversion.type_defs import JsonDict
-
 
 SNAP_BUFFER_READ_YAML_FIXTURE = (
     Path(__file__).parent

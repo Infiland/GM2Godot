@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Mapping, cast
 
 # D01 compatibility export for deferred resource consumers; retired by R26.
-from src.conversion.diagnostic_models import ProjectManifestDiagnostic as ProjectManifestDiagnostic
-from src.conversion.diagnostic_models import ProjectSourceLocation
+from src.conversion.diagnostic_models import (
+    ProjectManifestDiagnostic as ProjectManifestDiagnostic,
+    ProjectSourceLocation,
+)
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -17,7 +19,6 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.type_defs import JsonDict, JsonList
-
 
 _RESOURCE_TYPE_KIND = {
     "GMAnimationCurve": "animcurves",

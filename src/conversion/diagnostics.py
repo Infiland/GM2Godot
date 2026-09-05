@@ -22,8 +22,8 @@ from src.conversion.conversion_outcome import ConversionOutcome
 # D01 compatibility exports for deferred consumers; retired by R26.
 from src.conversion.diagnostic_models import (
     ConversionDiagnostic as ConversionDiagnostic,
+    DiagnosticSeverity as DiagnosticSeverity,
 )
-from src.conversion.diagnostic_models import DiagnosticSeverity as DiagnosticSeverity
 from src.conversion.type_defs import StrPath
 
 FileFingerprint: TypeAlias = tuple[int, int, int, int, int]

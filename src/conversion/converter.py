@@ -5,33 +5,6 @@ import stat
 from dataclasses import dataclass, replace
 from typing import Callable, Mapping, TypeAlias
 
-from src.conversion.base_converter import BaseConverter
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepLedger,
-    ConversionStepResult,
-    ConversionTerminalState,
-)
-from src.conversion.sprites import SpriteConverter
-from src.conversion.sounds import SoundConverter
-from src.conversion.fonts import FontConverter
-from src.conversion.asset_registry import AssetRegistryConverter
-from src.conversion.notes import NoteConverter
-from src.conversion.tilesets import TileSetConverter
-from src.conversion.scripts import ScriptConverter
-from src.conversion.objects import ObjectConverter
-from src.conversion.rooms import RoomConverter
-from src.conversion.shaders import ShaderConverter
-from src.conversion.included_files import IncludedFilesConverter
-from src.conversion.project_godot import (
-    inspect_godot_project_destination,
-    prepare_godot_project_destination,
-)
-from src.conversion.project_settings import (
-    ProjectOperationResult,
-    ProjectSettingsConverter,
-)
 from src.conversion.architecture_policy import (
     ArchitecturePolicyPublicationReceipt,
     ArchitecturePolicySnapshot,
@@ -39,6 +12,8 @@ from src.conversion.architecture_policy import (
     publish_architecture_policy_report,
     restore_architecture_policy_snapshot,
 )
+from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_context import (
     ConversionContext,
     RunningFlag,
@@ -54,12 +29,30 @@ from src.conversion.conversion_manifest import (
     capture_conversion_output_snapshot,
     write_conversion_artifacts,
 )
+from src.conversion.conversion_outcome import (
+    ConversionCounts,
+    ConversionOutcome,
+    ConversionStepLedger,
+    ConversionStepResult,
+    ConversionTerminalState,
+)
+from src.conversion.conversion_plan import build_conversion_plan
+from src.conversion.diagnostics import (
+    ConversionDiagnosticReportPublicationReceipt,
+    ConversionDiagnosticReportSnapshot,
+    DiagnosticCollector,
+    capture_conversion_diagnostic_reports,
+    publish_conversion_diagnostic_reports,
+    restore_conversion_diagnostic_reports,
+)
+from src.conversion.fonts import FontConverter
 from src.conversion.generation_inventory import (
     GenerationInventory,
     capture_generation_inventory,
     stage_inventory_carry_forward,
     validate_staged_generation_inventory,
 )
+from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.managed_output_publisher import (
     MANAGED_OUTPUT_POINTER_NAME,
     publish_managed_output_attempt,
@@ -72,22 +65,19 @@ from src.conversion.managed_output_workspace import (
     WORKSPACE_STAGE_MARKER_NAME,
     ManagedOutputWorkspace,
 )
-from src.conversion.managed_resource_outputs import (
-    STALE_INVALIDATION_CONVERTER_KEYS,
-)
-from src.conversion.conversion_plan import build_conversion_plan
-from src.conversion.diagnostics import (
-    ConversionDiagnosticReportPublicationReceipt,
-    ConversionDiagnosticReportSnapshot,
-    DiagnosticCollector,
-    capture_conversion_diagnostic_reports,
-    publish_conversion_diagnostic_reports,
-    restore_conversion_diagnostic_reports,
-)
+from src.conversion.managed_resource_outputs import STALE_INVALIDATION_CONVERTER_KEYS
+from src.conversion.notes import NoteConverter
+from src.conversion.objects import ObjectConverter
+from src.conversion.project_godot import inspect_godot_project_destination, prepare_godot_project_destination
+from src.conversion.project_settings import ProjectOperationResult, ProjectSettingsConverter
+from src.conversion.rooms import RoomConverter
+from src.conversion.scripts import ScriptConverter
+from src.conversion.shaders import ShaderConverter
+from src.conversion.sounds import SoundConverter
+from src.conversion.sprites import SpriteConverter
+from src.conversion.tilesets import TileSetConverter
 from src.conversion.type_defs import BoolSetting, LogCallback, ProgressCallback
-
 from src.localization import get_localized
-
 
 CONVERSION_CATEGORIES: dict[str, list[str]] = {
     "assets": ["sprites", "fonts", "sounds", "sound_group_folders", "included_files", "scripts", "objects", "rooms", "asset_registry"],

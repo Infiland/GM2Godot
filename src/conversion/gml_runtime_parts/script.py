@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from .manifest import (
-    RUNTIME_SEGMENT_DIR,
-    assert_runtime_segments_valid,
-    runtime_segment_names,
-)
+from .manifest import RUNTIME_SEGMENT_DIR, assert_runtime_segments_valid, runtime_segment_names
 
 _RUNTIME_SEGMENT_NAMES = runtime_segment_names()
 

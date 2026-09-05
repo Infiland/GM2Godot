@@ -10,23 +10,17 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
-from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.generated_paths import (
-    generated_flat_resource_path,
-    generated_resource_stem,
-)
+from src.conversion.generated_paths import generated_flat_resource_path, generated_resource_stem
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
     load_gamemaker_project_manifest,
 )
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    validate_project_resource_source_path,
-)
+from src.conversion.project_source_paths import ProjectSourcePathError, validate_project_resource_source_path
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.localization import get_localized
 
 FONT_EXTENSIONS = ('.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2')
 

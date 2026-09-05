@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from collections.abc import Sequence
 import lzma
 import os
-from pathlib import Path
 import re
 import signal
 import stat
@@ -15,7 +12,9 @@ import tempfile
 import time
 import zipfile
 import zlib
-
+from collections import Counter
+from collections.abc import Sequence
+from pathlib import Path
 
 ARCHIVE_NAME = "GM2Godot-linux.zip"
 EXECUTABLE_NAME = "GM2Godot"

@@ -1,10 +1,12 @@
 import unittest
 from typing import cast
 
-
 from src.conversion.event_mapping import (
-    EventMapping, map_event as _map_event, is_input_event,
-    INPUT_MERGED_MAPPING, map_input_event,
+    INPUT_MERGED_MAPPING,
+    EventMapping,
+    is_input_event,
+    map_event as _map_event,
+    map_input_event,
 )
 from src.conversion.type_defs import JsonDict
 

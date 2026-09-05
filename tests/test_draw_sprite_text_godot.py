@@ -14,7 +14,6 @@ from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
 from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 
-
 _PNG_1X1_WHITE = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
     "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
